@@ -764,6 +764,10 @@ function render(g){
   // 真人的数组下标左移。每次快照都用稳定 cid 重新定位自己，避免客户端继续拿旧座位号操作。
   const currentSeat=(g.players||[]).findIndex(p=>p&&p.cid===myClientId);
   if(currentSeat>=0) mySeat=currentSeat;
+  // 机器人调度必须和渲染解耦(见函数末尾的 finally):scheduleBotTurn 原本是 render 的最后
+  // 一行,渲染中途任何一处抛异常都会执行不到它、机器人从此永久停摆——这个症状和"机器人不
+  // 行动"的座位判定 bug 长得一模一样,会把排查方向带偏,所以这里用 try/finally 拆开。
+  try{
   normalize(g);
   // 轮到自己回合:语音+大字视觉双重提示,同一个触发时机、同一套去重判断——只在"刚刚轮到
   // 自己回合"这一刻提示一次,不会因为同一回合内的其它状态变化(如无关的日志/别人操作)
@@ -1314,7 +1318,12 @@ function render(g){
       lastToastedSeq = log[log.length-1].seq;
     }
   }
-  if(typeof scheduleBotTurn==='function') scheduleBotTurn(g);
+  } finally {
+    // 双向隔离:①渲染抛异常不影响机器人继续被调度(否则机器人永久停摆);
+    //          ②机器人调度自己抛异常也不污染渲染(catch 掉只记一条告警)。
+    try{ if(typeof scheduleBotTurn==='function') scheduleBotTurn(g); }
+    catch(e){ console.warn('bot schedule',e); }
+  }
 }
 
 

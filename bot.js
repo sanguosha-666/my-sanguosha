@@ -11,23 +11,81 @@ function isBotController(g){
   const seat=botControllerSeat(g);
   return seat>=0 && g.players[seat].cid===myClientId;
 }
+// phase -> "这个阶段真正该行动的人存在 pending 的哪个字段"。
+// 【为什么必须查表】旧实现是按固定顺序扫 [asking,active,currentSeat,targetSeat,sourceSeat,
+// damagerSeat,from,to,seat],返回第一个"恰好是机器人"的字段,不判断这个座位是不是该行动的
+// 那个人。respond/aoeResp 的 pending 都是 {from,to},该响应的是 to,但 from 排在前面 —— 机器人
+// 对机器人出杀时会把攻击者当成响应者,runBotDecision 对应分支要求 d.to===seat 不匹配、全部
+// 落空,而每次调度只算一个座位,真正该出闪的机器人永远等不到调度,对局必然死锁。
+// 【这张表的权威来源】不是从 runBotDecision 抄的,是逐条对照各响应函数在服务端的身份守卫
+// (respondShan 的 g.pending.to!==mySeat、duelResponse 的 active、respondJiedao 的 seatA 等)
+// 核验过的,33 条与 runBotDecision 的分支一一对应,无遗漏无多余。
+// 【安全性质】各 runBotDecision 分支仍保留自己的 d.X===seat 复核,所以万一某条表项写错,
+// 只会退化成"不行动"(=修复前的行为),绝不会让错误的机器人替别人行动。
+// 新增技能/阶段时:在 runBotDecision 里加分支,就要在这里补一条,否则该阶段会掉进下面的
+// 未覆盖兜底(能走,但不如查表精确)。
+const BOT_PHASE_ACTOR = {
+  huashenPick:'seat', guanxingReview:'seat', xunxunPick:'seat',
+  respond:'to', aoeResp:'to', huogongReveal:'to',
+  duel:'active',
+  dying:'asking', wuxie:'asking', guicai:'asking',
+  tieqi:'from', liegong:'from', huogong:'from', pick:'from', qilin:'from',
+  hanbing:'from', mengjin:'from', shaOffsetChoice:'from',
+  duanbingChoose:'sourceSeat', ganglieChoice:'sourceSeat',
+  fanjianSuit:'targetSeat', quhuRespond:'targetSeat', tianyiRespond:'targetSeat',
+  enyuanChoose:'damagerSeat', enyuanChooseOption:'damagerSeat', enyuanGiveCard:'damagerSeat',
+  jiedaoChoice:'seatA'
+};
 function botSeatForState(g){
   const d=g.pending||{};
+  const isBotSeat=s=>Number.isInteger(s)&&g.players[s]&&g.players[s].isBot;
+  // A. 行动者不在 pending 字段上的几个特殊阶段
   if(g.phase==='wugu'&&d.type==='wugu'&&Array.isArray(d.order)){
     const picker=d.order[d.idx||0];
-    return Number.isInteger(picker)&&g.players[picker]&&g.players[picker].isBot ? picker : -1;
+    return isBotSeat(picker)?picker:-1;
   }
-  const candidates=[
-    d.asking,d.active,d.currentSeat,d.targetSeat,d.sourceSeat,d.damagerSeat,
-    d.from,d.to,d.seat
-  ];
-  if(g.phase==='play'||g.phase==='draw'||g.phase==='discard') candidates.unshift(g.turn);
-  if(g.phase==='pickingLordGeneral') candidates.unshift(getLordSeat(g));
+  if(g.phase==='pickingLordGeneral'){
+    const lord=getLordSeat(g);
+    return isBotSeat(lord)?lord:-1;
+  }
   if(g.phase==='pickingGeneral'){
+    // 选将是各选各的:任意一个还没选将的机器人都可以现在就选
     const pick=(g.players||[]).findIndex(p=>p&&p.isBot&&!p.general);
-    if(pick>=0) candidates.unshift(pick);
+    return pick>=0?pick:-1;
   }
-  return candidates.find(s=>Number.isInteger(s)&&g.players[s]&&g.players[s].isBot) ?? -1;
+  if(g.phase==='draw'||g.phase==='play'||g.phase==='discard'){
+    return isBotSeat(g.turn)?g.turn:-1;
+  }
+  // B. 其余已覆盖阶段:查表直取,不猜
+  const field=BOT_PHASE_ACTOR[g.phase];
+  if(field!==undefined){
+    return isBotSeat(d[field])?d[field]:-1;
+  }
+  // C. runBotDecision 未覆盖的阶段(骁果/据守/礼让/悲歌/旋风等 70+ 个):这里不猜字段,
+  //    交给 botFallbackSeats + botSafePrompt 逐个座位试。
+  return -1;
+}
+// 上面 A/B 两段能解析出行动者的阶段集合。已知阶段就算解析结果是"该真人行动"(返回 -1),
+// 也不该再去兜底试点 —— 那是真人的回合,机器人不该插手,试点只会白白渲染+刷告警。
+const BOT_KNOWN_PHASES = new Set(
+  Object.keys(BOT_PHASE_ACTOR).concat(
+    ['wugu','pickingLordGeneral','pickingGeneral','draw','play','discard'])
+);
+// 未覆盖阶段的兜底候选:所有存活机器人。只在确实有人被询问(g.pending 非空)时才给,
+// 避免正常轮次里空转渲染。真正"该不该由这个座位点"由 botSafePrompt 自证 —— renderControls
+// 的各分支都按 ===mySeat 把关,不该他动的时候压根渲染不出可点按钮。
+function botFallbackSeats(g){
+  if(!g.pending || BOT_KNOWN_PHASES.has(g.phase)) return [];
+  const out=[];
+  (g.players||[]).forEach((p,i)=>{ if(p&&p.isBot&&p.alive) out.push(i); });
+  return out;
+}
+function runBotFallbackProbe(g){
+  for(const s of botFallbackSeats(g)){
+    if(botSafePrompt(g,s)) return true;
+  }
+  console.warn('机器人兜底未找到可点按钮',g.phase,(g.pending||{}).type);
+  return false;
 }
 function botStateKey(g,seat){
   const d=g.pending||{};
@@ -40,7 +98,9 @@ function botStateKey(g,seat){
 function scheduleBotTurn(g){
   if(!g || !isBotController(g) || g.phase==='over') return;
   const seat=botSeatForState(g);
-  if(seat<0) return;
+  // seat<0 有两种情况:该行动的是真人(不该我们插手),或这个阶段 runBotDecision 没覆盖
+  // (需要走兜底逐个试)。只有后者才继续排程。
+  if(seat<0 && !botFallbackSeats(g).length) return;
   const key=botStateKey(g,seat);
   if(botTimer && botScheduledKey===key) return;
   if(botTimer) clearTimeout(botTimer);
@@ -50,8 +110,9 @@ function scheduleBotTurn(g){
     const latest=(typeof currentG!=='undefined')?currentG:null;
     if(!latest || !isBotController(latest)) return;
     const nowSeat=botSeatForState(latest);
-    if(nowSeat<0 || botStateKey(latest,nowSeat)!==key) return;
-    runBotDecision(latest,nowSeat);
+    if(botStateKey(latest,nowSeat)!==key) return;
+    if(nowSeat>=0) runBotDecision(latest,nowSeat);
+    else runBotFallbackProbe(latest);
   },650+Math.floor(Math.random()*500));
 }
 function botInvoke(seat,fn){
@@ -276,7 +337,10 @@ function runBotDecision(g,seat){
   }
   if(g.phase==='wuxie'&&d.asking===seat){ botInvoke(seat,()=>respondWuxie(false)); return; }
   if(g.phase==='wugu'&&d.type==='wugu'&&Array.isArray(d.order)&&d.order[d.idx||0]===seat&&Array.isArray(d.pool)&&d.pool.length){
-    botInvoke(seat,()=>wuguPick(0,0,d.pool[0]&&d.pool[0].id)); return;
+    // expectedIdx 是乐观并发校验("我看到的时候轮到第几个人挑"),必须传当前真实的
+    // d.idx。曾经硬编码成 0,于是只要机器人不是五谷丰登的第一个挑牌人,服务端的
+    // idx!==expectedIdx 就会静默 return、什么都不做 —— 挑牌轮次卡在这里再也不动。
+    botInvoke(seat,()=>wuguPick(0,d.idx||0,d.pool[0]&&d.pool[0].id)); return;
   }
   if(g.phase==='tieqi'&&d.from===seat){ botInvoke(seat,()=>respondTieqi(true)); return; }
   if(g.phase==='liegong'&&d.from===seat){ botInvoke(seat,()=>respondLiegong(true)); return; }
