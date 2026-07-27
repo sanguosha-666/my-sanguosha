@@ -64,6 +64,35 @@ function enterGame(){
   gameRef.on('value', snap => render(snap.val()));
 }
 
+// 大厅机器人座位。机器人仍是标准 player，只以 isBot 区分；距离、身份、回合和胜负逻辑
+// 继续复用同一套 players 数组。只有座位0的真人可增删，避免多人同时操作造成争抢。
+function addBot(){
+  tx(g=>{
+    if(g.started || g.phase!=='lobby' || mySeat!==0 || g.players.length>=SEATS) return g;
+    const botNo=g.players.filter(p=>p&&p.isBot).length+1;
+    g.players.push({
+      name:'机器人'+botNo,cid:'bot-'+Date.now()+'-'+Math.floor(Math.random()*1000000),
+      isBot:true,botLevel:'smart',hp:MAX_HP,maxHp:MAX_HP,hand:[],alive:true
+    });
+    g.log=pushLog(g.log,'已添加机器人'+botNo);
+    return g;
+  });
+}
+function removeBot(){
+  tx(g=>{
+    if(g.started || g.phase!=='lobby' || mySeat!==0) return g;
+    for(let i=g.players.length-1;i>=0;i--){
+      if(g.players[i]&&g.players[i].isBot){
+        const name=g.players[i].name;
+        g.players.splice(i,1);
+        g.log=pushLog(g.log,'已移除'+name);
+        break;
+      }
+    }
+    return g;
+  });
+}
+
 // startGame(mode, gameMode):
 //   mode = 'random' | 'pick'  武将分配方式
 //   gameMode = 'ffa' | 'identity'  对战模式(乱斗/主公局);缺省或非法当 'ffa'
@@ -84,6 +113,7 @@ function startGame(mode, gameMode){
     g.gameMode = gm;
     g.generalMode = mode;
     g.winSide = null;
+    g.aiRebelSuspicion = {};
     g.lordGeneralPool = null;
     // 乱斗:清身份字段
     if(gm!=='identity'){
@@ -397,6 +427,7 @@ function newGame(){
   tx(g=>{
     g.started=false; g.phase='lobby'; g.pending=null; g.winner=null; g.aoe=null;
     g.gameMode=null; g.winSide=null; g.lordGeneralPool=null; g.generalMode=null;
+    g.aiRebelSuspicion={};
     g.deck=[]; g.discard=[];
     g.players.forEach(p=>{
       p.general = randomGeneralId();     // 每局重新随机换将

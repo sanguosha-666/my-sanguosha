@@ -1684,6 +1684,17 @@ function renderControls(g){
   }
   if(!g.started){
     const cnt=(g.players||[]).filter(Boolean).length;
+    const botCnt=(g.players||[]).filter(p=>p&&p.isBot).length;
+    if(mySeat===0){
+      const add=document.createElement('button');
+      add.className='ghost'; add.textContent='添加机器人（当前 '+botCnt+'）';
+      add.disabled=cnt>=SEATS; add.onclick=addBot; c.appendChild(add);
+      if(botCnt>0){
+        const remove=document.createElement('button');
+        remove.className='ghost'; remove.textContent='移除机器人';
+        remove.onclick=removeBot; c.appendChild(remove);
+      }
+    }
     // 1) 对战模式:乱斗 / 主公局
     const mkModeBtn=(label, mode)=>{
       const b=document.createElement('button');

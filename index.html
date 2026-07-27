@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>极简三国杀 · 三人联机</title>
+<title>极简三国杀 · 多人联机</title>
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="favicon-180.png">
 
@@ -1311,7 +1311,7 @@
 </div>
 <div class="wrap">
   <h1><span class="seal">杀</span>极简三国杀</h1>
-  <div class="sub">三 人 联 机 · 第 一 版</div>
+  <div class="sub">多 人 联 机 · 第 一 版</div>
 
   <!-- ============ CONFIG WARNING ============ -->
   <div id="configWarn" class="panel hidden" style="border-color:var(--cinnabar)">
@@ -1325,7 +1325,7 @@
   <div id="lobby" class="panel">
     <div class="row">
       <div>
-        <label>房间号(三人填同一个)</label>
+        <label>房间号(玩家填同一个)</label>
         <input id="roomInput" placeholder="例如 chibi" value="chibi">
       </div>
       <div>
@@ -1379,7 +1379,7 @@
   </div>
 
   <div class="footnote">
-    部署后,三人各自打开同一网址、填同一房间号即可。<br>
+    部署后,玩家各自打开同一网址、填同一房间号即可；房主也可在大厅补充机器人。<br>
     手牌只在你自己界面显示牌面;这是给朋友玩的轻量版,并非加密隐藏。
   </div>
 </div>
@@ -1388,16 +1388,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=218"></script>
-<script src="data.js?v=218"></script>
-<script src="room-lifecycle.js?v=218"></script>
-<script src="game.js?v=218"></script>
-<script src="weapons.js?v=218"></script>
-<script src="skills.js?v=218"></script>
-<script src="render.js?v=218"></script>
-<script src="render-table.js?v=218"></script>
-<script src="render-hand.js?v=218"></script>
-<script src="render-controls.js?v=218"></script>
-<script src="render-log.js?v=218"></script>
+<script src="config.js?v=219"></script>
+<script src="data.js?v=219"></script>
+<script src="room-lifecycle.js?v=219"></script>
+<script src="game.js?v=219"></script>
+<script src="weapons.js?v=219"></script>
+<script src="skills.js?v=219"></script>
+<script src="bot.js?v=219"></script>
+<script src="render.js?v=219"></script>
+<script src="render-table.js?v=219"></script>
+<script src="render-hand.js?v=219"></script>
+<script src="render-controls.js?v=219"></script>
+<script src="render-log.js?v=219"></script>
 </body>
 </html>

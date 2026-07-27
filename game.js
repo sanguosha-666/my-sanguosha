@@ -2249,15 +2249,26 @@ function pruneExchangeCards(g){
     g.exchangeCards=[];
   }
 }
-function tx(fn){ gameRef.transaction(g => {
-  if(!g) return g;
-  normalize(g);
-  pruneExchangeCards(g);
-  const result = fn(g) || g;
-  // 连营队列:本 tx 内 effect/杀结算可能覆盖 pending;收尾再尝试挂起询问
-  tryFlushLianying(result);
-  return stripUndefined(result);
-}); }
+function tx(fn){
+  // 机器人控制端会暂时把 mySeat 切到机器人座位再调用现有动作函数。Firebase 事务可能
+  // 因并发而重试，所以必须在创建事务时冻结行动座位。
+  const actingSeat=mySeat;
+  gameRef.transaction(g => {
+    if(!g) return g;
+    const visibleSeat=mySeat;
+    mySeat=actingSeat;
+    try{
+      normalize(g);
+      pruneExchangeCards(g);
+      const result = fn(g) || g;
+      // 连营队列:本 tx 内 effect/杀结算可能覆盖 pending;收尾再尝试挂起询问
+      tryFlushLianying(result);
+      return stripUndefined(result);
+    } finally {
+      mySeat=visibleSeat;
+    }
+  });
+}
 
 function doDraw(){
   tx(g=>{
@@ -3580,6 +3591,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   p.hp = p.hp - amount;
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
+  if(typeof recordBotDamageEvidence==='function') recordBotDamageEvidence(g,sourceSeat,seat,amount,srcType);
   // 连环状态在属性伤害发生后立即重置；真正向其他角色传导允许被当前角色的濒死流程
   // 中断，待其获救或死亡后再由 resumeAfterInterrupt 继续。
   const hasChainToPropagate=!skipChain && prepareChainedDamage(g,seat,amount,sourceSeat,reason,srcType,sourceCard);
@@ -3849,6 +3861,7 @@ function respondDying(useTao, jijiuChoice){
         asText='打出【'+card.name+'】';
       }
       dyingP.hp++;
+      if(typeof recordBotRescueEvidence==='function') recordBotRescueEvidence(g,mySeat,g.pending.seat);
       g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' '+asText+',回复1点体力（体力'+dyingP.hp+'）');
       // 周泰【不屈】:回复体力时移除一张不屈牌
       removeBuquCard(g, g.pending.seat);

@@ -760,6 +760,10 @@ function render(g){
     }
     return;
   }
+  // 大厅机器人允许增删 players 项；若机器人之后又有真人加入，删除中间的机器人会让后面
+  // 真人的数组下标左移。每次快照都用稳定 cid 重新定位自己，避免客户端继续拿旧座位号操作。
+  const currentSeat=(g.players||[]).findIndex(p=>p&&p.cid===myClientId);
+  if(currentSeat>=0) mySeat=currentSeat;
   normalize(g);
   // 轮到自己回合:语音+大字视觉双重提示,同一个触发时机、同一套去重判断——只在"刚刚轮到
   // 自己回合"这一刻提示一次,不会因为同一回合内的其它状态变化(如无关的日志/别人操作)
@@ -1310,6 +1314,7 @@ function render(g){
       lastToastedSeq = log[log.length-1].seq;
     }
   }
+  if(typeof scheduleBotTurn==='function') scheduleBotTurn(g);
 }
 
 
