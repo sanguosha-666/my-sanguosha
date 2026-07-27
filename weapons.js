@@ -353,7 +353,8 @@ function continueAfterCixiong(g){
   // 这里直接做仁王判断 + continueShaAfterTieqi,避免重入雌雄。
   const me=g.players[from], target=g.players[to];
   if(!me || !target || !target.alive){ finishSingleShaTarget(g); return; }
-  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
+  const ignoresArmor=hasCap(me,'ignoreArmor');
+  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || (!ignoresArmor && hasCap(target,'renwang')))){
     const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
     g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
     finishSingleShaTarget(g);

@@ -923,19 +923,38 @@ function chainedDamageTargets(g, seat){
     .map(o=>o.i);
 }
 
-function propagateChainedDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard){
+function prepareChainedDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard){
   const nature=cardDamageNature(sourceCard);
   const p=g.players[seat];
   if(!nature || !p || !p.chained || amount<=0) return false;
   const targets=chainedDamageTargets(g, seat);
   p.chained=false;
   g.log=pushLog(g.log, p.name+' 解除连环状态');
-  for(const targetSeat of targets){
+  // 传导一旦开始，参与本次传导的角色同时解除连环状态；队列保存目标，即使前一名
+  // 进入濒死并经过 Firebase 回读，也不会丢失后续角色。
+  targets.forEach(targetSeat=>{
     const target=g.players[targetSeat];
-    if(!target || !target.alive || !target.chained) continue;
-    target.chained=false;
+    if(target) target.chained=false;
+  });
+  if(!targets.length) return false;
+  g.chainDamageQueue={
+    originalSeat:seat,targets,idx:0,amount,sourceSeat,reason,srcType,sourceCard,
+    nature,finalResume:null
+  };
+  return true;
+}
+
+function advanceChainedDamage(g){
+  const q=g.chainDamageQueue;
+  if(!q) return false;
+  while(q.idx<q.targets.length){
+    const targetSeat=q.targets[q.idx++];
+    const target=g.players[targetSeat];
+    if(!target || !target.alive) continue;
     g.log=pushLog(g.log, target.name+' 被连环传导,解除连环状态');
-    const interrupted=dealDamage(g, targetSeat, amount, sourceSeat, '连环传导'+(damageNatureText(nature)?'('+damageNatureText(nature)+')':''), srcType, sourceCard, false, false, true);
+    const interrupted=dealDamage(g,targetSeat,q.amount,q.sourceSeat,
+      '连环传导'+(damageNatureText(q.nature)?'('+damageNatureText(q.nature)+')':''),
+      q.srcType,q.sourceCard,false,false,true);
     if(interrupted) return true;
   }
   return false;

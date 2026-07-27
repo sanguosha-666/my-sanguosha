@@ -438,13 +438,22 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
-  // 方天画戟排队(g.fangtianQueue):非活跃时应为 null(和 g.pending/g.aoe 同款标量哨兵)。
+  // 多目标杀排队(g.fangtianQueue，方天画戟/短兵共用):非活跃时应为 null。
   // 活跃时 from/idx 应是数字、targets 应是非空数组——任一不对就整体判无效清空,防止卡死。
   if(g.fangtianQueue===undefined) g.fangtianQueue=null;
   if(g.fangtianQueue){
     const q=g.fangtianQueue;
     if(typeof q.from!=='number' || typeof q.idx!=='number' || !Array.isArray(q.targets) || q.targets.length===0){
       g.fangtianQueue=null;
+    }
+  }
+  // 属性伤害连环传导队列：允许任一目标的濒死/技能询问中断后继续。
+  if(g.chainDamageQueue===undefined) g.chainDamageQueue=null;
+  if(g.chainDamageQueue){
+    const q=g.chainDamageQueue;
+    if(!Array.isArray(q.targets) || typeof q.idx!=='number' || typeof q.originalSeat!=='number' ||
+       typeof q.amount!=='number' || q.amount<=0){
+      g.chainDamageQueue=null;
     }
   }
   // 鬼才改判阶段:seat/asking 都应是数字座位号,judgeCard 应有 suit/rank,resume.kind 应是字符串;任一不对就整体判无效
@@ -2419,7 +2428,8 @@ const CARD_PLAYS = {
           // 必须同时排除自己和基础目标，避免重复选择
           if (g.players[i] && g.players[i].alive && i !== mySeat && i !== targetSeat) {
             const dist = distance(g, mySeat, i);
-            if (dist === 1) {
+            // 额外目标除了距离为1，还必须满足这张杀的全部目标合法性（如空城、同疾）。
+            if (dist === 1 && CARD_PLAYS['杀'].canTarget(g, me, card, i)) {
               aliveSeats.push(i);
             }
           }
@@ -2436,7 +2446,6 @@ const CARD_PLAYS = {
           };
           g.phase = 'duanbingChoose';
           g.log = pushLog(g.log, `${me.name} 可以发动【短兵】,多选择一名距离为1的角色为目标`);
-          markSkillSound(g, '短兵');
           return;
         }
       }
@@ -2844,8 +2853,10 @@ function afterShaTargetSkills(g, from, to, noShan, sourceCard, shaColor, shaInfo
   if(typeof maybeStartCixiong==='function' && maybeStartCixiong(g, from, to, noShan, sourceCard, shaColor, shaInfo)) return;
   const me=g.players[from], target=g.players[to];
   if(!me || !target || !target.alive){ finishSingleShaTarget(g); return; }
-  // 于禁【毅重】/ 仁王盾:黑色杀直接无效(在雌雄之后判定,见规格 FAQ)
-  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || hasCap(target,'renwang'))){
+  // 青釭剑无视目标防具，因此仁王盾不能让黑色杀无效；毅重是武将技，不属于防具，
+  // 即使攻击者装备青釭剑仍照常生效。
+  const ignoresArmor=hasCap(me,'ignoreArmor');
+  if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || (!ignoresArmor && hasCap(target,'renwang')))){
     const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
     g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
     finishSingleShaTarget(g);
@@ -2929,9 +2940,9 @@ function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInf
     g.phase='respond';
     return;
   }
-  // 青釭剑:攻击者无视目标防具 → 跳过目标八卦阵判定(八卦阵公开,记一条日志便于阅读)
+  // 青釭剑:攻击者无视目标防具 → 跳过目标防具判定。
   if(hasCap(me,'ignoreArmor')){
-    if(hasCap(g.players[to],'bagua')) g.log=pushLog(g.log, me.name+' 的【青釭剑】无视了 '+g.players[to].name+' 的防具');
+    if(g.players[to].equips && g.players[to].equips.armor) g.log=pushLog(g.log, me.name+' 的【青釭剑】无视了 '+g.players[to].name+' 的防具');
     g.phase='respond'; return; // 目标只能正常出闪/受伤
   }
   // 八卦阵:被杀需出闪前先判定,红=视为出闪 → 杀被抵消,攻击者继续出牌(与正常出闪同结果)
@@ -3262,8 +3273,13 @@ function liuliDiscardOptions(p){
   return list;
 }
 function liuliTargets(g, from, to){
+  // 多目标杀中，已经是此杀目标的其他角色不能再次成为【流离】的新目标，否则同一张杀会
+  // 对同一角色结算两次。单目标杀时队列为空，不影响原逻辑。
+  const queuedTargets=(g.fangtianQueue && Array.isArray(g.fangtianQueue.targets))
+    ? g.fangtianQueue.targets : [];
   return g.players.map((p,i)=>({p,i}))
-    .filter(o=>o.p && o.p.alive && o.i!==from && o.i!==to && canReachSha(g, to, o.i) && !(hasCap(o.p,'kongcheng') && (o.p.hand||[]).length===0))
+    .filter(o=>o.p && o.p.alive && o.i!==from && o.i!==to && !queuedTargets.includes(o.i) &&
+      canReachSha(g, to, o.i) && !(hasCap(o.p,'kongcheng') && (o.p.hand||[]).length===0))
     .map(o=>o.i);
 }
 function maybeStartLiuli(g, from, to, usedAs, shaColor, sourceCard){
@@ -3564,6 +3580,9 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   p.hp = p.hp - amount;
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
+  // 连环状态在属性伤害发生后立即重置；真正向其他角色传导允许被当前角色的濒死流程
+  // 中断，待其获救或死亡后再由 resumeAfterInterrupt 继续。
+  const hasChainToPropagate=!skipChain && prepareChainedDamage(g,seat,amount,sourceSeat,reason,srcType,sourceCard);
 
   // 陈宫【智迟】：回合外受伤后立即标记(锁定技,不挂起)
   if (amount > 0 && p && p.alive && hasCap(p, 'zhichi') && g.turn !== seat) {
@@ -3625,7 +3644,10 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
   }
 
-  if(!skipChain && propagateChainedDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard)) return true;
+  if(hasChainToPropagate){
+    if(advanceChainedDamage(g)) return true;
+    g.chainDamageQueue=null;
+  }
 
   // 实际受伤且存活 -> 受伤后可选/触发型效果(互斥:一次只挂一个 pending)
   if(amount>0){
@@ -4121,6 +4143,18 @@ function respondWangxi(activate){
 function resumeAfterInterrupt(g, resume, seat){
   if(startNextWangxi(g, resume)) return;
   if(consumePendingHookQueue(g, resume)) return;
+  // 连环中的某名角色刚完成濒死/技能询问：先继续剩余传导目标，整条传导结束后才接回
+  // 最初那次杀、火攻、闪电等流程。
+  if(g.chainDamageQueue){
+    const q=g.chainDamageQueue;
+    if(!q.finalResume) q.finalResume=resume;
+    if(advanceChainedDamage(g)) return;
+    const finalResume=q.finalResume || resume;
+    const originalSeat=q.originalSeat;
+    g.chainDamageQueue=null;
+    resumeAfterInterrupt(g,finalResume,originalSeat);
+    return;
+  }
   if(resume.type==='ganglie'){
     resumeAfterInterrupt(g, resume.resume, resume.seat);
   } else if(resume.type==='tianxiang'){
@@ -4345,7 +4379,7 @@ function respondYaowu(choice) {
   });
 }
 
-// ===== 方天画戟:队列驱动的多目标杀,共用出口 =====
+// ===== 方天画戟/短兵:队列驱动的多目标杀,共用出口 =====
 // finishSingleShaTarget: 一个目标的杀响应/判定彻底结束时统一走这里(毅重/仁王盾无效、八卦阵/鬼才改判
 // 红色抵消、respondShan 出闪或命中受伤后的共用尾巴,均改走这个出口)——先 checkWin,再看 g.fangtianQueue
 // 是否还有排队中的下一个目标,有则继续,没有(或本来就不是方天画戟触发的)才真正回到出牌阶段。
@@ -4377,7 +4411,7 @@ function continueLuanwuAfterSha(g){
   if(typeof proceedToNextLuanwu === 'function') proceedToNextLuanwu(g);
   else { g.pending=null; g.phase='play'; }
 }
-// advanceFangtianQueue: 推进到方天画戟队列里的下一个目标,重新走一遍完整的 resolveShaUse(毅重/仁王盾/
+// advanceFangtianQueue: 推进到多目标杀队列里的下一个目标,重新走一遍完整的 resolveShaUse(毅重/仁王盾/
 // 铁骑/烈弓/青釭剑/八卦阵/响应阶段全部照常各自独立判定)。跳过中途已阵亡的排队目标(防御性,理论上
 // 现有效果里没有会让排队目标之间互相致死的连锁,但仍做兜底)。问完/没有更多目标则清空队列回到出牌阶段。
 function advanceFangtianQueue(g){
@@ -6483,25 +6517,26 @@ function triggerDuanbing(extraTarget) {
     
     if (!me || !me.alive || !extra || !extra.alive) return g;
     
-    // 使用杀，目标为基础目标和额外目标
     const baseTarget = pending.baseTarget;
     const card = pending.card || {};
     const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
-    
-    // 首先处理基础目标（会消耗kill次数）
-    resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(card), card, undefined);
-    
-    // 然后立即处理额外目标（skipShaLimit: true 避免重复计数）
-    // 由于resolveShaUse内部会检查shaUsed，但我们希望第二个目标不受限制
-    // 所以传递skipShaLimit: true
-    resolveShaUse(g, me, extraTarget, usedAs + '（短兵）', singleCardShaColor(card), card, {skipShaLimit: true});
-    
-    g.log = pushLog(g.log, `${me.name} 发动【短兵】,对 ${g.players[baseTarget].name} 和 ${extra.name} 使用【杀】`);
+
+    // 与方天画戟共用成熟的多目标杀队列：前一个目标完整结束（流离、铁骑、武器、
+    // 防具、闪、伤害及濒死）后，finishSingleShaTarget 才推进下一个，绝不能连续调用
+    // 两次 resolveShaUse 覆盖 pending。
+    const targets=[baseTarget,extraTarget];
+    const order=[]; let s=mySeat;
+    for(let i=0;i<g.players.length;i++){ s=nextAlive(g,s); if(targets.includes(s)) order.push(s); }
+    const shaInfo=consumeJiuShaBonus(g,me);
+    g.pending=null;
+    g.fangtianQueue={
+      kind:'duanbing',from:mySeat,targets:order,idx:0,usedAs,
+      shaColor:singleCardShaColor(card),sourceCard:card,shaInfo
+    };
+    triggerJiangOnTarget(g,mySeat,extraTarget,'sha',isRed(card));
+    g.log = pushLog(g.log, `${me.name} 发动【短兵】,对 ${order.map(seat=>g.players[seat].name).join(' 和 ')} 使用【杀】`);
     markSkillSound(g, '短兵');
-    
-    // 清理状态
-    g.pending = null;
-    g.phase = 'play';
+    resolveShaUse(g,me,order[0],usedAs,singleCardShaColor(card),card,shaInfo);
     
     return g;
   });
@@ -6521,7 +6556,7 @@ function cancelDuanbing() {
       
       // 直接结算单目标的杀
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
-      resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(card), card, undefined);
+      resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(card), card, consumeJiuShaBonus(g, me));
     }
     return g;
   });

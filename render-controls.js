@@ -295,7 +295,9 @@ function renderHuashenChangeAsk(g, c, respondFn){
 // 附加在响应阶段(respond/tieqi/liegong)的 banner 末尾,帮旁观者看懂"这是第几个目标"。
 function fangtianSuffix(g){
   const q=g.fangtianQueue;
-  return q ? '（方天画戟 目标'+(q.idx+1)+'/'+q.targets.length+'）' : '';
+  if(!q) return '';
+  const label=q.kind==='duanbing' ? '短兵' : '方天画戟';
+  return '（'+label+' 目标'+(q.idx+1)+'/'+q.targets.length+'）';
 }
 
 // ===== 张郃【巧变】:动态扫描整个牌桌,现算"可选来源"/"合法目的地"清单(不预存进 pending) =====
@@ -3230,6 +3232,37 @@ function renderControls(g){
     return;
   }
   
+  } else if(g.phase==='duanbingChoose'){
+    // 【短兵】在打出杀后会把 phase 切到 duanbingChoose；必须在 play 分支之外渲染，
+    // 否则阶段已经改变后永远到不了原先嵌在 play 里的选择界面。
+    if(g.pending && g.pending.type==='duanbingChoose' && g.pending.sourceSeat===mySeat){
+      const div=document.createElement('div'); div.className='centered';
+      const h4=document.createElement('h4'); h4.textContent='【短兵】选择额外目标'; div.appendChild(h4);
+      const baseTarget=g.players[g.pending.baseTarget];
+      const p=document.createElement('p');
+      p.textContent='当前目标：'+escapeHtml((baseTarget&&baseTarget.name)||'?')+'。可以再选择一名与你距离为1的合法目标。';
+      div.appendChild(p);
+      const targetsDiv=document.createElement('div'); targetsDiv.className='target-options';
+      (g.pending.availableTargets||[]).forEach(seat=>{
+        const target=g.players[seat];
+        if(!target || !target.alive || !isSeatClickable(seat)) return;
+        const b=document.createElement('button'); b.className='target-btn';
+        b.textContent='追加 '+escapeHtml(target.name);
+        b.onclick=()=>triggerDuanbing(seat);
+        targetsDiv.appendChild(b);
+      });
+      div.appendChild(targetsDiv);
+      const cancelBtn=document.createElement('button'); cancelBtn.className='cancel-btn';
+      cancelBtn.textContent='不发动（仅对原目标使用杀）';
+      cancelBtn.onclick=cancelDuanbing;
+      div.appendChild(cancelBtn);
+      c.appendChild(div);
+      setBanner('【短兵】选择一名距离为1的额外目标');
+      return;
+    }
+    const source=g.pending && g.players[g.pending.sourceSeat];
+    setBanner(escapeHtml(source?source.name:'?')+' 正在选择【短兵】的额外目标…');
+    return;
   } else if(g.phase==='play'){
     // 本回合是否还能出杀(与单张杀 canPlay 同口径:未出过 或 有无限杀)
     const canSha = !g.shaUsed || hasCap(me,'unlimitedSha');
@@ -3790,56 +3823,6 @@ function renderControls(g){
     
     const b=document.createElement('button'); b.className='ghost';
     b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
-    
-    // 丁奉【短兵】:选择额外目标阶段
-    if(g.pending && g.pending.type==='duanbingChoose' && g.pending.sourceSeat===mySeat) {
-      const div = document.createElement('div'); div.className = 'centered';
-      const h4 = document.createElement('h4'); h4.textContent = '【短兵】发动';
-      div.appendChild(h4);
-      
-      const p1 = document.createElement('p'); 
-      p1.textContent = '你可以多选择一名距离为1的角色为目标';
-      div.appendChild(p1);
-      
-      const baseTarget = g.players[g.pending.baseTarget];
-      if(baseTarget && baseTarget.alive) {
-        const p2 = document.createElement('p'); 
-        p2.textContent = '当前目标: ' + escapeHtml(baseTarget.name);
-        div.appendChild(p2);
-      }
-      
-      const p3 = document.createElement('p'); 
-      p3.textContent = '可选的额外目标:';
-      div.appendChild(p3);
-      
-      const targetsDiv = document.createElement('div'); targetsDiv.className = 'target-options';
-      (g.pending.availableTargets || []).forEach(seat => {
-        const target = g.players[seat];
-        if(target && target.alive && isSeatClickable(seat)) {
-          const b = document.createElement('button');
-          b.className = 'target-btn';
-          b.textContent = '选择 ' + escapeHtml(target.name);
-          b.onclick = () => triggerDuanbing(seat);
-          targetsDiv.appendChild(b);
-        }
-      });
-      div.appendChild(targetsDiv);
-      
-      const cancelBtn = document.createElement('button'); cancelBtn.className = 'cancel-btn';
-      cancelBtn.textContent = '取消（仅对' + escapeHtml((baseTarget && baseTarget.name) || '目标') + '使用杀）';
-      cancelBtn.onclick = cancelDuanbing;
-      div.appendChild(cancelBtn);
-      
-      c.appendChild(div);
-      return;
-    }
-    
-    // 丁奉【短兵】:等待其他人选择
-    if(g.pending && g.pending.type==='duanbingChoose'){
-      const source = g.players[g.pending.sourceSeat];
-      setBanner(escapeHtml(source?source.name:'?') + ' 发动【短兵】,选择额外目标…');
-      return;
-    }
     
     // 丁奉【奋迅】:弃牌选择阶段
     if(g.pending && g.pending.type==='fenxunDiscard' && g.pending.seat===mySeat) {

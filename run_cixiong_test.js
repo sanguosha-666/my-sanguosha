@@ -258,6 +258,162 @@ check('黑杀+仁王:雌雄后仍可无效', ()=>{
   assert.ok(logText.includes('仁王盾') || logText.includes('无效'), logText);
 });
 
+check('青釭剑黑杀无视仁王盾，目标仍可正常出闪', ()=>{
+  const attacker=mkPlayer('张飞','zhangfei');
+  attacker.equips.weapon={id:1,name:'青釭剑',suit:'♠',rank:6};
+  attacker.hand=[{id:2,name:'杀',suit:'♠',rank:7}];
+  const target=mkPlayer('大乔','daqiao');
+  target.equips.armor={id:9,name:'仁王盾',suit:'♣',rank:2};
+  target.hand=[{id:3,name:'闪',suit:'♦',rank:2}];
+  const g={
+    phase:'play',turn:0,started:true,players:[attacker,target],
+    deck:[],discard:[],pending:null,log:[],exchangeCards:[],
+    shaUsed:false,gameMode:'ffa'
+  };
+  bindG(g);
+  vm.runInContext('mySeat=0;',sandbox);
+  R('playCard')(0,'杀',1);
+  const gg=G();
+  assert.strictEqual(gg.phase,'respond');
+  assert.strictEqual(gg.pending.from,0);
+  assert.strictEqual(gg.pending.to,1);
+  const logText=(gg.log||[]).map(e=>e.text||e).join('|');
+  assert.ok(logText.includes('青釭剑') && logText.includes('无视'),logText);
+  assert.ok(!logText.includes('因【仁王盾】无效'),logText);
+});
+
+check('没有青釭剑时黑杀仍被仁王盾正常抵消', ()=>{
+  const attacker=mkPlayer('张飞','zhangfei');
+  attacker.hand=[{id:2,name:'杀',suit:'♠',rank:7}];
+  const target=mkPlayer('大乔','daqiao');
+  target.equips.armor={id:9,name:'仁王盾',suit:'♣',rank:2};
+  const g={
+    phase:'play',turn:0,started:true,players:[attacker,target],
+    deck:[],discard:[],pending:null,log:[],exchangeCards:[],
+    shaUsed:false,gameMode:'ffa'
+  };
+  bindG(g);
+  vm.runInContext('mySeat=0;',sandbox);
+  R('playCard')(0,'杀',1);
+  const gg=G();
+  assert.strictEqual(gg.phase,'play');
+  const logText=(gg.log||[]).map(e=>e.text||e).join('|');
+  assert.ok(logText.includes('仁王盾') && logText.includes('无效'),logText);
+});
+
+check('丁奉短兵选择后按队列依次结算两个目标', ()=>{
+  const dingfeng=mkPlayer('丁奉','dingfeng');
+  dingfeng.hand=[{id:1,name:'杀',suit:'♠',rank:7}];
+  const first=mkPlayer('甲','guanyu');
+  first.hand=[{id:2,name:'闪',suit:'♦',rank:2}];
+  const second=mkPlayer('乙','zhangfei');
+  second.hand=[{id:3,name:'闪',suit:'♥',rank:4}];
+  const g={
+    phase:'play',turn:0,started:true,players:[dingfeng,first,second],
+    deck:[],discard:[],pending:null,log:[],exchangeCards:[],
+    shaUsed:false,gameMode:'ffa'
+  };
+  bindG(g);
+  vm.runInContext('mySeat=0;',sandbox);
+  R('playCard')(0,'杀',1);
+  let gg=G();
+  assert.strictEqual(gg.phase,'duanbingChoose');
+  assert.deepStrictEqual(Array.from(gg.pending.availableTargets),[2]);
+
+  R('triggerDuanbing')(2);
+  gg=G();
+  assert.strictEqual(gg.phase,'respond');
+  assert.strictEqual(gg.pending.to,1,'应先结算座位1');
+  assert.strictEqual(gg.fangtianQueue.kind,'duanbing');
+  assert.strictEqual(gg.fangtianQueue.targets.length,2);
+
+  vm.runInContext('mySeat=1;',sandbox);
+  R('respondShan')(true,0);
+  gg=G();
+  assert.strictEqual(gg.phase,'respond');
+  assert.strictEqual(gg.pending.to,2,'第一个目标结束后才推进座位2');
+
+  vm.runInContext('mySeat=2;',sandbox);
+  R('respondShan')(true,0);
+  gg=G();
+  assert.strictEqual(gg.phase,'play');
+  assert.strictEqual(gg.fangtianQueue,null);
+  assert.strictEqual(first.hand.length,0);
+  assert.strictEqual(second.hand.length,0);
+});
+
+check('丁奉取消短兵后只结算原目标', ()=>{
+  const dingfeng=mkPlayer('丁奉','dingfeng');
+  dingfeng.hand=[{id:1,name:'杀',suit:'♠',rank:7}];
+  const first=mkPlayer('甲','guanyu');
+  first.hand=[{id:2,name:'闪',suit:'♦',rank:2}];
+  const second=mkPlayer('乙','zhangfei');
+  const g={
+    phase:'play',turn:0,started:true,players:[dingfeng,first,second],
+    deck:[],discard:[],pending:null,log:[],exchangeCards:[],
+    shaUsed:false,gameMode:'ffa'
+  };
+  bindG(g);
+  vm.runInContext('mySeat=0;',sandbox);
+  R('playCard')(0,'杀',1);
+  assert.strictEqual(G().phase,'duanbingChoose');
+  R('cancelDuanbing')();
+  const gg=G();
+  assert.strictEqual(gg.phase,'respond');
+  assert.strictEqual(gg.pending.to,1);
+  assert.strictEqual(gg.fangtianQueue,null);
+});
+
+check('闪电令首名连环角色死亡后继续传导下一名角色', ()=>{
+  const diaochan=mkPlayer('貂蝉','diaochan',{hp:1,chained:true});
+  const guojia=mkPlayer('郭嘉','guojia',{hp:2,chained:true});
+  const third=mkPlayer('第三人','zhangfei');
+  const lightning={id:90,name:'闪电',suit:'♠',rank:1};
+  const g={
+    phase:'judge',turn:0,started:true,players:[diaochan,guojia,third],
+    deck:[],discard:[],pending:null,log:[],exchangeCards:[],gameMode:'ffa'
+  };
+  bindG(g);
+  assert.strictEqual(R('dealDamage')(g,0,3,undefined,'【闪电】发动','delay',lightning),true);
+  let gg=G();
+  assert.strictEqual(gg.phase,'dying');
+  assert.strictEqual(diaochan.chained,false);
+  assert.strictEqual(guojia.chained,false,'传导开始时参与者应解除连环');
+  gg.pending.resume={type:'delay',seat:0};
+
+  vm.runInContext('mySeat=0;',sandbox); R('respondDying')(false);
+  vm.runInContext('mySeat=1;',sandbox); R('respondDying')(false);
+  vm.runInContext('mySeat=2;',sandbox); R('respondDying')(false);
+  gg=G();
+  assert.strictEqual(diaochan.alive,false);
+  assert.strictEqual(gg.phase,'dying','郭嘉受到传导后也应进入濒死');
+  assert.strictEqual(gg.pending.seat,1);
+  assert.strictEqual(guojia.hp,-1);
+});
+
+check('首名连环角色被桃救回后仍继续传导', ()=>{
+  const diaochan=mkPlayer('貂蝉','diaochan',{hp:3,chained:true});
+  diaochan.hand=[{id:1,name:'桃',suit:'♥',rank:3}];
+  const guojia=mkPlayer('郭嘉','guojia',{hp:4,chained:true});
+  const third=mkPlayer('第三人','zhangfei');
+  const lightning={id:90,name:'闪电',suit:'♠',rank:1};
+  const g={
+    phase:'judge',turn:0,started:true,players:[diaochan,guojia,third],
+    deck:[],discard:[],pending:null,log:[],exchangeCards:[],gameMode:'ffa'
+  };
+  bindG(g);
+  R('dealDamage')(g,0,3,undefined,'【闪电】发动','delay',lightning);
+  let gg=G();
+  gg.pending.resume={type:'delay',seat:0};
+  vm.runInContext('mySeat=0;',sandbox);
+  R('respondDying')(true);
+  gg=G();
+  assert.strictEqual(diaochan.alive,true);
+  assert.strictEqual(diaochan.hp,1);
+  assert.strictEqual(guojia.hp,1,'貂蝉脱离濒死后郭嘉仍应受到3点雷伤');
+  assert.strictEqual(gg.chainDamageQueue,null);
+});
+
 check('hasCap cixiong', ()=>{
   const p = mkPlayer('张飞','zhangfei');
   p.equips.weapon = {id:1,name:'雌雄双股剑',suit:'♠',rank:2};
