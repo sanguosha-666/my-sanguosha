@@ -1178,11 +1178,19 @@ function normalize(g){
   }
 
   // 曹冲【称象】: 询问是否发动阶段
+  // 【压力测试发现的真实bug】这三个块(chengxiangAsk/chengxiangChoose/renxinChoose)曾经
+  // 只清 g.pending、忘了同步清 g.phase——一旦这条校验真的判定为脏数据(比如曹冲在这次
+  // 询问挂起期间因后续事件死亡),g.phase 会永久停在这个phase值、g.pending 却是 null,
+  // 从此没有任何代码路径能再匹配上这个phase,游戏对所有人(不分真人机器人)永久卡死。
+  // 这是服务端bug,不是机器人专属问题。全项目扫过 normalize 里全部93处
+  // "if(g.pending&&g.pending.type===X){...g.pending=null...}"块,只有这三处漏了
+  // phase重置,其余全部正确同步清理(如上面的 fenxunDiscard/fenxunTarget)。
   if(g.pending && g.pending.type==='chengxiangAsk'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        typeof d.damageInfo!=='object' || d.damageInfo === null){
       g.pending = null;
+      g.phase = 'play';
     }
   }
 
@@ -1193,6 +1201,7 @@ function normalize(g){
        !Array.isArray(d.revealedCards) || d.revealedCards.length === 0 ||
        !Array.isArray(d.selectable) || !Number.isInteger(d.sumLimit) || d.sumLimit <= 0){
       g.pending = null;
+      g.phase = 'play';
     }
   }
 
@@ -1205,6 +1214,7 @@ function normalize(g){
        !Array.isArray(d.equipSlots) || d.equipSlots.length === 0 ||
        typeof d.originalDamageInfo!=='object' || d.originalDamageInfo===null){
       g.pending = null;
+      g.phase = 'play';
     }
   }
 
