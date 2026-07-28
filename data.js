@@ -76,6 +76,11 @@ const EQUIPS = {
   '骕骦':     { slot:'minus1', dist:-1, desc:'坐骑(进攻马)。你计算与其他角色的距离时-1,让你更容易攻击到别人。' },
 };
 function getEquip(name){ return EQUIPS[name] || null; } // 唯一查询入口
+// 「这张牌是不是装备牌」。陈宫【明策】的 4 个调用点(game.js ×3、render-controls.js ×1)
+// 一直在调它,但全项目从来没有定义过 —— 每次调用都直接抛 ReferenceError,导致明策整个
+// 技能不可用、且渲染会从调用处断掉。口径沿用项目既有写法 !!getEquip(card.name),不新造
+// 判断方式(见 render-hand.js/skills.js 的 isBasicOrEquip)。
+function isEquipment(card){ return !!(card && getEquip(card.name)); }
 
 // ---------- 延时锦囊(判定区)地基:seam 已搭好,三张具体牌(闪电/乐不思蜀/兵粮寸断)尚未实现 ----------
 // name -> { onlySelf(是否只能对自己使用,如日后的闪电), effect(g,seat,judgeCard,card)=>可选返回"传给谁"的座位号 }。

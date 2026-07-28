@@ -2993,7 +2993,12 @@ function startMingce(){
 // 陈宫【明策】检查是否有可用的牌（UI 按钮可见性用）
 function checkMingceCard(p){
   if(!p || !p.alive || !hasCap(p,'mingce')) return false;
-  if(g && g.mingceUsed) return false;
+  // 必须用 currentG(render.js 每次 render 更新的那份快照),不能写裸 g:这个函数没有 g
+  // 参数、全项目也没有全局 g,未声明的标识符 `g &&` 不是安全短路——求值 g 本身就先抛
+  // ReferenceError,根本走不到 &&。它由 render-controls.js 在渲染时调用,所以只要场上有
+  // 陈宫,每次渲染都会从这里断掉、后半段控件全渲染不出来(影响真人玩家,不只是机器人)。
+  // 这是继曹冲称象 toggleChengxiangCard/confirmChengxiangSelection 之后同类问题第三次出现。
+  if(typeof currentG!=='undefined' && currentG && currentG.mingceUsed) return false;
   const hand = (p.hand||[]).some((c,i)=>c && (isEquipment(c) || canUseAs(p,c,'杀')));
   const equip = p.equips && Object.values(p.equips).some(eq=>eq!==null);
   return hand || equip;
