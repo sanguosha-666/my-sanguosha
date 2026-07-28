@@ -255,6 +255,18 @@ function botPlay(g,seat){
 function canBotPlaySha(p){
   return !!p && !p.jiangchiNoSlash;
 }
+// 机器人"此刻能不能用桃救这个濒死者"的统一判断(respond 的 noShan、这里的贾诩【完杀】,
+// 都是同一类"决策先探测服务端再决定"的实例,见上面 canBotPlaySha 那段注释——不要每次
+// 重新论证,直接照这个范式补)。逐字对照 respondDying 服务端那段"辅诩【完杀】"检查写的,
+// 不是简化版:完杀生效期间(g.wanshaActive 且濒死者正是 g.wanshaDyingSeat)、且贾诩本人
+// 正在其回合内(findPlayerWithCap 找到的贾诩座位===g.turn)时,只有贾诩自己或濒死者本人
+// 能用桃,其余人一律不能——盲答"能救"会被服务端原地拒绝、状态不变,永久死循环。
+function canBotUseTaoForDying(g, seat, dyingSeat){
+  if(!(g.wanshaActive && g.wanshaDyingSeat===dyingSeat)) return true;
+  const jiaxuSeat = findPlayerWithCap(g, 'wansha');
+  if(jiaxuSeat===null || jiaxuSeat!==g.turn) return true;
+  return seat===jiaxuSeat || seat===dyingSeat;
+}
 function botCanSave(g,seat,dyingSeat){
   const me=g.players[seat], dying=g.players[dyingSeat];
   if(seat===dyingSeat) return true;
@@ -329,7 +341,10 @@ function runBotDecision(g,seat){
     return;
   }
   if(g.phase==='respond'&&d.to===seat){
-    botInvoke(seat,()=>respondShan(findUsableAs(p.hand,p,'闪')>=0));
+    // 不能只看"手里有没有能当闪的牌":马超【铁骑】判红/黄忠【烈弓】触发时 d.noShan===true,
+    // 这张杀不可被闪抵消,respondShan 服务端一上来就 if(g.pending.noShan) return g 原地拒绝。
+    // 盲答"出闪"会被拒、状态不变,机器人下次醒来重算又是同样结论,永久死循环。
+    botInvoke(seat,()=>respondShan(!d.noShan && findUsableAs(p.hand,p,'闪')>=0));
     return;
   }
   if(g.phase==='aoeResp'&&d.to===seat){
@@ -347,7 +362,7 @@ function runBotDecision(g,seat){
     return;
   }
   if(g.phase==='dying'&&d.asking===seat){
-    const save=botCanSave(g,seat,d.seat)&&findUsableAs(p.hand,p,'桃')>=0;
+    const save=botCanSave(g,seat,d.seat)&&canBotUseTaoForDying(g,seat,d.seat)&&findUsableAs(p.hand,p,'桃')>=0;
     botInvoke(seat,()=>respondDying(save));
     return;
   }
