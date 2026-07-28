@@ -34,7 +34,18 @@ const BOT_PHASE_ACTOR = {
   duanbingChoose:'sourceSeat', ganglieChoice:'sourceSeat',
   fanjianSuit:'targetSeat', quhuRespond:'targetSeat', tianyiRespond:'targetSeat',
   enyuanChoose:'damagerSeat', enyuanChooseOption:'damagerSeat', enyuanGiveCard:'damagerSeat',
-  jiedaoChoice:'seatA'
+  jiedaoChoice:'seatA',
+  // 新增(机器人兜底词汇盲区修复,问题3+4):这几个phase的按钮文案("获得"/"不获得"、
+  // "不再发动"、"更改【化身】"/"不更改"、"质疑"/"不质疑"、"移动到XX"/"不移动")没有一个被
+  // botSafePrompt 的正则(/不发动|不使用|不出|取消|跳过|放弃|结束/ 和 /选择|交给|弃置|摸牌|
+  // 回复|打出/)覆盖到,兜底探测不出可点按钮,必然卡死。这里不是简单扩充正则(那治标不治本,
+  // 且 guhuoQuestion 本身是有策略含义的判断题,随便点安全按钮=瞎选而不是决策),而是照
+  // huashenPick/guanxingReview 等既有先例补专门决策分支——补分支就必须同时在这张表里登记,
+  // 否则 botSeatForState 会继续把这些phase当"未覆盖阶段"扔给 botFallbackSeats+
+  // botSafePrompt(=修复前的broken路径),新分支永远不会被调用到。
+  luoyingAsk:'seat', luoshen:'seat',
+  huashenChangeAskStart:'seat', huashenChangeAskEnd:'seat',
+  guhuoQuestion:'asking', qiaobianMove:'seat'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -441,6 +452,41 @@ function runBotDecision(g,seat){
   if(g.phase==='ganglieChoice'&&d.sourceSeat===seat){
     const picks=(p.hand||[]).length>=2?[0,1]:[];
     botInvoke(seat,()=>respondGanglieChoice(picks.length===2?'discard':'damage',picks)); return;
+  }
+  // ---- 机器人兜底词汇盲区修复(问题3+4):以下几个phase的按钮文案够不到botSafePrompt的
+  // 正则,分两类处理——纯流程性的(选哪个都不影响游戏走向)给合理默认;guhuoQuestion真的
+  // 有策略含义,用不偷看隐藏信息的随机决策,不是随便点安全按钮。----
+  if(g.phase==='luoyingAsk'&&d.seat===seat){
+    // 曹植【落英】:白拿弃牌堆里的梅花牌,没有下行风险,合理默认是总是获得。
+    botInvoke(seat,()=>respondLuoying(true)); return;
+  }
+  if(g.phase==='luoshen'&&d.seat===seat){
+    // 甄姬【洛神】:循环判定,黑色继续拿牌、红色才结束,没有下行风险,合理默认是总是尝试
+    // 发动(反正判红也只是这个技能结束,不会有额外损失)。
+    botInvoke(seat,()=>respondLuoshen(true)); return;
+  }
+  if(g.phase==='huashenChangeAskStart'&&d.seat===seat){
+    // 左慈【化身】回合开始阶段"是否更改借用的技能":要不要换需要评估全局局势,超出"合理
+    // 默认"的范畴——安全默认是不更改,维持现状,不做任何越权评估。
+    botInvoke(seat,()=>respondHuashenChangeAskStart(false)); return;
+  }
+  if(g.phase==='huashenChangeAskEnd'&&d.seat===seat){
+    // 同上,回合结束阶段的同一个决策,同一个安全默认。
+    botInvoke(seat,()=>respondHuashenChangeAskEnd(false)); return;
+  }
+  if(g.phase==='guhuoQuestion'&&d.asking===seat){
+    // 于吉【蛊惑】质疑与否是真正的判断题(质疑真的会被扣【缠怨】、质疑假的能让蛊惑作废),
+    // 但机器人不能偷看 d.actualCard——那是对玩家隐藏的信息,拿它来决策就是作弊。真人也是
+    // 在不知道真实牌的情况下博弈,这里用固定概率的随机数模拟同等的不完全信息决策,和
+    // respondFanjianSuit随机猜花色是同一处理原则,不是"瞎选"而是"信息对称前提下的合理
+    // 默认"。
+    botInvoke(seat,()=>respondGuhuoQuestion(Math.random()<0.3)); return;
+  }
+  if(g.phase==='qiaobianMove'&&d.seat===seat){
+    // 张郃【巧变】跳过出牌阶段后"是否移动一张装备/判定牌":真人走的是"选来源+选目的地"
+    // 纯客户端本地选牌流程,机器人不需要走这套UI,直接调用服务端函数决定"不移动"——弃牌+
+    // 跳过阶段这个效果本身已经生效,不移动不影响这个前提,不需要评估移动哪张牌对谁更有利。
+    botInvoke(seat,()=>respondQiaobianMove(null)); return;
   }
   if(botSafePrompt(g,seat)) return;
   console.warn('机器人暂未覆盖阶段',g.phase,d.type,seat);
