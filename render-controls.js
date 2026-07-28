@@ -2508,9 +2508,12 @@ function renderControls(g){
   if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat){
     const A=g.players[mySeat], B=g.players[g.pending.seatB], askerName=g.players[g.pending.from].name;
     const shaCandidates = (A.hand||[]).filter(card=>canUseAs(A, card, '杀'));
-    const canSha = shaCandidates.length>0;
+    // 曹彰【将驰】选项1 期间不能打出杀,服务端 respondJiedao 会直接拒绝 —— 这里必须一并
+    // 不渲染"使用【杀】"按钮,否则真人点了毫无反应(只能自己改点"弃置武器"绕开)。
+    // 曾经 jiangchiNoSlash 只影响下面的 shaNeedsPick(要不要先点一张牌),没管按钮出不出现。
+    const canSha = shaCandidates.length>0 && !A.jiangchiNoSlash;
     // 候选>1时先在手牌区点选一张再出现按钮(和respondShan同一风格);候选<=1时行为不变。
-    const shaNeedsPick = canSha && shaCandidates.length>1 && !A.jiangchiNoSlash;
+    const shaNeedsPick = canSha && shaCandidates.length>1;
     if(canSha && (!shaNeedsPick || selectedResponseCardIdx!==null)){
       const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
       const b1=document.createElement('button'); b1.className='primary';

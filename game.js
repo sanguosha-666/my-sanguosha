@@ -5751,12 +5751,16 @@ function startTurn(g, seat){
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];
   g.players.forEach(p=>{ if(p) p.jiuShaBonus=false; });
+  // 曹彰【将驰】是"本回合"限定,必须对【所有人】清 —— 只清 currentPlayer 的话,曹彰在自己
+  // 回合设下的标志要等他【下一个】回合开始才失效,中间所有人的回合都还带着它(实测跨了
+  // 整整一圈)。放进这个 forEach 后,曹彰回合一结束、下一个人 startTurn 就清掉,正好等价于
+  // 官方的"本回合结束时失效"(曹彰自己的结束阶段仍在他回合内,标志还在,也是对的)。
+  // 写法对齐同一批的 shuangxiongColor/jiuShaBonus,不新造模式。
+  g.players.forEach(p=>{ if(p){ p.jiangchiNoSlash=false; p.jiangchiNoDistance=false; } });
   if(currentPlayer) {
     currentPlayer.fenxunUsed = false;
     currentPlayer.fenxunTarget = null;
     currentPlayer.jujianUsed = false;
-    currentPlayer.jiangchiNoSlash = false;
-    currentPlayer.jiangchiNoDistance = false;
   }
   // 贾诩完杀：回合开始时重置状态
   g.wanshaActive = false; g.wanshaDyingSeat = null;

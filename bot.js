@@ -245,6 +245,16 @@ function botPlay(g,seat){
     mySeat=humanSeat;
   }
 }
+// 机器人"此刻能不能打出【杀】"的统一判断。手里有没有杀是一回事,规则允不允许是另一回事 ——
+// 曹彰【将驰】选项1 期间服务端 respondJiedao/duelResponse/aoeRespond 都会一上来就
+// if(jiangchiNoSlash) return g 原地拒绝,而机器人是无状态重算的:盲答"用杀"会被拒 → 状态不变
+// → 下次醒来重算得到同样结论 → 永久死循环(真人能改点别的选项逃出来,机器人不会改主意)。
+// 【通用要求】新增任何"要不要打出某张牌"的决策分支时,都要先问一句"服务端除了牌够不够,
+// 还有没有别的前置条件会拒绝我" —— 照 pick 分支"先探测实际可选项、再决定答什么"的写法,
+// 不要盲答。
+function canBotPlaySha(p){
+  return !!p && !p.jiangchiNoSlash;
+}
 function botCanSave(g,seat,dyingSeat){
   const me=g.players[seat], dying=g.players[dyingSeat];
   if(seat===dyingSeat) return true;
@@ -323,11 +333,17 @@ function runBotDecision(g,seat){
     return;
   }
   if(g.phase==='aoeResp'&&d.to===seat){
-    botInvoke(seat,()=>aoeRespond(findUsableAs(p.hand,p,d.need)>=0));
+    // need==='杀'(南蛮入侵)时同样受【将驰】限制,服务端 aoeRespond 会拒;need==='闪'
+    // (万箭齐发)不受影响,所以只在需要杀时才加这道判断。
+    const canRespond = (d.need==='杀' ? canBotPlaySha(p) : true) && findUsableAs(p.hand,p,d.need)>=0;
+    botInvoke(seat,()=>aoeRespond(canRespond));
     return;
   }
   if(g.phase==='duel'&&d.active===seat){
-    botInvoke(seat,()=>duelResponse(findUsableAs(p.hand,p,'杀')>=0));
+    // 不能只看"手里有没有杀":曹彰【将驰】选项1 期间服务端 duelResponse 一上来就
+    // if(me.jiangchiNoSlash) return g —— 盲答 true 会被原地拒绝、状态不变,机器人下次
+    // 醒来重算又得到同样结论,永久死循环。仿 pick 分支"先探测实际可选项再决定"。
+    botInvoke(seat,()=>duelResponse(canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0));
     return;
   }
   if(g.phase==='dying'&&d.asking===seat){
@@ -383,7 +399,8 @@ function runBotDecision(g,seat){
     botInvoke(seat,()=>respondShaOffsetChoice((d.available||[])[0]||null)); return;
   }
   if(g.phase==='jiedaoChoice'&&d.seatA===seat){
-    botInvoke(seat,()=>respondJiedao(findUsableAs(p.hand,p,'杀')>=0)); return;
+    // 同上:【将驰】期间不能出杀,只能选"交出武器"。答 false 会走弃武器分支,流程正常收尾。
+    botInvoke(seat,()=>respondJiedao(canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0)); return;
   }
   if(g.phase==='guicai'&&d.asking===seat){ botInvoke(seat,()=>respondGuicai(false)); return; }
   if(g.phase==='fanjianSuit'&&d.targetSeat===seat){
