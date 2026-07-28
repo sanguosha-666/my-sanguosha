@@ -135,8 +135,12 @@ function normalize(g){
   // 注意：明策结算必须完整进行，即使陈宫死亡，也继续结算
   if(g.pending && g.pending.type==='mingcePickCard'){
     const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
-       !Array.isArray(d.cardToGive) || d.cardToGive.length===0){
+    // 【不要再加 cardToGive 的校验】这个阶段的语义就是"陈宫还没选牌",startMingce 建的
+    // pending 只有 {type,sourceSeat},cardToGive 要到下一阶段才存在 —— 空/缺失是合法的
+    // 中间态,不是脏数据。曾经要求它必须是非空数组,导致每次 tx 开头的 normalize 都把这个
+    // 刚建立的 pending 清掉,明策永远走不过第一步(而 mingceUsed 已被消耗)。
+    // 和贾诩【乱武】remainingSeats.length===0 被误当脏数据是同一类错误。
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
       g.pending = null;
       g.phase = 'play';
     }
@@ -145,8 +149,11 @@ function normalize(g){
   // 陈宫【明策】:选择接收牌的目标阶段
   if(g.pending && g.pending.type==='mingcePickTarget'){
     const d = g.pending;
+    // 【不要再要求 targetSeat 是 number】这个阶段的语义就是"还没选接收牌的目标",
+    // pickMingceCard 建 pending 时 targetSeat 恒为 null —— 同上,合法中间态不是脏数据。
+    // 只有它非 null 时才需要是个真实座位。cardToGive/cardName 在这个阶段确实已经有了,保留校验。
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       (d.targetSeat!==null && (typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive)) ||
        !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
        typeof d.cardName !== 'string' || d.cardName === ''){
       g.pending = null;
@@ -3016,6 +3023,20 @@ function pickMingceCard(cardIdx, isEquip){
       card = equip;
       cardName = equip.name;
       me.equips[cardIdx] = null;
+      // 交出装备 = 失去装备,必须触发 onLoseEquip(孙尚香【枭姬】/凌统【旋风】等)。
+      // 写法照抄旋风那 8 个入口已确立的标准范式:先把 phase 设回休止相(让钩子里的
+      // 旋风捕获到正确的 previousPhase,不是 mingcePickCard 这种死相),再拍 pendingBefore
+      // 快照触发钩子;钩子若挂起了新 pending 就直接 return,不覆盖它。
+      g.pending = null;
+      g.phase = 'play';
+      const pendingBefore = g.pending;
+      triggerHook(g, mySeat, 'onLoseEquip', {count:1});
+      if(g.pending !== pendingBefore && g.pending){
+        // 钩子挂起了询问(如旋风):明策这次就到此为止,交出的牌按弃置处理避免凭空消失
+        g.discard.push(card);
+        g.log = pushLog(g.log, me.name+' 发动【明策】交出【'+cardName+'】时触发了其它技能,本次明策中止');
+        return g;
+      }
     }else{
       if(cardIdx<0 || cardIdx>=me.hand.length) return g;
       const c = me.hand[cardIdx];
@@ -3043,7 +3064,11 @@ function pickMingceTarget(targetSeat){
     if(!target || !target.alive || targetSeat===mySeat) return g;
     g.pending.targetSeat = targetSeat;
     // 找出目标攻击范围内的其他角色
-    const candidates = g.players.filter((p,i)=>p && p.alive && i!==targetSeat && i!==mySeat && canReachSha(g, targetSeat, i));
+    // 官方原文:"交给一名【其他】角色…选择其攻击范围内的【另一名】角色"——两处限定词不同:
+    // 接收牌的人必须是"其他角色"(排除陈宫自己),而被杀的第二目标只说"另一名角色",只相对
+    // 接收者而言,并没有排除陈宫。所以这里【不能】再加 i!==mySeat —— 陈宫可以指自己
+    // (常见打法:配合【智迟】主动吃一刀)。
+    const candidates = g.players.filter((p,i)=>p && p.alive && i!==targetSeat && canReachSha(g, targetSeat, i));
     if(candidates.length===0){
       // 无可选第二目标，直接进入选择阶段
       g.pending = {
@@ -3106,24 +3131,34 @@ function chooseMingceOption(option){
     const cardName = g.pending.cardName;
     const cardToGive = g.pending.cardToGive;
     if(!target || !target.alive) return g;
+    // 服务端兜底:没有第二目标时"视为使用杀"不是合法选项(官方FAQ:此时只能选摸牌)。
+    // UI 已经不渲染该按钮,这里再挡一层,避免出现"牌交出去了、两个选项的效果都不执行"
+    // 这种半吊子状态(既有实现就是这样,牌白给)。
+    if(option==='sha' && !(target2 && target2.alive)) return g;
+    if(option!=='sha' && option!=='draw') return g;
     // 先把牌交给目标
     if(cardToGive && cardToGive.length>0){
       cardToGive.forEach(c=>target.hand.push(c));
       g.log = pushLog(g.log, (source?source.name:'陈宫')+' 将 【'+cardName+'】 交给 '+target.name+'（明策）');
     }
+    // 先收尾回休止相,再触发后续效果 —— 这样 resolveShaUse 挂起的响应 pending 才不会被
+    // 我们自己的收尾覆盖掉(曾经是先 resolveShaUse、再无条件 g.pending=null;phase='play',
+    // 结果视为的杀刚建立响应阶段就被抹掉,目标毫发无伤)。
+    g.pending = null;
+    g.phase = 'play';
     if(option==='sha'){
-      // 视为对目标使用一张普通【杀】，无距离限制，无次数限制
-      if(target2 && target2.alive && source){
-        g.log = pushLog(g.log, target.name+' 选择视为对 '+target2.name+' 使用【杀】（明策）');
-        // 直接用 resolveShaUse，source 是视为使用杀的玩家（接收牌的角色）
-        resolveShaUse(g, g.players.indexOf(target), g.players.indexOf(target2), '明策:视为杀', 'none', undefined);
-      }
-    }else if(option==='draw'){
+      // 视为对第二目标使用一张普通【杀】(无花色/无属性),使用者是接收牌的角色而非陈宫。
+      // resolveShaUse 的第 2 参数是【玩家对象】(内部自己 indexOf 取座位),不是座位号 ——
+      // 曾经传 g.players.indexOf(target) 这个数字,导致 indexOf(数字) 得到 -1、
+      // 使用者变成不存在的座位(日志显示 "undefined 对 XX")。项目里其余 6 个调用点都传对象。
+      g.log = pushLog(g.log, target.name+' 选择视为对 '+target2.name+' 使用【杀】（明策）');
+      const pendingBefore = g.pending;
+      resolveShaUse(g, target, g.players.indexOf(target2), '明策:视为杀', 'none', undefined);
+      if(g.pending !== pendingBefore && g.pending) return g; // 杀已挂起响应,交给它继续
+    }else{
       drawN(g, g.players.indexOf(target), 1);
       g.log = pushLog(g.log, target.name+' 选择摸一张牌（明策）');
     }
-    g.pending = null;
-    g.phase = 'play';
     return g;
   });
 }
