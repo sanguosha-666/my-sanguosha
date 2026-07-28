@@ -511,7 +511,36 @@
      就得凭空猜一个"装备条大概多高"的魔数,行数一变就错位。这里改用"底部锚定的 flex
      column"把两者装在同一个容器里:装备条在下、判定区在上,判定区自然被装备条顶上去,
      不需要任何魔数、也不需要 :has() 或 JS 参与,行数怎么变都不会错位。 */
-  .seat-bottom{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;}
+  /* right 从 0 收进 22px——专门给右下角的出牌顺序编号角标(.seat-order-badge)让出空间,
+     不是覆盖它。.seat-bottom 内部所有行(装备/判定区/不屈牌)统一整体收窄,不管哪一行
+     恰好落在最底下都不会撞上角标(比按内容类型分别处理更简单,也不用管哪一行是"最后
+     一行"这种会随内容变化的判断)。这个 22px = 角标 base 尺寸16px + right偏移4px + 2px
+     间隙,和下面各响应式断点里 .seat-order-badge 的尺寸一一对应,改其中一个记得改另一个。 */
+  .seat-bottom{position:absolute;left:0;right:22px;bottom:0;display:flex;flex-direction:column;}
+  /* ===== 右下角:出牌顺序编号(从 g.turn 开始按真实轮转顺序编号1,2,3...,死亡玩家不
+     参与编号、不显示)。常驻显示,不是hover/点击才出现。
+     **位置冲突排查**(任务要求先确认、不能直接覆盖已有元素):.seat-bottom(判定区+
+     装备行)是 left:0;right:0;bottom:0 铺满整个底部宽度的绝对定位容器,其中
+     .seat-buqu-row/.seat-delays 都是 justify-content:flex-end(贴右对齐),装备文字
+     (.seat-equip-bar)也可能延伸到接近右边缘——也就是说右下角这块区域本来就被
+     .seat-bottom 的动态内容实际占用着。**解决方式:上面把 .seat-bottom 的 right 从 0
+     收进 22px,专门腾出这一条给角标**(错开摆放,不是压在谁上面),而不是让角标和装备/
+     判定区/不屈牌抢同一块空间。
+     视觉复用 .info-badge 已验证过的不透明底衬(#1a1410,不透明十六进制,不受背后立绘
+     明暗影响)+ --paper 文字——真实WCAG计算过这组颜色对比度14.04,远超AA的4.5,不新造
+     配色,和势力标识/不屈牌一贯"不透明底衬"的既有原则一致。尺寸/位置仿 .seat-identity
+     (同样是小方块单字符角标),只是挪到右下角、换一套配色区分"这是顺序"而不是"这是身份"。 */
+  .seat-order-badge{
+    position:absolute; right:4px; bottom:4px;
+    width:16px;height:16px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;line-height:1;
+    border-radius:3px;
+    background:#1a1410;color:var(--paper);
+    z-index:2;
+  }
+  .seat.me .seat-order-badge{right:6px;bottom:6px;width:22px;height:22px;font-size:13px;}
+  .seat.me .seat-bottom{right:30px;} /* 6(right偏移)+22(me尺寸)+2(间隙) */
   /* 周泰【不屈】不屈牌行:红色系 chip,**不透明底衬**(#4a1414,深红,不透明)——刻意不抄
      .dchip/.seat-huashen-line 那套"半透明+text-shadow"的旧写法,而是走势力标识/装备条那次
      确立的"对比度不随立绘明暗漂移"标准。只显示花色+点数(render.js的seatEquipFace,和装备条
@@ -595,6 +624,8 @@
     .seat-hp-col{font-size:9px;padding:2px;}
     .seat-identity{top:17px;width:13px;height:13px;}
     .seat .seat-info-badge{top:32px;width:12px;height:12px;font-size:8px;}
+    .seat-order-badge{width:13px;height:13px;font-size:8px;}
+    .seat-bottom{right:19px;} /* 4+13+2 */
   }
   @container (max-width:115px){
     .seat-left{top:15px;gap:0;}
@@ -603,6 +634,8 @@
     .seat-hp-col{font-size:8px;padding:1px 2px;}
     .seat-identity{top:15px;width:11px;height:11px;}
     .seat .seat-info-badge{top:27px;width:11px;height:11px;font-size:7px;}
+    .seat-order-badge{width:11px;height:11px;font-size:7px;}
+    .seat-bottom{right:17px;} /* 4+11+2 */
   }
   /* 横屏矮视口(见下方 max-height:460px 断点)把座位卡尺寸驱动方向反转成"按高度算宽度"
      之后,7人局在 SE 这类矮视口下能算出比这之前任何"按宽度分档"场景都窄的卡(实测约
@@ -617,6 +650,8 @@
     .seat-hp-col{font-size:7px;padding:1px 1px;}
     .seat-identity{top:11px;width:10px;height:10px;}
     .seat .seat-info-badge{top:22px;width:10px;height:10px;font-size:6px;}
+    .seat-order-badge{width:10px;height:10px;font-size:6px;}
+    .seat-bottom{right:16px;} /* 4+10+2 */
   }
   /* 三选一选将阶段:候选卡片纵向堆叠,继续用 .avatar-box/.avatar/.avatar-placeholder
      这套独立于座位卡片的头像展示(侧边固定宽度+信息在旁边),和上面 .seat-art
@@ -940,6 +975,8 @@
     .seat-gen-name{font-size:10px;}
     .seat-identity{top:17px;width:13px;height:13px;}
     .seat .seat-info-badge{top:33px;width:12px;height:12px;font-size:8px;}
+    .seat-order-badge{width:13px;height:13px;font-size:8px;}
+    .seat-bottom{right:19px;} /* 4+13+2,和 @container(max-width:150px) 那档同一组数值 */
     .seat-hp-col{font-size:10px;}
     /* (第6次微调:原来这里有一条 .seat-equip-bar{font-size:7px;padding:2px} 的固定像素覆盖,
        已删除——这是视口宽度断点,和卡片自身宽度(由对手人数决定)不是一回事,continuing to
@@ -962,6 +999,8 @@
     .seat-gen-name{font-size:9px;}
     .seat-identity{top:15px;width:12px;height:12px;}
     .seat .seat-info-badge{top:29px;width:11px;height:11px;font-size:7px;}
+    .seat-order-badge{width:11px;height:11px;font-size:7px;}
+    .seat-bottom{right:17px;} /* 4+11+2,和 @container(max-width:115px) 那档同一组数值 */
     .seat-hp-col{font-size:9px;}
     /* (第6次微调:同上一个断点,原有的 .seat-equip-bar{font-size:7px} 固定像素覆盖已删除。) */
   }
@@ -1388,17 +1427,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=226"></script>
-<script src="data.js?v=226"></script>
-<script src="room-lifecycle.js?v=226"></script>
-<script src="game.js?v=226"></script>
-<script src="weapons.js?v=226"></script>
-<script src="skills.js?v=226"></script>
-<script src="bot.js?v=226"></script>
-<script src="render.js?v=226"></script>
-<script src="render-table.js?v=226"></script>
-<script src="render-hand.js?v=226"></script>
-<script src="render-controls.js?v=226"></script>
-<script src="render-log.js?v=226"></script>
+<script src="config.js?v=227"></script>
+<script src="data.js?v=227"></script>
+<script src="room-lifecycle.js?v=227"></script>
+<script src="game.js?v=227"></script>
+<script src="weapons.js?v=227"></script>
+<script src="skills.js?v=227"></script>
+<script src="bot.js?v=227"></script>
+<script src="render.js?v=227"></script>
+<script src="render-table.js?v=227"></script>
+<script src="render-hand.js?v=227"></script>
+<script src="render-controls.js?v=227"></script>
+<script src="render-log.js?v=227"></script>
 </body>
 </html>

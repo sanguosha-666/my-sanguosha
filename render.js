@@ -537,6 +537,26 @@ function seatEquipFace(card){
 // 显示已装备的槽位(没装备的行完全不渲染)——**这条不对称是此前经用户明确确认保留的
 // 既有惯例,不是随手实现的默认值,不要"顺手统一"掉。**手牌数量图标不受这条不对称影响,
 // 自己和对手都会显示(手牌张数在这个项目里本来就是公开信息,不是隐藏的具体牌面内容)。
+
+// 出牌顺序编号:从 g.turn 开始按真实轮转顺序(nextAlive,game.js 已验证正确的轮转逻辑)
+// 依次给每个存活玩家编号 1,2,3...,死亡玩家不参与编号(返回的 map 里没有它的座位号,
+// 调用方据此不渲染角标)。纯展示层的派生计算,不写回 g、不需要 normalize 防御。
+// g.turn 理论上不该指向死亡玩家(引擎自身的不变量),但这里不假设这一点——万一真的
+// 撞上脏数据,兜底先用 nextAlive 找到第一个存活的人再开始编号,不崩溃、不显示错误角标。
+function computeTurnOrderNumbers(g){
+  const map = {};
+  if(!g || !g.started) return map;
+  const players = g.players||[];
+  const aliveCount = players.filter(p=>p&&p.alive).length;
+  if(aliveCount===0) return map;
+  let seat = Number.isInteger(g.turn) ? g.turn : 0;
+  if(!players[seat] || !players[seat].alive) seat = nextAlive(g, seat);
+  for(let i=1; i<=aliveCount; i++){
+    map[seat] = i;
+    seat = nextAlive(g, seat);
+  }
+  return map;
+}
 function renderSeatCard(g, seat, isSelf){
   const p = g.players[seat];
   const gen = getGeneral(p.general); // 可能为 null(大厅/旧数据)
@@ -704,6 +724,21 @@ function renderSeatCard(g, seat, isSelf){
   const infoBadge = (avatarReady&&gen)
     ? '<span class="seat-info-badge info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>'
     : '';
+  // 出牌顺序编号角标(右下角,常驻显示):死亡玩家不参与编号、不显示(orderMap 里没有
+  // 它的座位号,下面这行天然拿到 undefined)。**位置冲突排查**:.seat-bottom(判定区+
+  // 装备行)是 left:0;right:0;bottom:0 铺满整个底部的绝对定位容器,里面的不屈牌行/
+  // 判定区都是 justify-content:flex-end(贴右对齐),装备文字也可能延伸到接近右边缘——
+  // 也就是说右下角这块区域此刻已经被 .seat-bottom 的动态内容实际占用着,不能简单再叠一个
+  // 绝对定位元素上去(会盖住装备名/不屈牌,或反过来被它们盖住,取决于DOM顺序)。
+  // **解决方式:给 .seat-bottom 的 right 从 0 收进来一小条(见 index.html 对应位置的
+  // 注释),专门空出这个角标的位置,不是覆盖掉已有元素**——.seat-bottom 内部所有行(装备/
+  // 判定区/不屈牌)因此整体让出这一条,不管哪一行恰好是最底下那行都不会撞上。角标本身
+  // 复用 .info-badge 已验证过的不透明底衬(#1a1410)+ --paper 文字(真实WCAG对比度14.04,
+  // 远超AA的4.5),不新造配色。
+  const orderNum = computeTurnOrderNumbers(g)[seat];
+  const orderBadge = orderNum
+    ? '<div class="seat-order-badge" title="出牌顺序:第'+orderNum+'位">'+orderNum+'</div>'
+    : '';
   // DOM 顺序 = 层叠顺序(都在同一个 .seat 定位上下文里,后面的盖在前面的上面):
   // 图片 → 顶部遮罩 → 底部遮罩 → 标题栏/武将名/血量(文字层) → 底部区(判定区+装备行)。
   // 判定区和装备行(手牌图标+装备文字)一起包进 .seat-bottom(底部锚定的 flex column),
@@ -744,7 +779,12 @@ function renderSeatCard(g, seat, isSelf){
         return '<div class="seat-identity"></div>';
       })()
     + infoBadge
-    + '<div class="seat-bottom">'+huashenLine+buquRow+delayRow+equipRow+'</div>';
+    + '<div class="seat-bottom">'+huashenLine+buquRow+delayRow+equipRow+'</div>'
+    // orderBadge 排在 .seat-bottom 之后(DOM序=层叠序,后面的盖在前面上面)——两者本来
+    // 就靠 .seat-bottom 的 right 收窄互不重叠(见上面注释),这里放在最后只是双重保险:
+    // 万一某个极端场景下 .seat-bottom 的内容真的溢出了预留边界,角标仍然可见、不会被
+    // 悄悄盖住。
+    + orderBadge;
 }
 
 
