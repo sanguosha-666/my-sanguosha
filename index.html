@@ -1299,7 +1299,39 @@
          回退"这条硬约束)。日志面板变宽(1440px:357→432,1920px:537→912)是可以接受的
          结果而不是新问题——它是纯文本历史记录区,内容本身会自然按可用宽度换行/左对齐,
          不会像"固定宽高比的座位卡"那样在多余宽度里露出一整块无法被内容填补的空白;
-         已用真实截图核实这个宽度下日志区域视觉上不显得空洞(见CLAUDE.md)。 */
+         已用真实截图核实这个宽度下日志区域视觉上不显得空洞(见CLAUDE.md)。
+         【第13步修正】用户反馈日志面板占用宽度过多、可用性上没有帮助,应该把这部分空间
+         让给座位区。**真实测量确认一个此前被忽略的关键点**:单纯把左/右列的固定上限从
+         260再调大,对座位卡尺寸**没有任何效果**——6~8人局对手座位卡受纵向预算瓶颈,尺寸
+         早就远小于260px(不受列宽驱动);meSeat(2~4人局)当时的理论/实测上限恰好也只有
+         250px(由 render.js 里一个历史遗留的 266.7px 高度硬上限反推而来,`266.7×1.25×
+         0.75=250.03`),260px列宽已经完全够用、从未被列宽本身卡住过。**真正能让座位卡
+         明显变大的是先在 render.js 里把那个 266.7px 的历史legacy高度上限抬高到 400px**
+         (真实dump测过:1920×1080下2~4人局的纵向预算其实原本就有336.2px可用,却被这个
+         legacy常数白白夹掉69.5px；1440×900下同样的2~4人局场景、以及两档分辨率下的
+         5~8人局场景,纵向预算本来就低于266.7,不受这次调整影响)——**抬高高度上限之后,
+         meSeat 的新理论/实测上限变成 315.2px 宽(400×1.25×0.75,四舍五入留量),这时
+         列宽才第一次真正成为限制 meSeat 能不能长到这么大的瓶颈**,左/右列因此需要同步
+         加宽去配合这个新的、真正会被用上的宽度需求——**这两处改动必须同时做,只做其中
+         一个都不会有效果**(只抬高度上限而不加宽列会让 meSeat 被列宽重新夹回旧上限；
+         只加宽列而不抬高度上限,meSeat 仍然会停在旧的250px理论值,列宽白白多出的部分
+         继续是死区)。
+         **真实测量还发现一个容易被忽略的细节,直接决定了不能简单把这个更宽的列宽写死成
+         一个固定值**:1440×900 下 meSeat 的真实需求本来就只有 240.2px(该分辨率下的
+         纵向预算,不受这次抬高的400px上限影响——1440×900的solvedHeight本来就没到旧的
+         266.7,更不会到400),260px列宽在1440×900下已经绰绰有余,**加宽到330px在这个
+         分辨率下对座位卡没有任何帮助,只是白白多占30px列宽、直接从日志列身上抢走这30px
+         (×2列=60px)**,和这次任务"把日志的宽度让给座位区"的方向恰好相反——330px这个
+         数字只对1920×1080下meSeat新解出的315.2px需求有意义。**修法:用响应式断点让
+         每档分辨率各自只拿自己实际需要的列宽,不多占**:这里(min-width:1024px 桌面
+         基础断点)维持 260px(覆盖1440×900下240.2px的真实需求,留小余量),新增一个
+         @media(min-width:1700px)(1440和1920之间取的分界值,干净地把这次测试的两档
+         分辨率分开,写在紧邻这个 `#game.desktop-layout{...}` 规则块结束之后、只覆盖
+         grid-template-columns 这一条属性,不重复声明 grid-template-rows/column-gap/
+         align-items 等其它属性——这几项两档分辨率完全一样,不需要在更窄的断点里覆盖
+         第二次)专门加宽到330px(覆盖1920×1080下315.2px的真实需求)。这样1440×900下
+         日志列不会被无谓抢走60px列宽,可以把这部分空间还给日志(实测见下方验证记录),
+         1920×1080下座位卡则能吃到真正需要的330px。 */
       grid-template-columns:minmax(100px,260px) minmax(300px,420px) minmax(100px,260px) minmax(220px,1fr);
       /* 第8步:me+手牌合并进同一行后,总行数从8收紧到7(座位区3行+信息条/武将名/手牌标签
          各1行+合并后的me+手牌1行),没有空行,不会因为"预留了一行却没人占用"而多出一段
@@ -1307,6 +1339,16 @@
       grid-template-rows:repeat(7,auto);
       column-gap:12px; row-gap:8px;
       align-items:start;
+    }
+    /* 【第13步】1920×1080(及更宽视口)专属:左/右列上限从基础断点的260px加宽到330px,
+       只覆盖 grid-template-columns 这一条属性——其余 grid-template-rows/column-gap/
+       row-gap/align-items 沿用 min-width:1024px 那个块里已经声明好的值,不用重复写。
+       断点选1700px是1440和1920之间随意取的一个分界点,只要干净地把这次任务实测覆盖的
+       两档分辨率分开即可,不是什么精确计算出来的临界值。 */
+    @media (min-width:1700px){
+      #game.desktop-layout{
+        grid-template-columns:minmax(100px,330px) minmax(300px,420px) minmax(100px,330px) minmax(220px,1fr);
+      }
     }
     #game.desktop-layout #oppRow{ display:contents; }
     #game.desktop-layout .bottom-row{ display:contents; }
@@ -1379,6 +1421,20 @@
        也不碰 left/right 座位卡(选择器只限定 .seat.me,不会命中它们)。写法参照上面
        .wrap:has(#game.desktop-layout) 这条"用desktop-layout作用域覆盖旧规则"的既有模式,
        保持风格一致。 */
+    /* 【第13步修正,真实bug】:第10步删除桌面专属的180px固定宽度覆盖之后,`.seat.me`
+       的**基础规则**(文件靠前 `.seat.me{width:220px;max-width:260px}`,窄屏/flex布局
+       场景设计,第10步之前从未在桌面布局下真正生效过,因为当时还有桌面专属的180px覆盖
+       挡着)重新变得"没有任何桌面专属规则覆盖它"——`max-width:260px` 这条基础规则的
+       限制因此第一次真正在桌面布局下生效。这次(第13步)抬高 render.js 里座位卡高度
+       上限、加宽左右列宽到330px想让 meSeat 长到 315.2px 宽时,真实测量发现 meSeat 实际
+       只渲染到 260px 宽、且高度420.3px与宽度260px已不再是3:4——**aspect-ratio 被这条
+       遗忘已久的 max-width:260px 基础规则重新夹住了**,和本次任务前面 index.html 里已经
+       记录过的"log-panel 遗留 width:260px 覆盖"是同一类"移除了一部分覆盖、没意识到还有
+       另一条不相关的旧规则在暗中生效"的坑。修法:desktop-layout 范围内新增一条覆盖,把
+       max-width 显式放开(不设固定数字,交给 JS 动态算出的 height+aspect-ratio 决定实际
+       宽度,和对手座位卡 max-width:none 那条同一处理原则),不影响窄屏/flex布局下这条
+       基础规则本身继续生效。 */
+    #game.desktop-layout .seat.me{ max-width:none; }
     /* 空间再分配(桌面布局第10步)：这条 180px 固定覆盖已删除——meSeat 的尺寸现在和对手
        座位区一样交给 updateDesktopSeatHeights()(render.js)动态计算,不再是一个和对手区
        预算无关的固定切片。**根因**:meSeat 之前固定 width:180px(height 由 aspect-ratio
@@ -1595,17 +1651,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=231"></script>
-<script src="data.js?v=231"></script>
-<script src="room-lifecycle.js?v=231"></script>
-<script src="game.js?v=231"></script>
-<script src="weapons.js?v=231"></script>
-<script src="skills.js?v=231"></script>
-<script src="bot.js?v=231"></script>
-<script src="render.js?v=231"></script>
-<script src="render-table.js?v=231"></script>
-<script src="render-hand.js?v=231"></script>
-<script src="render-controls.js?v=231"></script>
-<script src="render-log.js?v=231"></script>
+<script src="config.js?v=232"></script>
+<script src="data.js?v=232"></script>
+<script src="room-lifecycle.js?v=232"></script>
+<script src="game.js?v=232"></script>
+<script src="weapons.js?v=232"></script>
+<script src="skills.js?v=232"></script>
+<script src="bot.js?v=232"></script>
+<script src="render.js?v=232"></script>
+<script src="render-table.js?v=232"></script>
+<script src="render-hand.js?v=232"></script>
+<script src="render-controls.js?v=232"></script>
+<script src="render-log.js?v=232"></script>
 </body>
 </html>

@@ -441,10 +441,18 @@ function updateDesktopSeatHeights(g){
   const ME_SEAT_RATIO = 1.25;
   const solvedHeight = (targetBottom - oppZoneTop - (rowsUsed-1)*rowGap - oppTopRowPadding - fixedMiddleHeight) / (rowsUsed + ME_SEAT_RATIO);
   // 上下限保护:下限90px是这一步的临时值(步骤c会用真实测量+放大截图重新核实可读性
-  // 下限,届时如果需要会调整这个数字或新增更紧的响应式断点,不是这里就能一次定死的);
-  // 上限266.7px是当前既有CSS宽度驱动方案下算出来的最大值(200px宽×4/3),没必要超过它
-  // ——用不到那么多空间时,座位卡维持原有大小即可,不需要占用多余的纵向预算。
-  const height = Math.max(90, Math.min(266.7, solvedHeight));
+  // 下限,届时如果需要会调整这个数字或新增更紧的响应式断点,不是这里就能一次定死的)。
+  // 【空间再分配第13步修正,真实bug】:上限原来写死266.7px("当前既有CSS宽度驱动方案下
+  // 算出来的最大值,200px宽×4/3")——这只是一个从旧版本carry over下来的历史数字,不是
+  // 真实的纵向空间上限。真实dump测过:1920×1080下2~4人局(rowsUsed=1,纵向预算最宽裕)
+  // 未clamp的solvedHeight其实有336.2px,却被这个历史legacy常数硬夹回266.7,白白扔掉
+  // 69.5px的真实可用高度(1440×900下2~4人局solvedHeight只有256.2,本来就没到266.7,
+  // 不受这个legacy值影响;5~8人局两档分辨率下solvedHeight都远低于266.7,同样不受影响
+  // ——这条legacy上限唯一真正束缚到的场景就是1920×1080的2~4人局)。改成400px(比目前
+  // 测过的最大真实值336.2多留63.8px余量,对已测的两档分辨率、全部人数都不会被这个新
+  // 上限反过来夹住,同时仍保留一个有限的sanity上限,不是彻底去掉夹子——防止未来在
+  // 明显更高的视口下座位卡被解出一个不合理的巨大尺寸)。
+  const height = Math.max(90, Math.min(400, solvedHeight));
   oppSeatEls.forEach(el=>{
     el.style.height = height+'px';
     el.style.width = 'auto';
