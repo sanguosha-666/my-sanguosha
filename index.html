@@ -1523,9 +1523,13 @@
        大厅阶段(#game 带 hidden)即使在宽屏下也维持原来宽松的标题栏/页脚,这两个
        条件缺一都不生效,和手机断点"仅游戏中收紧"的既有原则一致。*/
     .wrap:has(#game.desktop-layout:not(.hidden)){padding:10px 16px 10px;}
-    .wrap:has(#game.desktop-layout:not(.hidden)) h1{
-      font-size:18px;letter-spacing:.14em;text-indent:.14em;margin:0 0 2px;
-    }
+    /* 【座位卡最大化任务:方向1】标题栏原来只是缩小字号(18px)保留显示,这次改成
+       完全隐藏——和 .sub 副标题同一处理原则(见下一条规则):它是纯装饰性的品牌文字,
+       游戏进行中的桌面视角完全不需要,继续占用哪怕缩小后的一行也是纯粹的纵向死重。
+       真实测过:隐藏后 #game 的 top 位置相应上移(从原来 h1 占的位置开始),没有产生
+       任何布局跳动或错位——:has()/兄弟选择器的判断条件不变,依然只在"桌面布局+已开局"
+       这个交集生效,大厅阶段标题栏正常显示。 */
+    .wrap:has(#game.desktop-layout:not(.hidden)) h1{display:none;}
     .wrap:has(#game.desktop-layout:not(.hidden)) .sub{display:none;}
     /* footnote("部署后…"这类大厅提示)在已开局的桌面视角下同样是死重——和手机断点
        #game:not(.hidden) ~ .footnote 那条完全同一原理,这里额外加 .desktop-layout
@@ -1535,8 +1539,13 @@
 
     /* 【第11步】margin-bottom 从 6px 收紧到 4px——这是排查"座位卡还有没有更多可挤纵向
        预算"时顺带找到的一处小空间,不是本次任务的主要来源(主要来源是横向留白+#tableStrip
-       悬浮间隙),但既然在查、也一并收紧,给6~8人局座位卡再挤出几px。 */
-    #game.desktop-layout .panel.table{padding:5px 10px;margin:0 0 4px;gap:3px 10px;}
+       悬浮间隙),但既然在查、也一并收紧,给6~8人局座位卡再挤出几px。
+       【座位卡最大化任务:方向1】padding/margin/gap 进一步收紧(5px→3px、4px→2px、
+       3px→2px)——**不再继续压 phase-pill/deckinfo/banner/controls 这几项的字号**
+       (11~12px 已经是之前几轮压缩的下限,继续压会牺牲可读性,这次刻意不碰),只在
+       纯粹的间距(padding/margin/gap)上继续找空间,真实测过这几px的收紧不影响任何
+       文字的可读性,只是让内容彼此贴得更紧一点。 */
+    #game.desktop-layout .panel.table{padding:3px 8px;margin:0 0 2px;gap:2px 10px;}
     #game.desktop-layout .phase-pill{padding:2px 10px;font-size:11px;}
     #game.desktop-layout .deckinfo{font-size:11px;}
     #game.desktop-layout .banner{padding:5px 10px;margin:2px 0 0;font-size:12px;}
@@ -1550,8 +1559,11 @@
        是因为窄宽度下长描述容易换行、吃掉不可预测的纵向空间,桌面宽度(880~1096px)
        远比手机宽裕,换行风险低得多,没有必要为了省这点高度牺牲这条信息。 */
     /* 【第11步】margin 从 6px/4px 收紧到 4px/3px(同一处顺带收紧,理由同上面panelTable
-       那条注释)——myGeneral 和"你的手牌"标签共用这条规则,各省3px,合计再收紧6px。 */
-    #game.desktop-layout .hand-label{font-size:11px;margin:4px 0 3px;}
+       那条注释)——myGeneral 和"你的手牌"标签共用这条规则,各省3px,合计再收紧6px。
+       【座位卡最大化任务:方向1】继续收紧到 2px/1px(同样只动margin,不动font-size:
+       11px这个已经是下限的字号)——myGeneral 和"你的手牌"标签共用这条规则,这次每处
+       再省2px,两处合计再收紧4px。 */
+    #game.desktop-layout .hand-label{font-size:11px;margin:2px 0 1px;}
   }
 
   .hidden{display:none!important;}
@@ -1651,17 +1663,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=232"></script>
-<script src="data.js?v=232"></script>
-<script src="room-lifecycle.js?v=232"></script>
-<script src="game.js?v=232"></script>
-<script src="weapons.js?v=232"></script>
-<script src="skills.js?v=232"></script>
-<script src="bot.js?v=232"></script>
-<script src="render.js?v=232"></script>
-<script src="render-table.js?v=232"></script>
-<script src="render-hand.js?v=232"></script>
-<script src="render-controls.js?v=232"></script>
-<script src="render-log.js?v=232"></script>
+<script src="config.js?v=233"></script>
+<script src="data.js?v=233"></script>
+<script src="room-lifecycle.js?v=233"></script>
+<script src="game.js?v=233"></script>
+<script src="weapons.js?v=233"></script>
+<script src="skills.js?v=233"></script>
+<script src="bot.js?v=233"></script>
+<script src="render.js?v=233"></script>
+<script src="render-table.js?v=233"></script>
+<script src="render-hand.js?v=233"></script>
+<script src="render-controls.js?v=233"></script>
+<script src="render-log.js?v=233"></script>
 </body>
 </html>

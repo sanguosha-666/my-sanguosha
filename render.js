@@ -216,12 +216,22 @@ window.addEventListener('orientationchange', checkLandscapeGate);
 // ===== 宽屏桌面布局(desktop-layout-8p 第3步骨架) =====
 // assignSeatZones(playerCount, mySeat): 纯函数,把"我"以外的座位分到 top/left/right
 // 三个区域(见函数内注释),"我"自己固定 'me'。返回数组按座位号索引取值。
-// 分区规则(过渡态刻意从简,不追求精雕细琢):
+// 分区规则:
 //   - 对手数(others=playerCount-1) <=3(即2~4人局): 全部 top
-//   - others===4(5人局): top3 + left1
-//   - others===5(6人局): top3 + left2
-//   - others>=6(7/8人局): top3 + left2 + right(others-5),7人局right1、8人局right2,
-//     同一条公式覆盖两档,不用为7人单独写分支。
+//   - others===4(5人局): top3 + left1——这一档刻意维持不变,不套用下面 others>=5 的新规则。
+//     根因:5人局的"每行最多能塞几个"这个问题,最优解在1440×900和1920×1080两档分辨率下
+//     实测结果不一致(1440px下4个对手能全塞进top一行；1920px下算出来的卡片更大,4个塞不进
+//     同一行,只能退回2/1/1这种更保守的切法)——也就是说5人局的最优切法不再是"只看人数"就能
+//     确定的纯函数,需要在运行时查询实际视口宽度才能判断,这是比这次调整更大的架构改动
+//     (assignSeatZones 目前只接收 playerCount/mySeat 两个和视口无关的参数),留给以后单独
+//     的任务处理,这次不碰。
+//   - others>=5(6~8人局): leftCount/rightCount 各封顶为1(而不是旧版的2)——这是这次
+//     "座位卡最大化"任务验证过的核心杠杆:left/right 区的卡片只能用自己所在的那一条窄列
+//     宽度(和top行共享三列合计的宽度完全不同),2张纵向堆叠必然要占2行；封顶1张后,
+//     该区最多只需要1行,多出来的座位全部推给top行(topCount=n-2,top行横跨全部三列,
+//     宽度富余得多),从而把原来3行压缩到2行——真实测量确认topCount最大到5(8人局)时,
+//     top行横向空间依然绰绰有余,不会挤压变形,详见CLAUDE.md"座位卡最大化"条目里的
+//     完整验证数据。
 // 区内顺序按绝对座位号从小到大(不随mySeat旋转),保证同一输入永远同一输出。
 function assignSeatZones(playerCount, mySeat){
   const zones = new Array(playerCount);
@@ -236,11 +246,11 @@ function assignSeatZones(playerCount, mySeat){
     topCount = n; leftCount = 0; rightCount = 0;
   } else if(n===4){
     topCount = 3; leftCount = 1; rightCount = 0;
-  } else if(n===5){
-    topCount = 3; leftCount = 2; rightCount = 0;
   } else {
-    // n===6(7人局): top3+left2+right1；n===7(8人局): top3+left2+right2
-    topCount = 3; leftCount = 2; rightCount = n - 5;
+    // n>=5(6~8人局): leftCount/rightCount 各封顶1,多出的座位全部推给top行,把原来
+    // 3行压缩到2行。n=5(6人局)→top3+left1+right1；n=6(7人局)→top4+left1+right1；
+    // n=7(8人局)→top5+left1+right1,同一条公式覆盖三档,不用分别写分支。
+    topCount = n - 2; leftCount = 1; rightCount = 1;
   }
   let i = 0;
   for(let k=0;k<topCount;k++)   zones[others[i++]] = 'top';
@@ -300,18 +310,20 @@ function updateLogPanelHeight(){
 // ===== 桌面自适应 步骤a:对手区座位卡尺寸驱动方向反转(和"手机横屏矮视口"同一手法,
 // 见 index.html 里 #game.desktop-layout #oppTopRow .seat/#oppRow .seat[data-zone] 那条
 // CSS 的说明)=====
-// computeOppZoneRowsUsed(playerCount): 对手区(top/left/right三个zone共用grid行,最多
-// 3行)这一局实际用了几行,直接对应 assignSeatZones(本文件靠前)的分区规则:
+// computeOppZoneRowsUsed(playerCount): 对手区(top/left/right三个zone共用grid行)这一局
+// 实际用了几行,必须和 assignSeatZones(本文件靠前)的分区规则逐档保持同步——这两个函数
+// 描述的是同一件事的两个方面(assignSeatZones 决定"谁在哪个zone",这个函数决定"这些zone
+// 总共占几行"),分区规则一旦变了这里必须跟着改,不能各自维护一套数字。
 //   others<=3(2~4人局): 只有top,1行
-//   others===4(5人局): top+left(仅1个,只占row2,row3空),2行
-//   others>=5(6~8人局): top+left(2个,占满row2/row3),3行——right不管有没有、有几个
-//     都是往row2/row3里插,不会新增第4行,这是 assignSeatZones 本身就保证的性质
-//     (6/7/8人局实测总页面高度完全相同,已在设计阶段用真实dump验证过)。
+//   others===4(5人局): top+left(仅1个,只占row2,row3空),2行——5人局刻意维持旧规则
+//     不变(见 assignSeatZones 里的说明),这里同步保持2行。
+//   others>=5(6~8人局): 【座位卡最大化任务修改】leftCount/rightCount 现在各封顶1
+//     (不再是旧版的2),意味着left/right各自最多占1行(row2),row3不再被left/right
+//     使用——总行数从旧版的3行压缩到2行。
 function computeOppZoneRowsUsed(playerCount){
   const others = playerCount - 1;
   if(others<=3) return 1;
-  if(others===4) return 2;
-  return 3;
+  return 2;
 }
 // updateDesktopSeatHeights(g): 和 updateLogPanelHeight() 同一套"JS量出实际渲染位置、
 // 回写内联style"模式,调用时机也一样——必须在 tableStrip/panel.table/myGeneral/
