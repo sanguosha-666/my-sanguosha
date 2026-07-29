@@ -1246,7 +1246,24 @@
       /* 第4步新增第4列专门给日志面板——不和已经放 right 座位卡的第3列共用,
          座位/中央出牌区/信息条/手牌这些原有内容一律收在前3列(见下面各条
          grid-column 从 1/-1 改成 1/4),第4列从第1行到最后一行整列只属于日志面板。 */
-      grid-template-columns:minmax(100px,180px) 1fr minmax(100px,180px) minmax(220px,300px);
+      /* ===== 空间再分配(桌面布局第10步)=====
+         中央列原来是 1fr,会无条件吞掉左右/日志列分配剩下的全部横向空间(真实测过1440px
+         视口下高达712px)——但中央出牌区的实际内容需求远小于这个数:.exchange-card
+         (52px迷你卡+8px*2内边距+1px*2边框≈70px)+6px间距,即使6张牌横排也只需要
+         6*70+5*6=450px,712px里有超过260px是纯粹的视觉空白(截图里"寒冰剑"卡片两侧
+         的大片空白正是这里来的)。改成 minmax(300px,420px)——上限420px仍能舒适容纳
+         5张牌一行(420-16(tableStrip自身padding)=404,(404+6)/(70+6)≈5.4张),更极端
+         的场景(6张以上)靠既有的flex-wrap优雅换行,不会挤压变形(已用真实截图验证,见
+         CLAUDE.md)。
+         中央列不再是1fr之后,四列全部变成有上限的minmax,总宽度不再强制撑满#game的
+         全部可用宽度——改用下面的 justify-content:center 让这个(变窄的)四列网格整体
+         在#game内水平居中,多出来的横向空间变成左右对称的留白,而不是硬塞给某一列造成
+         该列本身看起来也很空。**这不影响座位卡实际尺寸**:6~8人局座位卡的尺寸瓶颈本来
+         就是纵向空间(updateDesktopSeatHeights算出的高度),不是列宽——已用真实dump核实
+         过5/7人局座位卡宽度(134.1px/96.1px)远小于180px列宽上限,列宽从来不是这几档
+         人数的瓶颈,所以省下来的横向空间不需要也不应该分给座位区列,直接居中留白即可。 */
+      grid-template-columns:minmax(100px,180px) minmax(300px,420px) minmax(100px,180px) minmax(220px,300px);
+      justify-content:center;
       /* 第8步:me+手牌合并进同一行后,总行数从8收紧到7(座位区3行+信息条/武将名/手牌标签
          各1行+合并后的me+手牌1行),没有空行,不会因为"预留了一行却没人占用"而多出一段
          意外的行间距(row-gap 对每条相邻track都生效,哪怕某条track是空的)。 */
@@ -1278,11 +1295,20 @@
     /* 中央出牌区:居中列,纵向跨第2/3行(和左右两列的座位卡对齐同一区块) */
     #game.desktop-layout #tableStrip{ grid-column:2; grid-row:2 / span 2; align-self:center; }
     /* 以下几项这一步只给"各占一整行、按顺序往下排"的兜底位置,不做内容密度优化;
-       同样限定在前3列,不侵入第4列。行号相应从原来的5/6/7上移一行(第8步me+手牌
-       合并后腾出了原来me单独占用的那一行)。 */
-    #game.desktop-layout .panel.table{ grid-column:1 / 4; grid-row:4; }
-    #game.desktop-layout #myGeneral{ grid-column:1 / 4; grid-row:5; }
-    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / 4; grid-row:6; }
+       行号相应从原来的5/6/7上移一行(第8步me+手牌合并后腾出了原来me单独占用的那一行)。
+       空间再分配(第10步):这三行从 grid-column:1/4(只占前3列,不侵入日志列)改成
+       1/5(横跨全部4列,含日志列)——**这不会和日志面板打架**:#log-panel 是
+       grid-row:1/span 3(只占对手区那3行),而这三行分别在 row4/5/6,纵向完全不重叠,
+       扩展到日志列的宽度对日志面板没有任何视觉侵入。这么改的动机是:中央出牌区列收窄
+       到 minmax(300px,420px) 之后,这三行(尤其 #myGeneral,武将名+技能+完整描述,
+       颜良文丑这类最长描述真实测过会在收窄后的1/4范围内换行到2行,吃掉不可预测的
+       纵向空间)可用宽度从原来1096px收窄到804px,换行风险明显变大——横跨到日志列
+       (总宽度恢复到1408px-2*180-2*12=1024px量级,比原1096px更宽裕,因为不用再扣除
+       中间那条现在更窄的中央列)之后,重新验证长描述不再换行(见CLAUDE.md記錄的真实
+       测量结果:myGeneral从两行33px高的换行状态恢复回单行16.5px)。 */
+    #game.desktop-layout .panel.table{ grid-column:1 / 5; grid-row:4; }
+    #game.desktop-layout #myGeneral{ grid-column:1 / 5; grid-row:5; }
+    #game.desktop-layout .hand-label:not(#myGeneral){ grid-column:1 / 5; grid-row:6; }
     /* 第8步:我的座位卡+手牌合并成同一行——me固定用第1列(和left/right座位卡共用
        同一条列轨道,宽度天然保持一致,不需要另外定义一组新的列宽),手牌占第2~3列
        (剩余宽度,即中央+right那两条列轨道合起来的宽度)。原来两者各自占一整行、
@@ -1303,7 +1329,20 @@
        也不碰 left/right 座位卡(选择器只限定 .seat.me,不会命中它们)。写法参照上面
        .wrap:has(#game.desktop-layout) 这条"用desktop-layout作用域覆盖旧规则"的既有模式,
        保持风格一致。 */
-    #game.desktop-layout .seat.me{ width:180px; max-width:180px; }
+    /* 空间再分配(桌面布局第10步)：这条 180px 固定覆盖已删除——meSeat 的尺寸现在和对手
+       座位区一样交给 updateDesktopSeatHeights()(render.js)动态计算,不再是一个和对手区
+       预算无关的固定切片。**根因**:meSeat 之前固定 width:180px(height 由 aspect-ratio
+       反推=240px)是一块不参与"整体自适应"那次任务算出的共享纵向预算的刚性开销——
+       6~8人局对手区已经被压缩到很小,而"我"的卡却始终占用240px纵向空间,造成"座位卡
+       明显偏小"(用户反馈的真实现象,真实测过:6~8人局对手卡只有96.1×128.2,和meSeat的
+       180×240相比明显不成比例)。现在 JS 按"meSeat应比对手卡高出固定倍率(1.25倍)"
+       和对手卡的高度联立求解(同一个总预算里的两个未知数,不是先后独立各算各的),这样
+       meSeat 会随对手区一起收缩/放大,不再是与对手区脱节的固定值。
+       **为什么 meSeat 的高度必须夹在≤240这个上限**:meSeat 固定占据 grid-column:1
+       (和 left 区座位卡共用同一条 minmax(100px,180px) 列轨道),它的宽度不能超过这条
+       列轨道的180px上限,配合 aspect-ratio:3/4 反推,高度上限因此是 180/0.75=240px——
+       这不是新加的限制,是列宽结构本来就有的约束,JS 计算时会把这个240当作硬上限,和
+       对手卡的90~266.7上下限是同一类"由布局结构决定、不能凭空取更大值"的道理。 */
     /* ===== 桌面自适应 步骤a:对手区座位卡尺寸驱动方向反转 =====
        和"手机横屏矮视口"(@media(max-height:460px) and (orientation:landscape))那次
        同一手法——高度当主动变量、宽度靠 aspect-ratio 反推,不再是"设宽度、aspect-ratio
@@ -1481,17 +1520,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=228"></script>
-<script src="data.js?v=228"></script>
-<script src="room-lifecycle.js?v=228"></script>
-<script src="game.js?v=228"></script>
-<script src="weapons.js?v=228"></script>
-<script src="skills.js?v=228"></script>
-<script src="bot.js?v=228"></script>
-<script src="render.js?v=228"></script>
-<script src="render-table.js?v=228"></script>
-<script src="render-hand.js?v=228"></script>
-<script src="render-controls.js?v=228"></script>
-<script src="render-log.js?v=228"></script>
+<script src="config.js?v=229"></script>
+<script src="data.js?v=229"></script>
+<script src="room-lifecycle.js?v=229"></script>
+<script src="game.js?v=229"></script>
+<script src="weapons.js?v=229"></script>
+<script src="skills.js?v=229"></script>
+<script src="bot.js?v=229"></script>
+<script src="render.js?v=229"></script>
+<script src="render-table.js?v=229"></script>
+<script src="render-hand.js?v=229"></script>
+<script src="render-controls.js?v=229"></script>
+<script src="render-log.js?v=229"></script>
 </body>
 </html>

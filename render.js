@@ -329,9 +329,18 @@ function computeOppZoneRowsUsed(playerCount){
 // 每行高度,不需要改这个函数本身。
 function updateDesktopSeatHeights(g){
   const oppSeatEls = document.querySelectorAll('#oppTopRow .seat, #oppRow .seat[data-zone]');
+  // meSeat 真正的座位卡视觉元素是 #meSeat 的**子元素**(class="seat me",由 buildSeatDOM
+  // 生成后 appendChild 进去),不是 #meSeat 这个 grid 包装 div 本身——包装 div 没有任何
+  // 尺寸相关的 CSS 规则,设置在它身上不会影响子元素的实际渲染尺寸(真实踩过的坑,详见
+  // 下面主逻辑里的完整说明)。清理路径同样要作用于子元素。
+  const meSeatCardElForCleanup = document.querySelector('#meSeat .seat');
   if(!desktopLayoutActive || !g || !g.started){
     // 非桌面布局/未开局:清掉可能残留的内联尺寸,回退给CSS基础规则(宽度驱动)。
+    // meSeat 同样要清空——空间再分配之后它的尺寸也由本函数动态设置,离开桌面布局时
+    // 同样需要回退给CSS基础规则(.seat.me 的 width:220px;max-width:260px),不清空
+    // 会让残留的桌面尺寸带进窄屏/手机布局。
     oppSeatEls.forEach(el=>{ el.style.height=''; el.style.width=''; });
+    if(meSeatCardElForCleanup){ meSeatCardElForCleanup.style.height=''; meSeatCardElForCleanup.style.width=''; }
     return;
   }
   const seatN = (g.players||[]).length;
@@ -384,18 +393,28 @@ function updateDesktopSeatHeights(g){
   let currentOppZoneBottom = oppZoneTop;
   oppSeatEls.forEach(el=>{ currentOppZoneBottom = Math.max(currentOppZoneBottom, el.getBoundingClientRect().bottom); });
   if(oppTopRowEl) currentOppZoneBottom = Math.max(currentOppZoneBottom, oppTopRowEl.getBoundingClientRect().bottom);
-  const meBottom = meSeatEl ? meSeatEl.getBoundingClientRect().bottom : 0;
-  const handBottom = handEl ? handEl.getBoundingClientRect().bottom : 0;
-  const contentBottom = Math.max(meBottom, handBottom) || gameEl.getBoundingClientRect().bottom;
-  const belowOppZoneFixedHeight = Math.max(0, contentBottom - currentOppZoneBottom);
+  // 【空间再分配(桌面布局第10步):meSeat 不再是"下方固定开销"的一部分,改成和对手区
+  // 联立求解的第二个未知数】——此前这里直接测 meSeat/hand 的 bottom 当"内容到哪结束",
+  // 把 meSeat 的(固定180px宽,aspect-ratio反推240px高)当成一块不可拆分的既定开销,
+  // 这正是"座位卡明显偏小"这个问题的根源:6~8人局对手区已经被压得很小,meSeat却始终
+  // 占用240px纵向空间,不参与共享预算、不随对手区一起收紧。
+  // 改法:只测量"从对手区当前(不管此刻是什么尺寸)结束的地方,到 meSeat 当前(同样不管
+  // 此刻是什么尺寸)开始的地方"这一段固定距离(fixedMiddleHeight,涵盖panelTable/
+  // myGeneral/handLabel及它们之间/前后的全部真实gap和margin)——这段距离和"三行对手区
+  // 现在多高"以及"meSeat现在多高"都无关(panelTable等这几个元素是各自独立的单行,
+  // 不跨行,不受相邻行尺寸变化牵连,是安全的位置差测量,同一手法这个函数上面已经用过
+  // 一次)。用 meSeatEl.top(而不是 meSeatEl.bottom)作为下边界,是因为 top 只取决于
+  // "meSeat这一行从哪里开始"(由前面几行多高决定),不取决于 meSeat 自己现在多高——
+  // 这样即使 meSeat 当前尺寸是上一轮渲染残留的旧值,也不会污染这段测量。
+  const fixedMiddleHeight = meSeatEl ? Math.max(0, meSeatEl.getBoundingClientRect().top - currentOppZoneBottom)
+    : Math.max(0, gameEl.getBoundingClientRect().bottom - currentOppZoneBottom);
   // 【真实踩过的第四处坑】:曾经固定写死"留8px安全边距"当 targetBottom,但
-  // meSeat/hand(contentBottom 的来源)之后还有 .wrap 自己的 padding-bottom(步骤b
-  // 给游戏中的桌面视角设了 padding:10px 16px 10px)——这段 padding 在 meSeat/hand
-  // 的 getBoundingClientRect() 之外,不会被 contentBottom 捕捉到,但它确确实实会让
-  // 页面整体的 scrollHeight 比 contentBottom 还要再高出这一截,固定8px不够覆盖,真实
-  // 测过 8~14px 的溢出。改成动态读 .wrap 当前实际的 padding-bottom(getComputedStyle,
-  // 不是把10px这个数字誊抄硬编码到这里——以后如果 .wrap 的 padding-bottom 数值改了,
-  // 这里能跟着自动生效,不需要同步改两处)。 */
+  // meSeat/hand 之后还有 .wrap 自己的 padding-bottom(步骤b给游戏中的桌面视角设了
+  // padding:10px 16px 10px)——这段 padding 在 meSeat/hand 的 getBoundingClientRect()
+  // 之外,不会被前面的测量捕捉到,但它确确实实会让页面整体的 scrollHeight 比内容底部
+  // 还要再高出这一截,固定8px不够覆盖,真实测过 8~14px 的溢出。改成动态读 .wrap 当前
+  // 实际的 padding-bottom(getComputedStyle,不是把10px这个数字誊抄硬编码到这里——
+  // 以后如果 .wrap 的 padding-bottom 数值改了,这里能跟着自动生效,不需要同步改两处)。 */
   const wrapEl = document.querySelector('.wrap');
   const wrapPaddingBottom = wrapEl ? (parseFloat(getComputedStyle(wrapEl).paddingBottom) || 0) : 0;
   const targetBottom = window.innerHeight - wrapPaddingBottom - 4; // 再留4px余量,不贴边
@@ -412,17 +431,51 @@ function updateDesktopSeatHeights(g){
   // 这部分,只属于row1、不该被三行平摊。 */
   const oppTopRowStyle = getComputedStyle(oppTopRowEl);
   const oppTopRowPadding = (parseFloat(oppTopRowStyle.paddingTop)||0) + (parseFloat(oppTopRowStyle.paddingBottom)||0);
-  const availableForOppZone = targetBottom - oppZoneTop - belowOppZoneFixedHeight - oppTopRowPadding;
-  const perRowHeight = (availableForOppZone - rowGap*(rowsUsed-1)) / rowsUsed;
+  // ME_SEAT_RATIO: meSeat(我的座位卡)应比对手座位卡高出的固定倍率——保持既有的
+  // "我的卡必须比对手更大更醒目"这条规则(verify_stage1_seatcard.js 锁定的既有回归),
+  // 但不再是一个和对手区无关的绝对固定值,而是和对手区高度成比例、联立求解同一个总预算:
+  //   R*h + (R-1)*rowGap + oppTopRowPadding + fixedMiddleHeight + ME_SEAT_RATIO*h = 可用总预算
+  //   → h = (可用总预算 - (R-1)*rowGap - oppTopRowPadding - fixedMiddleHeight) / (R + ME_SEAT_RATIO)
+  // 这样对手区吃紧(6~8人局)时,meSeat 会跟着一起收缩、不再是一块脱离预算的刚性开销;
+  // 对手区宽裕(2~4人局)时,meSeat 也能相应长得更大,而不是停留在旧版写死的240px。
+  const ME_SEAT_RATIO = 1.25;
+  const solvedHeight = (targetBottom - oppZoneTop - (rowsUsed-1)*rowGap - oppTopRowPadding - fixedMiddleHeight) / (rowsUsed + ME_SEAT_RATIO);
   // 上下限保护:下限90px是这一步的临时值(步骤c会用真实测量+放大截图重新核实可读性
   // 下限,届时如果需要会调整这个数字或新增更紧的响应式断点,不是这里就能一次定死的);
   // 上限266.7px是当前既有CSS宽度驱动方案下算出来的最大值(200px宽×4/3),没必要超过它
   // ——用不到那么多空间时,座位卡维持原有大小即可,不需要占用多余的纵向预算。
-  const height = Math.max(90, Math.min(266.7, perRowHeight));
+  const height = Math.max(90, Math.min(266.7, solvedHeight));
   oppSeatEls.forEach(el=>{
     el.style.height = height+'px';
     el.style.width = 'auto';
   });
+  // 【真实踩过的第六处坑,这次是空间再分配任务里引入的】:meSeat 高度尺寸真实设置在
+  // 了 #meSeat 这个 grid 包装 div 上,但 #meSeat 本身没有任何 CSS 尺寸规则(aspect-ratio
+  // 等全部声明在 .seat/.seat.me 这条规则上)——真正的座位卡视觉元素是 buildSeatDOM 生成、
+  // 通过 meSeatEl.appendChild(meDOM) 挂进去的**子元素**(class="seat active me"),和
+  // #oppTopRow/#oppRow 装 .seat 子元素同一个结构关系。给包装 div 设 height 完全不影响
+  // 它内部这个子元素的实际渲染尺寸——子元素会继续按自己的 CSS(此时因为已删除桌面专属的
+  // 180px覆盖,回退到基础规则 .seat.me{width:220px;max-width:260px}+aspect-ratio:3/4)
+  // 独立渲染成 220×293.3px,和包装 div 上设置的高度毫无关系,包装 div 自己反而会被撑高
+  // 去适应这个"实际尺寸远大于预期"的子元素——真实测过:6人局本该 178px 高的 meSeat,
+  // 因为这个疏漏实际渲染成 293px,页面因此溢出101~105px(和"计算值178 vs 实际293"这个
+  // 115px量级的差距基本吻合)。
+  // 修法:改成给**子元素**(meSeatEl.querySelector('.seat'))设置 height/width,和
+  // oppSeatEls 的选择方式保持同一模式,不是给包装 div 设置。 */
+  const meSeatCardEl = meSeatEl ? meSeatEl.querySelector('.seat') : null;
+  if(meSeatCardEl){
+    // meSeat 的高度上限是240px(不是任意取的):meSeat 固定占据 grid-column:1,和
+    // left区座位卡共用同一条 minmax(100px,180px) 列轨道,宽度不能超过这条列的180px
+    // 上限,配合 aspect-ratio:3/4 反推,高度上限因此是 180/0.75=240px——这是列宽结构
+    // 本身决定的硬上限,不是凭空选的数字。2~4人局(对手区宽裕、h 会顶到266.7上限)时,
+    // ME_SEAT_RATIO*h 会明显超过240,在这里被夹住,meSeat 维持在和旧版本一样的240px
+    // (2~4人局本来就不缺纵向空间,不需要也不应该再放大);6~8人局(h 只有~130~150)时
+    // ME_SEAT_RATIO*h 落在160~190区间,远低于240上限,不会被夹住,meSeat 真正跟着
+    // 对手区一起收缩,把原来浪费在meSeat身上的固定预算让还给对手区。
+    const meSeatHeight = Math.max(90*ME_SEAT_RATIO, Math.min(240, ME_SEAT_RATIO*height));
+    meSeatCardEl.style.height = meSeatHeight+'px';
+    meSeatCardEl.style.width = 'auto';
+  }
 }
 window.addEventListener('resize', () => { updateDesktopLayoutFlag(); updateDesktopSeatHeights(currentG); updateLogPanelHeight(); });
 
