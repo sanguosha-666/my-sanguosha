@@ -1304,6 +1304,22 @@
        .wrap:has(#game.desktop-layout) 这条"用desktop-layout作用域覆盖旧规则"的既有模式,
        保持风格一致。 */
     #game.desktop-layout .seat.me{ width:180px; max-width:180px; }
+    /* ===== 桌面自适应 步骤a:对手区座位卡尺寸驱动方向反转 =====
+       和"手机横屏矮视口"(@media(max-height:460px) and (orientation:landscape))那次
+       同一手法——高度当主动变量、宽度靠 aspect-ratio 反推,不再是"设宽度、aspect-ratio
+       反推高度"(base rule 的方向,在桌面 2 人局这个最简单场景下就已经会让页面溢出,
+       见 CLAUDE.md 记录的真实测量数据)。**这里只清空会和"JS内联style设height"打架的
+       约束(flex/min-width/max-width),不在CSS里写死height——height必须由
+       updateDesktopSeatHeights()(render.js)按"这一局实际用了几行对手区(1~3行,取决
+       于人数)"动态算出来再回写内联style,不能像手机那次一样用固定dvh clamp硬编码
+       (手机那次对手区永远只有1行,桌面这次行数本身是变量)。
+       只作用于对手座位(#oppTopRow 里的 top 区 + #oppRow 里的 left/right 区),不碰
+       .seat.me——"我"的卡沿用上面已有的180px固定宽度,保持"比对手更醒目"这条既有
+       设计规则(verify_stage1_seatcard.js 锁定的既有回归)不变。 */
+    #game.desktop-layout #oppTopRow .seat,
+    #game.desktop-layout #oppRow .seat[data-zone]{
+      flex:0 0 auto; min-width:0; max-width:none; width:auto;
+    }
     /* 第4步:日志面板挪到独立的第4列;第8步收紧成grid-row:1 / span 3——只覆盖座位区
        (top/left/right)+中央出牌区这3行,不再一路占满到底(原来是1/-1占满全部7行,
        会一路盖到"我+手牌"合并后的那一行)。用span而不是写死结束行号(比如1/4),
@@ -1328,6 +1344,44 @@
       max-height:none; height:100%;
       margin-top:0;
     }
+
+    /* ===== 桌面自适应 步骤b:压缩剩余固定开销 =====
+       步骤a只处理了对手座位区(动态算高度),但页面总高度还包含一批"和人数无关、
+       全程固定"的开销——标题栏/信息条/武将名行/页脚提示——这些从未对视口高度做过
+       预算,一直是各自 auto 撑开,在2人局(只用1行对手区)下就已经让整页溢出52px
+       (步骤a验证时实测得到的数字,不是猜的)。这里复用"手机横屏矮视口"
+       (@media(max-height:460px) and (orientation:landscape))同一套压缩手法——
+       只是数值上没有手机那么极限,毕竟桌面这次紧张的只是纵向预算,横向空间依然
+       宽裕,不需要像手机断点那样把字号压到8~9px的极限。
+       **作用域严格限定在"桌面布局+游戏已经开始"这个交集**:用 :has()/兄弟选择器
+       判断 #game 同时带 desktop-layout(宽屏)和不带 hidden(已开局)两个条件——
+       大厅阶段(#game 带 hidden)即使在宽屏下也维持原来宽松的标题栏/页脚,这两个
+       条件缺一都不生效,和手机断点"仅游戏中收紧"的既有原则一致。*/
+    .wrap:has(#game.desktop-layout:not(.hidden)){padding:10px 16px 10px;}
+    .wrap:has(#game.desktop-layout:not(.hidden)) h1{
+      font-size:18px;letter-spacing:.14em;text-indent:.14em;margin:0 0 2px;
+    }
+    .wrap:has(#game.desktop-layout:not(.hidden)) .sub{display:none;}
+    /* footnote("部署后…"这类大厅提示)在已开局的桌面视角下同样是死重——和手机断点
+       #game:not(.hidden) ~ .footnote 那条完全同一原理,这里额外加 .desktop-layout
+       限定,避免在<1024px的窄屏正常游玩(非矮视口横屏)时也被这条规则命中——那个
+       场景footnote本来就不是这次要处理的对象,窄屏是否要隐藏footnote不在本次范围。 */
+    #game.desktop-layout:not(.hidden) ~ .footnote{display:none;}
+
+    #game.desktop-layout .panel.table{padding:5px 10px;margin:0 0 6px;gap:3px 10px;}
+    #game.desktop-layout .phase-pill{padding:2px 10px;font-size:11px;}
+    #game.desktop-layout .deckinfo{font-size:11px;}
+    #game.desktop-layout .banner{padding:5px 10px;margin:2px 0 0;font-size:12px;}
+    #game.desktop-layout .controls{gap:6px;margin-top:2px;}
+    #game.desktop-layout .controls button{padding:5px 10px;font-size:12px;}
+
+    /* myGeneral(自己的武将名+技能+完整描述)和"你的手牌"标签共用 .hand-label 这个
+       class,base rule 的 margin:14px 0 8px 是给宽松布局设计的——桌面这套紧凑布局
+       不需要这么大的呼吸间距,压到 6px 0 4px(两处各省 12px,合计 24px)。**不隐藏
+       描述文字**(和手机断点的 #myGeneral span{display:none} 不同)——手机那样做
+       是因为窄宽度下长描述容易换行、吃掉不可预测的纵向空间,桌面宽度(880~1096px)
+       远比手机宽裕,换行风险低得多,没有必要为了省这点高度牺牲这条信息。 */
+    #game.desktop-layout .hand-label{font-size:11px;margin:6px 0 4px;}
   }
 
   .hidden{display:none!important;}
@@ -1427,17 +1481,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=227"></script>
-<script src="data.js?v=227"></script>
-<script src="room-lifecycle.js?v=227"></script>
-<script src="game.js?v=227"></script>
-<script src="weapons.js?v=227"></script>
-<script src="skills.js?v=227"></script>
-<script src="bot.js?v=227"></script>
-<script src="render.js?v=227"></script>
-<script src="render-table.js?v=227"></script>
-<script src="render-hand.js?v=227"></script>
-<script src="render-controls.js?v=227"></script>
-<script src="render-log.js?v=227"></script>
+<script src="config.js?v=228"></script>
+<script src="data.js?v=228"></script>
+<script src="room-lifecycle.js?v=228"></script>
+<script src="game.js?v=228"></script>
+<script src="weapons.js?v=228"></script>
+<script src="skills.js?v=228"></script>
+<script src="bot.js?v=228"></script>
+<script src="render.js?v=228"></script>
+<script src="render-table.js?v=228"></script>
+<script src="render-hand.js?v=228"></script>
+<script src="render-controls.js?v=228"></script>
+<script src="render-log.js?v=228"></script>
 </body>
 </html>

@@ -297,7 +297,134 @@ function updateLogPanelHeight(){
   const height = maxBottom - logTop;
   if(height>0) logEl.style.height = height+'px';
 }
-window.addEventListener('resize', () => { updateDesktopLayoutFlag(); updateLogPanelHeight(); });
+// ===== 桌面自适应 步骤a:对手区座位卡尺寸驱动方向反转(和"手机横屏矮视口"同一手法,
+// 见 index.html 里 #game.desktop-layout #oppTopRow .seat/#oppRow .seat[data-zone] 那条
+// CSS 的说明)=====
+// computeOppZoneRowsUsed(playerCount): 对手区(top/left/right三个zone共用grid行,最多
+// 3行)这一局实际用了几行,直接对应 assignSeatZones(本文件靠前)的分区规则:
+//   others<=3(2~4人局): 只有top,1行
+//   others===4(5人局): top+left(仅1个,只占row2,row3空),2行
+//   others>=5(6~8人局): top+left(2个,占满row2/row3),3行——right不管有没有、有几个
+//     都是往row2/row3里插,不会新增第4行,这是 assignSeatZones 本身就保证的性质
+//     (6/7/8人局实测总页面高度完全相同,已在设计阶段用真实dump验证过)。
+function computeOppZoneRowsUsed(playerCount){
+  const others = playerCount - 1;
+  if(others<=3) return 1;
+  if(others===4) return 2;
+  return 3;
+}
+// updateDesktopSeatHeights(g): 和 updateLogPanelHeight() 同一套"JS量出实际渲染位置、
+// 回写内联style"模式,调用时机也一样——必须在 tableStrip/panel.table/myGeneral/
+// hand-label/meSeat/hand 全部渲染完毕之后(render(g)里放在renderControls/renderHand
+// 之后),因为要测量这些区块已经占用了多少高度,才能算出"对手区还能分到多少"。
+// 这一步比 updateLogPanelHeight() 多一层复杂度:可用高度不是简单地"填满剩余空间"就
+// 结束,还要按 computeOppZoneRowsUsed() 算出的行数(1~3,取决于人数)均分——桌面下
+// 对手区行数本身是变量,不能像手机横屏那次一样直接套一个固定的 dvh clamp(那次对手区
+// 永远只有1行)。
+// **这一步(步骤a)只处理座位区域自己,不管其它区块要不要一起压缩**(那是步骤b的范围)——
+// 这里的"可用高度"计算方式是把 tableStrip 到 footnote 这一段(不依赖座位卡尺寸,可以
+// 直接测量当前DOM,哪怕座位卡此刻还是旧尺寸)当作既定开销直接减掉,可能在步骤b压缩这些
+// 开销之前算出的每行高度会偏保守(留的余量较小甚至暂时还不够填平全部溢出),这是预期的
+// 阶段性状态,不是bug——步骤b会重新压缩这些开销,届时同一份计算逻辑会自动算出更宽裕的
+// 每行高度,不需要改这个函数本身。
+function updateDesktopSeatHeights(g){
+  const oppSeatEls = document.querySelectorAll('#oppTopRow .seat, #oppRow .seat[data-zone]');
+  if(!desktopLayoutActive || !g || !g.started){
+    // 非桌面布局/未开局:清掉可能残留的内联尺寸,回退给CSS基础规则(宽度驱动)。
+    oppSeatEls.forEach(el=>{ el.style.height=''; el.style.width=''; });
+    return;
+  }
+  const seatN = (g.players||[]).length;
+  if(seatN<2) return;
+  const rowsUsed = computeOppZoneRowsUsed(seatN);
+  const oppTopRowEl = document.getElementById('oppTopRow');
+  const meSeatEl = document.getElementById('meSeat');
+  const handEl = document.getElementById('hand');
+  const gameEl = document.getElementById('game');
+  if(!oppTopRowEl || !gameEl) return;
+  // 【真实踩过的循环依赖 bug,已用真实dump定位】:.log-panel 是 grid-row:1/span 3,
+  // 和对手区共享同一批行——它的高度由 updateLogPanelHeight() 算,但那个函数排在这个
+  // 函数之后调用(必须如此,见调用点注释:它要读"座位区已经是这一轮最终尺寸"之后的
+  // 结果)。问题是:.log-panel 的内联 height 是"设置后一直留着,下次调用才会覆盖"的
+  // 写法——如果上一次 render() 是人数更多的一局(.log-panel 内联高度较大),这一次
+  // render() 走到这里时,.log-panel 那个偏大的旧内联高度依然生效、依然在撑住 grid 的
+  // 第1~3行,导致下面测出来的 tableStrip/footnote 位置偏低、"对手区可用高度"被污染成
+  // 偏小的错误值——而且这不是"晚一帧自愈"的瞬时误差,是一个稳定的错误不动点(连续多次
+  // render 同一个人数更少的对局,污染后的偏小结果会一直保持,不会自己纠正,真实dump
+  // 反复验证过)。修法:这里先把 .log-panel 的内联高度清空,让 grid 用它当前真实内容
+  // (不受上一次遗留高度影响)重新算行高,再做下面的测量——之后 updateLogPanelHeight()
+  // 会立刻给它设上正确的新高度,不会留下"没有高度"的中间状态。
+  const logPanelEl = document.getElementById('logPanel');
+  if(logPanelEl) logPanelEl.style.height = '';
+  const oppZoneTop = oppTopRowEl.getBoundingClientRect().top;
+  const rowGap = 8; // 和 #game.desktop-layout 的 row-gap:8px 对应,行间距也要算进预算里
+  // 【真实踩过的三处坑,已修复,记录下来避免以后重新踩】:
+  // ①第一版直接测 tableStripEl.getBoundingClientRect().top 当"对手区下方从哪里开始"的
+  // 界桩,又用 .footnote.getBoundingClientRect().bottom 当"内容到哪结束"——步骤b把
+  // .footnote在游戏中隐藏(display:none)后,它的rect全部返回0,会让可用高度计算误判
+  // "对手区下方毫无内容"、把几乎整个视口余量错误分给对手区,座位卡被撑得远超合理尺寸、
+  // 总页面反而溢出得更厉害(真实测过:6/8人局溢出从135px恶化到412px)。
+  // ②改用tableStrip的top测量后,发现#tableStrip自己有 align-self:center(把它在row2/3
+  // 合并的空间里居中,而不是贴顶)——这意味着tableStrip当前的top位置本身就循环依赖"row2/3
+  // (即left/right座位卡)现在有多高",正是要求解的对手区座位高度本身,会让结果偏保守/
+  // 不精确(算出92.17却被地板夹到90,视口还剩128px完全没用上)。
+  // ③改成"加总panelTable/myGeneral/handLabel各自的border-box高度,行间距一律按8px的
+  // 网格row-gap算"——这个假设是错的:.panel.table 有 margin:0 0 6px,.hand-label 有
+  // margin:6px 0 4px,这些CSS margin会叠加在grid的row-gap之上(grid不会把它们合并/
+  // 吸收掉),导致算出来的可用高度比实际需要的更宽松,结果6/8人局座位卡被撑大后总页面
+  // 反而溢出40px(真实测过)。
+  // **最终修法**:不再假设/加总任何具体的padding/margin/gap数值,改成直接测量"对手区
+  // 当前(不管此刻是什么尺寸)实际渲染到哪里结束"(取全部 oppSeatEls 里最大的 bottom,
+  // 不用 tableStrip 这种会自我居中、依赖对手区高度的元素当界桩)到 contentBottom 之间
+  // 的距离——这是安全的位置差測量,不是循环依赖:row4~7这几个元素都是
+  // align-items:start(容器默认值,均未覆盖),会随对手区(rows1-3)增高/变矮而整体
+  // 同步平移,彼此之间的间距(含它们各自的CSS margin)保持不变,所以“此刻对手区多高”
+  // 不影响这段差值本身的准确性,读到的就是包含全部真实margin/padding/gap在内的精确
+  // 下方开销,不需要手动枚举每一处margin/gap分别是多少。 */
+  let currentOppZoneBottom = oppZoneTop;
+  oppSeatEls.forEach(el=>{ currentOppZoneBottom = Math.max(currentOppZoneBottom, el.getBoundingClientRect().bottom); });
+  if(oppTopRowEl) currentOppZoneBottom = Math.max(currentOppZoneBottom, oppTopRowEl.getBoundingClientRect().bottom);
+  const meBottom = meSeatEl ? meSeatEl.getBoundingClientRect().bottom : 0;
+  const handBottom = handEl ? handEl.getBoundingClientRect().bottom : 0;
+  const contentBottom = Math.max(meBottom, handBottom) || gameEl.getBoundingClientRect().bottom;
+  const belowOppZoneFixedHeight = Math.max(0, contentBottom - currentOppZoneBottom);
+  // 【真实踩过的第四处坑】:曾经固定写死"留8px安全边距"当 targetBottom,但
+  // meSeat/hand(contentBottom 的来源)之后还有 .wrap 自己的 padding-bottom(步骤b
+  // 给游戏中的桌面视角设了 padding:10px 16px 10px)——这段 padding 在 meSeat/hand
+  // 的 getBoundingClientRect() 之外,不会被 contentBottom 捕捉到,但它确确实实会让
+  // 页面整体的 scrollHeight 比 contentBottom 还要再高出这一截,固定8px不够覆盖,真实
+  // 测过 8~14px 的溢出。改成动态读 .wrap 当前实际的 padding-bottom(getComputedStyle,
+  // 不是把10px这个数字誊抄硬编码到这里——以后如果 .wrap 的 padding-bottom 数值改了,
+  // 这里能跟着自动生效,不需要同步改两处)。 */
+  const wrapEl = document.querySelector('.wrap');
+  const wrapPaddingBottom = wrapEl ? (parseFloat(getComputedStyle(wrapEl).paddingBottom) || 0) : 0;
+  const targetBottom = window.innerHeight - wrapPaddingBottom - 4; // 再留4px余量,不贴边
+  // 【真实踩过的第五处坑】:top区(row1)套了一层 #oppTopRow 容器,它自己有
+  // padding:8px 8px 4px(上下合计12px),而left/right区(row2/row3)的座位卡是
+  // #oppRow(display:contents,不生成盒子)的直接子节点,没有这层容器包装、没有这
+  // 额外的12px——三行"每行需要的总高度"并不是单纯的三份 perRowHeight 那么整齐,
+  // row1 实际需要 perRowHeight+12,row2/row3 只需要 perRowHeight。旧公式假设三行
+  // 完全相等平摊预算,而这12px只属于row1一行、没有从预算里单独先扣掉,导致算出的
+  // perRowHeight比真正能用的偏大了一截,座位卡设成这个偏大的值后总页面因此溢出
+  // ——真实测过约12px的残余溢出)。
+  // 改成动态读 #oppTopRow 当前的 padding-top+padding-bottom(不硬编码12这个数字,
+  // 万一以后CSS里的padding值改了这里也能跟着变),从"三行共享的预算"里单独先扣掉
+  // 这部分,只属于row1、不该被三行平摊。 */
+  const oppTopRowStyle = getComputedStyle(oppTopRowEl);
+  const oppTopRowPadding = (parseFloat(oppTopRowStyle.paddingTop)||0) + (parseFloat(oppTopRowStyle.paddingBottom)||0);
+  const availableForOppZone = targetBottom - oppZoneTop - belowOppZoneFixedHeight - oppTopRowPadding;
+  const perRowHeight = (availableForOppZone - rowGap*(rowsUsed-1)) / rowsUsed;
+  // 上下限保护:下限90px是这一步的临时值(步骤c会用真实测量+放大截图重新核实可读性
+  // 下限,届时如果需要会调整这个数字或新增更紧的响应式断点,不是这里就能一次定死的);
+  // 上限266.7px是当前既有CSS宽度驱动方案下算出来的最大值(200px宽×4/3),没必要超过它
+  // ——用不到那么多空间时,座位卡维持原有大小即可,不需要占用多余的纵向预算。
+  const height = Math.max(90, Math.min(266.7, perRowHeight));
+  oppSeatEls.forEach(el=>{
+    el.style.height = height+'px';
+    el.style.width = 'auto';
+  });
+}
+window.addEventListener('resize', () => { updateDesktopLayoutFlag(); updateDesktopSeatHeights(currentG); updateLogPanelHeight(); });
 
 // 常驻"关闭房间"按钮(cleanupRoom):只需要绑定一次,不放进render(g)里——这是一个固定
 // 挂在页面角落、不随游戏状态变化的元素,和 #helpBtn/#logBtn 同一类"页面初始化时绑一次"
@@ -1321,10 +1448,19 @@ function render(g){
   // 这个顺序影响(它是持久节点,不会被座位重绘销毁),但它的目标座位高亮逻辑必须在这里、
   // 座位元素已经是"这一轮最终版本"之后执行。
   renderTableCard(g);
-  // 第8步:座位卡分流挂载(#oppTopRow/#oppRow)和#tableStrip内容(renderTableCard)都已经
-  // 是这一轮最终状态之后,才能测量出正确的"座位区+中央出牌区"实际渲染高度,所以放在这两者
-  // 之后执行,和上面renderTableCard必须晚于座位重绘同一个理由。
-  updateLogPanelHeight();
+  // 【updateLogPanelHeight() 的调用点已下移】——桌面自适应 步骤a 引入
+  // updateDesktopSeatHeights() 之后,这里出现过一个真实的循环依赖 bug:原来
+  // updateLogPanelHeight() 在这里(renderControls/renderHand 之前)就跑了,它会读
+  // tableStrip 的位置——但 tableStrip 的位置本身又受 .log-panel(grid-row:1/span 3,
+  // 和座位区共享同一批行)当前内联高度的影响;如果上一次渲染是人数更多的一局(.log-panel
+  // 内联高度较大),这次即使换成人数更少的一局,.log-panel 那个偏大的旧内联高度仍会在
+  // 这一刻撑住 grid 的第1~3行、让 tableStrip 的位置读出来偏低,导致 updateDesktopSeatHeights()
+  // (在更后面调用)算出的"对手区可用高度"被这份还没来得及更新的旧数据污染,得到偏小的
+  // 结果——而且这不是"晚一帧就能自己纠正"的瞬时误差,是一个稳定的错误不动点(连续多次
+  // 对同一个g重新render,污染后的偏小结果会一直保持,不会自愈,已用真实dump复现过)。
+  // 正确的依赖方向是:先算好座位卡该多高(它不依赖.log-panel),.log-panel 的高度再根据
+  // "座位卡已经是这一轮最终尺寸"之后的座位区实际底边来算——所以 updateLogPanelHeight()
+  // 必须挪到 updateDesktopSeatHeights() 之后调用,不能留在这里。
 
   // phase pill + deck info
   const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',shaOffsetChoice:'杀被抵消后的效果选择',mengjin:'猛进选择',zhijiChoice:'志继选择',tiaoxinChoice:'挑衅选择',tiaoxinDiscard:'挑衅弃牌',xunxunPick:'恂恂选择',wangxiAsk:'忘隙询问',over:'游戏结束'}[g.phase]||g.phase;
@@ -1358,6 +1494,15 @@ function render(g){
       lastToastedSeq = log[log.length-1].seq;
     }
   }
+
+  // 桌面自适应 步骤a:renderControls/renderHand(上面已执行完)渲染出的 tableStrip/
+  // panel.table/myGeneral/hand-label/meSeat/hand 都已是这一轮最终状态,现在才能正确
+  // 测量"对手区之外占用了多少高度",据此算出对手区座位卡该有多高。
+  updateDesktopSeatHeights(g);
+  // updateLogPanelHeight() 必须排在 updateDesktopSeatHeights(g) 之后——见上面
+  // renderTableCard 之后那段注释,这是修复循环依赖bug之后的正确调用顺序:座位卡先
+  // 定型,.log-panel 再根据座位区的最终实际底边算自己该多高。
+  updateLogPanelHeight();
   } finally {
     // 双向隔离:①渲染抛异常不影响机器人继续被调度(否则机器人永久停摆);
     //          ②机器人调度自己抛异常也不污染渲染(catch 掉只记一条告警)。
