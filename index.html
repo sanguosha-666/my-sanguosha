@@ -1275,8 +1275,32 @@
          3/4反推出的高度上限也跟着从180px列宽对应的240px一起变高——2~4人局(纵向预算
          宽裕、meSeat原本会撞到这个上限)因此能进一步放大;具体上限改由 render.js 动态
          测量这条列的实际渲染宽度决定,不再硬编码240这个数字(见 updateDesktopSeatHeights
-         的对应修改)。 */
-      grid-template-columns:minmax(100px,1fr) minmax(300px,420px) minmax(100px,1fr) minmax(220px,1.2fr);
+         的对应修改)。
+         【第12步修正,真实bug】:第11步把左/右列改成 minmax(100px,1fr) 之后,这两列的
+         宽度不再由"里面的内容实际需要多宽"决定,而是完全交给 fr 权重瓜分剩余空间——真实
+         测量确认这产生了大片黑色死区(1440px视口下左/右列各297.5px宽,但6~8人局的对手
+         座位卡受纵向预算瓶颈只能长到111.6px宽,列内剩余185.9px完全空着;1920px视口下
+         问题更严重,列宽被fr撑到447.5px,座位卡仍只有143.4px,死区扩大到304.1px/侧)。
+         **根因**:对手座位卡(6~8人局)的尺寸瓶颈始终是纵向空间(updateDesktopSeatHeights
+         算出的高度,受限于视口高度/行数,和列宽无关)——列越宽,座位卡也不会变宽(它的
+         width由height按aspect-ratio 3/4反推,不会去stretch填满列),多出来的列宽只会
+         变成纯粹的死区,不是"潜在的座位卡放大空间"。真正会用到这条列宽度的只有 meSeat
+         (2~4人局,同样固定在grid-column:1)——用真实dump测过 meSeat 在最宽裕情形下
+         (1920px,2/4人局)精确达到250×333.4px,这是它在当前公式下的理论/实测双重上限
+         (由 ME_SEAT_RATIO*266.7对手高度上限反推,266.7*1.25*0.75=250.03)。
+         **修法**:把左/右列从 minmax(100px,1fr) 改回固定上限 minmax(100px,260px)——
+         260px比meSeat实测/理论最大宽度250px多留10px安全余量,不会让meSeat在任何已验证
+         场景下被夹小(1440px下meSeat实测只有240.2px,1920px下250px,两者都在260px以内,
+         该列宽度改动对meSeat自身尺寸没有任何影响),但把原本浪费给6~8人局对手座位卡
+         的绝大部分死区直接收回(1440px:297.5→260,收回37.5px/侧；1920px:447.5→260,
+         收回187.5px/侧)。日志列(第4列)从 minmax(220px,1.2fr) 改成 minmax(220px,1fr)
+         ——继续是唯一的弹性(fr)列,吸收左右两列收窄后腾出的全部宽度,保证四列合计依然
+         100%撑满#game(不引入 justify-content,不违反"页面已经真正撑满视口边缘,不要
+         回退"这条硬约束)。日志面板变宽(1440px:357→432,1920px:537→912)是可以接受的
+         结果而不是新问题——它是纯文本历史记录区,内容本身会自然按可用宽度换行/左对齐,
+         不会像"固定宽高比的座位卡"那样在多余宽度里露出一整块无法被内容填补的空白;
+         已用真实截图核实这个宽度下日志区域视觉上不显得空洞(见CLAUDE.md)。 */
+      grid-template-columns:minmax(100px,260px) minmax(300px,420px) minmax(100px,260px) minmax(220px,1fr);
       /* 第8步:me+手牌合并进同一行后,总行数从8收紧到7(座位区3行+信息条/武将名/手牌标签
          各1行+合并后的me+手牌1行),没有空行,不会因为"预留了一行却没人占用"而多出一段
          意外的行间距(row-gap 对每条相邻track都生效,哪怕某条track是空的)。 */
@@ -1380,10 +1404,20 @@
        (手机那次对手区永远只有1行,桌面这次行数本身是变量)。
        只作用于对手座位(#oppTopRow 里的 top 区 + #oppRow 里的 left/right 区),不碰
        .seat.me——"我"的卡沿用上面已有的180px固定宽度,保持"比对手更醒目"这条既有
-       设计规则(verify_stage1_seatcard.js 锁定的既有回归)不变。 */
+       设计规则(verify_stage1_seatcard.js 锁定的既有回归)不变。
+       【第12步新增 justify-self:center】:左/右列收窄到260px上限之后(见上面
+       grid-template-columns那条注释),6~8人局的对手座位卡(纵向预算瓶颈下只有
+       ~110~150px宽)相对260px列宽仍会留一截残余空隙——这条规则把座位卡在自己所在的
+       grid区域内水平居中,让这截空隙从"整段贴在列的一侧、看起来像没用上的一大块"
+       变成"卡片左右各留一小段对称间距",读起来更像是有意的卡片留白而不是布局缺陷。
+       justify-self 只对真正的 grid item(#oppRow .seat[data-zone],因为 #oppRow 是
+       display:contents)生效;#oppTopRow .seat 是 flex 子项(#oppTopRow 自己才是
+       grid item),justify-self 对 flex 子项无效,写在同一条规则里是无害的空操作,
+       它们的水平居中已经由 #oppTopRow 自身的 justify-content:center 保证,不冲突。 */
     #game.desktop-layout #oppTopRow .seat,
     #game.desktop-layout #oppRow .seat[data-zone]{
       flex:0 0 auto; min-width:0; max-width:none; width:auto;
+      justify-self:center;
     }
     /* 第4步:日志面板挪到独立的第4列;第8步收紧成grid-row:1 / span 3——只覆盖座位区
        (top/left/right)+中央出牌区这3行,不再一路占满到底(原来是1/-1占满全部7行,
@@ -1561,17 +1595,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=230"></script>
-<script src="data.js?v=230"></script>
-<script src="room-lifecycle.js?v=230"></script>
-<script src="game.js?v=230"></script>
-<script src="weapons.js?v=230"></script>
-<script src="skills.js?v=230"></script>
-<script src="bot.js?v=230"></script>
-<script src="render.js?v=230"></script>
-<script src="render-table.js?v=230"></script>
-<script src="render-hand.js?v=230"></script>
-<script src="render-controls.js?v=230"></script>
-<script src="render-log.js?v=230"></script>
+<script src="config.js?v=231"></script>
+<script src="data.js?v=231"></script>
+<script src="room-lifecycle.js?v=231"></script>
+<script src="game.js?v=231"></script>
+<script src="weapons.js?v=231"></script>
+<script src="skills.js?v=231"></script>
+<script src="bot.js?v=231"></script>
+<script src="render.js?v=231"></script>
+<script src="render-table.js?v=231"></script>
+<script src="render-hand.js?v=231"></script>
+<script src="render-controls.js?v=231"></script>
+<script src="render-log.js?v=231"></script>
 </body>
 </html>
