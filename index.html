@@ -1255,15 +1255,28 @@
          5张牌一行(420-16(tableStrip自身padding)=404,(404+6)/(70+6)≈5.4张),更极端
          的场景(6张以上)靠既有的flex-wrap优雅换行,不会挤压变形(已用真实截图验证,见
          CLAUDE.md)。
-         中央列不再是1fr之后,四列全部变成有上限的minmax,总宽度不再强制撑满#game的
-         全部可用宽度——改用下面的 justify-content:center 让这个(变窄的)四列网格整体
-         在#game内水平居中,多出来的横向空间变成左右对称的留白,而不是硬塞给某一列造成
-         该列本身看起来也很空。**这不影响座位卡实际尺寸**:6~8人局座位卡的尺寸瓶颈本来
-         就是纵向空间(updateDesktopSeatHeights算出的高度),不是列宽——已用真实dump核实
-         过5/7人局座位卡宽度(134.1px/96.1px)远小于180px列宽上限,列宽从来不是这几档
-         人数的瓶颈,所以省下来的横向空间不需要也不应该分给座位区列,直接居中留白即可。 */
-      grid-template-columns:minmax(100px,180px) minmax(300px,420px) minmax(100px,180px) minmax(220px,300px);
-      justify-content:center;
+         【第11步修正】上一步把左/右/日志三列也全部改成有上限的minmax,导致四列总宽度
+         不再撑满#game的全部可用宽度,只能靠 justify-content:center 把这个变窄的四列
+         网格整体居中——代价是#game两侧留下大片对称的空白留白(真实测过1440px视口下
+         左右各146px,合计292px,接近#game自身宽度的21%),看起来像"页面里嵌了一个偏小
+         的居中区块",而不是真正撑满视口。真实原因:minmax(min,max)在满足max之后不会
+         再接收多余空间,谁都不吸收就只能留给justify-content当外部留白。
+         改法:中央列继续保持 minmax(300px,420px)固定上限(这是上一步已经用真实截图和
+         多卡横排最坏场景验证过的合理宽度,不应该重新变宽把"中央区域本身空白过多"这个
+         问题带回来);左/右/日志三列改用 minmax(min,Nfr)——fr 是"满足所有非fr轨道的
+         尺寸后,把总剩余空间按权重分配"给这几条轨道,不再需要 justify-content 兜底,
+         网格天然撑满#game的全部宽度。权重取 1:1:1.2(左:右:日志),日志略宽是因为
+         日志文本本身受益于更宽的阅读区域。**这不会让座位卡"凭空变大"**:6~8人局座位
+         卡的尺寸瓶颈依然是纵向空间(updateDesktopSeatHeights算出的高度),不是列宽——
+         已用真实dump核实过5/7人局座位卡宽度(134.1px/96.1px)远小于180px这条旧上限,
+         列宽从不是这几档人数的瓶颈,加宽后同样远小于新的、更宽的fr结果,不受影响。
+         **左/右列变宽真正带来的改善是"我的座位卡"(meSeat)的结构性尺寸上限**:meSeat
+         固定占据 grid-column:1,宽度不能超过这条列轨道当前的宽度,配合 aspect-ratio:
+         3/4反推出的高度上限也跟着从180px列宽对应的240px一起变高——2~4人局(纵向预算
+         宽裕、meSeat原本会撞到这个上限)因此能进一步放大;具体上限改由 render.js 动态
+         测量这条列的实际渲染宽度决定,不再硬编码240这个数字(见 updateDesktopSeatHeights
+         的对应修改)。 */
+      grid-template-columns:minmax(100px,1fr) minmax(300px,420px) minmax(100px,1fr) minmax(220px,1.2fr);
       /* 第8步:me+手牌合并进同一行后,总行数从8收紧到7(座位区3行+信息条/武将名/手牌标签
          各1行+合并后的me+手牌1行),没有空行,不会因为"预留了一行却没人占用"而多出一段
          意外的行间距(row-gap 对每条相邻track都生效,哪怕某条track是空的)。 */
@@ -1292,8 +1305,21 @@
     /* right: 最多2个,纵向排在最右列(第3列)的第2/3行 */
     #game.desktop-layout .seat[data-zone="right"][data-zone-index="0"]{ grid-column:3; grid-row:2; }
     #game.desktop-layout .seat[data-zone="right"][data-zone-index="1"]{ grid-column:3; grid-row:3; }
-    /* 中央出牌区:居中列,纵向跨第2/3行(和左右两列的座位卡对齐同一区块) */
-    #game.desktop-layout #tableStrip{ grid-column:2; grid-row:2 / span 2; align-self:center; }
+    /* 中央出牌区:居中列,纵向跨第2/3行(和左右两列的座位卡对齐同一区块)。
+       【第11步修正】align-self 从 center 改成 stretch——原来的 center 会把 #tableStrip
+       这个64px高的小盒子在row2/3合并空间(6~8人局时由左右座位卡撑到约300px高)里居中
+       悬浮,视觉上在它上方和下方各留出一大截"看起来像没用上的空白"(真实截图确认:玩家1/2/3
+       这排座位卡和下方出牌区之间有明显的大段间隙,这正是这段悬浮留白造成的),这也是本次
+       用户反馈"座位卡和出牌区离得太远、不够紧凑"的直接来源。改成 stretch 后 #tableStrip
+       的背景(rgba(20,15,10,.55)+上下细线)会铺满整个row2/3的高度,和上方座位卡紧接、和
+       下方信息条紧接;它内部的实际内容(#tableCard,靠.table-strip自身的
+       display:flex;align-items:center;justify-content:center)仍然在这个铺满的背景区域
+       内部保持垂直居中,不会显得内容贴边——从"一个悬浮在大片空白中间的小盒子"变成"一块
+       尺寸得当、内容居中的背景区域",视觉上明显更紧凑。**这纯粹是外观调整,不影响座位卡
+       高度计算**:updateDesktopSeatHeights()的公式从不读取#tableStrip的位置/尺寸(这是
+       "整体自适应"任务里为了消除circular dependency已经改掉的既有设计),align-self
+       改变多少都不会影响座位卡最终算出的px数值。 */
+    #game.desktop-layout #tableStrip{ grid-column:2; grid-row:2 / span 2; align-self:stretch; }
     /* 以下几项这一步只给"各占一整行、按顺序往下排"的兜底位置,不做内容密度优化;
        行号相应从原来的5/6/7上移一行(第8步me+手牌合并后腾出了原来me单独占用的那一行)。
        空间再分配(第10步):这三行从 grid-column:1/4(只占前3列,不侵入日志列)改成
@@ -1377,10 +1403,20 @@
        定位;这条选择器同时包含 #game 的 id 和 .desktop-layout/.log-panel 两个 class,
        特异性天然高于 900px 断点那条纯 class 选择器,不依赖源码顺序也能赢,但仍然按
        约定写在源码更后面。 */
+    /* 【第11步修复,真实bug】:上面这条规则原来只覆盖了 position/align-self/max-height/
+       height/margin-top,漏了 width——@media(min-width:900px) 那条更早的规则(见其
+       说明注释)还留着 width:260px,这里只把 position 从 fixed 改回 static 让它重新
+       参与 grid 布局,但 width:260px 这个值从未被覆盖掉,一直原样生效。position:static
+       之后它是一个真正的 grid item,默认应该 stretch 铺满所属列轨道的完整宽度(第4列,
+       本次改成 minmax(220px,1.2fr) 之后在 1440px/1920px 视口下能分到 357px/更宽),
+       但 width:260px 这个显式声明会覆盖掉这个默认的 stretch 行为,导致日志面板一直
+       卡在 260px、右侧空出一大截——真实测过:1440px视口下留白97px,1920px视口下留白
+       277px,和"网格总宽度已经撑满#game、但#logPanel自己没有跟着变宽"这个现象完全
+       对应。补一行 width:auto 显式恢复 grid item 默认的 stretch 行为。 */
     #game.desktop-layout .log-panel{
       grid-column:4; grid-row:1 / span 3;
       position:static; align-self:stretch;
-      max-height:none; height:100%;
+      max-height:none; height:100%; width:auto;
       margin-top:0;
     }
 
@@ -1407,7 +1443,10 @@
        场景footnote本来就不是这次要处理的对象,窄屏是否要隐藏footnote不在本次范围。 */
     #game.desktop-layout:not(.hidden) ~ .footnote{display:none;}
 
-    #game.desktop-layout .panel.table{padding:5px 10px;margin:0 0 6px;gap:3px 10px;}
+    /* 【第11步】margin-bottom 从 6px 收紧到 4px——这是排查"座位卡还有没有更多可挤纵向
+       预算"时顺带找到的一处小空间,不是本次任务的主要来源(主要来源是横向留白+#tableStrip
+       悬浮间隙),但既然在查、也一并收紧,给6~8人局座位卡再挤出几px。 */
+    #game.desktop-layout .panel.table{padding:5px 10px;margin:0 0 4px;gap:3px 10px;}
     #game.desktop-layout .phase-pill{padding:2px 10px;font-size:11px;}
     #game.desktop-layout .deckinfo{font-size:11px;}
     #game.desktop-layout .banner{padding:5px 10px;margin:2px 0 0;font-size:12px;}
@@ -1420,7 +1459,9 @@
        描述文字**(和手机断点的 #myGeneral span{display:none} 不同)——手机那样做
        是因为窄宽度下长描述容易换行、吃掉不可预测的纵向空间,桌面宽度(880~1096px)
        远比手机宽裕,换行风险低得多,没有必要为了省这点高度牺牲这条信息。 */
-    #game.desktop-layout .hand-label{font-size:11px;margin:6px 0 4px;}
+    /* 【第11步】margin 从 6px/4px 收紧到 4px/3px(同一处顺带收紧,理由同上面panelTable
+       那条注释)——myGeneral 和"你的手牌"标签共用这条规则,各省3px,合计再收紧6px。 */
+    #game.desktop-layout .hand-label{font-size:11px;margin:4px 0 3px;}
   }
 
   .hidden{display:none!important;}
@@ -1520,17 +1561,17 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=229"></script>
-<script src="data.js?v=229"></script>
-<script src="room-lifecycle.js?v=229"></script>
-<script src="game.js?v=229"></script>
-<script src="weapons.js?v=229"></script>
-<script src="skills.js?v=229"></script>
-<script src="bot.js?v=229"></script>
-<script src="render.js?v=229"></script>
-<script src="render-table.js?v=229"></script>
-<script src="render-hand.js?v=229"></script>
-<script src="render-controls.js?v=229"></script>
-<script src="render-log.js?v=229"></script>
+<script src="config.js?v=230"></script>
+<script src="data.js?v=230"></script>
+<script src="room-lifecycle.js?v=230"></script>
+<script src="game.js?v=230"></script>
+<script src="weapons.js?v=230"></script>
+<script src="skills.js?v=230"></script>
+<script src="bot.js?v=230"></script>
+<script src="render.js?v=230"></script>
+<script src="render-table.js?v=230"></script>
+<script src="render-hand.js?v=230"></script>
+<script src="render-controls.js?v=230"></script>
+<script src="render-log.js?v=230"></script>
 </body>
 </html>

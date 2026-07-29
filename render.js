@@ -464,15 +464,19 @@ function updateDesktopSeatHeights(g){
   // oppSeatEls 的选择方式保持同一模式,不是给包装 div 设置。 */
   const meSeatCardEl = meSeatEl ? meSeatEl.querySelector('.seat') : null;
   if(meSeatCardEl){
-    // meSeat 的高度上限是240px(不是任意取的):meSeat 固定占据 grid-column:1,和
-    // left区座位卡共用同一条 minmax(100px,180px) 列轨道,宽度不能超过这条列的180px
-    // 上限,配合 aspect-ratio:3/4 反推,高度上限因此是 180/0.75=240px——这是列宽结构
-    // 本身决定的硬上限,不是凭空选的数字。2~4人局(对手区宽裕、h 会顶到266.7上限)时,
-    // ME_SEAT_RATIO*h 会明显超过240,在这里被夹住,meSeat 维持在和旧版本一样的240px
-    // (2~4人局本来就不缺纵向空间,不需要也不应该再放大);6~8人局(h 只有~130~150)时
-    // ME_SEAT_RATIO*h 落在160~190区间,远低于240上限,不会被夹住,meSeat 真正跟着
-    // 对手区一起收缩,把原来浪费在meSeat身上的固定预算让还给对手区。
-    const meSeatHeight = Math.max(90*ME_SEAT_RATIO, Math.min(240, ME_SEAT_RATIO*height));
+    // meSeat 的高度上限由它所在列(grid-column:1)当前实际渲染宽度反推,不再硬编码
+    // 240 这个数字。【空间再分配第11步】之前左/右列固定 minmax(100px,180px),180px
+    // 宽度对应的高度上限恰好是180/0.75=240,当时把这个算好的常数直接写死;这次第11步
+    // 把左/右列改成 minmax(100px,1fr)(参见 index.html 对应注释),列宽本身随视口
+    // 宽度变化(不再是固定180px),240 这个写死的数字就不再准确——用
+    // meSeatEl.getBoundingClientRect().width(网格项默认拉伸铺满所属列轨道的整个宽度,
+    // 这里从未给 #meSeat 包装div本身设置过内联宽度,读到的就是列轨道的真实宽度)重新
+    // 动态算出"这条列这一刻能放下的最大高度"——列变宽时(比如更宽的桌面视口)上限
+    // 跟着变宽,列变窄时上限也跟着收紧,不会出现"列已经变了、上限还停留在旧数字"这种
+    // 脱节。 */
+    const meSeatColumnWidth = meSeatEl.getBoundingClientRect().width;
+    const meSeatHeightCeiling = meSeatColumnWidth>0 ? meSeatColumnWidth/0.75 : 240;
+    const meSeatHeight = Math.max(90*ME_SEAT_RATIO, Math.min(meSeatHeightCeiling, ME_SEAT_RATIO*height));
     meSeatCardEl.style.height = meSeatHeight+'px';
     meSeatCardEl.style.width = 'auto';
   }
