@@ -265,7 +265,14 @@ function assignSeatZones(playerCount, mySeat){
 // 复用同一个标志位,不重复判断。#game 上的 desktop-layout class 只是把这个 JS 判断结果
 // 同步给 CSS(CSS 自己的 @media(min-width:1024px) 断点是双重保险,两边同时满足才生效)。
 let desktopLayoutActive = false;
-function isDesktopLayout(){ return window.innerWidth >= 1024; }
+function isDesktopLayout(){
+  // 不能只看宽度：iPad Pro 等横屏平板同样可能达到 1024~1366px，旧判断会误套
+  // 鼠标桌面专用的四列布局。电脑布局要求足够宽且具备精确指针；触屏设备无论横竖屏
+  // 都交给 index.html 的手机/平板响应式规则。
+  if(window.innerWidth < 1200) return false;
+  if(typeof window.matchMedia!=='function') return true; // 旧浏览器/测试环境安全回退
+  return window.matchMedia('(hover:hover) and (pointer:fine)').matches;
+}
 function updateDesktopLayoutFlag(){
   desktopLayoutActive = isDesktopLayout();
   const gameEl = document.getElementById('game');

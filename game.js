@@ -1225,9 +1225,11 @@ function normalize(g){
 //   kind   —— 事件类型标签('damage'/'sha'/…),渲染端据此判定该不该弹 toast、以及 toast 的强调色,
 //             取代原来"从文本里嗅探子串"的脆弱写法。未带 kind 的条目走旧子串判定,行为不变。
 //   actor  —— 事件发起者座位号(可空);targets —— 目标座位号数组(可空)。本步只存不读,供第三步取用。
-// seq 逻辑与原来一致:从上一条派生自增,跨读取稳定、不受 slice(-40) 长度封顶影响。
+// 日志保留本局全部记录。右侧日志栏自身滚动，不再为了常驻面板只显示几条而在数据层
+// 截断历史；新开一局时游戏状态本来就会重建日志数组，因此不会串到下一局。
+// seq 继续从上一条派生自增，跨读取稳定。
 function logEvent(log, ev){
-  log = (log||[]).slice(-40);
+  log = (log||[]).slice();
   const last = log.length ? log[log.length-1] : null;
   const lastSeq = (last && typeof last==='object' && Number.isInteger(last.seq)) ? last.seq : 0;
   const text = (ev && typeof ev.text==='string') ? ev.text : String(ev && ev.text!=null ? ev.text : '');

@@ -1609,20 +1609,21 @@
     }
     #game.desktop-layout{
       width:100%;
-      min-height:calc(100dvh - 20px);
+      height:calc(100dvh - 20px);
+      min-height:0;
       box-sizing:border-box;
       grid-template-columns:
         minmax(140px,220px)
         minmax(360px,1fr)
         minmax(140px,220px)
-        minmax(280px,340px);
+        minmax(270px,320px);
       grid-template-rows:
-        minmax(150px,22dvh)
-        minmax(180px,1fr)
+        clamp(165px,23dvh,220px)
+        minmax(200px,1fr)
         auto
         auto
         auto
-        minmax(190px,27dvh);
+        clamp(190px,25dvh,250px);
       column-gap:10px;
       row-gap:6px;
       align-items:stretch;
@@ -1635,7 +1636,7 @@
       padding:0 6px;
       gap:8px;
       align-items:stretch;
-      justify-content:center;
+      justify-content:space-evenly;
       overflow:hidden;
     }
     #game.desktop-layout #oppTopRow .seat{
@@ -1742,11 +1743,32 @@
       align-self:end;
       justify-content:center;
       align-content:end;
+      flex-wrap:nowrap;
+      gap:12px;
       overflow-x:auto;
       overflow-y:hidden;
       padding:6px 4px 2px;
       box-sizing:border-box;
     }
+    /* Chrome 100%缩放是桌面端的设计基准。手牌不再沿用全局64×92的小尺寸；
+       手牌过多时横向滚动，不通过缩小整排卡片来硬塞。 */
+    #game.desktop-layout #hand .card{
+      width:82px;
+      height:118px;
+      flex:0 0 auto;
+      --badge:22px;
+    }
+    /* 中央出牌、判定和交换牌提高一级视觉权重。这里只改展示尺寸，DOM和动画逻辑不变。 */
+    #game.desktop-layout #tableStrip .table-card-mini{
+      width:92px;
+      height:132px;
+    }
+    #game.desktop-layout #tableStrip .exchange-card .table-card-mini{
+      width:78px;
+      height:112px;
+    }
+    #game.desktop-layout #tableStrip .table-card-name{font-size:25px;}
+    #game.desktop-layout #tableStrip .table-card-face{font-size:18px;}
     #game.desktop-layout .log-panel{
       grid-column:4;
       grid-row:1 / 7;
@@ -1754,26 +1776,74 @@
       min-height:0;
       max-height:none;
       overflow-y:auto;
+      overscroll-behavior:contain;
+      scrollbar-gutter:stable;
       border:1px solid var(--line);
       border-radius:10px;
       background:rgba(17,13,10,.92);
     }
 
-    /* 1024~1199px仍属于电脑端，但横向空间较紧：保留同样的信息架构，仅收窄四列。 */
-    @media (max-width:1199px){
+    /* 1366×768一类常见笔记本的浏览器内容区通常只有约620~680px高。直接按100%
+       缩放压缩纵向轨道，不要求用户把Chrome调成90%。 */
+    @media (max-height:760px){
       #game.desktop-layout{
-        grid-template-columns:
-          minmax(120px,160px)
-          minmax(300px,1fr)
-          minmax(120px,160px)
-          minmax(230px,280px);
+        grid-template-rows:
+          clamp(125px,21dvh,155px)
+          minmax(130px,1fr)
+          auto
+          auto
+          auto
+          clamp(145px,24dvh,175px);
       }
-      #game.desktop-layout #oppTopRow{gap:5px;}
-      #game.desktop-layout #oppTopRow .seat{max-width:150px;}
-      #game.desktop-layout #oppRow .seat[data-zone="left"],
-      #game.desktop-layout #oppRow .seat[data-zone="right"]{max-width:155px;}
-      #game.desktop-layout #meSeat .seat{max-width:170px;}
+      #game.desktop-layout #myGeneral span{display:none;}
+      #game.desktop-layout #oppTopRow .seat{max-width:145px;}
+      #game.desktop-layout #oppTopRow:has(> .seat:nth-child(4)) .seat{max-width:125px;}
+      #game.desktop-layout #oppTopRow:has(> .seat:nth-child(5)) .seat{max-width:110px;}
+      #game.desktop-layout #meSeat .seat{max-width:155px;}
+      #game.desktop-layout #hand .card{width:70px;height:100px;--badge:20px;}
+      #game.desktop-layout #tableStrip .table-card-mini{width:80px;height:114px;}
+      #game.desktop-layout #tableStrip .exchange-card .table-card-mini{width:68px;height:98px;}
     }
+
+  }
+
+  /* ===== 平板布局 =====
+     覆盖常见 7~13英寸平板：641~1199px，以及宽度更大但仍是触屏/粗指针的设备。
+     平板不进入电脑四列牌桌；日志回到文档流，避免固定在右侧盖住座位和手牌。 */
+  @media (min-width:641px) and (max-width:1199px),
+         (min-width:641px) and (hover:none) and (pointer:coarse){
+    .wrap{max-width:1100px;padding:10px 12px;}
+    .opp-row{gap:7px;padding:6px 6px 4px;}
+    .opp-row .seat{max-width:170px;}
+    .bottom-row{gap:10px;}
+    .hand{gap:8px;}
+    .hand .card{width:60px;height:86px;--badge:18px;}
+    .table-card-mini{width:76px;height:106px;}
+    .exchange-card .table-card-mini{width:64px;height:90px;}
+    .log-panel{
+      position:static;
+      width:auto;
+      max-height:110px;
+      margin-top:8px;
+    }
+  }
+
+  /* 平板竖屏：武将信息描述收起，给座位、操作区和手牌保留稳定空间。完整说明仍可
+     通过武将牌上的“?”查看。 */
+  @media (min-width:641px) and (max-width:900px) and (orientation:portrait){
+    .wrap{padding:8px 10px;}
+    #myGeneral span{display:none;}
+    .hand-label{margin:7px 0 4px;}
+    .bottom-row{gap:8px;}
+    .seat.me{width:180px;}
+  }
+
+  /* 常见手机横屏即使宽度超过640px，也按紧凑触屏布局处理；原有≤640px手机竖屏
+     规则继续负责更窄的设备。 */
+  @media (max-height:520px) and (orientation:landscape) and (pointer:coarse){
+    .hand .card{width:48px;height:70px;--badge:14px;}
+    .table-card-mini{width:58px;height:80px;}
+    .exchange-card .table-card-mini{width:50px;height:70px;}
   }
 
   .hidden{display:none!important;}

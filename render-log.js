@@ -14,12 +14,11 @@
 // "有新日志"。
 // **这里存的是 g.log 每条元素自带的 seq(全局单调递增,见 game.js 的 pushLog/normalize),
 // 不是"最后一条日志的文本"也不是"g.log.length"**——这套方案专门消掉了旧文本比较方案踩过的
-// 两个真实 bug:①`pushLog`(game.js)`slice(-40)` 只保留最近 40 条,若按 length 比较,总条数
-// 超过 40 后 `g.log.length` 会永远封顶在 41,长度判断从此再也算不出"有新增",toast 永久失效
-// 直到刷新页面;②若按"最后一条文本是否变化"比较,连续两条日志文本恰好完全相同(比如两人先后
+// 两个真实 bug:①历史版本曾在数据层截断日志,按 length 比较会在封顶后再也算不出"有新增";
+// ②若按"最后一条文本是否变化"比较,连续两条日志文本恰好完全相同(比如两人先后
 // 都摸了两张牌,文案巧合一致)会被误判成"没有新日志"而漏弹一次。seq 由 pushLog 从上一条派生
-// 自增,不依赖数组长度也不比较文本内容,slice(-40) 丢老条目不影响它持续递增,两条文本相同也
-// 各自有独立的 seq,天然规避这两个问题。
+// 自增,不依赖数组长度也不比较文本内容；两条文本相同也各自有独立的 seq,天然规避
+// 这两个问题。
 // 【排队展示,不再只弹最后一条】曾经这里"多条连续新日志只弹最后一条",导致延时锦囊判定
 // (乐不思蜀/兵粮寸断的"判定为XX,生效/无效"这条中间结果)被同一次事务里紧跟着的下一条日志
 // 淹没、玩家完全看不到判定过程发生了什么——已改成把本次新增的全部日志交给 queueLogToasts
@@ -218,15 +217,15 @@ function renderLogModal(g){
   const body=document.querySelector('#infoModal .log-modal');
   if(body) body.scrollTop=body.scrollHeight; // 每次刷新都跟到最新一条,和以前常驻日志的行为一致
 }
-// LOG_PANEL_LINES: 常驻面板只展示最近这么多条,完整历史仍走 📜 按钮的 renderLogModal。
-const LOG_PANEL_LINES = 8;
-// renderLogPanel: 常驻可见的日志小面板,不需要点开——和 renderControls/renderHand 同一批,
-// 每次 render() 都会调用,不受 logModalOpen 影响(那个开关只管完整历史弹窗)。
+// renderLogPanel: 右侧常驻日志显示本局全部记录，并在自己的面板内滚动。用户正在查看
+// 较早记录时保留当前位置；只有原本就在底部时，新日志到来才自动跟到最新一条。
+// 📜 按钮的完整历史弹窗继续保留，适合需要更大阅读面积时使用。
 function renderLogPanel(g){
   const el = document.getElementById('logPanel');
   if(!el) return;
   const log = g.log||[];
-  const recent = log.slice(-LOG_PANEL_LINES);
-  el.innerHTML = recent.map(l=>'<div>'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
-  el.scrollTop = el.scrollHeight; // 跟到最新一条
+  const oldScrollTop = el.scrollTop;
+  const wasAtBottom = el.scrollHeight-el.scrollTop-el.clientHeight < 24;
+  el.innerHTML = log.map(l=>'<div>'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
+  el.scrollTop = wasAtBottom ? el.scrollHeight : oldScrollTop;
 }
