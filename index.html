@@ -1747,7 +1747,7 @@
       gap:12px;
       overflow-x:auto;
       overflow-y:hidden;
-      padding:6px 4px 2px;
+      padding:72px 4px 2px;
       box-sizing:border-box;
     }
     /* Chrome 100%缩放是桌面端的设计基准。手牌不再沿用全局64×92的小尺寸；
@@ -1757,6 +1757,13 @@
       height:118px;
       flex:0 0 auto;
       --badge:22px;
+    }
+    /* 原来的2.2倍预览会超过底部轨道高度，被横向滚动容器裁掉。电脑端改为在预留的
+       上方空间内放大，仍足够看清牌面，但不会被桌面区域盖住。 */
+    @media (hover:hover) and (pointer:fine){
+      #game.desktop-layout #hand .card:hover{
+        transform:translateY(-18px) scale(1.62);
+      }
     }
     /* 中央出牌、判定和交换牌提高一级视觉权重。这里只改展示尺寸，DOM和动画逻辑不变。 */
     #game.desktop-layout #tableStrip .table-card-mini{
@@ -1778,9 +1785,43 @@
       overflow-y:auto;
       overscroll-behavior:contain;
       scrollbar-gutter:stable;
+      scrollbar-width:thin;
+      scrollbar-color:var(--gold-dim) rgba(0,0,0,.28);
       border:1px solid var(--line);
       border-radius:10px;
       background:rgba(17,13,10,.92);
+    }
+    #game.desktop-layout .log-panel::-webkit-scrollbar{width:10px;}
+    #game.desktop-layout .log-panel::-webkit-scrollbar-track{background:rgba(0,0,0,.28);}
+    #game.desktop-layout .log-panel::-webkit-scrollbar-thumb{
+      background:var(--gold-dim);
+      border-radius:8px;
+      border:2px solid rgba(0,0,0,.28);
+    }
+    #game.desktop-layout .log-panel-head{
+      position:sticky;
+      top:0;
+      z-index:2;
+      margin:0 0 5px;
+      padding:6px 4px;
+      color:var(--gold);
+      font-weight:700;
+      background:rgba(17,13,10,.98);
+      border-bottom:1px solid var(--line);
+    }
+    /* 选将列表的高度取决于候选武将说明，不能塞进固定一屏牌桌。检测到选将列表时
+       临时恢复正常文档高度和页面纵向滚动；选择结束后列表消失，自动回到固定牌桌。 */
+    #game.desktop-layout:has(.general-pick-list){
+      height:auto;
+      min-height:calc(100dvh - 20px);
+      overflow:visible;
+    }
+    #game.desktop-layout:has(.general-pick-list) .log-panel{
+      position:sticky;
+      top:10px;
+      align-self:start;
+      height:calc(100dvh - 20px)!important;
+      max-height:calc(100dvh - 20px);
     }
 
     /* 1366×768一类常见笔记本的浏览器内容区通常只有约620~680px高。直接按100%
@@ -1800,7 +1841,9 @@
       #game.desktop-layout #oppTopRow:has(> .seat:nth-child(4)) .seat{max-width:125px;}
       #game.desktop-layout #oppTopRow:has(> .seat:nth-child(5)) .seat{max-width:110px;}
       #game.desktop-layout #meSeat .seat{max-width:155px;}
+      #game.desktop-layout #hand{padding-top:52px;}
       #game.desktop-layout #hand .card{width:70px;height:100px;--badge:20px;}
+      #game.desktop-layout #hand .card:hover{transform:translateY(-12px) scale(1.42);}
       #game.desktop-layout #tableStrip .table-card-mini{width:80px;height:114px;}
       #game.desktop-layout #tableStrip .exchange-card .table-card-mini{width:68px;height:98px;}
     }

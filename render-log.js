@@ -226,6 +226,7 @@ function renderLogPanel(g){
   const log = g.log||[];
   const oldScrollTop = el.scrollTop;
   const wasAtBottom = el.scrollHeight-el.scrollTop-el.clientHeight < 24;
-  el.innerHTML = log.map(l=>'<div>'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
+  el.innerHTML = '<div class="log-panel-head">本局日志（共'+log.length+'条）</div>'
+    + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
   el.scrollTop = wasAtBottom ? el.scrollHeight : oldScrollTop;
 }
