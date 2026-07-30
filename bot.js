@@ -351,17 +351,53 @@ const BOT_STRATEGY_GUIDANCE_PLAY =
   +'互殴,那样往往是在替别人火中取栗;五谷丰登、无懈可击这类关键锦囊不要随手挥霍,该省'
   +'的时候要省。';
 
-const BOT_PLAY_SYSTEM_PROMPT =
-  '你在扮演一款网页版三国杀里的AI机器人玩家,当前轮到你的出牌阶段。你会收到:'
+// BOT_IDENTITY_GUIDANCE:第二阶段——身份局四阵营战术基调(详见 CLAUDE.md"AI机器人策略
+// 指导第二阶段"记录)。只在 g.gameMode==='identity' 且这个座位的 role 有值时才启用,
+// 复用 buildBotVisibleState 已经在读的 me.role 字段,不新增读取路径;普通局(ffa)完全
+// 不受影响。四段内容都是"当前阶段大致该往哪个方向想"的引导,刻意不写成if-then硬规则——
+// 尤其内奸那条(三阶段模型)是调研里最具体、也最容易被写歪成机械规则的一条,已按调研阶段
+// 的提醒把它写成"局势提示→倾向"这种叙述式引导,不是条件判断语句。四条内容和第一阶段
+// 通用指导共用同一句"是判断优先级的参考,不是必须遵守的硬规则"这条纪律声明。
+// 来源(调研阶段已查证,详见方案设计对话记录):反贼集火节奏("本回合若能对主公形成两次
+// 以上有效攻击应主动出手")+反贼不与忠臣内耗;忠臣"局势不明时宁可暂时被误伤也不要过早
+// 暴露"+不把手牌耗尽单挑反贼(这两条和反贼的"不与忠臣内耗"是同一枚硬币的两面);内奸
+// 三阶段模型(前期配合主公清理反贼但避免抢头功暴露自己→中期反贼减员后伺机针对忠臣→
+// 终局三方对峙阶段绝不主动碰主公、必须先解决忠臣);主公优先血厚/防御倾向+生存优先于
+// 输出+早期低调靠观察集火/护主反推身份。
+const BOT_IDENTITY_GUIDANCE = {
+  fan: '若本回合能对主公形成两次以上有效攻击,通常应该主动出手;避免和忠臣正面消耗,'
+    +'那样容易让内奸坐收渔利。',
+  zhong: '核心任务是辅助并保护主公。局势不明时,宁可暂时被误伤,也不要过早暴露身份——'
+    +'过早暴露容易成为反贼的首要目标,反而丧失后续保护主公的能力;也不要把手牌耗尽去'
+    +'单挑反贼,那同样是在替内奸创造机会。',
+  nei: '判断当前大致该往哪个方向想:场上还有较多反贼时,倾向于配合主公清理反贼,同时'
+    +'避免抢头功、暴露自己;反贼所剩不多时,可以考虑找机会针对忠臣;若局面已经收缩到'
+    +'只剩你、主公、忠臣三方,这个阶段不要主动招惹主公,优先设法解决忠臣,再考虑后续。',
+  zhu: '生存优先于输出,倾向保留桃、杀等防身手段,不要轻易消耗殆尽;早期适度低调,可以'
+    +'通过观察谁在集火你、谁在护着你来反推场上身份。',
+};
+const BOT_IDENTITY_ROLE_LABEL = { zhu:'主公', zhong:'忠臣', fan:'反贼', nei:'内奸' };
+function botIdentityGuidance(g, seat){
+  if(!g || g.gameMode!=='identity') return '';
+  const me = g.players && g.players[seat];
+  const role = me && me.role;
+  const content = role && BOT_IDENTITY_GUIDANCE[role];
+  if(!content) return '';
+  return '这局是身份局,你当前的身份是'+BOT_IDENTITY_ROLE_LABEL[role]+':'+content;
+}
+
+function buildBotPlaySystemPrompt(g, seat){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家,当前轮到你的出牌阶段。你会收到:'
   +'①你视角下真实合法可见的局面(自己的手牌与身份完全可见;其他角色只有公开信息——'
   +'血量、装备、判定区、已知身份,手牌只知道张数、不知道具体是什么牌);'
   +'②一份已经按游戏规则筛选好的合法候选动作列表(localHeuristicScore是一个简单的'
   +'启发式参考分,仅供参考、不代表最优解),列表最后一项固定是"结束出牌阶段"。'
   +'你的任务只有一件事:从候选列表里选出一个index,代表这次要执行的动作——'
   +'不能选择列表之外的动作,不能凭空发明新选项,不需要也不能指定目标(目标已经在候选'
-  +'列表里算好了)。'+BOT_STRATEGY_GUIDANCE_PLAY
+  +'列表里算好了)。'+BOT_STRATEGY_GUIDANCE_PLAY+botIdentityGuidance(g, seat)
   +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},'
   +'不要输出任何解释文字、代码块标记或多余字段。';
+}
 
 function buildBotPlayUserPrompt(state, candidates){
   return '当前局面:\n'+JSON.stringify(state)
@@ -409,7 +445,7 @@ async function tryAiBotPlay(g, seat, options){
   let result;
   try{
     result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: BOT_PLAY_SYSTEM_PROMPT,
+      systemPrompt: buildBotPlaySystemPrompt(g, seat),
       userPrompt: buildBotPlayUserPrompt(state, candidates),
       maxTokens: 200,
     });
@@ -479,14 +515,15 @@ const BOT_STRATEGY_GUIDANCE_TARGET =
   +'数量——手牌枯竭的目标往往比看起来血厚但手牌充足的目标更容易迅速解决,值得作为'
   +'参考维度之一。';
 
-const BOT_TARGET_SYSTEM_PROMPT =
-  '你在扮演一款网页版三国杀里的AI机器人玩家。你刚决定要使用/打出一张需要指定目标的牌,'
+function buildBotTargetSystemPrompt(g, seat){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。你刚决定要使用/打出一张需要指定目标的牌,'
   +'现在需要从候选目标列表里选一名目标——列表每一项是一个座位真实合法可见的公开信息'
   +'(血量、装备、判定区、已知身份;其他角色的手牌你只知道张数,不知道具体是什么牌)。'
   +'你的任务只有一件事:从候选列表里选出一个index,代表这次要指定的目标——不能选择'
-  +'列表之外的座位,不能凭空指定目标。'+BOT_STRATEGY_GUIDANCE_TARGET
+  +'列表之外的座位,不能凭空指定目标。'+BOT_STRATEGY_GUIDANCE_TARGET+botIdentityGuidance(g, seat)
   +'请只输出一个严格的JSON对象,格式固定为'
   +'{"choice": 数字},不要输出任何解释文字、代码块标记或多余字段。';
+}
 
 function buildBotTargetUserPrompt(state, card, actionId, candidates){
   return '你正在使用【'+actionId+'】(实际打出的牌:'+card.name+')。\n\n'
@@ -509,7 +546,7 @@ async function tryAiBotBestTarget(g, seat, card, actionId){
   let result;
   try{
     result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: BOT_TARGET_SYSTEM_PROMPT,
+      systemPrompt: buildBotTargetSystemPrompt(g, seat),
       userPrompt: buildBotTargetUserPrompt(state, card, actionId, candidates),
       maxTokens: 100,
     });
