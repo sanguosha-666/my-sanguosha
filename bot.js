@@ -243,11 +243,12 @@ function botCardPriority(name){
   return 20;
 }
 
-// ================= AI机器人接入第二阶段:仅接入 botPlay 这一个决策点 =================
-// 【范围声明】只有 botPlay(出什么牌)这一个决策点接入AI,botBestTarget(选目标)本次
-// 不动,留给第三阶段——先在一个决策点上验证完整链路(AI调用→合法性校验→超时/失败
-// 兜底→回退本地逻辑)稳固可靠,再扩展到下一个。ai-bot.js 的 callAI/PROVIDER_ADAPTERS
-// 等基础设施本阶段确认不需要改动,直接复用第一阶段已完成的成果。
+// ================= AI机器人接入第二阶段起:botPlay(出什么牌)+ botBestTarget(选目标) =================
+// 【范围声明】第二阶段先在 botPlay(出什么牌)这一个决策点上验证完整链路(AI调用→合法性
+// 校验→超时/失败兜底→回退本地逻辑)稳固可靠;第三阶段(见下方"AI机器人接入第三阶段"
+// 那段)在此基础上扩展到 botBestTarget(选目标)。四阶段方案里规划的三个决策点(第四阶段
+// 是可选的更广范围扩展,不在此列)至此全部接入完毕。ai-bot.js 的 callAI/PROVIDER_ADAPTERS
+// 等基础设施两个阶段都确认不需要改动,直接复用第一阶段已完成的成果。
 
 // showAiThinkingIndicator/hideAiThinkingIndicator:index.html 里新增的 #aiThinkingIndicator
 // 是一个独立于 #controls/#banner 的常驻占位元素(挂在 .panel.table 内,#banner 之后、
@@ -409,6 +410,82 @@ async function tryAiBotPlay(g, seat, options){
   return options[idx];
 }
 
+// ================= AI机器人接入第三阶段:接入 botBestTarget(选目标)这个决策点 =================
+// 【范围声明】唯一新增的AI决策点是"给已经决定要打出的、需要目标的牌挑一个目标"——不是
+// 让 botBestTarget 本身变 async 后塞进 botPlay 枚举阶段的 forEach 里。枚举阶段要给
+// options 里每一个候选算 value 才能排序,如果每张需要目标的手牌都在枚举时先问一次AI,
+// 会在"到底决定出哪张牌"之前就打出多次AI请求,既偏离第二阶段"一次决策一次AI调用"的
+// 既有形状,又没有意义(还没决定要不要打这张牌,选目标的决策没有意义)。
+//
+// 实现方式:botBestTarget(本地启发式)在枚举阶段完全不变,继续为每个候选算出一个默认
+// 目标——这个默认目标就是"没有AI介入/AI失败时"的兜底,和第二阶段"无密钥回归行为完全
+// 一致"同一原则,不需要额外的回退计算。等 botPlay 最终决定了 chosen(可能来自AI选牌、
+// 也可能来自本地兜底)之后,如果这张牌需要目标且有AI密钥,才调用 tryAiBotBestTarget
+// 针对这一张牌单独问一次AI该打谁——问到就用AI的答案覆盖 chosen.target,问不到就保留
+// 枚举阶段已经算好的默认值。
+//
+// buildBotTargetCandidates:候选目标列表只包含真实通过 spec.canTarget 校验的座位(和
+// botBestTarget 自己筛选合法目标的判断逐字一致),每一项直接复用 buildBotVisibleState
+// 里对应座位已经算好的公开信息投影(seat/name/hp/maxHp/handCount/equips/delays/
+// knownRole/general)——和"选牌"AI看到的隐藏信息范围是同一份、同一个函数产出,不重新
+// 定义一套可见性规则。
+function buildBotTargetCandidates(g, seat, card, actionId){
+  const me = g.players[seat];
+  const spec = CARD_PLAYS[actionId];
+  const state = buildBotVisibleState(g, seat);
+  const list = [];
+  g.players.forEach((p,i)=>{
+    if(!p||!p.alive||i===seat) return;
+    if(spec && spec.canTarget && !spec.canTarget(g, me, card, i)) return;
+    list.push(Object.assign({ index: list.length }, state.players[i]));
+  });
+  return list;
+}
+
+const BOT_TARGET_SYSTEM_PROMPT =
+  '你在扮演一款网页版三国杀里的AI机器人玩家。你刚决定要使用/打出一张需要指定目标的牌,'
+  +'现在需要从候选目标列表里选一名目标——列表每一项是一个座位真实合法可见的公开信息'
+  +'(血量、装备、判定区、已知身份;其他角色的手牌你只知道张数,不知道具体是什么牌)。'
+  +'你的任务只有一件事:从候选列表里选出一个index,代表这次要指定的目标——不能选择'
+  +'列表之外的座位,不能凭空指定目标。请只输出一个严格的JSON对象,格式固定为'
+  +'{"choice": 数字},不要输出任何解释文字、代码块标记或多余字段。';
+
+function buildBotTargetUserPrompt(state, card, actionId, candidates){
+  return '你正在使用【'+actionId+'】(实际打出的牌:'+card.name+')。\n\n'
+    +'当前局面:\n'+JSON.stringify(state)
+    +'\n\n合法候选目标列表(index从0开始):\n'+JSON.stringify(candidates)
+    +'\n\n只返回 {"choice": 数字} 这一个JSON对象。';
+}
+
+// tryAiBotBestTarget:和 tryAiBotPlay 同一套结构——返回一个合法座位号、或 null(没有
+// 密钥/AI没有正确响应/索引不合法,统一交给调用方保留本地启发式已经算好的默认目标,
+// 不重试、不阻塞)。解析直接复用 parseBotPlayAiChoice(两处AI回复都是同一个
+// {"choice":N}格式,没必要另写一份)。超时同样直接复用 callAI 自带的机制,不额外包
+// 一层——和 tryAiBotPlay 同一个已确认的取舍(见其顶部注释)。
+async function tryAiBotBestTarget(g, seat, card, actionId){
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
+  const candidates = buildBotTargetCandidates(g, seat, card, actionId);
+  if(!candidates.length) return null; // 理论上不会发生:调用方已经确认至少有一个合法目标
+  const state = buildBotVisibleState(g, seat);
+  showAiThinkingIndicator(g, seat);
+  let result;
+  try{
+    result = await callAI(aiProvider, aiApiKey, {
+      systemPrompt: BOT_TARGET_SYSTEM_PROMPT,
+      userPrompt: buildBotTargetUserPrompt(state, card, actionId, candidates),
+      maxTokens: 100,
+    });
+  }catch(e){
+    result = { ok:false, reason:'other', detail:String(e) };
+  }finally{
+    hideAiThinkingIndicator();
+  }
+  if(!result || !result.ok) return null;
+  const idx = parseBotPlayAiChoice(result.text);
+  if(idx===null || idx<0 || idx>=candidates.length) return null;
+  return candidates[idx].seat;
+}
+
 async function botPlay(g,seat){
   // CARD_PLAYS 的合法性函数沿用旧架构，会读取全局 mySeat；评估阶段也必须切到机器人
   // 视角，不能只在最后真正提交动作时才切。
@@ -447,8 +524,12 @@ async function botPlay(g,seat){
     mySeat=humanSeat;
   }
 
+  // aiReady 只算一次,card选择/target选择两处AI决策共用同一个判断,不重复写三遍
+  // 同一个条件表达式。
+  const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
+
   let chosen=null;
-  if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
+  if(aiReady){
     chosen = await tryAiBotPlay(g, seat, options);
   }
   if(chosen===null){
@@ -457,6 +538,22 @@ async function botPlay(g,seat){
     // 的原则)。没有密钥这一支和改动前行为完全相同,是这次改动的回归基线。
     if(options.length && options[0].value>25) chosen = options[0];
     else chosen = 'pass';
+  }
+
+  // 【第三阶段新增】chosen 需要目标、且有AI密钥时,针对这一张已经确定要打出的牌单独
+  // 问一次AI该指定谁为目标——这是"决定出什么牌"之后紧接着的第二个、独立的AI决策,不是
+  // 提前塞进上面的枚举阶段。mySeat 此刻已经在上面枚举阶段的 finally 里还给真人了,这里
+  // 完全没有再碰 mySeat——buildBotTargetCandidates/buildBotVisibleState/
+  // tryAiBotBestTarget 全部只读 g/seat 参数,不依赖也不修改 mySeat,这段AI等待期间
+  // mySeat 全程保持人类自己的座位。这不是"重新实现"第二阶段那套mySeat窗口处理方式,
+  // 是天然沿用——这段新代码从头到尾没有任何一行触碰 mySeat,自然不会重新踩那个坑。
+  // AI选中的目标为 null(没有密钥/AI失败/索引越权)时,chosen.target 保留 botBestTarget
+  // 在枚举阶段已经算好的本地默认目标,不需要额外的回退计算。
+  if(aiReady && chosen!=='pass' && CARD_PLAYS[chosen.action] && CARD_PLAYS[chosen.action].target){
+    const me = g.players[seat];
+    const card = me.hand[chosen.idx];
+    const aiTarget = await tryAiBotBestTarget(g, seat, card, chosen.action);
+    if(aiTarget!==null) chosen.target = aiTarget;
   }
 
   // 真正执行决策的这一刻,再借用一次 mySeat——botInvoke 本身就是"借用→同步执行→立刻
@@ -533,10 +630,12 @@ function botSafePrompt(g,seat){
   return false;
 }
 // 【async 的唯一理由】这个函数的绝大多数分支(respond/aoeResp/duel/dying/…30+个)全部
-// 保持同步不变——只有 g.phase==='play' 这一条分支需要 await botPlay(g,seat)(botPlay
-// 内部可能因为AI调用而异步等待,见上面 tryAiBotPlay 的注释)。async function 包裹一段
-// 同步代码不影响其行为(相当于自动包一层 resolved promise),所以其它分支原样照抄、
-// 零改动。
+// 保持同步不变——只有 g.phase==='play' 这一条分支需要 await botPlay(g,seat)。botPlay
+// 内部可能因为AI调用而异步等待,且可能连续等待两次(先问"出什么牌",牌需要目标时再问
+// "打给谁",见 tryAiBotPlay/tryAiBotBestTarget 的注释)——这两次AI调用都完整嵌套在这
+// 一次 await botPlay(g,seat) 里,不需要在这里(runBotDecision)单独再 await 一次
+// botBestTarget,那不是它现在的调用形状。async function 包裹一段同步代码不影响其行为
+// (相当于自动包一层 resolved promise),所以其它分支原样照抄、零改动。
 async function runBotDecision(g,seat){
   const p=g.players[seat];
   if(!p||!p.isBot||!p.alive&&g.phase!=='pickingGeneral') return;
