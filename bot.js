@@ -119,9 +119,42 @@ function botStateKey(g,seat){
 // try/finally 保证不管走哪条路径(成功/AI失败回退本地/抛异常)最终都会被清空,不会永久
 // 卡住机器人。
 let botDecisionInFlight=false;
+// botMissedSchedule:修复"botDecisionInFlight期间的调度请求被静默丢弃、永久卡死"这个
+// 真实bug(真实dump复现过:郭嘉的guicai决策AI调用还没resolve期间,另一次无懈可击链式
+// 询问轮到郭嘉,scheduleBotTurn 在124行直接return丢弃这次请求,不记录、不重试;
+// botDecisionInFlight清零后没有任何机制补上这次机会,除非之后又有别的无关事件恰好
+// 触发一次render(g),否则游戏永久卡死——这不是guicai特有的,用botPlay同样能复现,是
+// Phase2引入botDecisionInFlight时就存在的架构缺口,只是Phase4新增的三个"由其它玩家
+// 操作触发、可能命中旁观机器人"的决策点显著放大了真实触发概率)。
+// 只在"因为botDecisionInFlight为true而被丢弃、且这次被丢的状态和当前正在进行中的那个
+// 决策不是同一份"这种情况下才置真——!g/非机器人控制端/游戏结束/没有座位需要行动/同一个
+// key已经在debounce队列里 这几种情况都是"本来就没事可做"或"已经有等价请求在排队",不是
+// "漏掉了一次本该处理的机会",不应该触发重查。"和当前决策是不是同一份状态"这条判断是
+// 必需的,不是可选的精细化——第一版实现漏了这一层,导致既有回归测试(test_bot_ai_playbook.js
+// "端到端:选牌+选目标两次AI等待期间"那条)变红:那条测试专门验证"AI调用还没回应期间,
+// 重复触发scheduleBotTurn(状态完全没变)不应该产生额外callAI调用",这本身是完全合理的
+// 既有场景(Firebase的重复回声/无实质变化的重渲染,真实场景里会发生)——如果不加这层
+// 区分,清零后的补查会把这类"重复的、状态没变的丢弃"也当成"漏掉的机会"重新处理一遍,
+// 对同一份已经处理完的状态再决策一次,产生多余的AI调用甚至重复的动作提交。
+// botScheduledKey 正是"当前正在进行中的这个决策对应的key"——从这个决策被 setTimeout
+// 调度那一刻起,到它真正resolve、finally里清零botDecisionInFlight之前,不会被别的调用
+// 覆盖(scheduleBotTurn只有在botDecisionInFlight为false时才会走到重新赋值这一行),
+// 天然可以拿来判断"这次被丢的请求,和正在进行中的是不是同一回事"。
+// scheduleBotTurn 本身是"读当前g、判断该轮到谁"的无状态判断,清零后不需要记住"当时具体
+// 丢的是哪次请求",只需要知道"该拿最新状态再检查一次"——用 currentG(render(g) 函数体
+// 第一行就会更新,早于调用 scheduleBotTurn,所以清零这一刻读到的必然是最新真相)重新调用
+// scheduleBotTurn 自己即可自愈,不需要为多次丢弃分别记录/重放。
+let botMissedSchedule=false;
 function scheduleBotTurn(g){
   if(!g || !isBotController(g) || g.phase==='over') return;
-  if(botDecisionInFlight) return;
+  if(botDecisionInFlight){
+    const droppedSeat=botSeatForState(g);
+    if(droppedSeat>=0 || botFallbackSeats(g).length){
+      const droppedKey=botStateKey(g,droppedSeat);
+      if(droppedKey!==botScheduledKey) botMissedSchedule=true;
+    }
+    return;
+  }
   const seat=botSeatForState(g);
   // seat<0 有两种情况:该行动的是真人(不该我们插手),或这个阶段 runBotDecision 没覆盖
   // (需要走兜底逐个试)。只有后者才继续排程。
@@ -142,6 +175,20 @@ function scheduleBotTurn(g){
       else runBotFallbackProbe(latest);
     } finally {
       botDecisionInFlight=false;
+      // 补检查:期间有调度请求被丢弃过,现在标志位已清零,用最新的 currentG 重新跑一遍
+      // scheduleBotTurn 自己——它会自己判断"当前到底该谁行动",不需要外部传入具体信息。
+      // 这一步是同步调用(不用 setTimeout(fn,0) 延迟):scheduleBotTurn 本身极轻(只做
+      // 字段比较+最多设置一个定时器),真正的重活(runBotDecision)永远要再等一次
+      // 650~1150ms 的debounce才会执行,不存在"同步递归导致调用栈爆炸"或"抢占式执行"的
+      // 风险;currentG 在这一刻必然是最新的(render(g)把 currentG=g 放在函数体第一行,
+      // 早于调用 scheduleBotTurn,不存在"还没更新完"的竞态)。用 try/catch 包一层,和
+      // render.js 里"渲染与机器人调度双向隔离"的既有写法同一原则,避免这次补查自身出
+      // 意外时把外层 finally 搞崩。
+      if(botMissedSchedule){
+        botMissedSchedule=false;
+        try{ scheduleBotTurn(typeof currentG!=='undefined'?currentG:null); }
+        catch(e){ console.warn('bot missed-schedule recheck',e); }
+      }
     }
   },650+Math.floor(Math.random()*500));
 }
