@@ -106,8 +106,22 @@ function botStateKey(g,seat){
     p.hp,(p.hand||[]).length,(g.log||[]).length
   ].join(':');
 }
+// botDecisionInFlight:AI机器人接入第二阶段新增的并发保护——botPlay 改成 async 之后,
+// "AI思考"这段等待(最长约15秒,见 tryAiBotPlay 顶部注释)期间,任何触发 render(g) 的
+// 事件(比如别的玩家的操作、甚至只是网络重连推送)都会经过 render.js 里
+// scheduleBotTurn(g) 这唯一的调用点重新跑一遍;而这段等待期间服务端状态其实完全没变
+// (我们在等的是"自己"的决策结果,不是别人的行动),botStateKey 算出来的 key 会和上一次
+// 一模一样,原有的"botTimer && botScheduledKey===key 就不重复排程"这条防重复守卫只挡得住
+// "定时器还没触发"这一段,挡不住"定时器已经触发、决策还在异步进行中"这一段(触发那一刻
+// botTimer 已经清空成 null)——不加这个标志位,会在同一个决策点上并发跑出两次
+// runBotDecision,对 botPlay 而言就是两次并发的AI调用/两次 playCard,是这次改成 async
+// 之后必须补的正确性保护,不是可选的优化。只在"确实有一个决策正在进行"时才为真,
+// try/finally 保证不管走哪条路径(成功/AI失败回退本地/抛异常)最终都会被清空,不会永久
+// 卡住机器人。
+let botDecisionInFlight=false;
 function scheduleBotTurn(g){
   if(!g || !isBotController(g) || g.phase==='over') return;
+  if(botDecisionInFlight) return;
   const seat=botSeatForState(g);
   // seat<0 有两种情况:该行动的是真人(不该我们插手),或这个阶段 runBotDecision 没覆盖
   // (需要走兜底逐个试)。只有后者才继续排程。
@@ -116,14 +130,19 @@ function scheduleBotTurn(g){
   if(botTimer && botScheduledKey===key) return;
   if(botTimer) clearTimeout(botTimer);
   botScheduledKey=key;
-  botTimer=setTimeout(()=>{
+  botTimer=setTimeout(async ()=>{
     botTimer=null;
     const latest=(typeof currentG!=='undefined')?currentG:null;
     if(!latest || !isBotController(latest)) return;
     const nowSeat=botSeatForState(latest);
     if(botStateKey(latest,nowSeat)!==key) return;
-    if(nowSeat>=0) runBotDecision(latest,nowSeat);
-    else runBotFallbackProbe(latest);
+    botDecisionInFlight=true;
+    try{
+      if(nowSeat>=0) await runBotDecision(latest,nowSeat);
+      else runBotFallbackProbe(latest);
+    } finally {
+      botDecisionInFlight=false;
+    }
   },650+Math.floor(Math.random()*500));
 }
 function botInvoke(seat,fn){
@@ -223,14 +242,182 @@ function botCardPriority(name){
   if(name==='酒') return 40;
   return 20;
 }
-function botPlay(g,seat){
+
+// ================= AI机器人接入第二阶段:仅接入 botPlay 这一个决策点 =================
+// 【范围声明】只有 botPlay(出什么牌)这一个决策点接入AI,botBestTarget(选目标)本次
+// 不动,留给第三阶段——先在一个决策点上验证完整链路(AI调用→合法性校验→超时/失败
+// 兜底→回退本地逻辑)稳固可靠,再扩展到下一个。ai-bot.js 的 callAI/PROVIDER_ADAPTERS
+// 等基础设施本阶段确认不需要改动,直接复用第一阶段已完成的成果。
+
+// showAiThinkingIndicator/hideAiThinkingIndicator:index.html 里新增的 #aiThinkingIndicator
+// 是一个独立于 #controls/#banner 的常驻占位元素(挂在 .panel.table 内,#banner 之后、
+// #controls 之前),不会被 renderControls() 每次调用时的 c.innerHTML='' 清空覆盖——
+// AI 调用发生在客户端本地的一次异步等待期间,不是由某次 render(g) 触发,不能指望常规
+// 渲染周期去托管这个提示的显隐,只能在调用前后手动切换。只有 isBotController(g) 为真
+// 的这一个客户端会真正执行到 botPlay/tryAiBotPlay(scheduleBotTurn 的既有门槛已经保证
+// 了这一点,不需要额外判断),所以"仅在机器人控制者这一端显示"是这套调度结构天然带来的
+// 效果,不用专门加判断。纯提示、不拦截点击(CSS pointer-events:none,和 .my-turn-banner
+// 同一约定),不会挡住玩家同时进行的其它操作。
+function showAiThinkingIndicator(g, seat){
+  const el = document.getElementById('aiThinkingIndicator');
+  if(!el) return;
+  const name = (g.players[seat] && g.players[seat].name) || ('机器人'+(seat+1));
+  el.textContent = '🤖 '+name+' 正在思考…';
+  el.classList.remove('hidden');
+}
+function hideAiThinkingIndicator(){
+  const el = document.getElementById('aiThinkingIndicator');
+  if(el) el.classList.add('hidden');
+}
+
+// botCardBrief/botPublicEquipsView/botPublicDelaysView/buildBotVisibleState:
+// 【隐藏信息保护,务必遵守】给 AI 的 game state 必须是"这个机器人视角下真实合法可见的信息"
+// 投影——是从头只塞进这个座位真实能看到的字段,不是先把整个 g 塞给AI事后再过滤(那种
+// 写法容易在新增字段时漏过滤,这里从设计上就不给 AI 任何超出范围的原始对象引用)。
+// 装备区(equips)和判定区(delays)在这个项目里本来就是公开信息(见 CLAUDE.md「装备
+// 系统」「延时锦囊」两节的既有规则),对所有玩家一视同仁完整展示;身份复用既有的
+// botKnownRole(和 UI 渲染座位卡身份标识用的 canSeeRole 同一套规则:自己、主公、
+// 已翻开的角色才可见,其余一律 null),不新发明一套可见性判断。不该出现的东西——
+// 其他角色的真实手牌内容(只给张数 handCount,不给 name/suit/rank)、未翻开角色的
+// 真实身份(botKnownRole 返回 null 就是 null,不回退成"猜测值")——从这个函数的结构上
+// 就不可能被塞进去,不是靠事后删字段做到的。
+function botCardBrief(c){ return c ? { name:c.name, suit:c.suit, rank:c.rank } : null; }
+function botPublicEquipsView(p){
+  const out={};
+  (typeof EQUIP_SLOTS!=='undefined' ? EQUIP_SLOTS : []).forEach(slot=>{
+    const c = p.equips && p.equips[slot];
+    out[slot] = c ? c.name : null;
+  });
+  return out;
+}
+function botPublicDelaysView(p){ return (p.delays||[]).map(c=>c.name); }
+function buildBotVisibleState(g, seat){
+  const me = g.players[seat];
+  return {
+    seat,
+    gameMode: g.gameMode || 'ffa',
+    round: g.roundNum || 1,
+    // 自己的手牌/身份完全可见——这是这个座位本来就该看到的东西,不是特权。
+    myRole: me.role || null,
+    myHp: me.hp, myMaxHp: me.maxHp,
+    myHand: (me.hand||[]).map(botCardBrief),
+    myEquips: botPublicEquipsView(me),
+    myDelays: botPublicDelaysView(me),
+    players: (g.players||[]).map((p,i)=>{
+      if(!p) return null;
+      return {
+        seat: i, name: p.name, isSelf: i===seat, alive: p.alive,
+        hp: p.hp, maxHp: p.maxHp,
+        handCount: (p.hand||[]).length, // 只给张数,不给内容
+        equips: botPublicEquipsView(p), delays: botPublicDelaysView(p),
+        knownRole: botKnownRole(g, seat, i), // 复用既有的安全揭示逻辑,不知道就是 null
+        general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
+      };
+    }),
+  };
+}
+
+// buildBotPlayCandidates:AI能选的候选动作列表,直接由已经跑过 CARD_PLAYS 真实
+// canPlay/canTarget 校验的 options 数组(botPlay 里现有的合法性枚举逻辑,完全不变)
+// 转成给AI看的可读描述,index 和 options 数组下标一一对应;最后追加一项固定的
+// "结束出牌阶段"(index===options.length)。AI 只能从这份列表里选一个 index,这就是
+// 硬性合法性校验的入口——列表之外根本不存在其它选项可选。
+function botPlayCandidateEntry(g, opt, index){
+  const targetInfo = (opt.target!=null && g.players[opt.target])
+    ? { seat: opt.target, name: g.players[opt.target].name }
+    : null;
+  return { index, action: opt.action, target: targetInfo, localHeuristicScore: Math.round(opt.value) };
+}
+function buildBotPlayCandidates(g, options){
+  const list = options.map((o,i)=>botPlayCandidateEntry(g, o, i));
+  list.push({ index: options.length, action: '结束出牌阶段', target: null, localHeuristicScore: null });
+  return list;
+}
+
+const BOT_PLAY_SYSTEM_PROMPT =
+  '你在扮演一款网页版三国杀里的AI机器人玩家,当前轮到你的出牌阶段。你会收到:'
+  +'①你视角下真实合法可见的局面(自己的手牌与身份完全可见;其他角色只有公开信息——'
+  +'血量、装备、判定区、已知身份,手牌只知道张数、不知道具体是什么牌);'
+  +'②一份已经按游戏规则筛选好的合法候选动作列表(localHeuristicScore是一个简单的'
+  +'启发式参考分,仅供参考、不代表最优解),列表最后一项固定是"结束出牌阶段"。'
+  +'你的任务只有一件事:从候选列表里选出一个index,代表这次要执行的动作——'
+  +'不能选择列表之外的动作,不能凭空发明新选项,不需要也不能指定目标(目标已经在候选'
+  +'列表里算好了)。请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},'
+  +'不要输出任何解释文字、代码块标记或多余字段。';
+
+function buildBotPlayUserPrompt(state, candidates){
+  return '当前局面:\n'+JSON.stringify(state)
+    +'\n\n合法候选动作列表(index从0开始):\n'+JSON.stringify(candidates)
+    +'\n\n只返回 {"choice": 数字} 这一个JSON对象。';
+}
+
+// parseBotPlayAiChoice:从AI原始回复文本里尽量宽容地抠出 {"choice":N}——直接
+// JSON.parse失败时,再剥掉常见的```/```json代码块包裹重试一次(小模型经常无视"不要
+// 代码块"的指示);两次都失败,或者解析出来的 choice 不是合法整数,一律返回 null——
+// 不细分"到底是格式错误还是数值不对",按第一阶段方案确认的原则,parse失败和索引越权
+// 都统一交给调用方走同一条"回退本地逻辑"的路径,不单独区分。
+function parseBotPlayAiChoice(text){
+  if(typeof text!=='string') return null;
+  const tryParse=(s)=>{
+    try{
+      const obj=JSON.parse(s.trim());
+      if(obj && typeof obj.choice==='number' && Number.isInteger(obj.choice)) return obj.choice;
+    }catch(e){}
+    return null;
+  };
+  let r=tryParse(text);
+  if(r!==null) return r;
+  const stripped=text.replace(/```(?:json)?/gi,'').trim();
+  if(stripped!==text) r=tryParse(stripped);
+  return r;
+}
+
+// tryAiBotPlay:唯一的AI决策入口,返回 options 数组里的一项、或字符串 'pass'(选中了
+// "结束出牌阶段"那个候选)、或 null(没有密钥/AI没有正确响应/索引不合法——这几种情况
+// 一视同仁,统一交给 botPlay 落回本地启发式,不重试、不阻塞游戏)。
+//
+// 【超时上限,已确认的取舍】8~10秒的超时上限要求,直接复用 ai-bot.js 的 callAI 自带的
+// AbortController 超时机制(目前是 AI_CALL_TIMEOUT_MS=15000),这里不额外包一层
+// Promise.race 或 setTimeout——那是"重新发明"一套并行的超时逻辑,和"直接复用、不要
+// 重新发明"这条要求矛盾。而这次任务的收尾范围明确写了"ai-bot.js的callAI等基础设施
+// 本阶段不需要改动",两条要求字面上有一点冲突(15秒略宽于"8~10秒"),这里选择遵守
+// "不改ai-bot.js"这条更明确的收尾约束、如实记录这个取舍,而不是为了凑那个数字回头
+// 改动本阶段确认不动的文件。
+async function tryAiBotPlay(g, seat, options){
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
+  const candidates = buildBotPlayCandidates(g, options);
+  const state = buildBotVisibleState(g, seat);
+  showAiThinkingIndicator(g, seat);
+  let result;
+  try{
+    result = await callAI(aiProvider, aiApiKey, {
+      systemPrompt: BOT_PLAY_SYSTEM_PROMPT,
+      userPrompt: buildBotPlayUserPrompt(state, candidates),
+      maxTokens: 200,
+    });
+  }catch(e){
+    // callAI 本身设计上从不 reject(网络/超时/解析错误都被归类进 {ok:false,...} 这个
+    // resolve 值),这里只是防御性兜底,理论上不会走到。
+    result = { ok:false, reason:'other', detail:String(e) };
+  }finally{
+    hideAiThinkingIndicator();
+  }
+  if(!result || !result.ok) return null;
+  const idx = parseBotPlayAiChoice(result.text);
+  if(idx===null || idx<0 || idx>=candidates.length) return null;
+  if(idx===options.length) return 'pass';
+  return options[idx];
+}
+
+async function botPlay(g,seat){
   // CARD_PLAYS 的合法性函数沿用旧架构，会读取全局 mySeat；评估阶段也必须切到机器人
   // 视角，不能只在最后真正提交动作时才切。
   const humanSeat=mySeat;
   mySeat=seat;
+  let options;
   try{
     const me=g.players[seat];
-    const options=[];
+    options=[];
     (me.hand||[]).forEach((card,idx)=>{
       const action=botActionId(card),spec=CARD_PLAYS[action];
       if(!spec||action==='借刀杀人'||action==='铁索连环'||action==='闪电') return;
@@ -248,13 +435,35 @@ function botPlay(g,seat){
       options.push({idx,action,target,value});
     });
     options.sort((a,b)=>b.value-a.value);
-    if(options.length&&options[0].value>25){
-      const o=options[0];
-      botInvoke(seat,()=>playCard(o.idx,o.action,o.target));
-    } else botInvoke(seat,endPlay);
   } finally {
+    // 【正确性要点,不是可选优化】枚举阶段(需要 mySeat=seat 供 CARD_PLAYS 的
+    // canPlay/canTarget 读取)到此结束就立刻交还 mySeat,不能跨越接下来可能出现的
+    // AI 网络等待(最长约15秒,见 tryAiBotPlay 顶部注释)——mySeat 是全局的、瞬时的
+    // "当前视角",如果在 await 期间继续占着它,这段等待期间真人一切读取 mySeat 的
+    // 操作(渲染/点击)都会被误判成机器人自己的座位。这是把 botPlay 从同步改成 async
+    // 之后必须处理的正确性问题:改动前 mySeat 的借用窗口和整个函数体一样短(纯同步、
+    // 微秒级);改动后如果不提前归还,借用窗口会被 AI 等待拉长到最多15秒,足以让真人
+    // 在这段时间内的任何交互读到错误的座位号。
     mySeat=humanSeat;
   }
+
+  let chosen=null;
+  if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
+    chosen = await tryAiBotPlay(g, seat, options);
+  }
+  if(chosen===null){
+    // 与改动前逐字一致的本地启发式——没有密钥、AI没有正确响应(网络/超时/解析失败/
+    // 索引越权)全部落到这里,是同一条兜底路径,不单独区分失败原因(第一阶段方案确认
+    // 的原则)。没有密钥这一支和改动前行为完全相同,是这次改动的回归基线。
+    if(options.length && options[0].value>25) chosen = options[0];
+    else chosen = 'pass';
+  }
+
+  // 真正执行决策的这一刻,再借用一次 mySeat——botInvoke 本身就是"借用→同步执行→立刻
+  // 归还"这套既有写法(见文件前面 botInvoke 的定义),不会跨越任何 await,和改动前的
+  // 借用窗口性质完全相同。
+  if(chosen==='pass') botInvoke(seat, endPlay);
+  else botInvoke(seat, ()=>playCard(chosen.idx, chosen.action, chosen.target));
 }
 // 机器人"此刻能不能打出【杀】"的统一判断。手里有没有杀是一回事,规则允不允许是另一回事 ——
 // 曹彰【将驰】选项1 期间服务端 respondJiedao/duelResponse/aoeRespond 都会一上来就
@@ -323,7 +532,12 @@ function botSafePrompt(g,seat){
   }
   return false;
 }
-function runBotDecision(g,seat){
+// 【async 的唯一理由】这个函数的绝大多数分支(respond/aoeResp/duel/dying/…30+个)全部
+// 保持同步不变——只有 g.phase==='play' 这一条分支需要 await botPlay(g,seat)(botPlay
+// 内部可能因为AI调用而异步等待,见上面 tryAiBotPlay 的注释)。async function 包裹一段
+// 同步代码不影响其行为(相当于自动包一层 resolved promise),所以其它分支原样照抄、
+// 零改动。
+async function runBotDecision(g,seat){
   const p=g.players[seat];
   if(!p||!p.isBot||!p.alive&&g.phase!=='pickingGeneral') return;
   const d=g.pending||{};
@@ -344,7 +558,7 @@ function runBotDecision(g,seat){
     botInvoke(seat,()=>respondXunxun(all.slice(0,take),all.slice(take))); return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
-  if(g.phase==='play'&&g.turn===seat){ botPlay(g,seat); return; }
+  if(g.phase==='play'&&g.turn===seat){ await botPlay(g,seat); return; }
   if(g.phase==='discard'&&g.turn===seat){
     const need=Math.max(0,(p.hand||[]).length-p.hp);
     if(need>0) botInvoke(seat,()=>discardCards([...Array(need).keys()].map(i=>p.hand.length-1-i)));

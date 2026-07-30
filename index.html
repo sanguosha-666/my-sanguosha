@@ -704,6 +704,18 @@
     background:rgba(177,54,30,.16);border:1px solid var(--cinnabar);border-radius:10px;
     padding:10px 12px;margin:4px 0 0;font-size:14px;
   }
+  /* AI机器人接入第二阶段:"🤖 AI思考中…"提示——只在等待callAI网络响应期间短暂出现,
+     由 bot.js 的 showAiThinkingIndicator/hideAiThinkingIndicator 手动切换(不经过
+     render(g),AI等待期间不发生任何游戏状态变化,常规渲染周期没有机会托管它的显隐)。
+     不设 flex-basis:100%——#banner(紧挨在它前面)自己已经占满一整行,浏览器天然会把
+     这个元素挤到下一行开头,不需要它自己也强制整行,这样它只占内容本身需要的宽度,
+     不会在没有.banner内容时留下一整条空行。pointer-events:none,和 .my-turn-banner
+     同一约定,纯提示、不拦截下方 #controls 里任何按钮的点击。 */
+  #aiThinkingIndicator{
+    display:inline-block;margin:4px 0 0;padding:5px 12px;font-size:13px;
+    color:var(--gold);background:rgba(176,141,79,.1);border:1px solid var(--gold);
+    border-radius:999px;pointer-events:none;
+  }
   .controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;flex-basis:100%;margin-top:2px;}
   /* 左慈【化身】选技能环节(renderHuashenTwoStepPick):每个候选武将的按钮配一段完整
      desc说明。.huashen-candidate 是"按钮+说明"的小容器,自己走 flex-direction:column
@@ -1652,6 +1664,7 @@
       <div class="phase-pill" id="phasePill">等待开始</div>
       <div class="deckinfo" id="deckInfo"></div>
       <div id="banner"></div>
+      <div id="aiThinkingIndicator" class="hidden"></div>
       <div class="controls" id="controls"></div>
     </div>
     <!-- log-panel 挪到 .panel.table 外面(不再是它的flex子项)——桌面布局(第4步)要把它放进
@@ -1680,18 +1693,18 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=235"></script>
-<script src="data.js?v=235"></script>
-<script src="room-lifecycle.js?v=235"></script>
-<script src="game.js?v=235"></script>
-<script src="weapons.js?v=235"></script>
-<script src="skills.js?v=235"></script>
-<script src="bot.js?v=235"></script>
-<script src="ai-bot.js?v=235"></script>
-<script src="render.js?v=235"></script>
-<script src="render-table.js?v=235"></script>
-<script src="render-hand.js?v=235"></script>
-<script src="render-controls.js?v=235"></script>
-<script src="render-log.js?v=235"></script>
+<script src="config.js?v=236"></script>
+<script src="data.js?v=236"></script>
+<script src="room-lifecycle.js?v=236"></script>
+<script src="game.js?v=236"></script>
+<script src="weapons.js?v=236"></script>
+<script src="skills.js?v=236"></script>
+<script src="bot.js?v=236"></script>
+<script src="ai-bot.js?v=236"></script>
+<script src="render.js?v=236"></script>
+<script src="render-table.js?v=236"></script>
+<script src="render-hand.js?v=236"></script>
+<script src="render-controls.js?v=236"></script>
+<script src="render-log.js?v=236"></script>
 </body>
 </html>
