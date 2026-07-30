@@ -1078,6 +1078,22 @@
   .confirm-panel .confirm-msg{font-size:17px;line-height:1.6;margin-bottom:16px;text-align:center;}
   .confirm-panel .confirm-btns{display:flex;gap:10px;justify-content:center;}
 
+  /* AI机器人密钥询问弹窗(ai-bot.js 的 showAiKeyModal):和 #confirmModal 同一套
+     "fixed 遮罩 + 圆角卡片"结构,但内容是一段带输入框/下拉框的表单,不是"一段文字+
+     确定/取消"这个 showConfirm 已经固定复用的形状,所以独立一个 modal id、独立一份
+     内部渲染函数(和 confirmOwnOrSha 复用 #confirmModal 容器、但不复用 showConfirm
+     函数是同一个取舍)。label/input/button.ghost/button.primary 复用文件顶部已有的
+     通用表单/按钮样式(未加 .wrap 限定的全局元素选择器,弹窗虽然是 #wrap 外的 fixed
+     浮层,一样能命中),这里只需要定位容器和几个专属细节的间距。 */
+  #aiKeyModal{position:fixed;inset:0;z-index:112;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.62);padding:16px;}
+  #aiKeyModal.hidden{display:none;}
+  .ai-key-panel{background:#221a14;border:1px solid var(--gold);border-radius:12px;max-width:440px;width:100%;
+    padding:22px 24px;color:var(--paper);box-shadow:0 12px 40px rgba(0,0,0,.5);}
+  .ai-key-panel h3{color:var(--gold);margin:0 0 14px;font-size:19px;}
+  .ai-key-panel .ai-key-status{margin-top:8px;font-size:13px;color:var(--paper-dim);min-height:18px;}
+  .ai-key-panel .ai-key-warn{margin-top:12px;font-size:12px;color:var(--paper-dim);line-height:1.55;}
+  .ai-key-panel .ai-key-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;}
+
   /* ===== 强制横屏软引导——骨架级重建阶段3 =====
      CSS/浏览器原生的屏幕方向锁定 API(Screen Orientation Lock)支持非常有限(尤其 iOS
      Safari 完全不支持,只有部分 Android 浏览器在"已安装为全屏 PWA"时才生效),这个项目
@@ -1578,6 +1594,7 @@
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
+<div id="aiKeyModal" class="hidden"></div>
 <!-- 强制横屏软引导(骨架级重建阶段3):显隐逻辑纯 JS(render.js 的 checkLandscapeGate),
      这里只是静态结构,不含内联脚本。 -->
 <div id="landscapeGate" class="landscape-gate hidden">
@@ -1663,18 +1680,18 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=234"></script>
-<script src="data.js?v=234"></script>
-<script src="room-lifecycle.js?v=234"></script>
-<script src="game.js?v=234"></script>
-<script src="weapons.js?v=234"></script>
-<script src="skills.js?v=234"></script>
-<script src="bot.js?v=234"></script>
-<script src="ai-bot.js?v=234"></script>
-<script src="render.js?v=234"></script>
-<script src="render-table.js?v=234"></script>
-<script src="render-hand.js?v=234"></script>
-<script src="render-controls.js?v=234"></script>
-<script src="render-log.js?v=234"></script>
+<script src="config.js?v=235"></script>
+<script src="data.js?v=235"></script>
+<script src="room-lifecycle.js?v=235"></script>
+<script src="game.js?v=235"></script>
+<script src="weapons.js?v=235"></script>
+<script src="skills.js?v=235"></script>
+<script src="bot.js?v=235"></script>
+<script src="ai-bot.js?v=235"></script>
+<script src="render.js?v=235"></script>
+<script src="render-table.js?v=235"></script>
+<script src="render-hand.js?v=235"></script>
+<script src="render-controls.js?v=235"></script>
+<script src="render-log.js?v=235"></script>
 </body>
 </html>

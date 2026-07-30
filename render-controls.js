@@ -1688,16 +1688,21 @@ function renderControls(g){
     if(mySeat===0){
       const add=document.createElement('button');
       add.className='ghost'; add.textContent='添加机器人（当前 '+botCnt+'）';
-      add.disabled=cnt>=SEATS; add.onclick=addBot; c.appendChild(add);
+      // handleAddBotClick(ai-bot.js)包装了 addBot——第一次点击(这个会话内还没设置
+      // 过密钥、也没点过跳过)会先弹出 AI 密钥询问弹窗,回应(填密钥或跳过)后再真正
+      // 调用 addBot();已经回应过一次之后,后续点击直接 addBot(),不再重复打断。
+      add.disabled=cnt>=SEATS; add.onclick=handleAddBotClick; c.appendChild(add);
       if(botCnt>0){
         const remove=document.createElement('button');
         remove.className='ghost'; remove.textContent='移除机器人';
         remove.onclick=removeBot; c.appendChild(remove);
       }
-      // AI机器人密钥输入面板(ai-bot.js)——和上面添加/移除机器人按钮同一个身份边界
-      // (mySeat===0,持有密钥的只有触发 addBot() 的这个人),留空则机器人保持现有的
-      // 本地规则行为,不接入任何游戏逻辑(见 ai-bot.js 文件头部范围声明)。
-      renderAiKeyPanel(c);
+      // AI机器人设置入口(ai-bot.js)——和上面添加/移除机器人按钮同一个身份边界
+      // (mySeat===0,持有密钥的只有触发 addBot() 的这个人),常驻小按钮,随时可点开
+      // 密钥弹窗查看/修改当前配置,不受"这个会话是否已经回应过密钥询问"影响。留空
+      // 则机器人保持现有的本地规则行为,不接入任何游戏逻辑(见 ai-bot.js 文件头部
+      // 范围声明)。
+      renderAiStatusButton(c);
     }
     // 1) 对战模式:乱斗 / 主公局
     const mkModeBtn=(label, mode)=>{
