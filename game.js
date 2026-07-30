@@ -1937,6 +1937,28 @@ function finishGuicai(g, finalCard){
     finishGanglieJudge(g, finalCard, resume.seat, resume.sourceSeat, resume.resume);
     return;
   }
+  // 张角【雷击】判定:此前完全没有这个分支,会落到下面给其它 kind 兜底用的通用
+  // finishBaguaColor 处理(把雷击判定错误地当成八卦阵判定),且 resume.type 对雷击而言
+  // 恒为 undefined、两个 if/else if 分支都不成立,雷击链路(尤其从南蛮/万箭响应里触发、
+  // g.leijiResume 记着续接队列信息的场景)会被静默卡死。和 finishGuidu 的 leijiJudge
+  // 分支(处理鬼道改判雷击判定的同一场景)完全对齐——写法逐字照抄那一处,统一走
+  // finishLeijiChain 收尾,不落到下面的通用兜底。这是在实现 guicai(鬼才)AI接入、为了
+  // 覆盖"雷击判定被鬼才改判"这个场景做端到端测试时发现的既有 bug,和这批 AI 接入本身
+  // 无关,顺手一并修好(finishGuidu 那边已经修过,这里只是把 finishGuicai 补齐到同等
+  // 完整深度)。
+  if(resume.kind==='leijiJudge'){
+    const { sourceSeat, targetSeat } = resume;
+    const target=g.players[targetSeat];
+    if(finalCard.suit==='♠'){
+      const dying=dealDamage(g, targetSeat, 2, sourceSeat, g.players[sourceSeat].name+' 的【雷击】效果', 'leiji');
+      g.log=pushLog(g.log, target.name+' 被替换判定为'+finalCard.suit+rankText(finalCard.rank)+',受到2点雷电伤害');
+      if(dying) return;
+    } else {
+      g.log=pushLog(g.log, target.name+' 被替换判定为'+finalCard.suit+rankText(finalCard.rank)+',【雷击】无效');
+    }
+    finishLeijiChain(g);
+    return;
+  }
   // kind==='bagua'
   const red = finishBaguaColor(g, judgedSeat, finalCard);
   if(resume.type==='sha'){

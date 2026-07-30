@@ -726,6 +726,192 @@ async function tryAiBotGanglieChoice(g, seat){
   return choice===1;
 }
 
+// ================= AI机器人接入第四阶段第二批:guicai(郭嘉【鬼才】要不要发动改判)
+// =================
+// 【范围声明】这批是第四阶段第二批的第二个,独立于 ganglieChoice 单独commit。覆盖面
+// 最广(8种判定类型,由 finishGuicai 的 resume.kind 分派表决定),需要专门设计一个能
+// 适配不同判定上下文的通用prompt结构,不是照抄guhuoQuestion/ganglieChoice就能直接用。
+//
+// 【mySeat 借用窗口,已实际核实、不是照抄前两批的结论就假设一定适用】读了
+// respondGuicai(game.js)的完整函数体:守卫是标准的调用者身份守卫
+// (g.pending.asking!==mySeat),函数体内部只用 g.players[mySeat] 取自己、操作自己的
+// 手牌,从头到尾没有第二处引用 mySeat,也不调用任何依赖全局 mySeat 的
+// CARD_PLAYS.canPlay/canTarget——和 guhuoQuestion/ganglieChoice 是完全相同的形状,
+// 结论同样是:不需要额外借用窗口,标准 botInvoke(seat,fn) 包装即可。
+//
+// 【隐藏信息】判定牌(judgeCard)本身在 judge() 里就已经写进公开日志("判定牌:红桃3"),
+// 是公开信息,不是需要对响应者隐藏的东西;响应者自己的手牌通过 buildBotVisibleState 里
+// 的 myHand 天然可见(这本来就是他自己的手牌)。这个决策不涉及需要隐藏的信息,但仍然
+// 构造专门的 buildBotGuicaiVisibleState,不直接把完整的 g/player 对象喂给AI。
+//
+// 【选牌维度:设计决定,不是"沿用现有本地逻辑"——因为本地逻辑此前压根没有选牌能力】
+// respondGuicai(useReplace,cardIdx) 允许用任意一张手牌替换判定牌,没有额外限制;而
+// 改动前的本地启发式是硬编码 respondGuicai(false)(永远不发动,从不需要选牌)。这意味着
+// "只做要不要发动、选牌沿用本地逻辑"这个方案没有本地逻辑可沿用——一旦AI决定要发动,
+// 必须由这次AI调用自己选出用哪张牌,不存在第二层可独立复用的既有默认值。采用的方案是
+// 把"要不要发动"和"发动的话用哪张牌"合并进同一次AI调用、同一个候选列表——完全复用
+// botPlay 已经验证过的"候选列表+index"模式(不是发明新的响应格式):
+// buildBotGuicaiCandidates 产出 index=0("不发动")+ 每张手牌各一项("打出这张牌替换")的
+// 列表,AI 选一个 index,解析仍然是现成的 parseBotPlayAiChoice({"choice":N}),不需要
+// 引入新的JSON字段。无密钥/AI失败/index不合法时的回退是 {replace:false}——和改动前
+// respondGuicai(false) 这个硬编码默认完全一致,是这次改动的回归基线。
+// 手牌为空的座位理论上不会被问到(firstGuicaiAsker/nextGuicaiAsker 已经要求候选人
+// (p.hand||[]).length>0 才算有资格),但 tryAiBotGuicai 仍防御性地在候选列表只有
+// "不发动"这一项时直接跳过AI调用、不浪费一次网络请求。
+function buildBotGuicaiCandidates(g, seat){
+  const me = g.players[seat];
+  const list = [{ index:0, action:'不发动【鬼才】', handIndex:null, card:null }];
+  (me.hand||[]).forEach((c,i)=>{
+    list.push({ index:list.length, action:'发动【鬼才】,打出这张牌替换判定牌', handIndex:i, card:botCardBrief(c) });
+  });
+  return list;
+}
+
+// guicaiOutcomeDescription:这批唯一需要新设计的部分——把"当前是哪种判定+判定结果对
+// 局势的具体影响"组织进prompt。按 resume.kind(及 delayJudge 下的 trickName)分派,
+// 每种判定类型各自描述"如果不替换,当前这张已经判定出来的牌具体会带来什么后果"(不是
+// 抽象讲规则,是结合真实的 judgeCard 花色/点数给出确定性的结论)——这样AI不需要自己
+// 从头理解八卦阵/闪电/铁骑/洛神/双雄/悲歌/刚烈/雷击这8种判定各自的规则,直接看这句
+// 结论就知道"保留 vs 替换"分别意味着什么。覆盖 finishGuicai 分派表里全部 resume.kind
+// (包括这次顺带补齐的 leijiJudge,见 game.js 的 finishGuicai 修复注释)。
+function guicaiOutcomeDescription(g, resume, judgeCard, judgedSeat){
+  const jp = g.players[judgedSeat];
+  const judgedName = (jp && jp.name) || '判定者';
+  const cardDesc = judgeCard.suit+rankText(judgeCard.rank);
+  const isRed = judgeCard.suit==='♥' || judgeCard.suit==='♦';
+  switch(resume.kind){
+    case 'bagua': {
+      if(resume.type==='sha'){
+        return isRed
+          ? judgedName+' 当前判定'+cardDesc+'(红色),若不替换将视为出闪抵消这张杀,'+judgedName+' 不受伤害。'
+          : judgedName+' 当前判定'+cardDesc+'(黑色),若不替换八卦阵判定失败,'+judgedName+' 仍需正常打出闪或受到伤害。';
+      }
+      return isRed
+        ? judgedName+' 当前判定'+cardDesc+'(红色),若不替换将抵消这次群体锦囊效果,'+judgedName+' 不受影响。'
+        : judgedName+' 当前判定'+cardDesc+'(黑色),若不替换八卦阵判定失败,'+judgedName+' 仍需正常应战。';
+    }
+    case 'delayJudge': {
+      if(resume.trickName==='闪电'){
+        const hit = judgeCard.suit==='♠' && judgeCard.rank>=2 && judgeCard.rank<=9;
+        return hit
+          ? judgedName+' 当前判定'+cardDesc+'(黑桃2~9),若不替换【闪电】生效,'+judgedName+' 将受到3点无来源伤害。'
+          : judgedName+' 当前判定'+cardDesc+',若不替换【闪电】判定失败,将传给下家,'+judgedName+' 本人不受影响。';
+      }
+      if(resume.trickName==='乐不思蜀'){
+        const hit = judgeCard.suit!=='♥';
+        return hit
+          ? judgedName+' 当前判定'+cardDesc+'(非红桃),若不替换【乐不思蜀】生效,'+judgedName+' 将跳过下一个出牌阶段。'
+          : judgedName+' 当前判定'+cardDesc+'(红桃),若不替换【乐不思蜀】判定失败,'+judgedName+' 不受影响。';
+      }
+      if(resume.trickName==='兵粮寸断'){
+        const hit = judgeCard.suit!=='♣';
+        return hit
+          ? judgedName+' 当前判定'+cardDesc+'(非梅花),若不替换【兵粮寸断】生效,'+judgedName+' 将跳过下一个摸牌阶段。'
+          : judgedName+' 当前判定'+cardDesc+'(梅花),若不替换【兵粮寸断】判定失败,'+judgedName+' 不受影响。';
+      }
+      return judgedName+' 当前判定'+cardDesc+'。';
+    }
+    case 'tieqiJudge': {
+      return isRed
+        ? '攻击者的【铁骑】当前判定'+cardDesc+'(红色),若不替换,这张杀将不可被闪抵消。'
+        : '攻击者的【铁骑】当前判定'+cardDesc+'(黑色),若不替换,判定无效,这张杀可以正常被闪抵消。';
+    }
+    case 'luoshenJudge': {
+      const isBlack = judgeCard.suit==='♠' || judgeCard.suit==='♣';
+      return isBlack
+        ? judgedName+' 的【洛神】当前判定'+cardDesc+'(黑色),若不替换,'+judgedName+' 将获得这张判定牌并可以选择继续判定。'
+        : judgedName+' 的【洛神】当前判定'+cardDesc+'(红色),若不替换,判定结束,'+judgedName+' 不获得这张牌。';
+    }
+    case 'shuangxiongJudge': {
+      return judgedName+' 的【双雄】当前判定'+cardDesc+'('+(isRed?'红色':'黑色')+'),若不替换,本回合 '+judgedName+' 可以将'+(isRed?'黑色':'红色')+'手牌当决斗使用。';
+    }
+    case 'beigeJudge': {
+      const isRedPeach = judgeCard.suit==='♥';
+      return isRedPeach
+        ? '蔡文姬的【悲歌】当前判定'+cardDesc+'(红桃),若不替换,伤害来源将回复1点体力。'
+        : '蔡文姬的【悲歌】当前判定'+cardDesc+'(非红桃),若不替换,伤害来源需要弃置2张手牌。';
+    }
+    case 'ganglieJudge': {
+      const isRedPeach = judgeCard.suit==='♥';
+      return isRedPeach
+        ? '夏侯惇的【刚烈】当前判定'+cardDesc+'(红桃),若不替换,无事发生。'
+        : '夏侯惇的【刚烈】当前判定'+cardDesc+'(非红桃),若不替换,伤害来源需要在弃两张手牌与受到1点伤害之间选择。';
+    }
+    case 'leijiJudge': {
+      const isSpade = judgeCard.suit==='♠';
+      return isSpade
+        ? '张角的【雷击】当前判定'+cardDesc+'(黑桃),若不替换,目标将受到2点雷电伤害。'
+        : '张角的【雷击】当前判定'+cardDesc+'(非黑桃),若不替换,【雷击】无效。';
+    }
+    default:
+      return judgedName+' 当前判定'+cardDesc+'。';
+  }
+}
+
+function buildBotGuicaiVisibleState(g, seat){
+  const d = g.pending;
+  const state = buildBotVisibleState(g, seat);
+  state.guicai = {
+    judgedSeat: d.seat,
+    judgedSeatIsSelf: d.seat===seat,
+    judgeCard: botCardBrief(d.judgeCard),
+    outcomeIfKept: guicaiOutcomeDescription(g, d.resume, d.judgeCard, d.seat),
+  };
+  return state;
+}
+
+// BOT_GUICAI_SYSTEM_PROMPT:不接身份局四阵营guidance(这批的核心是"这次改判对局势具体
+// 有什么影响"这个判定上下文本身,和guhuoQuestion/ganglieChoice同一原则先保持简单;
+// guicai天然更贴近阵营博弈——判定往往发生在别人身上,是否要干预确实可能和敌我关系有关——
+// 但任务范围没有要求接入,这里刻意不做,留作以后如果需要再单独评估的候选项,不是这次
+// 顺手写死的架构决定)。明确提醒"判定发生在别人身上时,你是第三方视角在决定要不要干预",
+// 这是调研阶段指出的、guicai和前两批本质不同的地方("响应者是被动的第三方,不是发起者")。
+function buildBotGuicaiSystemPrompt(){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。场上刚发生一次判定,你(拥有郭嘉'
+  +'【鬼才】技能)可以选择打出一张手牌替换这张判定牌,或者不发动、保留原判定结果。'
+  +'局面数据里的 guicai 字段会说明:这次判定是谁的(judgedSeat)、判定牌具体是什么'
+  +'(judgeCard)、如果保留不替换会发生什么(outcomeIfKept)。你需要判断:这个结果对'
+  +'局势是有利还是不利,值不值得牺牲一张手牌去改变它——判定发生在别的角色身上时'
+  +'(guicai.judgedSeatIsSelf为false),你是以第三方视角在决定要不要干预这次判定,'
+  +'不是替判定者本人做决定。合法候选列表里,每一项对应"不发动"或"打出某张具体手牌'
+  +'替换",请从候选列表里选出一个index,不能凭空发明选项。'
+  +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},不要输出任何解释文字、'
+  +'代码块标记或多余字段。';
+}
+function buildBotGuicaiUserPrompt(state, candidates){
+  return '当前局面:\n'+JSON.stringify(state)
+    +'\n\n合法候选动作列表(index从0开始,0是"不发动"):\n'+JSON.stringify(candidates)
+    +'\n\n只返回 {"choice": 数字} 这一个JSON对象。';
+}
+
+// tryAiBotGuicai:返回 {replace:布尔值, handIndex:数字或null}、或 null(没有密钥/AI没有
+// 正确响应/index不合法,统一交给调用方回退到 {replace:false}——和改动前respondGuicai(false)
+// 这个硬编码本地默认完全一致)。
+async function tryAiBotGuicai(g, seat){
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
+  const candidates = buildBotGuicaiCandidates(g, seat);
+  if(candidates.length<=1) return null; // 没有手牌可以替换,不浪费一次AI调用
+  const state = buildBotGuicaiVisibleState(g, seat);
+  showAiThinkingIndicator(g, seat);
+  let result;
+  try{
+    result = await callAI(aiProvider, aiApiKey, {
+      systemPrompt: buildBotGuicaiSystemPrompt(),
+      userPrompt: buildBotGuicaiUserPrompt(state, candidates),
+      maxTokens: 100,
+    });
+  }catch(e){
+    result = { ok:false, reason:'other', detail:String(e) };
+  }finally{
+    hideAiThinkingIndicator();
+  }
+  if(!result || !result.ok) return null;
+  const idx = parseBotPlayAiChoice(result.text);
+  if(idx===null || idx<0 || idx>=candidates.length) return null;
+  if(idx===0) return { replace:false, handIndex:null };
+  return { replace:true, handIndex: candidates[idx].handIndex };
+}
+
 async function botPlay(g,seat){
   // CARD_PLAYS 的合法性函数沿用旧架构，会读取全局 mySeat；评估阶段也必须切到机器人
   // 视角，不能只在最后真正提交动作时才切。
@@ -981,7 +1167,20 @@ async function runBotDecision(g,seat){
     // 同上:【将驰】期间不能出杀,只能选"交出武器"。答 false 会走弃武器分支,流程正常收尾。
     botInvoke(seat,()=>respondJiedao(canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0)); return;
   }
-  if(g.phase==='guicai'&&d.asking===seat){ botInvoke(seat,()=>respondGuicai(false)); return; }
+  if(g.phase==='guicai'&&d.asking===seat){
+    // 郭嘉【鬼才】:要不要发动改判是判断价值高、且涉及"响应者是被动第三方"这层复杂度的
+    // 决策,不是纯机械规则。AI优先、回退本地——有密钥时先问AI(通用prompt结构/隐藏信息
+    // /mySeat窗口/选牌维度设计均见 tryAiBotGuicai 顶部注释,第四阶段第二批第二个);
+    // 没有密钥、或AI没有给出合法答案(网络/超时/解析失败/index越权)时,回退到原有的
+    // 本地默认——respondGuicai(false)(永不发动),和改动前逐字一致,是这次改动的回归
+    // 基线。
+    let decision = null;
+    if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
+      decision = await tryAiBotGuicai(g, seat);
+    }
+    if(decision===null) decision = { replace:false, handIndex:null };
+    botInvoke(seat,()=>respondGuicai(decision.replace, decision.handIndex)); return;
+  }
   if(g.phase==='fanjianSuit'&&d.targetSeat===seat){
     const suits=['♠','♥','♣','♦'];
     botInvoke(seat,()=>respondFanjianSuit(suits[Math.floor(Math.random()*suits.length)])); return;
