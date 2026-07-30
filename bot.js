@@ -644,6 +644,88 @@ async function tryAiBotGuhuoQuestion(g, seat){
   return choice===1;
 }
 
+// ================= AI机器人接入第四阶段第二批:ganglieChoice(夏侯惇【刚烈】弃牌还是
+// 受伤) =================
+// 【范围声明】这批是第四阶段第二批的第一个,和第一批 guhuoQuestion 同一个"判断题型"
+// 决策模式,复用同一套解析/回退/并发保护机制,只新增决策本身的视图构造和 prompt。
+// guicai 是第二批的第二个,单独一次commit,不和这次合并。
+//
+// 【mySeat 借用窗口,已实际核实、不是照抄guhuoQuestion的结论就假设一定适用】读了
+// respondGanglieChoice(game.js)的完整函数体:守卫是标准的调用者身份守卫
+// (g.pending.sourceSeat!==mySeat),函数体内部只用 g.pending 解出的 seat/sourceSeat/
+// resume 这几个局部变量操作 g.players[sourceSeat].hand,从头到尾没有第二处引用
+// mySeat,也不调用任何依赖全局 mySeat 的 CARD_PLAYS.canPlay/canTarget——和
+// respondGuhuoQuestion 是完全相同的形状(响应者对自己的一次判断,不涉及候选枚举),
+// 结论同样是:不需要额外借用窗口,标准 botInvoke(seat,fn) 包装即可正确处理身份守卫。
+//
+// 【隐藏信息】这个决策的响应者(sourceSeat)判断的是关于他自己的选择(弃自己的手牌还是
+// 自己受伤),不涉及需要对他隐藏的信息——但仍然构造专门的 buildBotGanglieVisibleState,
+// 不直接把完整的 g/player 对象喂给AI,做法和 buildBotGuhuoVisibleState 一致:复用
+// buildBotVisibleState(g,seat)得到的安全投影(已经包含myHand的完整内容——这是这个
+// 座位自己的手牌,对他自己公开完全合理),再补一个 ganglie 专属字段:discardIndices——
+// 若选择"弃牌",游戏规则固定弃掉 myHand 数组下标0和1这两张(respondGanglieChoice 的
+// 本地回退/AI回退都不做选牌,只做"弃牌还是受伤"这个二元判断,选牌维度不在这次范围内),
+// 让AI能直接对着 myHand[0]/myHand[1] 判断这两张具体的牌值不值得留,而不是凭空猜测
+// "弃牌"这个选项到底会弃掉哪两张。
+function buildBotGanglieVisibleState(g, seat){
+  const state = buildBotVisibleState(g, seat);
+  state.ganglie = {
+    hpIfDamaged: state.myHp - 1,
+    discardIndices: state.myHand.length>=2 ? [0,1] : [],
+  };
+  return state;
+}
+
+// BOT_GANGLIE_SYSTEM_PROMPT:choice=1 表示"弃牌"(discard),choice=0 表示"受伤"
+// (damage)——respondGanglieChoice(action,picks) 的 action 参数直接对应
+// ('discard'/'damage'),不需要额外映射表。直接引用第一阶段"通用部分"里已经写好的
+// "1点体力≈2张手牌"这句价值判断(和调研阶段的结论一致:这条经验本身就足够覆盖大部分
+// 场景,不需要另起一套框架),再补一句提醒AI同时评估"这两张即将被弃掉的牌具体值不值得
+// 留"和"当前体力安全边际"——这两个维度是本地固定启发式(总是选弃牌,只要手牌够两张)
+// 完全没有考虑的,正是调研阶段指出的、AI能比机械规则做得更好的地方。
+function buildBotGanglieSystemPrompt(){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。你(被夏侯惇【刚烈】判定命中后需要'
+  +'做选择的伤害来源)现在需要在两个选项里选一个:弃置手牌中两张具体的牌(不能挑,固定'
+  +'弃掉局面里 myHand 数组下标0和1对应的那两张,已在局面数据的 ganglie.discardIndices'
+  +'里标出),或者受到1点伤害。判断依据可以参考:1点体力大致相当于2张手牌的价值,可以据此'
+  +'判断值不值得为了保命搭上这两张牌——但这不是唯一维度,还要具体看这两张即将被弃掉的牌'
+  +'本身值不值得留(是不是杀/闪/桃/装备/关键锦囊这类高价值牌),以及你当前的体力安全'
+  +'边际(血量已经很低、手里又缺桃这类救命牌时,即使多花两张牌也应该优先保留体力;血量'
+  +'充裕、这两张牌明显有用时,选择受伤反而更划算)。'
+  +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},其中 1 表示弃牌、'
+  +'0 表示受到伤害,不要输出任何解释文字、代码块标记或多余字段。';
+}
+function buildBotGanglieUserPrompt(state){
+  return '当前局面:\n'+JSON.stringify(state)
+    +'\n\n只返回 {"choice": 数字} 这一个JSON对象,1表示弃牌、0表示受伤。';
+}
+
+// tryAiBotGanglieChoice:返回布尔值(true=弃牌/false=受伤)、或 null(没有密钥/AI没有
+// 正确响应/choice不是合法的0或1,统一交给调用方回退到本地启发式)。结构和
+// tryAiBotGuhuoQuestion 逐字对应,复用同一套 parseBotPlayAiChoice/showAiThinkingIndicator/
+// callAI超时机制,不重复设计。
+async function tryAiBotGanglieChoice(g, seat){
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
+  const state = buildBotGanglieVisibleState(g, seat);
+  showAiThinkingIndicator(g, seat);
+  let result;
+  try{
+    result = await callAI(aiProvider, aiApiKey, {
+      systemPrompt: buildBotGanglieSystemPrompt(),
+      userPrompt: buildBotGanglieUserPrompt(state),
+      maxTokens: 80,
+    });
+  }catch(e){
+    result = { ok:false, reason:'other', detail:String(e) };
+  }finally{
+    hideAiThinkingIndicator();
+  }
+  if(!result || !result.ok) return null;
+  const choice = parseBotPlayAiChoice(result.text);
+  if(choice!==0 && choice!==1) return null;
+  return choice===1;
+}
+
 async function botPlay(g,seat){
   // CARD_PLAYS 的合法性函数沿用旧架构，会读取全局 mySeat；评估阶段也必须切到机器人
   // 视角，不能只在最后真正提交动作时才切。
@@ -921,8 +1003,20 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>giveEnyuanCard(heart)); return;
   }
   if(g.phase==='ganglieChoice'&&d.sourceSeat===seat){
-    const picks=(p.hand||[]).length>=2?[0,1]:[];
-    botInvoke(seat,()=>respondGanglieChoice(picks.length===2?'discard':'damage',picks)); return;
+    // 夏侯惇【刚烈】:弃两张手牌还是受1点伤害是资源取舍判断,不是纯机械规则。AI优先、
+    // 回退本地——有密钥时先问AI(隐藏信息处理/mySeat窗口/合法性校验均见
+    // tryAiBotGanglieChoice 顶部注释,第四阶段第二批第一个);没有密钥、或AI没有给出
+    // 合法答案(网络/超时/解析失败/choice不是0或1)时,回退到原有的本地启发式——手牌够
+    // 两张就弃牌,不够就只能受伤(这个分支实际总是手牌>=2,finishGanglieJudge在手牌不足2
+    // 时会直接跳过这个pending自动结算伤害)。没有密钥这一支和改动前行为完全相同,是这次
+    // 改动的回归基线。
+    let discard = null;
+    if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
+      discard = await tryAiBotGanglieChoice(g, seat);
+    }
+    if(discard===null) discard = (p.hand||[]).length>=2;
+    const picks = discard ? [0,1] : [];
+    botInvoke(seat,()=>respondGanglieChoice(discard?'discard':'damage',picks)); return;
   }
   // ---- 机器人兜底词汇盲区修复(问题3+4):以下几个phase的按钮文案够不到botSafePrompt的
   // 正则,分两类处理——纯流程性的(选哪个都不影响游戏走向)给合理默认;guhuoQuestion真的
