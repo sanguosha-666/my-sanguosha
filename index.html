@@ -1753,16 +1753,16 @@
     /* Chrome 100%缩放是桌面端的设计基准。手牌不再沿用全局64×92的小尺寸；
        手牌过多时横向滚动，不通过缩小整排卡片来硬塞。 */
     #game.desktop-layout #hand .card{
-      width:82px;
-      height:118px;
+      width:96px;
+      height:138px;
       flex:0 0 auto;
-      --badge:22px;
+      --badge:24px;
     }
     /* 原来的2.2倍预览会超过底部轨道高度，被横向滚动容器裁掉。电脑端改为在预留的
        上方空间内放大，仍足够看清牌面，但不会被桌面区域盖住。 */
     @media (hover:hover) and (pointer:fine){
       #game.desktop-layout #hand .card:hover{
-        transform:translateY(-18px) scale(1.62);
+        transform:translateY(-14px) scale(1.48);
       }
     }
     /* 中央出牌、判定和交换牌提高一级视觉权重。这里只改展示尺寸，DOM和动画逻辑不变。 */
@@ -1841,9 +1841,9 @@
       #game.desktop-layout #oppTopRow:has(> .seat:nth-child(4)) .seat{max-width:125px;}
       #game.desktop-layout #oppTopRow:has(> .seat:nth-child(5)) .seat{max-width:110px;}
       #game.desktop-layout #meSeat .seat{max-width:155px;}
-      #game.desktop-layout #hand{padding-top:52px;}
-      #game.desktop-layout #hand .card{width:70px;height:100px;--badge:20px;}
-      #game.desktop-layout #hand .card:hover{transform:translateY(-12px) scale(1.42);}
+      #game.desktop-layout #hand{padding-top:36px;}
+      #game.desktop-layout #hand .card{width:78px;height:112px;--badge:20px;}
+      #game.desktop-layout #hand .card:hover{transform:translateY(-6px) scale(1.25);}
       #game.desktop-layout #tableStrip .table-card-mini{width:80px;height:114px;}
       #game.desktop-layout #tableStrip .exchange-card .table-card-mini{width:68px;height:98px;}
     }
@@ -1860,7 +1860,7 @@
     .opp-row .seat{max-width:170px;}
     .bottom-row{gap:10px;}
     .hand{gap:8px;}
-    .hand .card{width:60px;height:86px;--badge:18px;}
+    .hand .card{width:68px;height:98px;--badge:19px;}
     .table-card-mini{width:76px;height:106px;}
     .exchange-card .table-card-mini{width:64px;height:90px;}
     .log-panel{
@@ -1988,18 +1988,18 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=244"></script>
-<script src="data.js?v=244"></script>
-<script src="room-lifecycle.js?v=244"></script>
-<script src="game.js?v=244"></script>
-<script src="weapons.js?v=244"></script>
-<script src="skills.js?v=244"></script>
-<script src="bot.js?v=244"></script>
-<script src="ai-bot.js?v=244"></script>
-<script src="render.js?v=244"></script>
-<script src="render-table.js?v=244"></script>
-<script src="render-hand.js?v=244"></script>
-<script src="render-controls.js?v=244"></script>
-<script src="render-log.js?v=244"></script>
+<script src="config.js?v=245"></script>
+<script src="data.js?v=245"></script>
+<script src="room-lifecycle.js?v=245"></script>
+<script src="game.js?v=245"></script>
+<script src="weapons.js?v=245"></script>
+<script src="skills.js?v=245"></script>
+<script src="bot.js?v=245"></script>
+<script src="ai-bot.js?v=245"></script>
+<script src="render.js?v=245"></script>
+<script src="render-table.js?v=245"></script>
+<script src="render-hand.js?v=245"></script>
+<script src="render-controls.js?v=245"></script>
+<script src="render-log.js?v=245"></script>
 </body>
 </html>
