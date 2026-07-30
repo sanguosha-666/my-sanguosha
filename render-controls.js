@@ -1694,6 +1694,10 @@ function renderControls(g){
         remove.className='ghost'; remove.textContent='移除机器人';
         remove.onclick=removeBot; c.appendChild(remove);
       }
+      // AI机器人密钥输入面板(ai-bot.js)——和上面添加/移除机器人按钮同一个身份边界
+      // (mySeat===0,持有密钥的只有触发 addBot() 的这个人),留空则机器人保持现有的
+      // 本地规则行为,不接入任何游戏逻辑(见 ai-bot.js 文件头部范围声明)。
+      renderAiKeyPanel(c);
     }
     // 1) 对战模式:乱斗 / 主公局
     const mkModeBtn=(label, mode)=>{
