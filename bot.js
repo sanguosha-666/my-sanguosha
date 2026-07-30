@@ -561,6 +561,89 @@ async function tryAiBotBestTarget(g, seat, card, actionId){
   return candidates[idx].seat;
 }
 
+// ================= AI机器人接入第四阶段:guhuoQuestion(于吉【蛊惑】质疑判断) =================
+// 【范围声明】这批只接入 guhuoQuestion 一个决策点;ganglieChoice/guicai 留给以后单独的
+// 批次分别验证,不在这次任务范围内(见 CLAUDE.md"AI机器人策略指导第四阶段"设计报告的
+// 优先级排序)。
+//
+// 【隐藏信息约束,本次唯一需要新设计的部分,务必做对】d.actualCard(于吉扣置的那张牌的
+// 真实内容)是对玩家隐藏的信息——本地启发式(runBotDecision 原有分支)用固定30%概率的
+// 随机数模拟不完全信息决策,绝不偷看这张牌;AI决策同样不能看到它。buildBotGuhuoVisibleState
+// 从头只构造这个决策真正该看到的字段:局面 state 部分直接复用 buildBotVisibleState——
+// 它本身从不涉及 pending/actualCard,复用它不会引入风险;guhuoQuestion 专属的字段是
+// 手工逐个挑选加进去的——sourceSeat/sourceName(于吉是谁,公开信息)、claimedCardName
+// (于吉声明的内容本身就是公开动作,规则上任何人都能看到"他声称这是什么牌")。整个函数体
+// 从第一行到最后一行都没有出现过 d.actualCard 这个引用,不是"先塞进完整视图再删掉这个
+// 字段"那种更容易出错的写法(万一漏删就会真的泄露),是结构上从一开始就不可能引用到它。
+function buildBotGuhuoVisibleState(g, seat){
+  const d = g.pending;
+  const state = buildBotVisibleState(g, seat);
+  state.guhuo = {
+    sourceSeat: d.sourceSeat,
+    sourceName: (g.players[d.sourceSeat] && g.players[d.sourceSeat].name) || null,
+    claimedCardName: d.claimedCard && d.claimedCard.name,
+  };
+  return state;
+}
+
+// buildBotGuhuoSystemPrompt:独立的、比 BOT_PLAY_SYSTEM_PROMPT 更短的专用 system
+// prompt——这是一道二选一的判断题,不需要候选动作列表描述,也不接入身份局四阵营指导
+// (纯粹是"这张声明牌可信度"的判断,和阵营博弈无关,按第四阶段设计报告的结论刻意不接)。
+// choice 的语义在这里显式约定:choice=1 表示"质疑"(question=true),choice=0 表示
+// "不质疑"(question=false)——和 respondGuhuoQuestion(question) 的参数语义直接对应,
+// 不需要额外的映射表。
+function buildBotGuhuoSystemPrompt(){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。场上一名角色(于吉)刚扣置一张手牌,'
+  +'声明它是某张具体的牌,并表示要当那张牌使用——你现在需要判断要不要质疑这个声明。'
+  +'若你选择质疑:声明为真,你会获得一个负面效果(【缠怨】,此后永远不能再质疑于吉的'
+  +'蛊惑);声明为假,这张牌会直接作废、不产生任何效果。若你选择不质疑:声明为真则'
+  +'照常生效,声明为假也没有任何影响。你完全不知道这张牌真实是什么,只能根据这名角色'
+  +'的行为倾向、场上局势等信息合理推断这次声明的可信度做出判断。'
+  +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},其中 1 表示质疑、'
+  +'0 表示不质疑,不要输出任何解释文字、代码块标记或多余字段。';
+}
+function buildBotGuhuoUserPrompt(state){
+  return '当前局面:\n'+JSON.stringify(state)
+    +'\n\n只返回 {"choice": 数字} 这一个JSON对象,1表示质疑、0表示不质疑。';
+}
+
+// tryAiBotGuhuoQuestion:返回布尔值(是否质疑)、或 null(没有密钥/AI没有正确响应/
+// choice 不是合法的0或1,统一交给调用方回退到本地启发式,不重试、不阻塞)。
+//
+// 【mySeat 借用窗口,已核实确认不需要】respondGuhuoQuestion(skills.js)内部对 mySeat
+// 的唯一引用是标准的调用者身份守卫(g.pending.asking!==mySeat)和 g.players[mySeat]
+// 取值,这两处都由 runBotDecision 现有的 botInvoke(seat,fn) 包装(mySeat=seat;同步
+// 执行;立刻归还)正确处理,和其余30多个响应类分支(respondShan/duelResponse等)完全
+// 一样——不是 botPlay 枚举阶段那种"需要在调用真正的动作函数之前,先用全局 mySeat 跑一遍
+// CARD_PLAYS.canPlay/canTarget 筛出候选"的特殊场景(这个决策是二选一判断题,不涉及任何
+// 候选枚举,不读 CARD_PLAYS)。函数内部另有一处 mySeat 的临时切换(runGuhuoAsSource,
+// 发生在蛊惑判定为真、真正结算 spec.effect 时),但那是把 mySeat 切到"于吉自己的座位"、
+// 且完全内嵌在 respondGuhuoQuestion 触发的同一次同步 tx 调用链里、finally 里会自动切
+// 回去——是游戏引擎自身的既有机制,和"谁/怎么触发了 respondGuhuoQuestion"无关,不需要
+// 机器人决策层做任何特殊处理。因此这次不需要额外的借用窗口,直接用标准的 botInvoke
+// 包装即可。
+async function tryAiBotGuhuoQuestion(g, seat){
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
+  const state = buildBotGuhuoVisibleState(g, seat);
+  showAiThinkingIndicator(g, seat);
+  let result;
+  try{
+    result = await callAI(aiProvider, aiApiKey, {
+      systemPrompt: buildBotGuhuoSystemPrompt(),
+      userPrompt: buildBotGuhuoUserPrompt(state),
+      maxTokens: 50,
+    });
+  }catch(e){
+    result = { ok:false, reason:'other', detail:String(e) };
+  }finally{
+    hideAiThinkingIndicator();
+  }
+  if(!result || !result.ok) return null;
+  const choice = parseBotPlayAiChoice(result.text);
+  if(choice!==0 && choice!==1) return null;
+  return choice===1;
+}
+
 async function botPlay(g,seat){
   // CARD_PLAYS 的合法性函数沿用旧架构，会读取全局 mySeat；评估阶段也必须切到机器人
   // 视角，不能只在最后真正提交动作时才切。
@@ -863,12 +946,20 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondHuashenChangeAskEnd(false)); return;
   }
   if(g.phase==='guhuoQuestion'&&d.asking===seat){
-    // 于吉【蛊惑】质疑与否是真正的判断题(质疑真的会被扣【缠怨】、质疑假的能让蛊惑作废),
-    // 但机器人不能偷看 d.actualCard——那是对玩家隐藏的信息,拿它来决策就是作弊。真人也是
-    // 在不知道真实牌的情况下博弈,这里用固定概率的随机数模拟同等的不完全信息决策,和
-    // respondFanjianSuit随机猜花色是同一处理原则,不是"瞎选"而是"信息对称前提下的合理
-    // 默认"。
-    botInvoke(seat,()=>respondGuhuoQuestion(Math.random()<0.3)); return;
+    // 于吉【蛊惑】质疑与否是真正的判断题(质疑真的会被扣【缠怨】、质疑假的能让蛊惑作废)。
+    // AI优先、回退本地——有密钥时先问AI(隐藏信息保护/mySeat窗口/合法性校验均见
+    // tryAiBotGuhuoQuestion 顶部注释,第四阶段第一批接入,详见 CLAUDE.md);没有密钥、
+    // 或AI没有给出合法答案(网络/超时/解析失败/choice不是0或1)时,回退到原有的本地
+    // 启发式——机器人不能偷看 d.actualCard,真人也是在不知道真实牌的情况下博弈,固定
+    // 概率的随机数模拟同等的不完全信息决策,和 respondFanjianSuit 随机猜花色是同一
+    // 处理原则,不是"瞎选"而是"信息对称前提下的合理默认"。没有密钥这一支和改动前行为
+    // 完全相同,是这次改动的回归基线。
+    let question = null;
+    if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
+      question = await tryAiBotGuhuoQuestion(g, seat);
+    }
+    if(question===null) question = Math.random()<0.3;
+    botInvoke(seat,()=>respondGuhuoQuestion(question)); return;
   }
   if(g.phase==='qiaobianMove'&&d.seat===seat){
     // 张郃【巧变】跳过出牌阶段后"是否移动一张装备/判定牌":真人走的是"选来源+选目的地"
