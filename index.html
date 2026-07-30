@@ -1592,6 +1592,188 @@
        11px这个已经是下限的字号)——myGeneral 和"你的手牌"标签共用这条规则,这次每处
        再省2px,两处合计再收紧4px。 */
     #game.desktop-layout .hand-label{font-size:11px;margin:2px 0 1px;}
+
+    /* ===== 经典桌面牌桌布局 =====
+       只重排宽屏游戏界面，不改变座位 DOM、点击事件或任何游戏状态。
+       目标结构参考传统三国杀客户端：对手在上/左右，自己在左下，手牌在底部中央，
+       中央区域只负责出牌与判定，日志固定在最右侧。
+
+       座位尺寸在这里最终交给 CSS；!important 只用于覆盖 render.js 旧版桌面自适应
+       每轮渲染写入的 inline width/height。这样状态同步时不会经历“CSS 初始尺寸 →
+       JS 重新测量尺寸”的视觉跳变。窄屏规则不在这个 media 范围内，完全不受影响。 */
+    .wrap:has(#game.desktop-layout:not(.hidden)){
+      width:100%;
+      min-height:100dvh;
+      padding:10px 14px;
+      box-sizing:border-box;
+    }
+    #game.desktop-layout{
+      width:100%;
+      min-height:calc(100dvh - 20px);
+      box-sizing:border-box;
+      grid-template-columns:
+        minmax(140px,220px)
+        minmax(360px,1fr)
+        minmax(140px,220px)
+        minmax(280px,340px);
+      grid-template-rows:
+        minmax(150px,22dvh)
+        minmax(180px,1fr)
+        auto
+        auto
+        auto
+        minmax(190px,27dvh);
+      column-gap:10px;
+      row-gap:6px;
+      align-items:stretch;
+      overflow:hidden;
+    }
+    #game.desktop-layout #oppTopRow{
+      grid-column:1 / 4;
+      grid-row:1;
+      min-width:0;
+      padding:0 6px;
+      gap:8px;
+      align-items:stretch;
+      justify-content:center;
+      overflow:hidden;
+    }
+    #game.desktop-layout #oppTopRow .seat{
+      flex:0 1 180px;
+      width:auto!important;
+      height:auto!important;
+      min-width:0;
+      max-width:180px;
+      max-height:100%;
+      aspect-ratio:3 / 4;
+      align-self:stretch;
+    }
+    /* 1~8人局人数分支：
+       2~4人局的1~3名对手可以保持较大的顶部座位；7/8人局顶部达到4/5名时，
+       只收紧顶部卡片上限，不改动整张牌桌的列宽，因此出牌过程中布局不会跳档。 */
+    #game.desktop-layout #oppTopRow:has(> .seat:nth-child(4)) .seat{
+      max-width:165px;
+    }
+    #game.desktop-layout #oppTopRow:has(> .seat:nth-child(5)) .seat{
+      max-width:145px;
+    }
+    /* 单人调试局没有任何对手。隐藏空的顶部轨道，并让中央桌面接管上半区；
+       正常2~8人局不会命中这两条。 */
+    #game.desktop-layout:has(#oppTopRow:empty){
+      grid-template-rows:
+        0
+        minmax(260px,1fr)
+        auto
+        auto
+        auto
+        minmax(190px,27dvh);
+    }
+    #game.desktop-layout:has(#oppTopRow:empty) #oppTopRow{
+      display:none;
+    }
+    #game.desktop-layout:has(#oppTopRow:empty) #tableStrip{
+      grid-column:1 / 4;
+      grid-row:1 / 3;
+    }
+    #game.desktop-layout #oppRow .seat[data-zone="left"],
+    #game.desktop-layout #oppRow .seat[data-zone="right"]{
+      width:min(100%,200px)!important;
+      height:auto!important;
+      max-width:200px;
+      max-height:100%;
+      aspect-ratio:3 / 4;
+      align-self:center;
+      justify-self:center;
+    }
+    #game.desktop-layout .seat[data-zone="left"]{
+      grid-column:1!important;
+      grid-row:2!important;
+    }
+    #game.desktop-layout .seat[data-zone="right"]{
+      grid-column:3!important;
+      grid-row:2!important;
+    }
+    #game.desktop-layout #tableStrip{
+      grid-column:2;
+      grid-row:2;
+      min-width:0;
+      min-height:180px;
+      align-self:stretch;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:
+        radial-gradient(circle at center,rgba(112,82,38,.12),transparent 64%),
+        rgba(20,15,10,.55);
+    }
+    #game.desktop-layout .panel.table{
+      grid-column:1 / 4;
+      grid-row:3;
+      margin:0;
+    }
+    #game.desktop-layout #myGeneral{
+      grid-column:1 / 4;
+      grid-row:4;
+    }
+    #game.desktop-layout .hand-label:not(#myGeneral){
+      grid-column:1 / 4;
+      grid-row:5;
+    }
+    #game.desktop-layout #meSeat{
+      grid-column:1;
+      grid-row:6;
+      min-width:0;
+      display:flex;
+      align-items:end;
+      justify-content:center;
+      overflow:hidden;
+    }
+    #game.desktop-layout #meSeat .seat{
+      width:min(100%,220px)!important;
+      height:auto!important;
+      max-width:220px;
+      max-height:100%;
+      aspect-ratio:3 / 4;
+    }
+    #game.desktop-layout #hand{
+      grid-column:2 / 4;
+      grid-row:6;
+      min-width:0;
+      min-height:0;
+      align-self:end;
+      justify-content:center;
+      align-content:end;
+      overflow-x:auto;
+      overflow-y:hidden;
+      padding:6px 4px 2px;
+      box-sizing:border-box;
+    }
+    #game.desktop-layout .log-panel{
+      grid-column:4;
+      grid-row:1 / 7;
+      height:auto!important;
+      min-height:0;
+      max-height:none;
+      overflow-y:auto;
+      border:1px solid var(--line);
+      border-radius:10px;
+      background:rgba(17,13,10,.92);
+    }
+
+    /* 1024~1199px仍属于电脑端，但横向空间较紧：保留同样的信息架构，仅收窄四列。 */
+    @media (max-width:1199px){
+      #game.desktop-layout{
+        grid-template-columns:
+          minmax(120px,160px)
+          minmax(300px,1fr)
+          minmax(120px,160px)
+          minmax(230px,280px);
+      }
+      #game.desktop-layout #oppTopRow{gap:5px;}
+      #game.desktop-layout #oppTopRow .seat{max-width:150px;}
+      #game.desktop-layout #oppRow .seat[data-zone="left"],
+      #game.desktop-layout #oppRow .seat[data-zone="right"]{max-width:155px;}
+      #game.desktop-layout #meSeat .seat{max-width:170px;}
+    }
   }
 
   .hidden{display:none!important;}
