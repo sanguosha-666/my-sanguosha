@@ -4666,6 +4666,11 @@ function startTrick(g, info){
   // "点确定没反应",且这类 bug 只有真连 Firebase 才会触发,本地 stub 测试完全测不出来)。
   // 只在真的有值时才把这个 key 放进对象(而不是塞一个 undefined 值)。
   g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, exclude:info.from, depth:0};
+  // 初始无懈窗口允许所有持有无懈的存活角色响应（包括锦囊使用者本人），并记录本层已问座位。
+  // 桃园/五谷原先单独打开 askAll，而其它锦囊走另一套遍历，容易出现范围不一致；现在统一。
+  g.pending.askAll=true;
+  g.pending.askStart=info.from;
+  g.pending.asked=[];
   if(info.card!==undefined) g.pending.card=info.card;
   if(info.sourceCard!==undefined) g.pending.sourceCard=info.sourceCard;
   if(info.seatB!==undefined) g.pending.seatB=info.seatB;
@@ -4690,6 +4695,14 @@ function openWuxieRound(g){
 // finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
 // 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。
 function nextWuxieAskee(g, pending, current){
+  // 无懈窗口只询问此刻确实持有【无懈可击】的角色。旧实现会把每个存活角色都问一遍；
+  // 桃园结义/五谷丰登/南蛮入侵/万箭齐发又是逐目标结算，于是多人局会连续转好几圈，
+  // 即使所有人都根本没有无懈也必须逐个点“不出”。所有锦囊及反制无懈统一从这里
+  // 过滤，既不改变“每个目标分别可被无懈”的规则，也避免无意义的重复询问。
+  const canWuxie = seat=>{
+    const p=g.players[seat];
+    return !!(p && p.alive && Array.isArray(p.hand) && p.hand.some(c=>c && c.name==='无懈可击'));
+  };
   if(pending && pending.askAll && pending.depth===0){
     const n=g.players.length;
     const asked=Array.isArray(pending.asked) ? pending.asked : [];
@@ -4699,11 +4712,19 @@ function nextWuxieAskee(g, pending, current){
     for(let k=1;k<=n;k++){
       const s=(start+k)%n;
       if(asked.includes(s)) continue;
-      if(g.players[s] && g.players[s].alive) return s;
+      if(canWuxie(s)) return s;
     }
     return null;
   }
-  return nextAskee(g, pending.exclude, Number.isInteger(current) ? current : pending.exclude);
+  const n=g.players.length;
+  const stop=pending.exclude;
+  const start=Number.isInteger(current) ? current : stop;
+  for(let k=1;k<=n;k++){
+    const s=(start+k)%n;
+    if(s===stop) return null;
+    if(canWuxie(s)) return s;
+  }
+  return null;
 }
 function markWuxieAsked(g){
   if(!(g.pending && g.pending.askAll && g.pending.depth===0 && Number.isInteger(g.pending.asking))) return;
@@ -5114,6 +5135,9 @@ function aoeAdvance(g, prevSeat){
   }
   // 对该目标开启无懈询问子阶段(exclude/depth 初始化,交给 openWuxieRound 统一处理)
   g.pending={type:'wuxie', ctx:'aoe', trick:g.aoe.trick, from, to:next, exclude:from, depth:0};
+  g.pending.askAll=true;
+  g.pending.askStart=from;
+  g.pending.asked=[];
   if(g.aoe.sourceCard!==undefined) g.pending.sourceCard=g.aoe.sourceCard;
   g.phase='wuxie';
   g.log=pushLog(g.log, '结算对 '+g.players[next].name+' 的【'+g.aoe.trick+'】…');

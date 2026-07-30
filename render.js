@@ -111,11 +111,12 @@ let logModalOpen = false;
 // avatarReady = g.started && gen 判断"能不能亮出具体武将"(见 renderSeats 附近注释:选将阶段
 // p.general 选完就已经写进共享状态,但正式开局前仍是隐藏信息,只判断 gen 非空会在选将阶段
 // 提前剧透,是真实修过的信息泄露 bug)。这里同样以 g.started 为准，不只看 p.general 有没有值：
-// 未开局(含选将阶段)一律只显示玩家名，开局后才显示"武将名(玩家名)"。
+// 未开局(含选将阶段)一律只显示玩家名；开局后日志及中央出牌区只显示带边框的武将名，
+// 例如【貂蝉】，不再附加括号里的玩家名。
 function getPlayerDisplayLabel(g, p){
   if(!p) return '';
   const gen = (g && g.started && p.general!=null) ? getGeneral(p.general) : null;
-  return gen ? (gen.name+'('+p.name+')') : p.name;
+  return gen ? ('【'+gen.name+'】') : p.name;
 }
 function chainedTagText(g, seat){
   const p=g.players && g.players[seat];

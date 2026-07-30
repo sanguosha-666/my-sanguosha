@@ -42,7 +42,7 @@ function colorizeSuits(segment){
 
 // formatLogEntry: 日志展示层的统一格式化入口,给常驻面板和完整历史弹窗共用。不改变 g.log 里
 // 存储的原始文本——原文本仍是各处手写的纯字符串,只在这一步做两件事:①把玩家名字替换成
-// "武将名(玩家名)"并按座位色染色(getPlayerDisplayLabel);②给文本里的花色符号染色
+// "【武将名】"并按座位色染色(getPlayerDisplayLabel);②给文本里的花色符号染色
 // (colorizeSuits)。和 colorizeLogLine 同一套"先在纯文本坐标系标记已占用区间、长名字优先
 // 占坑、最后一次性拼出HTML"写法,避免嵌套/重叠替换,同时保证姓名区间不会被花色染色重复处理
 // (colorizeSuits 只作用于姓名匹配之间/之外的剩余片段)。
@@ -135,7 +135,8 @@ function showLogToast(g, entry){
   const el = document.getElementById('logToast');
   const text = (entry && typeof entry==='object') ? entry.text : entry; // 兼容极端情况下传进来的是字符串
   const kind = (entry && typeof entry==='object') ? entry.kind : null;
-  el.innerHTML = colorizeLogLine(g, text);
+  // toast 与右侧日志使用同一套姓名格式，避免一处显示【武将名】、另一处仍泄露玩家名。
+  el.innerHTML = formatLogEntry(g, text);
   // 先清空 class(#logToast 基础样式来自 id 选择器,清 class 不影响基础外观),再按本条 kind 上强调色。
   // 无 kind 则保持默认金色样式;染色的玩家名字有 inline color、不受强调色影响,只影响其余文字。
   el.className = '';
