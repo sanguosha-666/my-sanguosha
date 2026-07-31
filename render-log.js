@@ -299,13 +299,21 @@ function renderLogPanel(g){
   }).join('');
   const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
   const emojiPicker='<div id="emojiPicker" class="emoji-picker hidden">'+CHAT_EMOJIS.map(e=>'<button type="button" onclick="sendChatEmoji(\''+e+'\')">'+e+'</button>').join('')+'</div>';
-  el.innerHTML = '<section class="log-panel-section"><div class="log-panel-head">本局日志（共'+log.length+'条）</div><div class="log-panel-scroll">'
-    + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('')
-    + '</div></section><section class="chat-panel-section"><div class="chat-panel-head">聊天（'+(chatMessages||[]).length+'条）</div><div class="chat-panel-scroll">'
-    + (messages||'<div class="chat-empty">还没有人说话</div>')
-    + '</div><div class="chat-compose">'+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div></section>';
+  // 输入区只在首次进入房间时创建。之后的实时状态刷新仅更新两个滚动区，避免重建
+  // #chatInput 导致正在输入的文字、输入法组合状态和光标位置被清空。
+  if(!el.querySelector('.log-panel-section') || !el.querySelector('.chat-panel-section')){
+    el.innerHTML = '<section class="log-panel-section"><div class="log-panel-head"></div><div class="log-panel-scroll"></div></section>'
+      + '<section class="chat-panel-section"><div class="chat-panel-head"></div><div class="chat-panel-scroll"></div>'
+      + '<div class="chat-compose">'+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div></section>';
+  }
   const logBody=el.querySelector('.log-panel-scroll');
   const chatBody=el.querySelector('.chat-panel-scroll');
+  const logHead=el.querySelector('.log-panel-head');
+  const chatHead=el.querySelector('.chat-panel-head');
+  if(logHead) logHead.textContent='本局日志（共'+log.length+'条）';
+  if(chatHead) chatHead.textContent='聊天（'+(chatMessages||[]).length+'条）';
+  if(logBody) logBody.innerHTML=log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
+  if(chatBody) chatBody.innerHTML=messages||'<div class="chat-empty">还没有人说话</div>';
   if(logBody) logBody.scrollTop = logWasAtBottom ? logBody.scrollHeight : oldLogScrollTop;
   if(chatBody) chatBody.scrollTop = chatWasAtBottom ? chatBody.scrollHeight : oldChatScrollTop;
 }
