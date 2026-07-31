@@ -135,11 +135,11 @@ function renderHand(g){
     // 而不是"两个图标之间真正的净空间"——这两者是完全不同的两个数字,只要文字宽度超出
     // 图标间真正的净空间,末尾的字就会被图标不透明地压住挡掉,不管字号算法本身多精确都
     // 没用(算法只能保证"塞进算出来的maxWidth",算错了maxWidth,结果必然还是被挡)。
-    // 现在改成:卡片宽度减去左右各一个完整badge的宽度(图标真正占用、文字必须避开的
-    // 空间),再留4px缓冲。
+    // 现在手牌的角标/说明按钮位于插画区顶部，标题栏可以使用整张卡的宽度；只保留
+    // 左右各5px的视觉安全边距，不再为两个已经移出标题栏的badge重复预留空间。
     const m = cardMetricsForViewport();
-    const titleMaxWidth = m.cardWidth - m.badge * 2 - 4;
-    const titleFontSize = fitFontSize(card.name, titleMaxWidth, m.maxTitleFont, 700, CARD_TITLE_FONT_FAMILY) + 'px';
+    const titleMaxWidth = m.cardWidth - 10;
+    const titleFontSize = fitFontSize(card.name, titleMaxWidth, m.maxTitleFont, 800, CARD_TITLE_FONT_FAMILY) + 'px';
     el.innerHTML =
       '<div class="card-title" style="font-size:'+titleFontSize+'">'+card.name+'</div>'
       +'<div class="card-art-box">'+imgTag+'</div>'
@@ -347,7 +347,17 @@ function fitFontSize(text, maxWidth, maxFontSize, fontWeight, fontFamily){
 // --badge/标题栏字号,这里要跟着改)。
 function cardMetricsForViewport(){
   const w = window.innerWidth;
-  if(w<=480) return { cardWidth:46, badge:14, maxTitleFont:10 };
-  if(w<=640) return { cardWidth:50, badge:16, maxTitleFont:11 };
-  return { cardWidth:64, badge:20, maxTitleFont:14 };
+  const h = window.innerHeight;
+  const game = document.getElementById('game');
+  const desktop = !!(game && game.classList.contains('desktop-layout'));
+  if(desktop){
+    if(h<=760) return { cardWidth:92, badge:19, maxTitleFont:16 };
+    return { cardWidth:108, badge:22, maxTitleFont:18 };
+  }
+  const coarse = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
+  if(h<=520 && coarse) return { cardWidth:60, badge:15, maxTitleFont:13 };
+  if(w<=480) return { cardWidth:52, badge:14, maxTitleFont:12 };
+  if(w<=640) return { cardWidth:58, badge:15, maxTitleFont:13 };
+  if(w<=1199 || coarse) return { cardWidth:82, badge:18, maxTitleFont:15 };
+  return { cardWidth:72, badge:18, maxTitleFont:15 };
 }

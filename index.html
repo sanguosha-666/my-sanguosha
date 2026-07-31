@@ -735,7 +735,7 @@
   .hand-label{font-size:12px;letter-spacing:.14em;color:var(--paper-dim);margin:14px 0 8px;}
   .hand{display:flex;gap:10px;flex-wrap:wrap;flex:1;min-width:0;}
   .card{
-    width:64px;height:92px;border-radius:10px;background:#f1ead9;color:#1a1410;
+    width:72px;height:104px;border-radius:10px;background:#f1ead9;color:#1a1410;
     border:1px solid #00000022;position:relative;cursor:pointer;overflow:hidden;
     display:flex;flex-direction:column;
     box-shadow:0 2px 0 rgba(0,0,0,.3);transition:transform .08s;user-select:none;
@@ -803,10 +803,15 @@
      既然 fitFontSize 已经确保文字宽度不超过可用空间,理论上不会触发省略号这条路径。 */
   .card-title{
     flex:0 0 22%;display:flex;align-items:center;justify-content:center;
-    font-weight:700;background:rgba(0,0,0,.15);
+    font-weight:800;color:#2b1d14;background:rgba(255,255,255,.34);
     border-bottom:1px solid rgba(0,0,0,.15);
     padding:0 calc(var(--badge) * 0.12); overflow:hidden; white-space:nowrap;
   }
+  /* 自己的手牌把花色角标和说明按钮放到插画区顶部，标题栏不再被左右两个图标
+     挤得只剩十几像素。这样长牌名可以使用完整卡宽，避免被缩成看不清的小字。 */
+  .hand .card-title{padding:0 5px;}
+  .hand .card .corner,
+  .hand .card .info-badge-hit{top:calc(22% + 3px);}
   .card-art-box{flex:1 1 auto;position:relative;overflow:hidden;}
   .card-art-box .card-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
   /* 没图时(映射表缺失、或全部候选格式都加载失败)插画区域留一块占位底色,不完全空白,
@@ -850,23 +855,25 @@
      颜色分辨类别,不需要盯着标题文字看。 */
   .card.sha{box-shadow:0 0 0 2px var(--cinnabar) inset,0 2px 0 rgba(0,0,0,.3);}
   .card.tao{box-shadow:0 0 0 2px var(--jade) inset,0 2px 0 rgba(0,0,0,.3);}
-  .card.tao .card-title{color:var(--jade);}
+  .card.tao .card-title{color:#185b43;}
   .card.shan{box-shadow:0 0 0 2px #2f5b86 inset,0 2px 0 rgba(0,0,0,.3);}
-  .card.shan .card-title{color:#2f5b86;}
+  .card.shan .card-title{color:#214f7a;}
   .card.trick{box-shadow:0 0 0 2px #7a5fa0 inset,0 2px 0 rgba(0,0,0,.3);}
   /* 锦囊/顺手类牌名字号不再需要在这里单独处理——render.js 的 fitFontSize 对所有牌名
      一视同仁用canvas实测算出合适字号,不分牌型类别,只保留按牌型区分的文字颜色 +
      letter-spacing(轻微收紧字距,辅助长牌名排布,和字号算法不冲突)。 */
-  .card.trick .card-title{color:#7a5fa0;letter-spacing:-.02em;}
+  .card.trick .card-title{color:#513573;letter-spacing:-.02em;}
   .card.steal{box-shadow:0 0 0 2px #1f7a6e inset,0 2px 0 rgba(0,0,0,.3);}
-  .card.steal .card-title{color:#1f7a6e;letter-spacing:-.02em;}
+  .card.steal .card-title{color:#135f55;letter-spacing:-.02em;}
   .card.selected{outline:3px solid var(--gold);transform:translateY(-6px);}
   /* 弃牌阶段"多选后统一确认":已勾选待弃置的牌在既有.selected(金色描边+上浮)基础上叠加
      一层半透明朱红遮罩+朱红描边,明确区分"这张要被弃掉"和其它场景下的".selected"(选中
      待使用/待移动等),避免玩家把两种不同含义的"选中态"混淆。 */
   .card.discard-selected{outline-color:var(--cinnabar-bright);box-shadow:inset 0 0 0 999px rgba(216,73,44,.28);}
-  .card.disabled{opacity:.4;pointer-events:none;}
-  .card.disabled{opacity:.4;pointer-events:none;}
+  /* 不可操作只压暗插画，不再把牌名、花色和点数一起降到40%透明度。 */
+  .card.disabled{pointer-events:none;cursor:not-allowed;}
+  .card.disabled .card-art-box{opacity:.48;filter:grayscale(.28) brightness(.72);}
+  .card.disabled .card-title{opacity:.88;}
   .cardback{
     width:46px;height:66px;border-radius:8px;
     background:repeating-linear-gradient(45deg,#3a302a,#3a302a 6px,#2c241f 6px,#2c241f 12px);
@@ -967,7 +974,7 @@
        "无论多少张手牌都不会横向溢出/需要横向滚动"这条硬指标——缩小是为了减少换行数量,
        不是靠它来防溢出(防溢出这件事从一开始就是 flex-wrap 的职责,缩小前后都不会溢出)。 */
     .hand{gap:6px;}
-    .card{width:50px;height:74px;--badge:16px;} /* 角标/问号图标统一收窄到16px,.corner
+    .card{width:58px;height:84px;--badge:15px;} /* 角标/问号图标统一收窄,.corner
       和 .info-badge-hit 的尺寸/字号靠 calc() 公式自动跟着算,不用再分别写死两套数值。
       .card-title 的字号也不需要在这里覆盖——fitFontSize(render.js)按这一档实际
       的卡片宽度/--badge值实测计算,inline style 100%覆盖,这里写CSS字号也不会生效。 */
@@ -997,7 +1004,7 @@
        这次改CSS前就先排查掉了,不是留到出bug才发现)。) */
   }
   @media (max-width:480px){
-    .card{width:46px;height:68px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
+    .card{width:52px;height:76px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
       跟着 --badge 自动缩小,不用逐处对齐;.card-title 字号同上由 fitFontSize 实测,
       这里不需要再覆盖。 */
     #logToast{font-size:14px;padding:7px 14px;}
@@ -1753,10 +1760,10 @@
     /* Chrome 100%缩放是桌面端的设计基准。手牌不再沿用全局64×92的小尺寸；
        手牌过多时横向滚动，不通过缩小整排卡片来硬塞。 */
     #game.desktop-layout #hand .card{
-      width:96px;
-      height:138px;
+      width:108px;
+      height:154px;
       flex:0 0 auto;
-      --badge:24px;
+      --badge:22px;
     }
     /* 原来的2.2倍预览会超过底部轨道高度，被横向滚动容器裁掉。电脑端改为在预留的
        上方空间内放大，仍足够看清牌面，但不会被桌面区域盖住。 */
@@ -1842,7 +1849,7 @@
       #game.desktop-layout #oppTopRow:has(> .seat:nth-child(5)) .seat{max-width:110px;}
       #game.desktop-layout #meSeat .seat{max-width:155px;}
       #game.desktop-layout #hand{padding-top:36px;}
-      #game.desktop-layout #hand .card{width:78px;height:112px;--badge:20px;}
+      #game.desktop-layout #hand .card{width:92px;height:132px;--badge:19px;}
       #game.desktop-layout #hand .card:hover{transform:translateY(-6px) scale(1.25);}
       #game.desktop-layout #tableStrip .table-card-mini{width:80px;height:114px;}
       #game.desktop-layout #tableStrip .exchange-card .table-card-mini{width:68px;height:98px;}
@@ -1860,7 +1867,7 @@
     .opp-row .seat{max-width:170px;}
     .bottom-row{gap:10px;}
     .hand{gap:8px;}
-    .hand .card{width:68px;height:98px;--badge:19px;}
+    .hand .card{width:82px;height:118px;--badge:18px;}
     .table-card-mini{width:76px;height:106px;}
     .exchange-card .table-card-mini{width:64px;height:90px;}
     .log-panel{
@@ -1884,7 +1891,7 @@
   /* 常见手机横屏即使宽度超过640px，也按紧凑触屏布局处理；原有≤640px手机竖屏
      规则继续负责更窄的设备。 */
   @media (max-height:520px) and (orientation:landscape) and (pointer:coarse){
-    .hand .card{width:48px;height:70px;--badge:14px;}
+    .hand .card{width:60px;height:86px;--badge:15px;}
     .table-card-mini{width:58px;height:80px;}
     .exchange-card .table-card-mini{width:50px;height:70px;}
   }
@@ -1988,18 +1995,18 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=248"></script>
-<script src="data.js?v=248"></script>
-<script src="room-lifecycle.js?v=248"></script>
-<script src="game.js?v=248"></script>
-<script src="weapons.js?v=248"></script>
-<script src="skills.js?v=248"></script>
-<script src="bot.js?v=248"></script>
-<script src="ai-bot.js?v=248"></script>
-<script src="render.js?v=248"></script>
-<script src="render-table.js?v=248"></script>
-<script src="render-hand.js?v=248"></script>
-<script src="render-controls.js?v=248"></script>
-<script src="render-log.js?v=248"></script>
+<script src="config.js?v=249"></script>
+<script src="data.js?v=249"></script>
+<script src="room-lifecycle.js?v=249"></script>
+<script src="game.js?v=249"></script>
+<script src="weapons.js?v=249"></script>
+<script src="skills.js?v=249"></script>
+<script src="bot.js?v=249"></script>
+<script src="ai-bot.js?v=249"></script>
+<script src="render.js?v=249"></script>
+<script src="render-table.js?v=249"></script>
+<script src="render-hand.js?v=249"></script>
+<script src="render-controls.js?v=249"></script>
+<script src="render-log.js?v=249"></script>
 </body>
 </html>
