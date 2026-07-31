@@ -880,10 +880,9 @@
      一层半透明朱红遮罩+朱红描边,明确区分"这张要被弃掉"和其它场景下的".selected"(选中
      待使用/待移动等),避免玩家把两种不同含义的"选中态"混淆。 */
   .card.discard-selected{outline-color:var(--cinnabar-bright);box-shadow:inset 0 0 0 999px rgba(216,73,44,.28);}
-  /* 不可操作只压暗插画，不再把牌名、花色和点数一起降到40%透明度。 */
+  /* 不可操作时只禁止点击，牌面继续保持正常颜色；是否轮到自己由操作栏提示，
+     不再用发白、灰度或透明度变化破坏牌面辨识度。 */
   .card.disabled{pointer-events:none;cursor:not-allowed;}
-  .card.disabled .card-art-box{opacity:.48;filter:grayscale(.28) brightness(.72);}
-  .card.disabled .card-title{opacity:.88;}
   .cardback{
     width:46px;height:66px;border-radius:8px;
     background:repeating-linear-gradient(45deg,#3a302a,#3a302a 6px,#2c241f 6px,#2c241f 12px);
@@ -2023,18 +2022,18 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=251"></script>
-<script src="data.js?v=251"></script>
-<script src="room-lifecycle.js?v=251"></script>
-<script src="game.js?v=251"></script>
-<script src="weapons.js?v=251"></script>
-<script src="skills.js?v=251"></script>
-<script src="bot.js?v=251"></script>
-<script src="ai-bot.js?v=251"></script>
-<script src="render.js?v=251"></script>
-<script src="render-table.js?v=251"></script>
-<script src="render-hand.js?v=251"></script>
-<script src="render-controls.js?v=251"></script>
-<script src="render-log.js?v=253"></script>
+<script src="config.js?v=254"></script>
+<script src="data.js?v=254"></script>
+<script src="room-lifecycle.js?v=254"></script>
+<script src="game.js?v=254"></script>
+<script src="weapons.js?v=254"></script>
+<script src="skills.js?v=254"></script>
+<script src="bot.js?v=254"></script>
+<script src="ai-bot.js?v=254"></script>
+<script src="render.js?v=254"></script>
+<script src="render-table.js?v=254"></script>
+<script src="render-hand.js?v=254"></script>
+<script src="render-controls.js?v=254"></script>
+<script src="render-log.js?v=254"></script>
 </body>
 </html>
