@@ -199,7 +199,9 @@
      一度把红色对比度误测成12.33)。 */
   .table-card-mini .corner{transform:scale(.75);transform-origin:top left;background:#f1ead9;}
   .exchange-card .table-card-mini{width:52px;height:72px;}
-  .table-card.wugu-pool-mode{width:100%;max-width:none;display:flex;flex-direction:column;gap:7px;align-items:center;}
+  /* #tableCard 默认是纯展示层(pointer-events:none)，五谷牌池则是真正的交互区；
+     进入该模式时必须恢复命中测试，否则按钮看得见却永远收不到点击。 */
+  .table-card.wugu-pool-mode{width:100%;max-width:none;display:flex;flex-direction:column;gap:7px;align-items:center;pointer-events:auto;}
   .wugu-pool-title{font-size:16px;font-weight:700;color:var(--gold);}
   .wugu-pool{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-end;gap:10px;width:100%;}
   .wugu-pool-card{margin:0;padding:5px;background:rgba(22,17,12,.9);border:1px solid var(--line);border-radius:9px;color:var(--paper);}
@@ -2026,18 +2028,18 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=254"></script>
-<script src="data.js?v=254"></script>
-<script src="room-lifecycle.js?v=254"></script>
-<script src="game.js?v=254"></script>
-<script src="weapons.js?v=254"></script>
-<script src="skills.js?v=254"></script>
-<script src="bot.js?v=254"></script>
-<script src="ai-bot.js?v=254"></script>
-<script src="render.js?v=254"></script>
-<script src="render-table.js?v=254"></script>
-<script src="render-hand.js?v=254"></script>
-<script src="render-controls.js?v=254"></script>
-<script src="render-log.js?v=256"></script>
+<script src="config.js?v=257"></script>
+<script src="data.js?v=257"></script>
+<script src="room-lifecycle.js?v=257"></script>
+<script src="game.js?v=257"></script>
+<script src="weapons.js?v=257"></script>
+<script src="skills.js?v=257"></script>
+<script src="bot.js?v=257"></script>
+<script src="ai-bot.js?v=257"></script>
+<script src="render.js?v=257"></script>
+<script src="render-table.js?v=257"></script>
+<script src="render-hand.js?v=257"></script>
+<script src="render-controls.js?v=257"></script>
+<script src="render-log.js?v=257"></script>
 </body>
 </html>
