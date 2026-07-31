@@ -47,6 +47,7 @@
 const AI_KEY_STORAGE_KEY = 'sgsAiKey';
 const AI_PROVIDER_STORAGE_KEY = 'sgsAiProvider';
 const AI_PROMPT_DISMISSED_STORAGE_KEY = 'sgsAiPromptDismissed';
+const AI_MODEL_STORAGE_KEY = 'sgsAiModel';
 
 // 模块级变量,和 game.js 顶部 myClientId 同一处理方式:加载时尝试从 sessionStorage
 // 恢复一次(应对"同一标签页内因为JS错误等原因整页刷新"这类场景——标签页本身没关闭,
@@ -56,17 +57,24 @@ let aiProvider = null; // 'claude' | 'openrouter' | 'groq' | null(尚未识别/�
 // 这个会话内是否已经明确回应过密钥询问(填了密钥,或点了"跳过")——true 时
 // handleAddBotClick 不会再自动弹窗,但常驻的"AI机器人设置"按钮始终不受这个影响。
 let aiPromptDismissed = false;
+// 用户手动选择/输入的具体模型ID。空字符串="不覆盖,交给 PROVIDER_ADAPTERS 各自的
+// buildRequest 用其内置默认档位"——这条约定和 aiApiKey/aiProvider 完全独立,选不选
+// 模型不影响密钥/提供商这两件事的既有行为。bot.js 的 5 处 callAI(...) 调用点统一传
+// model: aiApiModel || undefined,undefined 时 opts.model||'默认档位' 这行既有代码
+// 天然兜底,不需要为"用户没选模型"这个最常见情形写任何特殊分支。
+let aiApiModel = '';
 
 (function hydrateAiStateFromSession(){
   try{
     aiApiKey = sessionStorage.getItem(AI_KEY_STORAGE_KEY) || '';
     aiProvider = sessionStorage.getItem(AI_PROVIDER_STORAGE_KEY) || null;
     aiPromptDismissed = sessionStorage.getItem(AI_PROMPT_DISMISSED_STORAGE_KEY) === '1';
+    aiApiModel = sessionStorage.getItem(AI_MODEL_STORAGE_KEY) || '';
   }catch(e){
     // 隐私模式等场景下 sessionStorage 可能整体不可用——静默回退到空值,不影响
     // 本次会话内内存里正常使用,只是刷新后无法恢复(每次刷新都会重新弹一次询问框,
     // 这是这种环境下唯一的合理退化,不算 bug)。
-    aiApiKey = ''; aiProvider = null; aiPromptDismissed = false;
+    aiApiKey = ''; aiProvider = null; aiPromptDismissed = false; aiApiModel = '';
   }
 })();
 
@@ -78,6 +86,8 @@ function persistAiState(){
     else sessionStorage.removeItem(AI_PROVIDER_STORAGE_KEY);
     if(aiPromptDismissed) sessionStorage.setItem(AI_PROMPT_DISMISSED_STORAGE_KEY, '1');
     else sessionStorage.removeItem(AI_PROMPT_DISMISSED_STORAGE_KEY);
+    if(aiApiModel) sessionStorage.setItem(AI_MODEL_STORAGE_KEY, aiApiModel);
+    else sessionStorage.removeItem(AI_MODEL_STORAGE_KEY);
   }catch(e){ /* 同上,静默忽略 */ }
 }
 
@@ -186,6 +196,41 @@ const PROVIDER_ADAPTERS = {
   },
 };
 
+// ---------- 模型选择候选表 ----------
+// 【每家的候选列表都是真实核实过的,不是凭旧印象假设——2026-08-01 用 WebSearch/
+// WebFetch 分别核实】Claude:官方模型表(见 CLAUDE.md「当前模型」);OpenRouter:直接
+// 请求了公开的 https://openrouter.ai/api/v1/models 这个不需要鉴权的模型清单接口,
+// 逐个确认了下面这几个 id 字符串在当次抓取里确实存在、且价格字段真实(不是猜的);
+// Groq:WebFetch 了 console.groq.com/docs/models.md,逐条对照生产模型表。每家列表
+// 第一项都固定等于 PROVIDER_ADAPTERS 对应 buildRequest 里硬编码的默认值——这样
+// aiApiModel 为空(用户没手动选)时,下拉框视觉上预选的就是"当前实际生效"的那一项,
+// 不会出现"UI显示的默认选项"和"实际调用的模型"对不上的情况。
+// 【自定义(__custom__)选项存在的原因】OpenRouter 这类聚合平台的可选模型有300+个、
+// 且随时可能上新/下架,这里只给3~5个有代表性的常见选项(任务要求,不需要穷举全部)——
+// 真正的自由度靠这个特殊值实现:选中后展示一个文本框,允许用户输入任何自己核实过
+// 有效的精确模型ID,不受这份候选表的限制。三家 provider 统一提供这个选项,不只是
+// OpenRouter 独有(以防 Anthropic/Groq 在这份表更新前就发布了新档位)。
+const AI_MODEL_CUSTOM_VALUE = '__custom__';
+const AI_MODEL_OPTIONS = {
+  claude: [
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5(默认·最快最省)' },
+    { id: 'claude-sonnet-5', label: 'Sonnet 5(更聪明·成本更高)' },
+    { id: 'claude-opus-5', label: 'Opus 5(最强·最贵最慢)' },
+  ],
+  openrouter: [
+    { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini(默认)' },
+    { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite(更快更省)' },
+    { id: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2(性价比均衡)' },
+    { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B(开源)' },
+  ],
+  groq: [
+    { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B(默认)' },
+    { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B(更快更省)' },
+    { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B(更强)' },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B(更快)' },
+  ],
+};
+
 // ---------- 统一网络层 ----------
 // callAI(provider, apiKey, {systemPrompt, userPrompt, maxTokens, model}) ->
 //   Promise<{ok:true, text} | {ok:false, reason:'network'|'auth'|'timeout'|'parse'|'other', detail}>
@@ -282,6 +327,10 @@ function showAiKeyModal(onDone){
   statusLine.className = 'ai-key-status';
   wrap.appendChild(statusLine);
 
+  const modelWrap = document.createElement('div');
+  modelWrap.className = 'ai-model-picker';
+  wrap.appendChild(modelWrap);
+
   const warn = document.createElement('div');
   warn.className = 'ai-key-warn';
   warn.textContent = '填入密钥后,本局全部AI机器人的调用费用由这把密钥的账户承担;'
@@ -313,11 +362,94 @@ function showAiKeyModal(onDone){
     saveBtn.disabled = !!(aiApiKey && !aiProvider);
   }
 
+  // renderModelPicker:provider 确定之后才渲染的"选择模型"下拉框——没有 provider
+  // (还没识别出来/还没手动选)时留空,不渲染任何内容。选项来自 AI_MODEL_OPTIONS[provider]
+  // + 一个固定的"自定义"项(AI_MODEL_CUSTOM_VALUE)。默认选中态由 aiApiModel 当前值
+  // 决定:①aiApiModel 匹配候选表里某一项 → 选中那一项;②aiApiModel 非空但不在候选表
+  // 里(比如上次手动填过一个自定义ID)→ 选中"自定义"并把文本框预填这个值;③aiApiModel
+  // 为空 → 选中候选表第一项(=该 provider 的内置默认档位)但不写入 aiApiModel——留空
+  // 就是"不覆盖,交给 buildRequest 自己的默认值"这条既定语义,视觉上预选第一项只是让
+  // 用户看得到"现在实际用的是哪个",不代表这个值已经被写进 aiApiModel。
+  function renderModelPicker(){
+    modelWrap.innerHTML = '';
+    if(!aiProvider) return;
+    const options = AI_MODEL_OPTIONS[aiProvider] || [];
+    const label = document.createElement('label');
+    label.textContent = '模型';
+    label.style.cssText = 'margin-top:8px;';
+    modelWrap.appendChild(label);
+
+    const sel = document.createElement('select');
+    sel.id = 'aiModelSelect';
+    const knownIds = options.map(o=>o.id);
+    const isCustom = !!aiApiModel && !knownIds.includes(aiApiModel);
+    // aiApiModel 为空(!isCustom 且不匹配任何已知项)时,视觉上默认预选候选表第一项——
+    // 这一项本来就等于该 provider 的内置默认档位(见文件顶部 AI_MODEL_OPTIONS 注释里
+    // "第一项固定等于 buildRequest 硬编码默认值"这条约定),只是"预选"不等于"写入
+    // aiApiModel",不选默认档位对应的 option.selected 也不会让 aiApiModel 变成非空。
+    options.forEach((o,i)=>{
+      const opt = document.createElement('option');
+      opt.value = o.id; opt.textContent = o.label;
+      if(aiApiModel===o.id || (!aiApiModel && i===0)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    const optCustom = document.createElement('option');
+    optCustom.value = AI_MODEL_CUSTOM_VALUE; optCustom.textContent = '自定义(手动输入模型ID)';
+    if(isCustom) optCustom.selected = true;
+    sel.appendChild(optCustom);
+    modelWrap.appendChild(sel);
+
+    const customInput = document.createElement('input');
+    customInput.type = 'text';
+    customInput.id = 'aiModelCustomInput';
+    customInput.placeholder = '精确的模型ID,例如 openai/gpt-5.4-mini';
+    customInput.autocomplete = 'off';
+    // 统一用逐个属性直接赋值(不用 style.cssText 塞一整条字符串)——下面 sel.onchange
+    // 切换显隐时用的就是这种写法,创建时的初始状态也保持同一种写法,不要混用两种方式
+    // 表达同一件事。
+    customInput.style.marginLeft = '8px';
+    customInput.style.display = isCustom ? 'inline-block' : 'none';
+    customInput.value = isCustom ? aiApiModel : '';
+    modelWrap.appendChild(customInput);
+
+    function commitCustomModel(){
+      aiApiModel = customInput.value.trim();
+      persistAiState();
+    }
+    customInput.addEventListener('input', commitCustomModel);
+    customInput.addEventListener('blur', commitCustomModel);
+
+    sel.onchange = ()=>{
+      if(sel.value===AI_MODEL_CUSTOM_VALUE){
+        customInput.style.display = 'inline-block';
+        aiApiModel = customInput.value.trim(); // 可能是空字符串,commitCustomModel 会在用户真正输入后覆盖
+      } else {
+        customInput.style.display = 'none';
+        customInput.value = '';
+        aiApiModel = sel.value;
+      }
+      persistAiState();
+    };
+
+    const modelNote = document.createElement('div');
+    modelNote.className = 'ai-key-warn';
+    modelNote.style.cssText = 'margin-top:4px;';
+    modelNote.textContent = '更强的模型通常更贵、单次决策也可能更慢——如果响应超过'
+      +(AI_CALL_TIMEOUT_MS/1000)+'秒会自动回退到本地机器人规则,不会卡住游戏。';
+    modelWrap.appendChild(modelNote);
+  }
+
   function updateStatusLine(){
     statusLine.innerHTML = '';
     if(!aiApiKey){
       statusLine.textContent = '未填写密钥,机器人将使用本地规则(不产生任何费用)。';
+      // 密钥清空时,provider 已经在 commitKey 里被清过了(见其注释);这里连带清空
+      // 已选模型——避免密钥/提供商都清空了、却在 sessionStorage 里留一个不再对应
+      // 任何provider的孤儿模型ID。
+      aiApiModel = '';
+      modelWrap.innerHTML = '';
     } else {
+      const prevProvider = aiProvider;
       const detected = detectAiProvider(aiApiKey);
       if(detected){
         aiProvider = detected;
@@ -337,13 +469,19 @@ function showAiKeyModal(onDone){
           sel.appendChild(opt);
         });
         sel.onchange = ()=>{
+          if(aiProvider!==sel.value) aiApiModel = '';
           aiProvider = sel.value || null;
           persistAiState();
           updateSaveBtnState();
+          renderModelPicker();
         };
         statusLine.appendChild(sel);
       }
+      // provider 真的发生了变化(不是同一个 provider 重复识别)才清空已选模型——避免
+      // 把上一个 provider 的模型ID带进新 provider(两者的候选表/合法值域互不相通)。
+      if(prevProvider!==aiProvider) aiApiModel = '';
     }
+    renderModelPicker();
     updateSaveBtnState();
   }
 
@@ -377,10 +515,11 @@ function showAiKeyModal(onDone){
   }
 
   function doSkip(){
-    // 显式清空——跳过必须真的是"不带任何密钥",不能因为输入框里已经打了几个字符
-    // (被 input 事件顺手自动保存过)而在跳过之后仍然残留一把半打完的密钥。
+    // 显式清空——跳过必须真的是"不带任何密钥/不带任何已选模型",不能因为输入框/模型
+    // 下拉框已经被操作过(被 input/onchange 事件顺手自动保存过)而在跳过之后仍然残留
+    // 半打完的配置。
     input.value = '';
-    aiApiKey = ''; aiProvider = null;
+    aiApiKey = ''; aiProvider = null; aiApiModel = '';
     aiPromptDismissed = true;
     persistAiState();
     finish();

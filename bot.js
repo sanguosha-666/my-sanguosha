@@ -540,6 +540,7 @@ async function tryAiBotPlay(g, seat, options){
       systemPrompt: buildBotPlaySystemPrompt(g, seat),
       userPrompt: buildBotPlayUserPrompt(state, candidates),
       maxTokens: 200,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
     });
   }catch(e){
     // callAI 本身设计上从不 reject(网络/超时/解析错误都被归类进 {ok:false,...} 这个
@@ -641,6 +642,7 @@ async function tryAiBotBestTarget(g, seat, card, actionId){
       systemPrompt: buildBotTargetSystemPrompt(g, seat),
       userPrompt: buildBotTargetUserPrompt(state, card, actionId, candidates),
       maxTokens: 100,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
@@ -724,6 +726,7 @@ async function tryAiBotGuhuoQuestion(g, seat){
       systemPrompt: buildBotGuhuoSystemPrompt(),
       userPrompt: buildBotGuhuoUserPrompt(state),
       maxTokens: 50,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
@@ -806,6 +809,7 @@ async function tryAiBotGanglieChoice(g, seat){
       systemPrompt: buildBotGanglieSystemPrompt(),
       userPrompt: buildBotGanglieUserPrompt(state),
       maxTokens: 80,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
@@ -991,6 +995,7 @@ async function tryAiBotGuicai(g, seat){
       systemPrompt: buildBotGuicaiSystemPrompt(),
       userPrompt: buildBotGuicaiUserPrompt(state, candidates),
       maxTokens: 100,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
