@@ -172,7 +172,7 @@ const PROVIDER_ADAPTERS = {
           'authorization': 'Bearer '+apiKey,
         },
         body: JSON.stringify({
-          model: opts.model || 'llama-3.1-8b-instant',
+          model: opts.model || 'llama-3.3-70b-versatile',
           max_tokens: opts.maxTokens || 512,
           messages,
         }),
