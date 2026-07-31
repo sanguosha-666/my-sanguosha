@@ -234,13 +234,14 @@ const QUICK_CHAT_PHRASES = [
   '稳住，我们能赢。',
   '承让承让！'
 ];
+const CHAT_EMOJIS = ['😀','😂','🤣','😊','😍','😎','😭','😡','👍','👏'];
 function chatSenderLabel(g, msg){
   const p=Number.isInteger(msg.seat) && g.players ? g.players[msg.seat] : null;
   const generalId=(p&&p.general)||msg.general;
   const gen=g.started && generalId ? getGeneral(generalId) : null;
   return gen ? ('【'+gen.name+'】') : ((p&&p.name)||msg.playerName||'玩家');
 }
-function sendChatMessage(text){
+function pushChatMessage(text, type){
   text=String(text||'').trim().slice(0,60);
   if(!text || !chatRef || !currentG || mySeat===null) return;
   const now=Date.now();
@@ -250,9 +251,28 @@ function sendChatMessage(text){
   lastChatSentAt=now;
   const ts=(typeof firebase!=='undefined' && firebase.database && firebase.database.ServerValue)
     ? firebase.database.ServerValue.TIMESTAMP : now;
-  chatRef.push({text,seat:mySeat,playerName:p.name||'玩家',general:p.general||null,ts});
+  chatRef.push({text,type:type||'text',seat:mySeat,playerName:p.name||'玩家',general:p.general||null,ts});
   const input=document.getElementById('chatInput');
   if(input) input.value='';
+}
+function sendChatMessage(text){ pushChatMessage(text,'text'); }
+function sendChatEmoji(emoji){
+  if(CHAT_EMOJIS.includes(emoji)) pushChatMessage(emoji,'emoji');
+}
+function toggleEmojiPicker(){
+  const picker=document.getElementById('emojiPicker');
+  if(!picker) return;
+  const opening=picker.classList.contains('hidden');
+  picker.classList.toggle('hidden');
+  if(opening){
+    const button=document.querySelector('.emoji-toggle');
+    if(!button) return;
+    const rect=button.getBoundingClientRect();
+    const width=Math.min(210,window.innerWidth-16);
+    picker.style.width=width+'px';
+    picker.style.left=Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px';
+    picker.style.top=Math.max(8,rect.top-picker.offsetHeight-6)+'px';
+  }
 }
 function sendQuickChat(text){ if(text) sendChatMessage(text); }
 function sendChatFromInput(){
@@ -269,12 +289,17 @@ function renderLogPanel(g){
   const oldBody=el.querySelector('.log-panel-scroll');
   const oldScrollTop=oldBody?oldBody.scrollTop:0;
   const wasAtBottom=!oldBody || oldBody.scrollHeight-oldBody.scrollTop-oldBody.clientHeight<24;
-  const messages=(chatMessages||[]).map(m=>'<div class="chat-message"><b style="color:'+seatColor(Number.isInteger(m.seat)?m.seat:0)+'">'+escapeHtml(chatSenderLabel(g,m))+'</b>：'+escapeHtml(m.text||'')+'</div>').join('');
+  const messages=(chatMessages||[]).map(m=>{
+    const isEmoji=m.type==='emoji' && CHAT_EMOJIS.includes(m.text);
+    const content=isEmoji ? '<span class="chat-emoji">'+escapeHtml(m.text)+'</span>' : escapeHtml(m.text||'');
+    return '<div class="chat-message'+(isEmoji?' emoji-message':'')+'"><b style="color:'+seatColor(Number.isInteger(m.seat)?m.seat:0)+'">'+escapeHtml(chatSenderLabel(g,m))+'</b>：'+content+'</div>';
+  }).join('');
   const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
+  const emojiPicker='<div id="emojiPicker" class="emoji-picker hidden">'+CHAT_EMOJIS.map(e=>'<button type="button" onclick="sendChatEmoji(\''+e+'\')">'+e+'</button>').join('')+'</div>';
   el.innerHTML = '<div class="log-panel-scroll"><div class="log-panel-head">本局日志（共'+log.length+'条）</div>'
     + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('')
     + (messages ? '<div class="chat-divider">聊天</div>'+messages : '')
-    + '</div><div class="chat-compose">'+quick+'<div class="chat-input-row"><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div>';
+    + '</div><div class="chat-compose">'+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div>';
   const body=el.querySelector('.log-panel-scroll');
   if(body) body.scrollTop = wasAtBottom ? body.scrollHeight : oldScrollTop;
 }

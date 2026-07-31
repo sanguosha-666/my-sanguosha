@@ -1080,12 +1080,19 @@
   .log-panel div:last-child{color:var(--paper);}
   .log-panel-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
   .chat-message{padding:3px 1px!important;word-break:break-word;color:var(--paper-dim);}
+  .chat-message.emoji-message{display:flex;align-items:center;gap:3px;}
+  .chat-emoji{display:inline-block;font-size:52px;line-height:1.08;vertical-align:middle;}
   .chat-divider{margin-top:7px;padding:5px 1px!important;border-top:1px solid var(--line);color:var(--gold)!important;font-weight:700;}
-  .chat-compose{padding:7px 0 0!important;border-top:1px solid var(--line);}
+  .chat-compose{position:relative;padding:7px 0 0!important;border-top:1px solid var(--line);}
   .quick-chat-select{width:100%;margin-bottom:5px;padding:4px 6px;background:#18130f;color:var(--paper);border:1px solid var(--line);border-radius:5px;font-size:12px;}
   .chat-input-row{display:flex;gap:5px;padding:0!important;}
   .chat-input-row input{flex:1;min-width:0;padding:5px 7px;background:#18130f;color:var(--paper);border:1px solid var(--line);border-radius:5px;}
   .chat-input-row button{padding:5px 10px;white-space:nowrap;}
+  .chat-input-row .emoji-toggle{padding:3px 7px;font-size:18px;line-height:1;}
+  .emoji-picker{position:fixed;z-index:90;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;width:210px;padding:7px!important;background:#211914;border:1px solid var(--gold-dim);border-radius:8px;box-shadow:0 5px 18px rgba(0,0,0,.55);}
+  .emoji-picker.hidden{display:none;}
+  .emoji-picker button{padding:4px!important;font-size:24px;line-height:1.2;background:rgba(255,255,255,.04);border:1px solid transparent;border-radius:5px;cursor:pointer;}
+  .emoji-picker button:hover{border-color:var(--gold-dim);background:rgba(180,130,58,.18);}
   /* 宽屏(>=900px,手机断点之外)下把常驻日志面板切到右侧,不再挤在 controls 下方——
      窄屏没有侧边空间，保持原来嵌入 controls 下方的位置不变，只在这里加宽屏覆盖。
      top:64px 避开顶部 44px 高的 helpBtn/logBtn/closeRoomBtn(它们在 top:12px，
@@ -2028,6 +2035,6 @@
 <script src="render-table.js?v=251"></script>
 <script src="render-hand.js?v=251"></script>
 <script src="render-controls.js?v=251"></script>
-<script src="render-log.js?v=252"></script>
+<script src="render-log.js?v=253"></script>
 </body>
 </html>
