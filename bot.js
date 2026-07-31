@@ -339,6 +339,35 @@ function botPublicEquipsView(p){
   return out;
 }
 function botPublicDelaysView(p){ return (p.delays||[]).map(c=>c.name); }
+
+// botSuspicionHint:身份局AI选目标/出牌决策的第一层(信息层)——把本地既有的
+// aiRebelSuspicion嫌疑值机制(botSuspicion,详见其定义处的注释)转成AI能读的分档
+// 描述性文本,不给裸数值。【不是新的隐藏信息接口,是把机器人已有的公开信息读能力
+// 补给AI】——recordBotDamageEvidence/recordBotRescueEvidence(game.js里dealDamage/
+// 救援响应路径调用)的每一条delta判断分支,输入全部是结构性公开信息:"谁对谁造成了
+// 伤害"(dealDamage本身会产生公开日志)、"目标是不是主公"(身份局里主公从开局起就是
+// 明牌)、"目标身份是否已翻开"(roleRevealed,和UI的canSeeRole同一套公开性规则)——
+// 没有一个分支读取任何只有机器人内部才知道的私有状态。所以aiRebelSuspicion是纯粹
+// 由公开事件推导出的聚合值,任何真人玩家盯着日志心算理论上能算出同一个数,这和
+// buildBotVisibleState"结构上只投影真实可见信息"的既有安全原则完全兼容,不是新开
+// 的口子。裸数值不给的原因:-100~100是内部实现刻度(45/24/-28/-50/25这几个和阈值
+// 绑定的魔数),AI拿到一个孤立的数字不知道怎么校准,分档文本更符合"引导性描述、非
+// 机械阈值判断"这条既有措辞原则。阈值30/60按现有delta量级校准:单次典型事件
+// (24~50)落进"一定"档,两次以上复合(48~100+)落进"较强"档,不是拍脑袋定的。
+// 只描述方向+强度,不编造具体事件次数/细节——机制本身只有累加后的最终值,没有保留
+// 离散事件记录,编造"三次攻击"这类具体次数是虚构信息,不诚实。
+// 返回 undefined(不是 null)是刻意的:JSON.stringify 会跳过值为 undefined 的键,
+// 非身份局/证据不足时这个字段在发给AI的prompt里完全不出现,不占篇幅、不用"无证据"
+// 这类空话填充每一条候选。
+function botSuspicionHint(g, targetSeat){
+  if(!g || g.gameMode!=='identity') return undefined;
+  const s = botSuspicion(g, targetSeat);
+  if(s>=60) return '公开行为显示出较强的反贼嫌疑';
+  if(s>=30) return '公开行为显示出一定的反贼嫌疑';
+  if(s<=-60) return '公开行为显示出较强的偏向忠于主公一方的倾向,反贼嫌疑很低';
+  if(s<=-30) return '公开行为显示出一定的偏向忠于主公一方的倾向,反贼嫌疑较低';
+  return undefined;
+}
 function buildBotVisibleState(g, seat){
   const me = g.players[seat];
   return {
@@ -360,6 +389,7 @@ function buildBotVisibleState(g, seat){
         equips: botPublicEquipsView(p), delays: botPublicDelaysView(p),
         knownRole: botKnownRole(g, seat, i), // 复用既有的安全揭示逻辑,不知道就是 null
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
+        suspicionHint: botSuspicionHint(g, i), // 身份局限定,undefined 时 JSON 里不出现这个键
       };
     }),
   };
