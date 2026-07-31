@@ -339,6 +339,35 @@ function botPublicEquipsView(p){
   return out;
 }
 function botPublicDelaysView(p){ return (p.delays||[]).map(c=>c.name); }
+
+// botSuspicionHint:身份局AI选目标/出牌决策的第一层(信息层)——把本地既有的
+// aiRebelSuspicion嫌疑值机制(botSuspicion,详见其定义处的注释)转成AI能读的分档
+// 描述性文本,不给裸数值。【不是新的隐藏信息接口,是把机器人已有的公开信息读能力
+// 补给AI】——recordBotDamageEvidence/recordBotRescueEvidence(game.js里dealDamage/
+// 救援响应路径调用)的每一条delta判断分支,输入全部是结构性公开信息:"谁对谁造成了
+// 伤害"(dealDamage本身会产生公开日志)、"目标是不是主公"(身份局里主公从开局起就是
+// 明牌)、"目标身份是否已翻开"(roleRevealed,和UI的canSeeRole同一套公开性规则)——
+// 没有一个分支读取任何只有机器人内部才知道的私有状态。所以aiRebelSuspicion是纯粹
+// 由公开事件推导出的聚合值,任何真人玩家盯着日志心算理论上能算出同一个数,这和
+// buildBotVisibleState"结构上只投影真实可见信息"的既有安全原则完全兼容,不是新开
+// 的口子。裸数值不给的原因:-100~100是内部实现刻度(45/24/-28/-50/25这几个和阈值
+// 绑定的魔数),AI拿到一个孤立的数字不知道怎么校准,分档文本更符合"引导性描述、非
+// 机械阈值判断"这条既有措辞原则。阈值30/60按现有delta量级校准:单次典型事件
+// (24~50)落进"一定"档,两次以上复合(48~100+)落进"较强"档,不是拍脑袋定的。
+// 只描述方向+强度,不编造具体事件次数/细节——机制本身只有累加后的最终值,没有保留
+// 离散事件记录,编造"三次攻击"这类具体次数是虚构信息,不诚实。
+// 返回 undefined(不是 null)是刻意的:JSON.stringify 会跳过值为 undefined 的键,
+// 非身份局/证据不足时这个字段在发给AI的prompt里完全不出现,不占篇幅、不用"无证据"
+// 这类空话填充每一条候选。
+function botSuspicionHint(g, targetSeat){
+  if(!g || g.gameMode!=='identity') return undefined;
+  const s = botSuspicion(g, targetSeat);
+  if(s>=60) return '公开行为显示出较强的反贼嫌疑';
+  if(s>=30) return '公开行为显示出一定的反贼嫌疑';
+  if(s<=-60) return '公开行为显示出较强的偏向忠于主公一方的倾向,反贼嫌疑很低';
+  if(s<=-30) return '公开行为显示出一定的偏向忠于主公一方的倾向,反贼嫌疑较低';
+  return undefined;
+}
 function buildBotVisibleState(g, seat){
   const me = g.players[seat];
   return {
@@ -360,6 +389,7 @@ function buildBotVisibleState(g, seat){
         equips: botPublicEquipsView(p), delays: botPublicDelaysView(p),
         knownRole: botKnownRole(g, seat, i), // 复用既有的安全揭示逻辑,不知道就是 null
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
+        suspicionHint: botSuspicionHint(g, i), // 身份局限定,undefined 时 JSON 里不出现这个键
       };
     }),
   };
@@ -411,17 +441,32 @@ const BOT_STRATEGY_GUIDANCE_PLAY =
 // 三阶段模型(前期配合主公清理反贼但避免抢头功暴露自己→中期反贼减员后伺机针对忠臣→
 // 终局三方对峙阶段绝不主动碰主公、必须先解决忠臣);主公优先血厚/防御倾向+生存优先于
 // 输出+早期低调靠观察集火/护主反推身份。
+//
+// 【判断力层,身份推断线索接入步骤②】四段各追加一句"该怎么用 suspicionHint"——步骤①
+// (信息层)已经把 buildBotVisibleState 的 players[].suspicionHint 字段接进两个决策
+// 点的 prompt 了,但光有字段不等于AI会用好它,需要明说"这是什么、该怎么参考"。延续
+// 既有措辞原则(引导性描述,不是"score>N就必须怎样"这种机械阈值判断)。zhu(主公)那句
+// 是唯一的例外——不是新增一句,是修正:原文"可以通过观察谁在集火你、谁在护着你来反推
+// 场上身份"这句话此前完全是空转的(AI没有任何字段能真的做这件事),现在 suspicionHint
+// 就是这件事的现成答案,原句改写成直接点出这一点、让这句话真正落地,而不是另起一句。
 const BOT_IDENTITY_GUIDANCE = {
   fan: '若本回合能对主公形成两次以上有效攻击,通常应该主动出手;避免和忠臣正面消耗,'
-    +'那样容易让内奸坐收渔利。',
+    +'那样容易让内奸坐收渔利。候选目标信息里如果带有嫌疑提示(suspicionHint),同样'
+    +'值得参考——嫌疑很低的目标往往行为上更偏向保护主公一方,可能更值得优先处理;'
+    +'这份线索是场上公开行为算出来的,理论上任何人都能观察到。',
   zhong: '核心任务是辅助并保护主公。局势不明时,宁可暂时被误伤,也不要过早暴露身份——'
     +'过早暴露容易成为反贼的首要目标,反而丧失后续保护主公的能力;也不要把手牌耗尽去'
-    +'单挑反贼,那同样是在替内奸创造机会。',
+    +'单挑反贼,那同样是在替内奸创造机会。候选目标信息里如果带有嫌疑提示'
+    +'(suspicionHint),那是基于场上公开行为(比如是否打过主公、是否救过疑似反贼)'
+    +'算出来的参考,不是凭空猜测——嫌疑越明显的目标,越值得优先怀疑、考虑针对性行动。',
   nei: '判断当前大致该往哪个方向想:场上还有较多反贼时,倾向于配合主公清理反贼,同时'
     +'避免抢头功、暴露自己;反贼所剩不多时,可以考虑找机会针对忠臣;若局面已经收缩到'
-    +'只剩你、主公、忠臣三方,这个阶段不要主动招惹主公,优先设法解决忠臣,再考虑后续。',
-  zhu: '生存优先于输出,倾向保留桃、杀等防身手段,不要轻易消耗殆尽;早期适度低调,可以'
-    +'通过观察谁在集火你、谁在护着你来反推场上身份。',
+    +'只剩你、主公、忠臣三方,这个阶段不要主动招惹主公,优先设法解决忠臣,再考虑后续。'
+    +'候选目标的嫌疑提示(suspicionHint)同样有用,帮助判断谁更可能是反贼、谁更可能是'
+    +'忠臣,配合上面的阶段判断使用。',
+  zhu: '生存优先于输出,倾向保留桃、杀等防身手段,不要轻易消耗殆尽;早期适度低调;'
+    +'候选目标信息里的嫌疑提示(suspicionHint)就是"谁在集火你、谁在护着你"这类公开'
+    +'行为的汇总,可以直接参考来反推场上身份,不用凭空猜测。',
 };
 const BOT_IDENTITY_ROLE_LABEL = { zhu:'主公', zhong:'忠臣', fan:'反贼', nei:'内奸' };
 function botIdentityGuidance(g, seat){
