@@ -221,13 +221,74 @@ function renderLogModal(g){
 // renderLogPanel: 右侧常驻日志显示本局全部记录，并在自己的面板内滚动。用户正在查看
 // 较早记录时保留当前位置；只有原本就在底部时，新日志到来才自动跟到最新一条。
 // 📜 按钮的完整历史弹窗继续保留，适合需要更大阅读面积时使用。
+let logPanelMode = 'log';
+let lastChatSentAt = 0;
+const QUICK_CHAT_PHRASES = [
+  '快点吧，花儿都谢了！',
+  '别急，让我想想。',
+  '你这牌打得很有想法。',
+  '好家伙，直接给我整不会了。',
+  '不是吧，这也能中？',
+  '这波啊，这波是天命。',
+  '我就静静地看着你表演。',
+  '给个机会，我还能抢救一下。',
+  '稳住，我们能赢。',
+  '承让承让！'
+];
+function switchLogPanelMode(mode){
+  logPanelMode = mode==='chat' ? 'chat' : 'log';
+  if(currentG) renderLogPanel(currentG);
+}
+function chatSenderLabel(g, msg){
+  const p=Number.isInteger(msg.seat) && g.players ? g.players[msg.seat] : null;
+  const generalId=(p&&p.general)||msg.general;
+  const gen=g.started && generalId ? getGeneral(generalId) : null;
+  return gen ? ('【'+gen.name+'】') : ((p&&p.name)||msg.playerName||'玩家');
+}
+function sendChatMessage(text){
+  text=String(text||'').trim().slice(0,60);
+  if(!text || !chatRef || !currentG || mySeat===null) return;
+  const now=Date.now();
+  if(now-lastChatSentAt<600) return;
+  const p=currentG.players&&currentG.players[mySeat];
+  if(!p) return;
+  lastChatSentAt=now;
+  const ts=(typeof firebase!=='undefined' && firebase.database && firebase.database.ServerValue)
+    ? firebase.database.ServerValue.TIMESTAMP : now;
+  chatRef.push({text,seat:mySeat,playerName:p.name||'玩家',general:p.general||null,ts});
+  const input=document.getElementById('chatInput');
+  if(input) input.value='';
+}
+function sendQuickChat(text){ if(text) sendChatMessage(text); }
+function sendChatFromInput(){
+  const input=document.getElementById('chatInput');
+  if(input) sendChatMessage(input.value);
+}
+function chatInputKeydown(e){
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendChatFromInput(); }
+}
 function renderLogPanel(g){
   const el = document.getElementById('logPanel');
   if(!el) return;
+  el.classList.toggle('chat-open',logPanelMode==='chat');
+  const tabs='<div class="log-panel-tabs"><button class="'+(logPanelMode==='log'?'active':'')+'" onclick="switchLogPanelMode(\'log\')">游戏日志</button><button class="'+(logPanelMode==='chat'?'active':'')+'" onclick="switchLogPanelMode(\'chat\')">聊天</button></div>';
+  if(logPanelMode==='chat'){
+    const oldBody=el.querySelector('.log-panel-scroll');
+    const oldScrollTop=oldBody?oldBody.scrollTop:0;
+    const wasAtBottom=!oldBody || oldBody.scrollHeight-oldBody.scrollTop-oldBody.clientHeight<24;
+    const messages=(chatMessages||[]).map(m=>'<div class="chat-message"><b style="color:'+seatColor(Number.isInteger(m.seat)?m.seat:0)+'">'+escapeHtml(chatSenderLabel(g,m))+'</b>：'+escapeHtml(m.text||'')+'</div>').join('');
+    const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
+    el.innerHTML=tabs+'<div class="log-panel-scroll chat-scroll">'+(messages||'<div class="chat-empty">还没有人说话</div>')+'</div><div class="chat-compose">'+quick+'<div class="chat-input-row"><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div>';
+    const body=el.querySelector('.log-panel-scroll');
+    if(body) body.scrollTop=wasAtBottom?body.scrollHeight:oldScrollTop;
+    return;
+  }
   const log = g.log||[];
-  const oldScrollTop = el.scrollTop;
-  const wasAtBottom = el.scrollHeight-el.scrollTop-el.clientHeight < 24;
-  el.innerHTML = '<div class="log-panel-head">本局日志（共'+log.length+'条）</div>'
-    + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
-  el.scrollTop = wasAtBottom ? el.scrollHeight : oldScrollTop;
+  const oldBody=el.querySelector('.log-panel-scroll');
+  const oldScrollTop=oldBody?oldBody.scrollTop:0;
+  const wasAtBottom=!oldBody || oldBody.scrollHeight-oldBody.scrollTop-oldBody.clientHeight<24;
+  el.innerHTML = tabs+'<div class="log-panel-scroll"><div class="log-panel-head">本局日志（共'+log.length+'条）</div>'
+    + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('')+'</div>';
+  const body=el.querySelector('.log-panel-scroll');
+  if(body) body.scrollTop = wasAtBottom ? body.scrollHeight : oldScrollTop;
 }

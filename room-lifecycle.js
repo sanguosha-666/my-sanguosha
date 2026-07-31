@@ -19,6 +19,7 @@ function joinRoom(){
   if(!name){ errEl.textContent='请填名字'; return; }
   roomId = room;
   gameRef = db.ref('rooms/'+roomId+'/game');
+  chatRef = db.ref('rooms/'+roomId+'/chat');
 
   let joinError = null; // 在事务里设置,事务外提示
 
@@ -62,6 +63,14 @@ function enterGame(){
   document.getElementById('configWarn').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
   gameRef.on('value', snap => render(snap.val()));
+  if(chatQuery) chatQuery.off();
+  chatQuery = chatRef.limitToLast(80);
+  chatQuery.on('value', snap=>{
+    const raw=snap.val()||{};
+    chatMessages=Object.keys(raw).map(k=>Object.assign({id:k},raw[k]||{}))
+      .sort((a,b)=>(a.ts||0)-(b.ts||0));
+    if(currentG) renderLogPanel(currentG);
+  });
 }
 
 // 大厅机器人座位。机器人仍是标准 player，只以 isBot 区分；距离、身份、回合和胜负逻辑
@@ -447,12 +456,15 @@ function cleanupRoom(){
   // 行为本身(删除房间数据+所有人回大厅)完全一致,只是让玩家点之前多一层警示。
   if(!confirm('确定要关闭本房间吗?这会删除本房间数据,所有人会立即回到大厅——如果游戏正在进行中,会直接中断当前对局且无法恢复。')) return;
   if(gameRef) gameRef.off();
-  gameRef.remove().then(backToLobby).catch(err=>{
+  if(chatQuery) chatQuery.off();
+  Promise.all([gameRef.remove(), chatRef ? chatRef.remove() : Promise.resolve()]).then(backToLobby).catch(err=>{
     alert('清理失败: '+err.message);
   });
 }
 
 function backToLobby(){
+  if(chatQuery) chatQuery.off();
+  chatQuery=null; chatRef=null; chatMessages=[];
   mySeat = null; selectedCardIdx = null; resetZhangba();
   document.getElementById('game').classList.add('hidden');
   document.getElementById('lobby').classList.remove('hidden');

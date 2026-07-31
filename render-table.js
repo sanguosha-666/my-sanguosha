@@ -28,9 +28,41 @@ function tableCardFaceHtml(card){
 // 好几次,"链结束"是最后单独发生的一次,不一定伴随新牌)。
 let lastShownEntrySeq = undefined;
 let lastFadedBatchSeq = undefined;
+function renderWuguPool(g, el, pending){
+  const pool=Array.isArray(pending.pool)?pending.pool:[];
+  const picker=Array.isArray(pending.order)?pending.order[pending.idx]:null;
+  const selectable=g.phase==='wugu' && pending.type==='wugu' && picker===mySeat;
+  el.classList.add('wugu-pool-mode','exchange-mode');
+  el.classList.remove('show');
+  el.innerHTML='<div class="wugu-pool-title">【五谷丰登】'+(selectable?'请选择一张牌':'亮出的牌')+'</div>';
+  const row=document.createElement('div');
+  row.className='wugu-pool';
+  pool.forEach((card,pi)=>{
+    const item=document.createElement(selectable?'button':'div');
+    item.className='wugu-pool-card'+(selectable?' selectable':'');
+    item.innerHTML='<div class="wugu-card-name">'+escapeHtml(card.name)+'</div>'+tableCardFaceHtml(card);
+    if(selectable){
+      item.title='选择【'+card.name+'】';
+      item.onclick=()=>{
+        row.querySelectorAll('button').forEach(btn=>{btn.disabled=true;});
+        wuguPick(pi,pending.idx,card&&card.id);
+      };
+    }
+    row.appendChild(item);
+  });
+  el.appendChild(row);
+}
 function renderTableCard(g){
   const el = document.getElementById('tableCard');
   if(!el) return;
+  const wuguPending=g.pending && (
+    g.pending.type==='wugu' || (g.pending.type==='wuxie' && g.pending.ctx==='wugu')
+  ) ? g.pending : null;
+  if(wuguPending && Array.isArray(wuguPending.pool) && wuguPending.pool.length){
+    renderWuguPool(g,el,wuguPending);
+    return;
+  }
+  el.classList.remove('wugu-pool-mode');
   const list = Array.isArray(g.exchangeCards) ? g.exchangeCards : [];
   if(list.length===0){
     // 数组已被 normalize 清空(上一条链彻底结束、下一条链还没开始):清掉展示,不留残影。

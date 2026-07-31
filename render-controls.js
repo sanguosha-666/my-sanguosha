@@ -2615,21 +2615,10 @@ function renderControls(g){
   }
   if(g.phase==='wugu' && g.pending && g.pending.type==='wugu'){
     const picker=g.pending.order[g.pending.idx];
-    const poolDesc=g.pending.pool.map(c=>(cardFace(c)||'')+escapeHtml(c.name)).join('、');
     if(picker===mySeat){
-      g.pending.pool.forEach((card,pi)=>{
-        const b=document.createElement('button');
-        b.className='wugu-pick-btn';
-        b.innerHTML='挑选 '+(cardFace(card)||card.name)+' '+card.name;
-        b.onclick=()=>{
-          c.querySelectorAll('.wugu-pick-btn').forEach(btn=>{ btn.disabled=true; });
-          wuguPick(pi, g.pending.idx, card && card.id);
-        };
-        c.appendChild(b);
-      });
-      setBanner('【五谷丰登】轮到你挑选,公共池:'+poolDesc);
+      setBanner('【五谷丰登】轮到你挑选，请直接点击中央牌池中的一张牌。');
     } else {
-      setBanner('【五谷丰登】等待 '+escapeHtml(g.players[picker].name)+' 挑选。公共池:'+poolDesc);
+      setBanner('【五谷丰登】等待 '+escapeHtml(g.players[picker].name)+' 从中央牌池挑选。');
     }
     return;
   }

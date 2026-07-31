@@ -1,6 +1,8 @@
 // ---------- local state ----------
 let roomId = null, mySeat = null;
 let gameRef = null;
+let chatRef = null, chatQuery = null;
+let chatMessages = [];
 // 本地稳定标识:用来区分"我自己刷新重连"和"另一个人重名"。持久化到 localStorage,刷新后不变。
 let myClientId = (function(){
   try{
