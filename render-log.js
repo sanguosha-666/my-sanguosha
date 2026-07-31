@@ -286,9 +286,12 @@ function renderLogPanel(g){
   const el = document.getElementById('logPanel');
   if(!el) return;
   const log = g.log||[];
-  const oldBody=el.querySelector('.log-panel-scroll');
-  const oldScrollTop=oldBody?oldBody.scrollTop:0;
-  const wasAtBottom=!oldBody || oldBody.scrollHeight-oldBody.scrollTop-oldBody.clientHeight<24;
+  const oldLogBody=el.querySelector('.log-panel-scroll');
+  const oldChatBody=el.querySelector('.chat-panel-scroll');
+  const oldLogScrollTop=oldLogBody?oldLogBody.scrollTop:0;
+  const oldChatScrollTop=oldChatBody?oldChatBody.scrollTop:0;
+  const logWasAtBottom=!oldLogBody || oldLogBody.scrollHeight-oldLogBody.scrollTop-oldLogBody.clientHeight<24;
+  const chatWasAtBottom=!oldChatBody || oldChatBody.scrollHeight-oldChatBody.scrollTop-oldChatBody.clientHeight<24;
   const messages=(chatMessages||[]).map(m=>{
     const isEmoji=m.type==='emoji' && CHAT_EMOJIS.includes(m.text);
     const content=isEmoji ? '<span class="chat-emoji">'+escapeHtml(m.text)+'</span>' : escapeHtml(m.text||'');
@@ -296,10 +299,13 @@ function renderLogPanel(g){
   }).join('');
   const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
   const emojiPicker='<div id="emojiPicker" class="emoji-picker hidden">'+CHAT_EMOJIS.map(e=>'<button type="button" onclick="sendChatEmoji(\''+e+'\')">'+e+'</button>').join('')+'</div>';
-  el.innerHTML = '<div class="log-panel-scroll"><div class="log-panel-head">本局日志（共'+log.length+'条）</div>'
+  el.innerHTML = '<section class="log-panel-section"><div class="log-panel-head">本局日志（共'+log.length+'条）</div><div class="log-panel-scroll">'
     + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('')
-    + (messages ? '<div class="chat-divider">聊天</div>'+messages : '')
-    + '</div><div class="chat-compose">'+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div>';
-  const body=el.querySelector('.log-panel-scroll');
-  if(body) body.scrollTop = wasAtBottom ? body.scrollHeight : oldScrollTop;
+    + '</div></section><section class="chat-panel-section"><div class="chat-panel-head">聊天（'+(chatMessages||[]).length+'条）</div><div class="chat-panel-scroll">'
+    + (messages||'<div class="chat-empty">还没有人说话</div>')
+    + '</div><div class="chat-compose">'+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div></section>';
+  const logBody=el.querySelector('.log-panel-scroll');
+  const chatBody=el.querySelector('.chat-panel-scroll');
+  if(logBody) logBody.scrollTop = logWasAtBottom ? logBody.scrollHeight : oldLogScrollTop;
+  if(chatBody) chatBody.scrollTop = chatWasAtBottom ? chatBody.scrollHeight : oldChatScrollTop;
 }

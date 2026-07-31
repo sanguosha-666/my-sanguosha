@@ -1077,11 +1077,15 @@
        /grid 里的独立列(见桌面布局 @media(min-width:1024px))时同样不冲突。 */}
   .log-panel div{padding:2px 0;}
   .log-panel div:last-child{color:var(--paper);}
-  .log-panel-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+  .log-panel-section,.chat-panel-section{display:flex;flex:1 1 0;min-height:0;flex-direction:column;overflow:hidden;}
+  .log-panel-section{padding:0 0 6px!important;border-bottom:1px solid var(--line);}
+  .chat-panel-section{padding:6px 0 0!important;}
+  .log-panel-scroll,.chat-panel-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--gold-dim) rgba(0,0,0,.2);}
+  .chat-panel-head{padding:3px 4px 5px!important;color:var(--gold);font-weight:700;}
   .chat-message{padding:3px 1px!important;word-break:break-word;color:var(--paper-dim);}
   .chat-message.emoji-message{display:flex;align-items:center;gap:3px;}
   .chat-emoji{display:inline-block;font-size:52px;line-height:1.08;vertical-align:middle;}
-  .chat-divider{margin-top:7px;padding:5px 1px!important;border-top:1px solid var(--line);color:var(--gold)!important;font-weight:700;}
+  .chat-empty{text-align:center;color:var(--paper-dim);padding:12px 0!important;}
   .chat-compose{position:relative;padding:7px 0 0!important;border-top:1px solid var(--line);}
   .quick-chat-select{width:100%;margin-bottom:5px;padding:4px 6px;background:#18130f;color:var(--paper);border:1px solid var(--line);border-radius:5px;font-size:12px;}
   .chat-input-row{display:flex;gap:5px;padding:0!important;}
@@ -2034,6 +2038,6 @@
 <script src="render-table.js?v=254"></script>
 <script src="render-hand.js?v=254"></script>
 <script src="render-controls.js?v=254"></script>
-<script src="render-log.js?v=254"></script>
+<script src="render-log.js?v=255"></script>
 </body>
 </html>
