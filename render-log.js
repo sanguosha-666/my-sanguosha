@@ -221,7 +221,6 @@ function renderLogModal(g){
 // renderLogPanel: 右侧常驻日志显示本局全部记录，并在自己的面板内滚动。用户正在查看
 // 较早记录时保留当前位置；只有原本就在底部时，新日志到来才自动跟到最新一条。
 // 📜 按钮的完整历史弹窗继续保留，适合需要更大阅读面积时使用。
-let logPanelMode = 'log';
 let lastChatSentAt = 0;
 const QUICK_CHAT_PHRASES = [
   '快点吧，花儿都谢了！',
@@ -235,10 +234,6 @@ const QUICK_CHAT_PHRASES = [
   '稳住，我们能赢。',
   '承让承让！'
 ];
-function switchLogPanelMode(mode){
-  logPanelMode = mode==='chat' ? 'chat' : 'log';
-  if(currentG) renderLogPanel(currentG);
-}
 function chatSenderLabel(g, msg){
   const p=Number.isInteger(msg.seat) && g.players ? g.players[msg.seat] : null;
   const generalId=(p&&p.general)||msg.general;
@@ -270,25 +265,16 @@ function chatInputKeydown(e){
 function renderLogPanel(g){
   const el = document.getElementById('logPanel');
   if(!el) return;
-  el.classList.toggle('chat-open',logPanelMode==='chat');
-  const tabs='<div class="log-panel-tabs"><button class="'+(logPanelMode==='log'?'active':'')+'" onclick="switchLogPanelMode(\'log\')">游戏日志</button><button class="'+(logPanelMode==='chat'?'active':'')+'" onclick="switchLogPanelMode(\'chat\')">聊天</button></div>';
-  if(logPanelMode==='chat'){
-    const oldBody=el.querySelector('.log-panel-scroll');
-    const oldScrollTop=oldBody?oldBody.scrollTop:0;
-    const wasAtBottom=!oldBody || oldBody.scrollHeight-oldBody.scrollTop-oldBody.clientHeight<24;
-    const messages=(chatMessages||[]).map(m=>'<div class="chat-message"><b style="color:'+seatColor(Number.isInteger(m.seat)?m.seat:0)+'">'+escapeHtml(chatSenderLabel(g,m))+'</b>：'+escapeHtml(m.text||'')+'</div>').join('');
-    const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
-    el.innerHTML=tabs+'<div class="log-panel-scroll chat-scroll">'+(messages||'<div class="chat-empty">还没有人说话</div>')+'</div><div class="chat-compose">'+quick+'<div class="chat-input-row"><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div>';
-    const body=el.querySelector('.log-panel-scroll');
-    if(body) body.scrollTop=wasAtBottom?body.scrollHeight:oldScrollTop;
-    return;
-  }
   const log = g.log||[];
   const oldBody=el.querySelector('.log-panel-scroll');
   const oldScrollTop=oldBody?oldBody.scrollTop:0;
   const wasAtBottom=!oldBody || oldBody.scrollHeight-oldBody.scrollTop-oldBody.clientHeight<24;
-  el.innerHTML = tabs+'<div class="log-panel-scroll"><div class="log-panel-head">本局日志（共'+log.length+'条）</div>'
-    + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('')+'</div>';
+  const messages=(chatMessages||[]).map(m=>'<div class="chat-message"><b style="color:'+seatColor(Number.isInteger(m.seat)?m.seat:0)+'">'+escapeHtml(chatSenderLabel(g,m))+'</b>：'+escapeHtml(m.text||'')+'</div>').join('');
+  const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
+  el.innerHTML = '<div class="log-panel-scroll"><div class="log-panel-head">本局日志（共'+log.length+'条）</div>'
+    + log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('')
+    + (messages ? '<div class="chat-divider">聊天</div>'+messages : '')
+    + '</div><div class="chat-compose">'+quick+'<div class="chat-input-row"><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div>';
   const body=el.querySelector('.log-panel-scroll');
   if(body) body.scrollTop = wasAtBottom ? body.scrollHeight : oldScrollTop;
 }
