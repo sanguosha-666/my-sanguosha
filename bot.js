@@ -368,12 +368,29 @@ function botSuspicionHint(g, targetSeat){
   if(s<=-30) return '公开行为显示出一定的偏向忠于主公一方的倾向,反贼嫌疑较低';
   return undefined;
 }
-function buildBotVisibleState(g, seat){
+function buildBotVisibleState(g, seat, isFirstTurn=false){
   const me = g.players[seat];
+  
+  // 计算下一个玩家（用于AI判断行动顺序）
+  const calculateNextPlayer = () => {
+    if (typeof nextAlive === 'function') {
+      return nextAlive(g, g.turn || 0);
+    }
+    // 兜底实现：如果nextAlive不可用，使用简单的下一个存活玩家逻辑
+    const n = g.players.length;
+    for(let k = 1; k <= n; k++){
+      const s = (g.turn + k) % n;
+      if(g.players[s] && g.players[s].alive) return s;
+    }
+    return g.turn || 0;
+  };
+  
   return {
     seat,
     gameMode: g.gameMode || 'ffa',
     round: g.roundNum || 1,
+    phase: g.phase || '', // 当前游戏阶段
+    nextPlayer: calculateNextPlayer(), // 下一个行动的玩家座位
     // 自己的手牌/身份完全可见——这是这个座位本来就该看到的东西,不是特权。
     myRole: me.role || null,
     myHp: me.hp, myMaxHp: me.maxHp,
@@ -382,14 +399,25 @@ function buildBotVisibleState(g, seat){
     myDelays: botPublicDelaysView(me),
     players: (g.players||[]).map((p,i)=>{
       if(!p) return null;
+      const knownRole = botKnownRole(g, seat, i);
       return {
         seat: i, name: p.name, isSelf: i===seat, alive: p.alive,
         hp: p.hp, maxHp: p.maxHp,
         handCount: (p.hand||[]).length, // 只给张数,不给内容
         equips: botPublicEquipsView(p), delays: botPublicDelaysView(p),
-        knownRole: botKnownRole(g, seat, i), // 复用既有的安全揭示逻辑,不知道就是 null
+        knownRole: knownRole, // 复用既有的安全揭示逻辑,不知道就是 null
+        deadRole: !p.alive && g.gameMode==='identity' ? knownRole : undefined, // 已死玩家的身份
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
+        generalSkill: isFirstTurn && p.general && GENERALS && GENERALS[p.general] ? GENERALS[p.general].skill : undefined, // 第一回合提供武将技能
+        generalDesc: isFirstTurn && p.general && GENERALS && GENERALS[p.general] ? GENERALS[p.general].desc : undefined, // 第一回合提供武将描述
+        distance: i !== seat ? distance(g, seat, i) : 0, // 与自己的距离
         suspicionHint: botSuspicionHint(g, i), // 身份局限定,undefined 时 JSON 里不出现这个键
+        // 特殊状态信息
+        status: {
+          faceup: typeof p.faceup === 'boolean' ? p.faceup : true, // 翻面状态（true=正面，false=背面）
+          chained: p.chained === true, // 连环状态
+          turnedOver: p.turnedOver === true, // 翻面状态（历史遗留字段，与faceup功能相同）
+        },
       };
     }),
   };

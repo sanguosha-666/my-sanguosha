@@ -573,3 +573,21 @@ function handleAddBotClick(){
     addBot();
   }
 }
+
+// ---------- 页面刷新警告 ----------
+// 当AI会话存在时，提醒操作者刷新页面会丢失会话历史
+function setupRefreshWarning() {
+  // 检查是否有AI会话数据（有任何机器人已经配置了密钥）
+  const hasAiSessions = Object.keys(window.aiConversations || {}).length > 0;
+  
+  if (hasAiSessions) {
+    window.addEventListener('beforeunload', function(e) {
+      e.preventDefault();
+      e.returnValue = '页面刷新后AI机器人的会话历史将丢失，确定要刷新吗？';
+      return e.returnValue;
+    });
+  }
+}
+
+// 自动设置刷新警告
+setupRefreshWarning();
