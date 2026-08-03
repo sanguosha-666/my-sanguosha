@@ -1905,6 +1905,71 @@ BOT_DECISIONS.rendeTwoStep = {
   },
 };
 
+// ================= AI自维护回合摘要(aiSummary) =================
+// 机器人自己维护的"本局记忆摘要":updateAiSummary(g,seat) 异步调用 callAI,把旧摘要
+// (如有)+最近公开事件压缩成 ≤200字 的新摘要存进模块级 aiSummary;callAiChooseIndex
+// 每次做决策时把这份摘要注入 systemPrompt,帮 AI 跨回合记住"谁打过谁、谁救过谁、
+// 自己的留牌计划"这类会被日志滚掉的长程信息。aiSummarySeat 记录这份摘要属于哪个
+// 座位:座位变化(重连/换机器人)时清空,同座位累积。aiSummaryRound/aiSummaryTurn
+// 记录摘要对应的回合节点,留给后续调度逻辑(如"每轮更新一次")判断是否该更新,
+// 本任务只定义状态不消费。
+let aiSummary = '';
+let aiSummarySeat = null;
+let aiSummaryRound = 0;
+let aiSummaryTurn = -1;
+function aiSummaryReset(){
+  aiSummary = '';
+  aiSummarySeat = null;
+  aiSummaryRound = 0;
+  aiSummaryTurn = -1;
+}
+
+// buildSummaryPrompt:摘要任务的系统提示——要求"只记发生过的事、只记对后续决策有
+// 用的事实",不写推测,直接输出纯文本。刻意和 callAiChooseIndex 的"只输出
+// {"choice":数字}"约定分开,因为这是文本任务,不是选 index。
+function buildSummaryPrompt(g, seat){
+  return '你是网页版三国杀的AI机器人。请把"本局摘要"更新为最近状态的版本:'
+    +'结合旧的摘要(如有)与最近发生的公开事件,重写一份不超过200字的摘要,'
+    +'只记对后续决策有用的事实:谁对谁造成了伤害、谁救过谁、谁翻开了身份、'
+    +'你自己的出牌意图与留牌计划、你观察到的嫌疑。只写发生过的事,不要写推测。'
+    +'直接输出摘要文本,不要输出JSON、不要解释。';
+}
+
+// updateAiSummary:异步调用 callAI 生成/迭代本座位的局内摘要。fire-and-forget——
+// 调用方不 await(摘要只是辅助记忆,不能阻塞任何决策/回合推进);失败静默沿用旧摘要。
+// 只有成功写出新文本时才把 aiSummarySeat 挪到本座位:旧摘要若还在,它仍属于旧座位,
+// 等 callAiChooseIndex 的座位校验去清;若本座位是第一次写摘要(aiSummarySeat 还是
+// null),也必须立刻归属本座位,否则紧接着的第一次决策会把刚写好的摘要当成
+// "座位变化"误清掉。
+async function updateAiSummary(g, seat){
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return;
+  const state = buildBotVisibleState(g, seat);
+  const oldSummary = aiSummary ? ('旧摘要:\n'+aiSummary+'\n\n') : '';
+  const userPrompt = oldSummary
+    + '最近局面信息:\n' + JSON.stringify({ round: g.roundNum, recentLog: state.recentLog, discardPile: state.discardPile, players: state.players })
+    + '\n\n请输出更新后的摘要(≤200字)。';
+  showAiThinkingIndicator(g, seat);
+  let result;
+  try{
+    result = await callAI(aiProvider, aiApiKey, {
+      systemPrompt: buildSummaryPrompt(g, seat),
+      userPrompt: userPrompt,
+      maxTokens: 300,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
+    });
+  }catch(e){
+    result = { ok:false, reason:'other', detail:String(e) };
+  }finally{
+    hideAiThinkingIndicator();
+  }
+  if(!result || !result.ok) return;
+  const text = (result.text || '').trim();
+  if(text){
+    aiSummary = text.slice(0, 500);
+    aiSummarySeat = seat;
+  }
+}
+
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
     +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
@@ -1926,12 +1991,20 @@ async function callAiChooseIndex(opts){
   const candidates = opts.candidates || [];
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
   if(candidates.length<=1) return candidates.length===1 ? 0 : null;
+  // 【AI摘要】座位校验:座位变化(重连/换机器人)清空记忆;同座位累积。摘要只注入文本,
+  // 不在这里重建可见状态——buildBotVisibleState 的开销留给各调用方已有的那次调用。
+  if(aiSummarySeat !== opts.seat) aiSummaryReset();
+  aiSummarySeat = opts.seat;
+  // 摘要注入:有摘要且座位匹配时,追加进 systemPrompt
+  const summaryNote = aiSummary && aiSummarySeat===opts.seat
+    ? '\n\n本局记忆摘要(你自己维护的,参考即可):\n'+aiSummary
+    : '';
   const g = opts.g, seat = opts.seat;
   showAiThinkingIndicator(g, seat);
   let result;
   try{
     result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: opts.systemPrompt || buildBotDefaultSystemPrompt(),
+      systemPrompt: (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote,
       userPrompt: opts.userPrompt,
       maxTokens: opts.maxTokens || 80,
       model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,

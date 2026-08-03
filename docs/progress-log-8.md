@@ -87,3 +87,38 @@
   - **改动范围**：`bot.js`（`buildBotVisibleState` 两行）；`run_ai_bus_info_test.js`（+2 项、更新 2 项、
     文件头注释同步）；`index.html` `?v=` 281→282 共 13 处。`normalize` 无需改（纯客户端投影，不进 g）。
   - **commit**：`feat(bot): AI可见状态 desc全量与recentLog 20条`（wenwen_dev）。
+
+## S1 AI自维护回合摘要(状态+总结调用+决策注入,commit 待写)
+
+- **任务**:SDD 计划「2026-08-03-ai-summary-round-memory」Part S1——AI 机器人自维护的
+  "本局记忆摘要":跨回合记住日志会滚掉的长程信息(谁对谁造成伤害/谁救过谁/自己的留牌计划),
+  每次 AI 决策时注入 systemPrompt。
+- **新增状态(bot.js 模块级)**:`aiSummary`(摘要文本)/`aiSummarySeat`(摘要属于哪个座位)/
+  `aiSummaryRound`/`aiSummaryTurn`(摘要对应的回合节点,本任务只定义不消费,留给后续调度
+  逻辑判断"每轮该不该更新")+ `aiSummaryReset()` 统一清空。
+- **`updateAiSummary(g,seat)`(async,fire-and-forget)**:密钥守卫(无 `aiApiKey`/`aiProvider`
+  直接 return)→ `buildBotVisibleState` 投影公开可见信息 → userPrompt = 旧摘要(如有,标
+  "旧摘要:")+ 最近局面 JSON(`roundNum`/`recentLog`/`discardPile`/`players`)→ 调
+  `callAI`(复用 ai-bot.js 基础设施,零改动,`maxTokens:300`)→ 失败静默沿用旧摘要;
+  成功且文本非空才写 `aiSummary = text.slice(0,500)` **并 `aiSummarySeat = seat`**。
+  最后一行是相对 spec 原文的刻意补充:若本座位第一次写摘要(aiSummarySeat 还是 null),
+  不立刻归属的话紧接着的第一次 `callAiChooseIndex` 会把刚写好的摘要当成"座位变化"
+  误清掉(测试 2→3 顺序锁死这个语义)。
+- **`buildSummaryPrompt(g,seat)`**:纯文本任务的系统提示——"只记发生过的事,不要写推测",
+  要求重写 ≤200 字、直接输出文本不输出 JSON。刻意和决策 prompt 的 `{"choice":数字}`
+  约定分开。
+- **`callAiChooseIndex` 注入段**(候选守卫之后、`showAiThinkingIndicator` 之前):
+  `if(aiSummarySeat !== opts.seat) aiSummaryReset(); aiSummarySeat = opts.seat;` +
+  `summaryNote = aiSummary && aiSummarySeat===opts.seat ? '\n\n本局记忆摘要...'+aiSummary : ''`,
+  `systemPrompt: (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote`。
+  无摘要时 summaryNote 为空串,与旧 systemPrompt 字节级一致,零影响回归。4 个调用点
+  (botDecide/tryAiBotPlay/tryAiBotBestTarget/强C同窗多步)全部传 `seat`,无需守卫。
+  注入段不调 `buildBotVisibleState`(状态重建开销留给各调用方已有的一次调用)。
+- **测试(`run_ai_summary_test.js` 8 项,TDD RED→GREEN)**:①首回合 aiSummary 空且
+  systemPrompt 无摘要段;②updateAiSummary 调 callAI 一次、prompt 含"摘要"、写回;
+  ③非空摘要注入 systemPrompt;④`{ok:false}` 沿用旧摘要;⑤第二次 userPrompt 含
+  "旧摘要"+第一次输出;⑥座位 1→2 触发 reset;⑦600 字截断到 500(取前 500);
+  ⑧fire-and-forget:返回 Promise、未 await 时后续决策照常工作。harness 复用
+  run_ai_bus_info_test.js 惯例(data.js+ai-bot.js+bot.js,distance/attackRange stub)。
+- **回归**:summary 8/0、core 7/0、l2 23/0、l3 93/0、c_window 25/0,`node --check bot.js`
+  通过。`index.html` `?v=` 282→283 共 13 处。`normalize` 无需改(纯客户端状态,不进 g)。
