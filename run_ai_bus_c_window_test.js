@@ -79,8 +79,10 @@ files.forEach(function(file){
     vm.runInContext(code, sandbox, { filename: file });
     console.log('  OK ' + file);
     if (file === 'game.js') {
-      vm.runInContext('tx = function(fn) { return fn(typeof _g !== "undefined" ? _g : {}); };', sandbox);
-      vm.runInContext('gameRef = { transaction: function(fn) { return tx(fn); } };', sandbox);
+      // 强C:gameRef.transaction 升级为 Promise 模式(真实 SDK 行为),tx 的 onCommitted 才会触发。
+      // 逻辑仍同步执行(与旧 stub 一致);__txSnapshot 供测试覆盖"提交后快照",null=默认用
+      // fn 的返回值(Firebase 提交成功后 snapshot.val()=提交后状态的语义)。tx 保持真实实现。
+      vm.runInContext('gameRef = { __txSnapshot: null, transaction: function(fn){ var result = fn(typeof _g !== "undefined" ? _g : {}); var snap = gameRef.__txSnapshot !== null ? gameRef.__txSnapshot : result; return Promise.resolve({ snapshot: { val: function(){ return snap; } } }); } };', sandbox);
       vm.runInContext('mySeat = 0;', sandbox);
     }
   } catch (e) {
@@ -210,6 +212,53 @@ const testCode = String.raw`
     var end = list[0];
     if(end.isEndPlay !== true || end.action !== '结束出牌阶段') throw new Error('结束项字段不对,实际 ' + JSON.stringify(end));
     if(end.handIndex !== null || end.card !== null || end.target !== null) throw new Error('结束项应无牌无目标,实际 ' + JSON.stringify(end));
+  });
+
+  // ================= SC1:tx/playCard/endPlay 可选提交回调(强C前置) =================
+  // 此段必须放在 C1 的 playCard/endPlay spy 替换之前,调用的是 game.js 真实实现;
+  // tx 保持真实实现(加载时不再被 spy 替换),gameRef.transaction 是 Promise 模式 stub。
+  // ---- T13:tx(fn,onCommitted) → 回调收到提交后快照(含变更) ----
+  await check('SC1:tx 带 onCommitted → 回调收到提交快照(含 x=1)', async function(){
+    _g = {};
+    window.__committed = null;
+    var p = tx(function(g){ g.x = 1; return g; }, function(newG){ window.__committed = newG; });
+    if(!p || typeof p.then !== 'function') throw new Error('tx 应返回 Promise,实际 ' + p);
+    await Promise.resolve(); await Promise.resolve(); // 等微任务链(onCommitted 经 p.then 触发)
+    if(!window.__committed) throw new Error('onCommitted 从未被调用');
+    if(window.__committed.x !== 1) throw new Error('快照应含 x=1,实际 ' + JSON.stringify(window.__committed));
+  });
+
+  // ---- T14:不传 onCommitted → 无回调、无异常(既有调用回归) ----
+  await check('SC1:tx 不带 onCommitted → 无回调、无异常', async function(){
+    _g = {};
+    window.__committed = null;
+    var threw = false;
+    try { tx(function(g){ g.y = 2; return g; }); } catch(e){ threw = true; }
+    if(threw) throw new Error('不传 onCommitted 不应抛异常');
+    await Promise.resolve(); await Promise.resolve();
+    if(window.__committed !== null) throw new Error('不传 onCommitted 不应有回调');
+  });
+
+  // ---- T15:playCard(0,'桃',null,onCommitted) → 回调收到提交后快照(手牌已变) ----
+  await check('SC1:playCard 带 onCommitted → 快照手牌已出桃、体力+1', async function(){
+    _g = mkG([card('桃')], { myHp: 2 });
+    window.__committed = null;
+    playCard(0, '桃', null, function(newG){ window.__committed = newG; });
+    await Promise.resolve(); await Promise.resolve();
+    if(!window.__committed) throw new Error('onCommitted 从未被调用');
+    if(!window.__committed.players || window.__committed.players[0].hand.length !== 0)
+      throw new Error('快照手牌应为空(桃已打出),实际 ' + JSON.stringify(window.__committed.players && window.__committed.players[0].hand));
+    if(window.__committed.players[0].hp !== 3) throw new Error('快照体力应 2→3,实际 ' + window.__committed.players[0].hp);
+  });
+
+  // ---- T16:endPlay(onCommitted) → 回调被调用(phase 已推进) ----
+  await check('SC1:endPlay 带 onCommitted → 回调收到快照(phase 已推进到 discard)', async function(){
+    _g = mkG([]);
+    window.__committed = null;
+    endPlay(function(newG){ window.__committed = newG; });
+    await Promise.resolve(); await Promise.resolve();
+    if(!window.__committed) throw new Error('onCommitted 从未被调用');
+    if(window.__committed.phase !== 'discard') throw new Error('快照 phase 应为 discard,实际 ' + window.__committed.phase);
   });
 
   // ================= C1:弱C出牌窗 =================

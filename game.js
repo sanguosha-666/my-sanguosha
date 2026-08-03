@@ -2292,11 +2292,11 @@ function pruneExchangeCards(g){
     g.exchangeCards=[];
   }
 }
-function tx(fn){
+function tx(fn, onCommitted){
   // 机器人控制端会暂时把 mySeat 切到机器人座位再调用现有动作函数。Firebase 事务可能
   // 因并发而重试，所以必须在创建事务时冻结行动座位。
   const actingSeat=mySeat;
-  gameRef.transaction(g => {
+  const p = gameRef.transaction(g => {
     if(!g) return g;
     const visibleSeat=mySeat;
     mySeat=actingSeat;
@@ -2311,6 +2311,17 @@ function tx(fn){
       mySeat=visibleSeat;
     }
   });
+  // 【强C新增】可选提交回调:Firebase transaction 返回 Promise(真实 SDK 行为),
+  // resolve 后把提交成功的快照 g 交给 onCommitted(供机器人拿新状态继续同窗循环)。
+  // 不传 onCommitted 时行为与改动前逐字一致(fire-and-forget,返回值被忽略);
+  // vm stub 若不返回 thenable 则回调分支不触发,同样零影响。
+  if(typeof onCommitted === 'function' && p && typeof p.then === 'function'){
+    p.then(function(res){
+      const snap = res && res.snapshot && typeof res.snapshot.val === 'function' ? res.snapshot.val() : null;
+      onCommitted(snap);
+    }, function(){ onCommitted(null); });
+  }
+  return p;
 }
 
 function doDraw(){
@@ -2803,7 +2814,7 @@ function aoeEffect(g, me, card){
   aoeAdvance(g, mySeat); // 从下家起结算第一个目标
 }
 // playCard: 统一校验(阶段/回合、取牌、身份+独特前置、目标存活、默认非自己)、出牌入弃牌堆(noDiscard 的装备/延时锦囊除外),再执行该牌独特效果。
-function playCard(cardIdx, actionId, targetSeat){
+function playCard(cardIdx, actionId, targetSeat, onCommitted){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     const me=g.players[mySeat], card=me.hand[cardIdx];
@@ -2834,7 +2845,7 @@ function playCard(cardIdx, actionId, targetSeat){
     }
     markCardSound(g, actionId, mySeat, card, spec.target ? targetSeat : null); // playCard 是普通出牌的统一出口,这里加一次就覆盖所有走这个入口的牌
     return g;
-  });
+  }, onCommitted);
 }
 // resolveShaUse: 杀的结算入口(设次数标记 + pending + 进入响应阶段 + 日志)。
 // 普通杀(CARD_PLAYS['杀'])和丈八蛇矛两张当杀共用,保证响应/距离/次数口径不分叉。
@@ -5294,7 +5305,7 @@ function respondShan(useShan, cardIdx){
     return g;
   });
 }
-function endPlay(){
+function endPlay(onCommitted){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     // 正常结束出牌阶段:仍要检查张郃【巧变】是否也跳过了弃牌阶段(理论上和"正常走完出牌阶段"
@@ -5302,7 +5313,7 @@ function endPlay(){
     // 不会发生,统一走 advancePastDiscard 判断,不重复写一遍 if/else)。
     advancePastDiscard(g);
     return g;
-  });
+  }, onCommitted);
 }
 function discardCard(cardIdx){
   tx(g=>{
