@@ -806,6 +806,98 @@ BOT_DECISIONS.pickSlot = {
   buildSystemPrompt: buildPickSlotSystemPrompt,
 };
 
+// ================= L2:响应类三兄弟(guicai/ganglieChoice/guhuoQuestion,Task B5) =================
+// 【本批是什么】三个响应类决策点从"第四阶段各自独立的 tryAiBotXxx + runBotDecision 硬编码
+// 分支"收敛进 BOT_DECISIONS 注册表,删除 tryAi* 包装函数,避免双路径。三个都无法用 L1
+// controlsChoice 镜像:guicai/ganglieChoice 的 controls 按钮是"进入本地多步选牌状态机"
+// (点击不提交,见 render-controls.js 对应分支),guhuoQuestion 的本地回退是固定30%概率的
+// 随机数(非确定性),都不是"点一个按钮即提交"的形状,故各自专用注册。
+// 【无密钥回归红线】三条 localFallback 与改动前硬编码分支逐字一致:guicai 不发动、
+// ganglieChoice 手牌够2张弃牌否则受伤、guhuoQuestion 30%随机质疑。
+function guicaiHandPickMatch(g, seat){
+  return g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===seat;
+}
+function guicaiHandPickBuildCandidates(g, seat){
+  // 复用 buildBotGuicaiCandidates 的形状(index0=不发动+每张手牌一项),补 replace 标志:
+  // 候选0→replace:false,候选>0→replace:true + 对应 handIndex,execute 直接映射到
+  // respondGuicai(useReplace,cardIdx) 两个参数。
+  return buildBotGuicaiCandidates(g, seat).map((c, i)=>({
+    action: c.action, handIndex: c.handIndex, card: c.card,
+    replace: i===0 ? false : true,
+  }));
+}
+function guicaiHandPickLocalFallback(){
+  return { replace:false, handIndex:null };
+}
+function guicaiHandPickExecute(g, seat, choice){
+  botInvoke(seat, ()=>respondGuicai(choice.replace, choice.handIndex));
+}
+BOT_DECISIONS.guicaiHandPick = {
+  match: guicaiHandPickMatch,
+  buildCandidates: guicaiHandPickBuildCandidates,
+  localFallback: guicaiHandPickLocalFallback,
+  execute: guicaiHandPickExecute,
+  extraState: buildBotGuicaiVisibleState,
+  buildSystemPrompt: buildBotGuicaiSystemPrompt,
+  maxTokens: 100,
+};
+
+function ganglieChoiceMatch(g, seat){
+  return g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice' && g.pending.sourceSeat===seat;
+}
+function ganglieChoiceBuildCandidates(g, seat){
+  // 手牌不足2张时 finishGanglieJudge 会直接跳过这个 pending 自动结算伤害,这里镜像同一
+  // 规则只保留"受伤"一个候选(botDecide 单候选短路,不浪费AI调用)。
+  const me = g.players[seat];
+  const out = [];
+  if((me.hand||[]).length>=2) out.push({ action:'弃置2张手牌', discard:true });
+  out.push({ action:'受到1点伤害', discard:false });
+  return out;
+}
+function ganglieChoiceLocalFallback(g, seat, candidates){
+  // 与旧硬编码分支逐字一致:手牌够两张就弃牌,否则只能受伤。
+  const wantDiscard = (g.players[seat].hand||[]).length>=2;
+  return candidates.find(c=>c.discard===wantDiscard) || candidates[0];
+}
+function ganglieChoiceExecute(g, seat, choice){
+  botInvoke(seat, ()=>respondGanglieChoice(choice.discard?'discard':'damage', choice.discard?[0,1]:[]));
+}
+BOT_DECISIONS.ganglieChoice = {
+  match: ganglieChoiceMatch,
+  buildCandidates: ganglieChoiceBuildCandidates,
+  localFallback: ganglieChoiceLocalFallback,
+  execute: ganglieChoiceExecute,
+  extraState: buildBotGanglieVisibleState,
+  buildSystemPrompt: buildBotGanglieSystemPrompt,
+  maxTokens: 80,
+};
+
+function guhuoQuestionMatch(g, seat){
+  return g.phase==='guhuoQuestion' && g.pending && g.pending.type==='guhuoQuestion' && g.pending.asking===seat;
+}
+function guhuoQuestionBuildCandidates(){
+  return [
+    { action:'质疑', question:true },
+    { action:'不质疑', question:false },
+  ];
+}
+function guhuoQuestionLocalFallback(g, seat, candidates){
+  // 与旧硬编码分支逐字一致:固定30%概率随机质疑,不偷看 d.actualCard(隐藏信息)。
+  return Math.random()<0.3 ? candidates.find(c=>c.question) : candidates.find(c=>!c.question);
+}
+function guhuoQuestionExecute(g, seat, choice){
+  botInvoke(seat, ()=>respondGuhuoQuestion(choice.question));
+}
+BOT_DECISIONS.guhuoQuestion = {
+  match: guhuoQuestionMatch,
+  buildCandidates: guhuoQuestionBuildCandidates,
+  localFallback: guhuoQuestionLocalFallback,
+  execute: guhuoQuestionExecute,
+  extraState: buildBotGuhuoVisibleState,
+  buildSystemPrompt: buildBotGuhuoSystemPrompt,
+  maxTokens: 50,
+};
+
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
     +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
@@ -1050,43 +1142,23 @@ function buildBotGuhuoUserPrompt(state){
     +'\n\n只返回 {"choice": 数字} 这一个JSON对象,1表示质疑、0表示不质疑。';
 }
 
-// tryAiBotGuhuoQuestion:返回布尔值(是否质疑)、或 null(没有密钥/AI没有正确响应/
-// choice 不是合法的0或1,统一交给调用方回退到本地启发式,不重试、不阻塞)。
+// 【本决策点的注册入口】BOT_DECISIONS.guhuoQuestion(见文件前面"响应类三兄弟"段):
+// 候选=[质疑,不质疑],localFallback 是旧硬编码分支的固定30%随机,execute 提交
+// respondGuhuoQuestion(question);AI视角经 extraState=buildBotGuhuoVisibleState 构造,
+// 结构上不可能引用到 d.actualCard。
 //
 // 【mySeat 借用窗口,已核实确认不需要】respondGuhuoQuestion(skills.js)内部对 mySeat
 // 的唯一引用是标准的调用者身份守卫(g.pending.asking!==mySeat)和 g.players[mySeat]
-// 取值,这两处都由 runBotDecision 现有的 botInvoke(seat,fn) 包装(mySeat=seat;同步
-// 执行;立刻归还)正确处理,和其余30多个响应类分支(respondShan/duelResponse等)完全
-// 一样——不是 botPlay 枚举阶段那种"需要在调用真正的动作函数之前,先用全局 mySeat 跑一遍
-// CARD_PLAYS.canPlay/canTarget 筛出候选"的特殊场景(这个决策是二选一判断题,不涉及任何
-// 候选枚举,不读 CARD_PLAYS)。函数内部另有一处 mySeat 的临时切换(runGuhuoAsSource,
-// 发生在蛊惑判定为真、真正结算 spec.effect 时),但那是把 mySeat 切到"于吉自己的座位"、
-// 且完全内嵌在 respondGuhuoQuestion 触发的同一次同步 tx 调用链里、finally 里会自动切
-// 回去——是游戏引擎自身的既有机制,和"谁/怎么触发了 respondGuhuoQuestion"无关,不需要
-// 机器人决策层做任何特殊处理。因此这次不需要额外的借用窗口,直接用标准的 botInvoke
-// 包装即可。
-async function tryAiBotGuhuoQuestion(g, seat){
-  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
-  const state = buildBotGuhuoVisibleState(g, seat);
-  showAiThinkingIndicator(g, seat);
-  let result;
-  try{
-    result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: buildBotGuhuoSystemPrompt(),
-      userPrompt: buildBotGuhuoUserPrompt(state),
-      maxTokens: 50,
-      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
-    });
-  }catch(e){
-    result = { ok:false, reason:'other', detail:String(e) };
-  }finally{
-    hideAiThinkingIndicator();
-  }
-  if(!result || !result.ok) return null;
-  const choice = parseBotPlayAiChoice(result.text);
-  if(choice!==0 && choice!==1) return null;
-  return choice===1;
-}
+// 取值,这两处都由 botDecide 的 execute 用既有的 botInvoke(seat,fn) 包装(mySeat=seat;
+// 同步执行;立刻归还)正确处理,和其余30多个响应类分支(respondShan/duelResponse等)
+// 完全一样——不是 botPlay 枚举阶段那种"需要在调用真正的动作函数之前,先用全局 mySeat
+// 跑一遍 CARD_PLAYS.canPlay/canTarget 筛出候选"的特殊场景(这个决策是二选一判断题,
+// 不涉及任何候选枚举,不读 CARD_PLAYS)。函数内部另有一处 mySeat 的临时切换
+// (runGuhuoAsSource,发生在蛊惑判定为真、真正结算 spec.effect 时),但那是把 mySeat
+// 切到"于吉自己的座位"、且完全内嵌在 respondGuhuoQuestion 触发的同一次同步 tx 调用
+// 链里、finally 里会自动切回去——是游戏引擎自身的既有机制,和"谁/怎么触发了
+// respondGuhuoQuestion"无关,不需要机器人决策层做任何特殊处理。因此这次不需要额外的
+// 借用窗口,直接用标准的 botInvoke 包装即可。
 
 // ================= AI机器人接入第四阶段第二批:ganglieChoice(夏侯惇【刚烈】弃牌还是
 // 受伤) =================
@@ -1144,32 +1216,9 @@ function buildBotGanglieUserPrompt(state){
     +'\n\n只返回 {"choice": 数字} 这一个JSON对象,1表示弃牌、0表示受伤。';
 }
 
-// tryAiBotGanglieChoice:返回布尔值(true=弃牌/false=受伤)、或 null(没有密钥/AI没有
-// 正确响应/choice不是合法的0或1,统一交给调用方回退到本地启发式)。结构和
-// tryAiBotGuhuoQuestion 逐字对应,复用同一套 parseBotPlayAiChoice/showAiThinkingIndicator/
-// callAI超时机制,不重复设计。
-async function tryAiBotGanglieChoice(g, seat){
-  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
-  const state = buildBotGanglieVisibleState(g, seat);
-  showAiThinkingIndicator(g, seat);
-  let result;
-  try{
-    result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: buildBotGanglieSystemPrompt(),
-      userPrompt: buildBotGanglieUserPrompt(state),
-      maxTokens: 80,
-      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
-    });
-  }catch(e){
-    result = { ok:false, reason:'other', detail:String(e) };
-  }finally{
-    hideAiThinkingIndicator();
-  }
-  if(!result || !result.ok) return null;
-  const choice = parseBotPlayAiChoice(result.text);
-  if(choice!==0 && choice!==1) return null;
-  return choice===1;
-}
+// 【本决策点的注册入口】BOT_DECISIONS.ganglieChoice(见文件前面"响应类三兄弟"段):
+// 候选=[弃置2张(手牌>=2时), 受伤],localFallback 与旧硬编码分支逐字一致,execute
+// 提交 respondGanglieChoice(action,picks)。
 
 // ================= AI机器人接入第四阶段第二批:guicai(郭嘉【鬼才】要不要发动改判)
 // =================
@@ -1201,8 +1250,8 @@ async function tryAiBotGanglieChoice(g, seat){
 // 引入新的JSON字段。无密钥/AI失败/index不合法时的回退是 {replace:false}——和改动前
 // respondGuicai(false) 这个硬编码默认完全一致,是这次改动的回归基线。
 // 手牌为空的座位理论上不会被问到(firstGuicaiAsker/nextGuicaiAsker 已经要求候选人
-// (p.hand||[]).length>0 才算有资格),但 tryAiBotGuicai 仍防御性地在候选列表只有
-// "不发动"这一项时直接跳过AI调用、不浪费一次网络请求。
+// (p.hand||[]).length>0 才算有资格),但 guicaiHandPick 注册项仍防御性地在候选列表只有
+// "不发动"这一项时跳过AI调用、不浪费一次网络请求(botDecide 的单候选短路)。
 function buildBotGuicaiCandidates(g, seat){
   const me = g.players[seat];
   const list = [{ index:0, action:'不发动【鬼才】', handIndex:null, card:null }];
@@ -1329,34 +1378,12 @@ function buildBotGuicaiUserPrompt(state, candidates){
     +'\n\n只返回 {"choice": 数字} 这一个JSON对象。';
 }
 
-// tryAiBotGuicai:返回 {replace:布尔值, handIndex:数字或null}、或 null(没有密钥/AI没有
-// 正确响应/index不合法,统一交给调用方回退到 {replace:false}——和改动前respondGuicai(false)
-// 这个硬编码本地默认完全一致)。
-async function tryAiBotGuicai(g, seat){
-  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
-  const candidates = buildBotGuicaiCandidates(g, seat);
-  if(candidates.length<=1) return null; // 没有手牌可以替换,不浪费一次AI调用
-  const state = buildBotGuicaiVisibleState(g, seat);
-  showAiThinkingIndicator(g, seat);
-  let result;
-  try{
-    result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: buildBotGuicaiSystemPrompt(),
-      userPrompt: buildBotGuicaiUserPrompt(state, candidates),
-      maxTokens: 100,
-      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
-    });
-  }catch(e){
-    result = { ok:false, reason:'other', detail:String(e) };
-  }finally{
-    hideAiThinkingIndicator();
-  }
-  if(!result || !result.ok) return null;
-  const idx = parseBotPlayAiChoice(result.text);
-  if(idx===null || idx<0 || idx>=candidates.length) return null;
-  if(idx===0) return { replace:false, handIndex:null };
-  return { replace:true, handIndex: candidates[idx].handIndex };
-}
+// 【本决策点的注册入口】BOT_DECISIONS.guicaiHandPick(见文件前面"响应类三兄弟"段):
+// buildCandidates 复用 buildBotGuicaiCandidates 的形状并补 replace 标志;无密钥回退
+// {replace:false} 与改动前 respondGuicai(false) 这个硬编码默认完全一致,是回归基线。
+// 手牌为空的座位理论上不会被问到(firstGuicaiAsker/nextGuicaiAsker 已经要求候选人
+// (p.hand||[]).length>0 才算有资格),但候选列表只剩"不发动"一项时 botDecide 的单候选
+// 短路也会跳过AI调用、不浪费一次网络请求。
 
 async function botPlay(g,seat){
   // CARD_PLAYS 的合法性函数沿用旧架构，会读取全局 mySeat；评估阶段也必须切到机器人
@@ -1615,18 +1642,9 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondJiedao(canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0)); return;
   }
   if(g.phase==='guicai'&&d.asking===seat){
-    // 郭嘉【鬼才】:要不要发动改判是判断价值高、且涉及"响应者是被动第三方"这层复杂度的
-    // 决策,不是纯机械规则。AI优先、回退本地——有密钥时先问AI(通用prompt结构/隐藏信息
-    // /mySeat窗口/选牌维度设计均见 tryAiBotGuicai 顶部注释,第四阶段第二批第二个);
-    // 没有密钥、或AI没有给出合法答案(网络/超时/解析失败/index越权)时,回退到原有的
-    // 本地默认——respondGuicai(false)(永不发动),和改动前逐字一致,是这次改动的回归
-    // 基线。
-    let decision = null;
-    if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
-      decision = await tryAiBotGuicai(g, seat);
-    }
-    if(decision===null) decision = { replace:false, handIndex:null };
-    botInvoke(seat,()=>respondGuicai(decision.replace, decision.handIndex)); return;
+    // 郭嘉【鬼才】改判决策由总线接管(候选=不发动+每张手牌;无密钥回退=respondGuicai(false),
+    // 与旧硬编码分支逐字一致)。guard 与 guicaiHandPickMatch 同一道,保留作双保险。
+    if(await botDecide('guicaiHandPick', g, seat)) return;
   }
   if(g.phase==='fanjianSuit'&&d.targetSeat===seat){
     const suits=['♠','♥','♣','♦'];
@@ -1649,20 +1667,9 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>giveEnyuanCard(heart)); return;
   }
   if(g.phase==='ganglieChoice'&&d.sourceSeat===seat){
-    // 夏侯惇【刚烈】:弃两张手牌还是受1点伤害是资源取舍判断,不是纯机械规则。AI优先、
-    // 回退本地——有密钥时先问AI(隐藏信息处理/mySeat窗口/合法性校验均见
-    // tryAiBotGanglieChoice 顶部注释,第四阶段第二批第一个);没有密钥、或AI没有给出
-    // 合法答案(网络/超时/解析失败/choice不是0或1)时,回退到原有的本地启发式——手牌够
-    // 两张就弃牌,不够就只能受伤(这个分支实际总是手牌>=2,finishGanglieJudge在手牌不足2
-    // 时会直接跳过这个pending自动结算伤害)。没有密钥这一支和改动前行为完全相同,是这次
-    // 改动的回归基线。
-    let discard = null;
-    if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
-      discard = await tryAiBotGanglieChoice(g, seat);
-    }
-    if(discard===null) discard = (p.hand||[]).length>=2;
-    const picks = discard ? [0,1] : [];
-    botInvoke(seat,()=>respondGanglieChoice(discard?'discard':'damage',picks)); return;
+    // 夏侯惇【刚烈】弃牌/受伤决策由总线接管(无密钥回退=手牌够2张弃牌、否则受伤,与旧
+    // 分支逐字一致)。guard 与 ganglieChoiceMatch 同一道,保留作双保险。
+    if(await botDecide('ganglieChoice', g, seat)) return;
   }
   // ---- 机器人兜底词汇盲区修复(问题3+4):以下几个phase的按钮文案够不到botSafePrompt的
   // 正则,分两类处理——纯流程性的(选哪个都不影响游戏走向)给合理默认;guhuoQuestion真的
@@ -1686,20 +1693,9 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondHuashenChangeAskEnd(false)); return;
   }
   if(g.phase==='guhuoQuestion'&&d.asking===seat){
-    // 于吉【蛊惑】质疑与否是真正的判断题(质疑真的会被扣【缠怨】、质疑假的能让蛊惑作废)。
-    // AI优先、回退本地——有密钥时先问AI(隐藏信息保护/mySeat窗口/合法性校验均见
-    // tryAiBotGuhuoQuestion 顶部注释,第四阶段第一批接入,详见 CLAUDE.md);没有密钥、
-    // 或AI没有给出合法答案(网络/超时/解析失败/choice不是0或1)时,回退到原有的本地
-    // 启发式——机器人不能偷看 d.actualCard,真人也是在不知道真实牌的情况下博弈,固定
-    // 概率的随机数模拟同等的不完全信息决策,和 respondFanjianSuit 随机猜花色是同一
-    // 处理原则,不是"瞎选"而是"信息对称前提下的合理默认"。没有密钥这一支和改动前行为
-    // 完全相同,是这次改动的回归基线。
-    let question = null;
-    if(typeof aiApiKey!=='undefined' && aiApiKey && aiProvider){
-      question = await tryAiBotGuhuoQuestion(g, seat);
-    }
-    if(question===null) question = Math.random()<0.3;
-    botInvoke(seat,()=>respondGuhuoQuestion(question)); return;
+    // 于吉【蛊惑】质疑判断由总线接管(无密钥回退=固定30%随机质疑,与旧分支逐字一致;
+    // AI视角经 buildBotGuhuoVisibleState 不含 d.actualCard,不偷看隐藏信息)。
+    if(await botDecide('guhuoQuestion', g, seat)) return;
   }
   if(g.phase==='qiaobianMove'&&d.seat===seat){
     // 张郃【巧变】跳过出牌阶段后"是否移动一张装备/判定牌":真人走的是"选来源+选目的地"
