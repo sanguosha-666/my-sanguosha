@@ -142,6 +142,35 @@ const testCode = String.raw`
   function card(name, id){
     return { id: id || (name + ''), name: name, suit: '♥', rank: 5 };
   }
+  // T2 截断专用:6 人局(自己+5 个存活目标),机器人座位0,全员 role 'zhu' 无嫌疑值
+  // (botTargetScore 对杀/拆桥目标恒 -Infinity,便于构造"唯一最高分=桃"的场景)
+  function mkG6(hand, opt){
+    opt = opt || {};
+    var players = [];
+    for(var i = 0; i < 6; i++){
+      players.push({
+        name: '玩家' + i,
+        alive: i === 0 ? !(opt.deadSelf === true) : true,
+        hp: i === 0 ? (opt.myHp !== undefined ? opt.myHp : 4) : 4,
+        maxHp: 4,
+        hand: i === 0 ? hand : [],
+        equips: emptyEquips(),
+        delays: [],
+        isBot: i === 0,
+        role: opt.roleOf ? opt.roleOf[i] : 'zhu'
+      });
+    }
+    var g = {
+      players: players,
+      gameMode: opt.gameMode || 'ffa',
+      roundNum: 1,
+      phase: opt.phase !== undefined ? opt.phase : 'play',
+      turn: opt.turn !== undefined ? opt.turn : 0,
+      pending: opt.pending !== undefined ? opt.pending : null,
+      log: []
+    };
+    return g;
+  }
 
   // ---- T1~T4:窗口谓词四态 ----
   await check('play 窗:phase=play/turn=0/无pending → true', function(){
@@ -540,6 +569,73 @@ const testCode = String.raw`
     if(window.__playCalls.length !== 8) throw new Error('应恰8次 playCard(maxSteps 截断),实际 ' + window.__playCalls.length);
     if(window.__mockAiCalls !== 8) throw new Error('应恰8次AI询问,实际 ' + window.__mockAiCalls);
     if(window.__endPlayCalls !== 0) throw new Error('AI 未选结束,不应 endPlay,实际 ' + window.__endPlayCalls);
+  });
+
+  // ================= T2:候选 Top-K=25 截断(token 优化) =================
+  // ---- T23:30+ 原始候选 → 截断到 25+结束=26,结束项恒在末尾 ----
+  // 构造:5 杀(连弩无限杀,6人局里杀只能打相邻的座位1/5 → 每张2条=10条)
+  //       + 5 过河拆桥(无距离限制,5个目标 → 每张5条=25条) = 35 条原始候选。
+  await check('T2截断:35条原始候选 → 返回恰26条(25+结束),最后一条 isEndPlay', function(){
+    var hand = [];
+    for(var s = 0; s < 5; s++){ hand.push(card('杀', 'sha' + s)); }
+    for(var d = 0; d < 5; d++){ hand.push(card('过河拆桥', 'chai' + d)); }
+    var g = mkG6(hand);
+    g.players[0].equips.weapon = card('诸葛连弩'); // unlimitedSha:5张杀都可出
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    if(list.length !== 26) throw new Error('35条原始候选应截断为25+结束=26条,实际 ' + list.length + ' ' + JSON.stringify(list.map(function(c){ return c.action; })));
+    list.forEach(function(c, i){
+      if(c.isEndPlay && i !== list.length - 1) throw new Error('结束项应只在末尾,实际出现在第' + i + '位');
+    });
+    var end = list[list.length - 1];
+    if(!end.isEndPlay || end.action !== '结束出牌阶段' || end.localHeuristicScore !== null)
+      throw new Error('最后一条应为结束出牌阶段且分值为 null,实际 ' + JSON.stringify(end));
+  });
+
+  // ---- T24:Top-1 恒在(唯一最高分候选=桃,截断后仍在) ----
+  // 同 T23 场景加一张桃(缺体力,价值100);杀/拆桥目标分恒 -Infinity → 桃是唯一最高分,
+  // 截断后必须保留(否则"按分截断"就是错的)。
+  await check('T2截断:Top-1(桃100分)在截断结果里,且是非结束候选中最高分', function(){
+    var hand = [];
+    for(var s = 0; s < 5; s++){ hand.push(card('杀', 'sha' + s)); }
+    for(var d = 0; d < 5; d++){ hand.push(card('过河拆桥', 'chai' + d)); }
+    hand.push(card('桃'));
+    var g = mkG6(hand, { myHp: 2 });
+    g.players[0].equips.weapon = card('诸葛连弩');
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    var tao = null;
+    list.forEach(function(c){ if(c.action === '桃' && c.target === null) tao = c; });
+    if(!tao) throw new Error('Top-1 桃候选应仍在截断结果里,实际 ' + JSON.stringify(list.map(function(c){ return c.action; })));
+    var maxScore = -Infinity;
+    list.forEach(function(c){ if(!c.isEndPlay) maxScore = Math.max(maxScore, c.localHeuristicScore); });
+    if(maxScore !== tao.localHeuristicScore) throw new Error('桃应为截断后最高分,实际 max=' + maxScore + ' 桃=' + tao.localHeuristicScore);
+  });
+
+  // ---- T25:无密钥兜底零变化——fallback 在截断列表上选 Top-1,与未截断一致 ----
+  // 桃是唯一最高分(>25):未截断的36条里 fallback 选桃,截断后的26条里同样选桃。
+  await check('T2截断:localFallbackPlayWindow 在截断列表上选 Top-1(桃),与未截断一致', function(){
+    var hand = [];
+    for(var s = 0; s < 5; s++){ hand.push(card('杀', 'sha' + s)); }
+    for(var d = 0; d < 5; d++){ hand.push(card('过河拆桥', 'chai' + d)); }
+    hand.push(card('桃'));
+    var g = mkG6(hand, { myHp: 2 });
+    g.players[0].equips.weapon = card('诸葛连弩');
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    var pick = localFallbackPlayWindow(g, 0, list);
+    if(!pick || pick.action !== '桃' || pick.target !== null)
+      throw new Error('fallback 应选桃(100分>25,截断前后同选),实际 ' + JSON.stringify(pick));
+  });
+
+  // ---- T26:少候选(<26)不截断——全部保留 + 结束项 ----
+  await check('T2截断:10条原始候选(5拆桥×2目标)不截断 → 11条(10+结束)', function(){
+    var hand = [];
+    for(var d = 0; d < 5; d++){ hand.push(card('过河拆桥', 'chai' + d)); }
+    var g = mkG(hand); // 3人局:拆桥可打座位1/2 → 每张2条 = 10条
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    if(list.length !== 11) throw new Error('10条原始候选应全部保留+结束=11条,实际 ' + list.length);
+    var chai = list.filter(function(c){ return c.action === '过河拆桥'; });
+    if(chai.length !== 10) throw new Error('应有10条拆桥候选,实际 ' + chai.length);
+    var end = list[list.length - 1];
+    if(!end.isEndPlay || end.action !== '结束出牌阶段') throw new Error('最后一条应为结束出牌阶段,实际 ' + JSON.stringify(end));
   });
 
   console.log('\n' + '='.repeat(60));

@@ -2869,6 +2869,12 @@ function isBotActionWindow(g, seat){
 // 座位、结束立刻归还。本函数纯同步,借用窗口和 botPlay 枚举段一样短,不跨越任何 await。
 // 【v1 刻意不含】play 阶段 renderControls 渲染的主动技按钮(collectControlsCandidates)
 // 没有并入——C0 只做"手牌×目标"展开,合并 controls 候选是 C1 的扩展项。
+// 【T2 token 优化】候选 Top-K 截断:手牌×目标展开后可能几十上百条(5张杀×5目标=25条,
+// 再叠拆桥/无中生有等轻松破50),全量塞给 AI 每步都烧 token。按 localHeuristicScore 降序
+// 只保留前 25 条——排序让 AI 先看到最高价值的候选;结束项在截断之后才 push,恒在末尾、
+// 不参与截断。无密钥兜底零变化:localFallbackPlayWindow 只取最高分非结束候选,Top-1
+// (最高分)恒在截断结果里,fallback 选择与截断前一致(测试锁定)。
+const AI_PLAY_CANDIDATE_LIMIT = 25;
 function enumerateAllLegalOneStepActions(g, seat){
   const out = [];
   const me = g.players[seat];
@@ -2902,6 +2908,10 @@ function enumerateAllLegalOneStepActions(g, seat){
   } finally {
     mySeat = humanSeat;
   }
+  // 按 localHeuristicScore 降序截断:保留最高分前 25 条(-Infinity 目标分正常参与排序,
+  // 排序稳定,同分保持原枚举顺序);结束项在截断之后才 push,恒在末尾、不参与截断。
+  out.sort(function(a,b){ return ((b.localHeuristicScore||0) - (a.localHeuristicScore||0)); });
+  if(out.length > AI_PLAY_CANDIDATE_LIMIT) out.length = AI_PLAY_CANDIDATE_LIMIT;
   out.push({ label: '结束出牌阶段', action: '结束出牌阶段', card: null, handIndex: null, target: null, localHeuristicScore: null, isEndPlay: true });
   return out;
 }

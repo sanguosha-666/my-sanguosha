@@ -543,7 +543,7 @@ const testCode = String.raw`
     window.__playCalls = [];
     window.__endPlayCalls = 0;
     window.__mockAiCalls = 0;
-    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }]; // 合并候选 [0=铁索→座位1, 1=铁索→座位2, 2=结束]
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }]; // T2起候选按分降序:[0=铁索→自己(20分), 1=铁索→座位1, 2=铁索→座位2, 3=结束]
     aiApiKey = 'test-key';
     aiProvider = 'claude';
     var g = mkG([card('铁索连环')]);
