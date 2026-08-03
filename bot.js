@@ -1045,6 +1045,165 @@ BOT_SEAT_PICKS.xuanfeng = {
   },
 };
 
+// ================= L3: 出牌阶段转化技能 5 个(断粮/奇袭/国色/武圣/双雄,Task L3-T2) =================
+// 【合法性来源】render.js 座位卡分支(断粮距离≤2/奇袭有牌可拆/国色无乐/武圣·双雄走真
+// canTarget)+ render-controls.js 入口按钮门槛(hasCap/断粮限一次)+ 服务端函数逐条守卫。
+// 【与 brief 的偏差,以 render.js 为准】①断粮的"黑色基本牌"判定用 render-hand.js 的
+// BASIC_CARDS.includes||getEquip(比 brief 的 杀/闪/桃 多覆盖"酒");②断粮 match 额外加
+// hasCap(me,'duanliang')&&!g.duanliangUsed(render-controls 入口门槛+服务端守卫,防 AI
+// 选一个必被服务端拒的选项);③奇袭/国色 match 加 hasCap(入口门槛,同上);④武圣 match
+// 加 CARD_PLAYS['杀'].canPlay(render.js:1449 isWushengShaSel 真身就含这一条)。
+// 【选牌语义】牌维度第一批不交 AI,execute 内 findIndex 第一张合法牌(与 render.js 真人
+// "点牌"一致)——AI 只选目标座位,牌由 execute 决定。每个技能的选牌谓词独立成函数,
+// match/buildSeatCandidates/execute 三处复用同一谓词(同手牌+同谓词→确定性同 idx)。
+function isDuanliangCard(me, c){
+  return !!(c && (c.suit==='♠'||c.suit==='♣')
+    && (BASIC_CARDS.includes(c.name) || !!getEquip(c.name)));
+}
+function isQixiCard(c){ return !!(c && (c.suit==='♠'||c.suit==='♣')); }
+function isGuoseCard(c){ return !!(c && c.suit==='♦'); }
+// isWushengShaCard:镜像 render.js:1448 isWushengShaSel(红+可当杀+自有入口优先+杀可打出)
+function isWushengShaCard(g, me, c){
+  if(!c) return false;
+  const red = c.suit==='♥'||c.suit==='♦';
+  return red && canUseAs(me, c, '杀') && resolveActionId(g, me, c)!=='杀'
+    && CARD_PLAYS['杀'].canPlay(g, me, c);
+}
+// 镜像 render.js:1162 hasHandOrEquip(顺手/拆桥同款:手牌/装备/判定区任一非空)
+function seatHasTargetableCards(p){
+  return !!p && ((p.hand||[]).length>0
+    || EQUIP_SLOTS.some(s=>p.equips && p.equips[s])
+    || (p.delays||[]).length>0);
+}
+
+BOT_SEAT_PICKS.duanliang = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me || !hasCap(me,'duanliang') || g.duanliangUsed) return false;
+    return (me.hand||[]).some(function(c){ return isDuanliangCard(me, c); });
+  },
+  buildSeatCandidates: function(g, seat){
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if(distance(g, seat, i) > 2) return;
+      out.push({ seat: i, label: '断粮→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用断粮
+  execute: function(g, seat, targetSeat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return isDuanliangCard(me, c); });
+    if(idx>=0) botInvoke(seat, function(){ duanLiang(idx, targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.qixi = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me || !hasCap(me,'qixi')) return false;
+    return (me.hand||[]).some(isQixiCard);
+  },
+  buildSeatCandidates: function(g, seat){
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if(!seatHasTargetableCards(p)) return;
+      out.push({ seat: i, label: '奇袭→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用奇袭
+  execute: function(g, seat, targetSeat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(isQixiCard);
+    if(idx>=0) botInvoke(seat, function(){ qiXi(idx, targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.guose = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me || !hasCap(me,'guose')) return false;
+    return (me.hand||[]).some(isGuoseCard);
+  },
+  buildSeatCandidates: function(g, seat){
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if((p.delays||[]).some(c=>c && c.name==='乐不思蜀')) return;
+      out.push({ seat: i, label: '国色→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用国色
+  execute: function(g, seat, targetSeat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(isGuoseCard);
+    if(idx>=0) botInvoke(seat, function(){ guoSe(idx, targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.wusheng = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me) return false;
+    return (me.hand||[]).some(function(c){ return isWushengShaCard(g, me, c); });
+  },
+  buildSeatCandidates: function(g, seat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return isWushengShaCard(g, me, c); });
+    const selCard = idx>=0 ? me.hand[idx] : null;
+    const out = [];
+    if(!selCard) return out;
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if(!CARD_PLAYS['杀'].canTarget(g, me, selCard, i)) return;
+      out.push({ seat: i, label: '武圣→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用武圣转化
+  execute: function(g, seat, targetSeat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return isWushengShaCard(g, me, c); });
+    if(idx>=0) botInvoke(seat, function(){ playCard(idx, '杀', targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.shuangxiong = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me) return false;
+    return (me.hand||[]).some(function(c){ return canShuangxiongDuelCard(me, c); });
+  },
+  buildSeatCandidates: function(g, seat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return canShuangxiongDuelCard(me, c); });
+    const selCard = idx>=0 ? me.hand[idx] : null;
+    const out = [];
+    if(!selCard) return out;
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if(!CARD_PLAYS['决斗'].canTarget(g, me, selCard, i)) return;
+      out.push({ seat: i, label: '双雄→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用双雄转化
+  execute: function(g, seat, targetSeat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return canShuangxiongDuelCard(me, c); });
+    if(idx>=0) botInvoke(seat, function(){ playCard(idx, '决斗', targetSeat); });
+  },
+};
+
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
     +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
