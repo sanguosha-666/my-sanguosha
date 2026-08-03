@@ -167,3 +167,13 @@
   `node --check bot.js` 通过。全项目 `rg discardPile` 确认无其它测试/调用点引用该字段
   (仅 specs/plans 文档)。`index.html` `?v=` 284→285 共 13 处。`normalize` 无需改
   (纯客户端投影删除,不进 g)。
+
+## token 优化 T2:出牌候选 Top-K=25 截断(SDD 计划「2026-08-03-ai-summary-token-optimization」)
+
+- **背景**：7 人局出牌候选按"手牌×目标"全展开可达 40-50 条，label 每条 20-40 字，userPrompt 浪费 1-2k tokens；候选过多也分散模型注意力。
+- **实现（bot.js `enumerateAllLegalOneStepActions`）**：新增模块级常量 `AI_PLAY_CANDIDATE_LIMIT = 25`；枚举展开后、push 结束项**之前**按 `localHeuristicScore` 降序 `sort`（V8 稳定排序，同分保持原枚举顺序），超 25 条则 `out.length = 25` 截断；「结束出牌阶段」在截断之后才 push，恒在末尾、不参与截断。
+- **无密钥零变化论证**：`localFallbackPlayWindow` 只取最高分非结束候选——Top-1（最高分）恒在截断结果里，fallback 选择不变（c_window T25 锁定）。
+- **排序/截断只影响 AI 看到候选的顺序与条数，不影响合法性**（截断前已全部过 canPlay/canTarget）。
+- **测试（`run_ai_bus_c_window_test.js` 25→29 项）**：T23 构造 6 人局 + 5 杀(连弩无限杀×相邻2目标=10条) + 5 过河拆桥(×5目标=25条) = 35 条原始 → 断言恰返回 26 条(25+结束)、结束项只在末尾；T24 加桃(100 分) → 桃是唯一最高分、截断后仍在且为最高分；T25 `localFallbackPlayWindow` 在截断后列表上选桃(100>25)，与未截断一致；T26 3 人局 10 条原始(<26) → 不截断、11 条全部保留+结束项。
+- **l2 测试 1 处适配**：铁索连环测试的 mock choice 0→1——T2 排序后候选顺序变化（最高分在前，铁索→自己 20 分排 0 位），测试意图(铁索目标为他人)不变，非回归。
+- **改动范围**：`bot.js`（`AI_PLAY_CANDIDATE_LIMIT` + 排序截断）、`run_ai_bus_c_window_test.js`(+4 项)、`run_ai_bus_l2_test.js`(1 处 choice 适配)、`index.html`(`?v=` 285→286 ×13)。回归全绿：c_window 29、l2 23、l3 93、summary 13、core 7。
