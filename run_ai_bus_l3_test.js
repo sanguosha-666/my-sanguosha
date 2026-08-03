@@ -196,6 +196,7 @@ const testCode = String.raw`
   liJian = spyService('lijian');
   renDe = spyService('rende');
   playZhangbaSha = spyService('zhangba');
+  respondGuanxing = spyService('guanxing');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -1648,6 +1649,101 @@ const testCode = String.raw`
     await runBotDecision(g2, 0);
     if(window.__wuguCalls.length !== 1 || window.__wuguCalls[0][0] !== 0 || window.__wuguCalls[0][1] !== 0 || window.__wuguCalls[0][2] !== 'x0')
       throw new Error('wugu 接线应 wuguPick(0,0,x0),实际 ' + JSON.stringify(window.__wuguCalls));
+  });
+
+  // ================= 观星(guanxingReview)进总线(Task T8) =================
+  // pending 服务端真实结构(skills.js continueGuanxingCheck):{type:'guanxingReview',
+  // seat, cards}(cards 是牌堆顶切出的实际N张,牌对象带 name/suit/rank,下标越大越接近
+  // 牌堆顶)。默认方案=全置顶原序,与旧 runBotDecision 硬编码分支逐字一致。
+  function mkGuanxingG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'guanxingReview';
+    g.pending = opt.pending || {
+      type: 'guanxingReview', seat: 0,
+      cards: [card('杀','gx0'), card('闪','gx1'), card('桃','gx2'), card('过河拆桥','gx3')]
+    };
+    return g;
+  }
+
+  await check('guanxing:注册存在;match=观星阶段+本人;错阶段/错座位/错pending类型/无pending false', function(){
+    var s = BOT_DECISIONS.guanxing;
+    if(!s) throw new Error('BOT_DECISIONS.guanxing 未注册');
+    var g1 = mkGuanxingG({});
+    if(!s.match(g1, 0)) throw new Error('观星阶段+本人应命中');
+    if(s.match(g1, 1)) throw new Error('非本人座位不应命中');
+    var g3 = mkGuanxingG({}); g3.phase = 'play';
+    if(s.match(g3, 0)) throw new Error('错阶段不应命中');
+    var g4 = mkGuanxingG({ pending: { type: 'xunxunPick', seat: 0, cards: [] } });
+    if(s.match(g4, 0)) throw new Error('错 pending 类型不应命中');
+    var g5 = mkGuanxingG({}); g5.pending = null;
+    if(s.match(g5, 0)) throw new Error('无 pending 不应命中');
+  });
+
+  await check('guanxing:4张牌候选≤8;默认方案=全置顶原序(isDefault)恒在;每候选 top+bottom 恰覆盖全部下标无重复无遗漏;label 含牌名', function(){
+    var s = BOT_DECISIONS.guanxing;
+    var g = mkGuanxingG({});
+    var c = s.buildCandidates(g, 0);
+    if(!c.length || c.length > 8) throw new Error('候选应 1..8 个,实际 ' + c.length);
+    if(!c[0].isDefault) throw new Error('首候选应为默认方案');
+    if(JSON.stringify(c[0].topOrder) !== '[0,1,2,3]') throw new Error('默认方案应全置顶原序,实际 ' + JSON.stringify(c[0].topOrder));
+    if(c[0].bottomOrder.length !== 0) throw new Error('默认方案底部应为空,实际 ' + JSON.stringify(c[0].bottomOrder));
+    if(c[0].label.indexOf('默认方案') < 0) throw new Error('默认方案 label 应含"默认方案",实际 ' + c[0].label);
+    if(c[0].label.indexOf('杀') < 0 || c[0].label.indexOf('过河拆桥') < 0)
+      throw new Error('label 应含牌名,实际 ' + c[0].label);
+    var hasNonDefault = false;
+    c.forEach(function(cc){
+      if(!cc.isDefault) hasNonDefault = true;
+      var joined = cc.topOrder.concat(cc.bottomOrder);
+      if(joined.length !== 4 || new Set(joined).size !== 4)
+        throw new Error('top+bottom 应恰覆盖4个下标各一次,实际 ' + JSON.stringify(joined));
+      joined.forEach(function(i){ if(i < 0 || i > 3) throw new Error('下标越界 ' + i); });
+    });
+    if(!hasNonDefault) throw new Error('除默认方案外应还有价值排序/置换变体');
+  });
+
+  await check('guanxing有密钥:mock 选非默认变体 → respondGuanxing(该变体 topOrder, bottomOrder)', async function(){
+    window.__guanxingCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":2}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkGuanxingG({});
+    var r = await botDecide('guanxing', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__guanxingCalls.length !== 1) throw new Error('respondGuanxing 应被调1次,实际 ' + window.__guanxingCalls.length);
+    var expected = BOT_DECISIONS.guanxing.buildCandidates(g, 0)[2];
+    if(expected.isDefault) throw new Error('choice2 应是非默认变体(测试前置)');
+    var got = window.__guanxingCalls[0];
+    if(JSON.stringify(got[0]) !== JSON.stringify(expected.topOrder) || JSON.stringify(got[1]) !== JSON.stringify(expected.bottomOrder))
+      throw new Error('应提交变体(' + JSON.stringify(expected.topOrder) + ',' + JSON.stringify(expected.bottomOrder) + '),实际 ' + JSON.stringify(got));
+  });
+
+  await check('guanxing无密钥:fallback=默认方案 → respondGuanxing(全下标, []) 与旧行为一致', async function(){
+    window.__guanxingCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkGuanxingG({});
+    var r = await botDecide('guanxing', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__guanxingCalls.length !== 1) throw new Error('respondGuanxing 应被调1次,实际 ' + window.__guanxingCalls.length);
+    var got = window.__guanxingCalls[0];
+    if(JSON.stringify(got[0]) !== '[0,1,2,3]' || JSON.stringify(got[1]) !== '[]')
+      throw new Error('无密钥应提交旧行为(全置顶原序,空底部),实际 ' + JSON.stringify(got));
+  });
+
+  await check('接线:runBotDecision guanxingReview 命中走 botDecide 恰1次且 respondGuanxing 只调1次(旧分支已删)', async function(){
+    window.__guanxingCalls = [];
+    window.__botDecideCalls = [];
+    var __origBotDecide = botDecide;
+    botDecide = async function(id, gg, ss){ window.__botDecideCalls.push(id); return __origBotDecide(id, gg, ss); };
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkGuanxingG({});
+    await runBotDecision(g, 0);
+    botDecide = __origBotDecide;
+    if(window.__botDecideCalls.filter(function(id){ return id === 'guanxing'; }).length !== 1)
+      throw new Error('应恰1次 botDecide(guanxing),实际 ' + JSON.stringify(window.__botDecideCalls));
+    if(window.__guanxingCalls.length !== 1) throw new Error('respondGuanxing 应恰被调1次(旧分支不应再触发),实际 ' + window.__guanxingCalls.length);
   });
 
   console.log('\n' + '='.repeat(60));

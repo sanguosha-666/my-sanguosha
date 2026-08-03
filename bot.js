@@ -1100,6 +1100,51 @@ BOT_DECISIONS.pickGeneral = {
   },
 };
 
+// ================= L3: 观星(诸葛亮【观星】)进总线(Task T8) =================
+// 【本批是什么】观星"把牌堆顶几张按顺序放回顶/底"从 runBotDecision 硬编码分支收敛进
+// BOT_DECISIONS 注册表。旧分支=全部置顶原序;localFallback 与旧分支逐字一致(默认方案
+// 恒在),无密钥行为零变化。
+// 【方案A:有限排列候选】默认方案(全置顶原序)恒在;+价值排序置顶方案;+最多6个相邻
+// 置换变体。观星牌最多5张(continueGuanxingCheck 里 min(5,存活数)),变体上限8足够
+// 覆盖候选空间,AI 不会面对空列表。候选 topOrder/bottomOrder 都是 pending.cards 的
+// 下标数组,label 带牌名(观星者本人查看牌堆顶,牌名对该机器人合法可见,不是泄露)。
+function buildGuanxingCandidates(g, seat){
+  const d = g.pending;
+  const n = (d.cards||[]).length;
+  const all = (d.cards||[]).map(function(_, i){ return i; });
+  const seen = new Set();
+  const out = [];
+  function add(top, isDefault){
+    const key = JSON.stringify(top) + '|' + JSON.stringify(all.filter(function(i){ return top.indexOf(i)<0; }));
+    if(seen.has(key) || out.length >= 8) return;
+    seen.add(key);
+    const bottom = all.filter(function(i){ return top.indexOf(i)<0; });
+    const topNames = top.map(function(i){ return d.cards[i].name; }).join(',');
+    const bottomNames = bottom.map(function(i){ return d.cards[i].name; }).join(',');
+    out.push({ topOrder: top.slice(), bottomOrder: bottom, isDefault: isDefault,
+      label: (isDefault?'默认方案':'方案'+out.length)+':顶['+topNames+'] 底['+(bottomNames||'无')+']' });
+  }
+  add(all, true); // 默认:全部置顶原序(旧行为)
+  // 价值排序:按 botCardPriority 降序置顶
+  const byValue = all.slice().sort(function(a, b){ return botCardPriority(d.cards[b].name) - botCardPriority(d.cards[a].name); });
+  add(byValue, false);
+  // 变体:相邻置换
+  for(let i=0;i<n-1 && out.length<8;i++){
+    const v = all.slice(); const t = v[i]; v[i]=v[i+1]; v[i+1]=t;
+    add(v, false);
+  }
+  return out;
+}
+BOT_DECISIONS.guanxing = {
+  match: function(g, seat){ return g.phase==='guanxingReview' && g.pending && g.pending.type==='guanxingReview' && g.pending.seat===seat; },
+  buildCandidates: function(g, seat){ return buildGuanxingCandidates(g, seat); },
+  localFallback: function(g, seat, candidates){ return candidates.find(function(c){ return c.isDefault; }) || candidates[0] || null; },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){ respondGuanxing(choice.topOrder, choice.bottomOrder); });
+  },
+};
+
 // ================= L3: seatPick 通用座位协议(第一批扩展,Task L3-T1) =================
 // 【本协议是什么】把"从合法座位里选一个"这一大类交互收敛成通用协议:BOT_SEAT_PICKS
 // 按技能注册 {match, buildSeatCandidates, fallbackSeat, execute},seatPick 动态收集
@@ -2403,8 +2448,9 @@ async function runBotDecision(g,seat){
     return;
   }
   if(g.phase==='guanxingReview'&&d.seat===seat){
-    const order=(d.cards||[]).map((_,i)=>i);
-    botInvoke(seat,()=>respondGuanxing(order,[])); return;
+    // 决策已进 BOT_DECISIONS.guanxing(默认方案=旧行为"全置顶原序",逐字一致,见注册表
+    // 上方注释)。phase+pending.seat 守卫保留作双保险,命中即 return。
+    if(await botDecide('guanxing',g,seat)) return;
   }
   if(g.phase==='xunxunPick'&&d.seat===seat){
     const all=(d.cards||[]).map((_,i)=>i),take=d.takeN||2;
