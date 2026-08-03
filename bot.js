@@ -902,6 +902,149 @@ BOT_DECISIONS.guhuoQuestion = {
   maxTokens: 50,
 };
 
+// ================= L3: seatPick 通用座位协议(第一批扩展,Task L3-T1) =================
+// 【本协议是什么】把"从合法座位里选一个"这一大类交互收敛成通用协议:BOT_SEAT_PICKS
+// 按技能注册 {match, buildSeatCandidates, fallbackSeat, execute},seatPick 动态收集
+// 全部命中技能的候选合并成一张表(AI 一次选"哪个技能打向哪个座位",label 带技能名前缀),
+// 不命中任何技能时返回 false 走旧分支。与 render.js 真人交互的关系:候选合法性与
+// render.js 座位卡分支同源但独立实现(不读客户端 mode 变量,只读 g/玩家状态),
+// 真人 onclick 路径零改动。
+const BOT_SEAT_PICKS = Object.create(null);
+
+function seatPickMatch(g, seat){
+  if(!g || g.phase!=='play' && !(g.pending && (g.pending.type==='guhuoTarget'||g.pending.type==='xuanfengPick'))) return false;
+  return Object.keys(BOT_SEAT_PICKS).some(function(key){
+    const s = BOT_SEAT_PICKS[key];
+    return typeof s.match==='function' && s.match(g, seat);
+  });
+}
+function seatPickBuildCandidates(g, seat){
+  const out = [];
+  Object.keys(BOT_SEAT_PICKS).forEach(function(key){
+    const s = BOT_SEAT_PICKS[key];
+    if(typeof s.match!=='function' || !s.match(g, seat)) return;
+    const list = s.buildSeatCandidates(g, seat) || [];
+    list.forEach(function(c){
+      out.push({
+        index: 0, // botDecide 会重新规范化
+        label: c.label,
+        skillKey: key,
+        seat: c.seat,
+        source: 'seatPick',
+      });
+    });
+  });
+  return out;
+}
+function seatPickLocalFallback(g, seat, candidates){
+  // 遍历注册表,对第一个 match 的技能取 fallbackSeat(旧行为);匹配到目标则返回对应候选
+  const keys = Object.keys(BOT_SEAT_PICKS);
+  for(let i=0;i<keys.length;i++){
+    const key = keys[i], s = BOT_SEAT_PICKS[key];
+    if(typeof s.match!=='function' || !s.match(g, seat)) continue;
+    const fs = s.fallbackSeat(g, seat);
+    if(fs===null || fs===undefined) return null; // 旧行为=不发动 → botDecide 拿 null 会崩,须返回候选或由 execute 处理
+    const hit = candidates.find(function(c){ return c.skillKey===key && c.seat===fs; });
+    return hit || null;
+  }
+  return null;
+}
+function seatPickExtraState(g, seat){
+  // 聚合所有命中技能的 extraState(如蛊惑的声明牌名——公开信息,AI 决策需要知道
+  // "这次蛊惑声明的是什么牌"),与 guhuoQuestion 的 buildBotGuhuoVisibleState 同款
+  // 只投影公开字段、绝不带隐藏信息(actualCard/他人手牌)。
+  const out = {};
+  Object.keys(BOT_SEAT_PICKS).forEach(function(key){
+    const s = BOT_SEAT_PICKS[key];
+    if(typeof s.match!=='function' || !s.match(g, seat)) return;
+    if(typeof s.extraState==='function') Object.assign(out, s.extraState(g, seat) || {});
+  });
+  return out;
+}
+function seatPickExecute(g, seat, choice){
+  if(!choice || !choice.skillKey) return;
+  const s = BOT_SEAT_PICKS[choice.skillKey];
+  if(!s || typeof s.execute!=='function') return;
+  s.execute(g, seat, choice.seat);
+}
+BOT_DECISIONS.seatPick = {
+  match: seatPickMatch,
+  buildCandidates: seatPickBuildCandidates,
+  localFallback: seatPickLocalFallback,
+  execute: seatPickExecute,
+  extraState: seatPickExtraState,
+  buildSystemPrompt: function(g, seat, ctx){
+    return '你在扮演网页版三国杀的AI机器人。当前你的出牌阶段/技能阶段,候选列表里的每一项'
+      +'是"发动某个技能并指定某个目标"的完整动作(技能名前缀区分)。请结合局面与目标公开'
+      +'状态选择最合适的动作。只能选列表内选项,不能发明。只输出 {"choice":数字},不要解释。';
+  },
+};
+
+// ================= L3: 蛊惑目标(于吉【蛊惑】无人质疑后由发起者选目标) =================
+// 【合法性来源】render.js 座位卡分支(guhuoTarget 高亮段):claimed 声明牌走
+// guhuoActionId → CARD_PLAYS[actionId].target/.canTarget/.allowSelf 三重校验,
+// 这里逐条镜像(只读 g/pending,不读客户端 mode 变量)。
+BOT_SEAT_PICKS.guhuoTarget = {
+  match: function(g, seat){
+    const d = g.pending;
+    return !!(d && d.type==='guhuoTarget' && d.sourceSeat===seat);
+  },
+  buildSeatCandidates: function(g, seat){
+    const d = g.pending;
+    const claimed = d && d.claimedCard;
+    const spec = claimed ? CARD_PLAYS[guhuoActionId(claimed.name)] : null;
+    const meP = g.players[seat];
+    const out = [];
+    if(!claimed || !spec || !spec.target) return out;
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive) return;
+      const selfAllowed = i!==seat || !!(spec && spec.allowSelf);
+      if(!selfAllowed) return;
+      if(spec.canTarget && !spec.canTarget(g, meP, claimed, i)) return;
+      out.push({ seat: i, label: '蛊惑→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(g, seat){
+    // 改动前:机器人从不主动发起蛊惑,该阶段对机器人无处理(死路径)。保守:null(不动作)
+    return null;
+  },
+  extraState: function(g, seat){
+    const d = g.pending || {};
+    const out = {};
+    if(d.claimedCard && d.claimedCard.name) out.claimedCardName = d.claimedCard.name;
+    return out;
+  },
+  execute: function(g, seat, targetSeat){
+    botInvoke(seat, function(){ guhuoChooseTarget(targetSeat); });
+  },
+};
+
+// ================= L3: 旋风目标(凌统【旋风】失去装备后选弃置目标) =================
+// 【合法性来源】render.js 座位卡分支(xuanfengPick 高亮段):存活且非自己。
+BOT_SEAT_PICKS.xuanfeng = {
+  match: function(g, seat){
+    const d = g.pending;
+    return !!(d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting');
+  },
+  buildSeatCandidates: function(g, seat){
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      out.push({ seat: i, label: '旋风→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(g, seat){
+    // 旧分支:runBotDecision 未覆盖 xuanfengPick(70+ 未覆盖之一),机器人此前走 botSafePrompt。
+    // 无密钥回退对齐"botSafePrompt 语义":若无明显安全按钮则不动 → null
+    return null;
+  },
+  execute: function(g, seat, targetSeat){
+    botInvoke(seat, function(){ pickXuanfengTarget(targetSeat); });
+  },
+};
+
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
     +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
@@ -978,6 +1121,11 @@ async function botDecide(decisionId, g, seat){
     choice = spec.localFallback(g, seat, candidates);
   } else {
     choice = candidates[idx];
+  }
+  if(choice===null || choice===undefined){
+    // 本地回退显式返回 null/undefined = 该决策点"无动作"(如 seatPick 的旧行为=不发动),
+    // 视为已处理,不再执行 execute。既有注册项的 fallback 永不返回 null,行为不受影响。
+    return true;
   }
   spec.execute(g, seat, choice);
   return true;
