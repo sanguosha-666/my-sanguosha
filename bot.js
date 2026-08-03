@@ -438,11 +438,24 @@ function botPlayCandidateEntry(g, opt, index){
   const targetInfo = (opt.target!=null && g.players[opt.target])
     ? { seat: opt.target, name: g.players[opt.target].name }
     : null;
-  return { index, action: opt.action, target: targetInfo, localHeuristicScore: Math.round(opt.value) };
+  // card:候选对应的物理牌牌面(botCardBrief 只给 name/suit/rank),供AI直接看这张牌
+  // 具体是什么;handIndex 是对应手牌数组下标,AI 无法凭空发明牌,只能在这份列表里选。
+  // botPlay 保证 g.turn===seat(出牌阶段),读 g.players[g.turn] 和读 seat 等价。
+  const hand = (g.players[g.turn] && g.players[g.turn].hand) || [];
+  const card = (opt.idx!=null && hand[opt.idx]) ? botCardBrief(hand[opt.idx]) : null;
+  const parts = ['出【'+opt.action+'】'];
+  if(card && card.name!==opt.action) parts.push('实际牌【'+card.name+'】');
+  if(targetInfo) parts.push('目标:'+targetInfo.name);
+  parts.push('本地分'+Math.round(opt.value));
+  return {
+    index, action: opt.action, target: targetInfo, localHeuristicScore: Math.round(opt.value),
+    label: parts.join(' '), card, handIndex: (opt.idx!=null ? opt.idx : null)
+  };
 }
 function buildBotPlayCandidates(g, options){
   const list = options.map((o,i)=>botPlayCandidateEntry(g, o, i));
-  list.push({ index: options.length, action: '结束出牌阶段', target: null, localHeuristicScore: null });
+  list.push({ index: options.length, action: '结束出牌阶段', target: null, localHeuristicScore: null,
+    label: '结束出牌阶段', card: null, handIndex: null });
   return list;
 }
 
@@ -658,25 +671,15 @@ async function tryAiBotPlay(g, seat, options){
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
   const candidates = buildBotPlayCandidates(g, options);
   const state = buildBotVisibleState(g, seat);
-  showAiThinkingIndicator(g, seat);
-  let result;
-  try{
-    result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: buildBotPlaySystemPrompt(g, seat),
-      userPrompt: buildBotPlayUserPrompt(state, candidates),
-      maxTokens: 200,
-      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
-    });
-  }catch(e){
-    // callAI 本身设计上从不 reject(网络/超时/解析错误都被归类进 {ok:false,...} 这个
-    // resolve 值),这里只是防御性兜底,理论上不会走到。
-    result = { ok:false, reason:'other', detail:String(e) };
-  }finally{
-    hideAiThinkingIndicator();
-  }
-  if(!result || !result.ok) return null;
-  const idx = parseBotPlayAiChoice(result.text);
-  if(idx===null || idx<0 || idx>=candidates.length) return null;
+  // 候选列表→索引的AI询问统一走 callAiChooseIndex(密钥守卫/单候选短路/思考指示/
+  // 解析/越界校验/超时兜底全部收敛在总线骨架里,和 botDecide 共用同一套基础设施)。
+  const idx = await callAiChooseIndex({
+    g, seat,
+    systemPrompt: buildBotPlaySystemPrompt(g, seat),
+    userPrompt: buildBotPlayUserPrompt(state, candidates),
+    candidates, maxTokens: 200,
+  });
+  if(idx===null) return null;
   if(idx===options.length) return 'pass';
   return options[idx];
 }
@@ -760,23 +763,13 @@ async function tryAiBotBestTarget(g, seat, card, actionId){
   const candidates = buildBotTargetCandidates(g, seat, card, actionId);
   if(!candidates.length) return null; // 理论上不会发生:调用方已经确认至少有一个合法目标
   const state = buildBotVisibleState(g, seat);
-  showAiThinkingIndicator(g, seat);
-  let result;
-  try{
-    result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: buildBotTargetSystemPrompt(g, seat),
-      userPrompt: buildBotTargetUserPrompt(state, card, actionId, candidates),
-      maxTokens: 100,
-      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
-    });
-  }catch(e){
-    result = { ok:false, reason:'other', detail:String(e) };
-  }finally{
-    hideAiThinkingIndicator();
-  }
-  if(!result || !result.ok) return null;
-  const idx = parseBotPlayAiChoice(result.text);
-  if(idx===null || idx<0 || idx>=candidates.length) return null;
+  const idx = await callAiChooseIndex({
+    g, seat,
+    systemPrompt: buildBotTargetSystemPrompt(g, seat),
+    userPrompt: buildBotTargetUserPrompt(state, card, actionId, candidates),
+    candidates, maxTokens: 100,
+  });
+  if(idx===null) return null;
   return candidates[idx].seat;
 }
 
