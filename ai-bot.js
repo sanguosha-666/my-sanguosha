@@ -281,6 +281,150 @@ function callAI(provider, apiKey, opts){
   });
 }
 
+// ---------- 动态模型列表拉取(替代写死的候选表) ----------
+// 每个 provider 的模型清单接口协议各不相同,按 provider 描述 url/headers/label 提取,
+// 语义与 callAI 同一套"从不 reject"约定:未知 provider / fetch reject / 非 2xx /
+// JSON 结构不符 / 超时一律 resolve null,由 renderModelPicker 回退到静态表
+// AI_MODEL_OPTIONS(那张候选表保留作离线兜底,见其顶部注释)。
+const AI_DEFAULT_MODEL = {
+  // 各 provider 内置默认档位——必须和 PROVIDER_ADAPTERS 对应 buildRequest 里
+  // opts.model || 'xxx' 的硬编码保持同步;动态列表里匹配该项的模型追加「(默认)」,
+  // aiApiModel 为空时视觉预选它。测试用例钉死了这三个 id,改这里记得同步改测试。
+  claude: 'claude-haiku-4-5-20251001',
+  openrouter: 'openai/gpt-4o-mini',
+  groq: 'llama-3.3-70b-versatile',
+};
+const MODEL_LIST_API = {
+  claude: {
+    url: 'https://api.anthropic.com/v1/models?limit=1000',
+    headers(apiKey){ return {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      // 与 messages 端点同规则:没有这个头浏览器直连会被拒,见 PROVIDER_ADAPTERS.claude
+      'anthropic-dangerous-direct-browser-access': 'true',
+    }; },
+    labelOf(m){ return (m && (m.display_name || m.id)) || ''; },
+  },
+  openrouter: {
+    url: 'https://openrouter.ai/api/v1/models', // 公开接口,不需要鉴权头
+    headers(){ return {}; },
+    labelOf(m){ return (m && (m.name || m.id)) || ''; },
+  },
+  groq: {
+    url: 'https://api.groq.com/openai/v1/models',
+    headers(apiKey){ return { 'authorization': 'Bearer ' + apiKey }; },
+    labelOf(m){ return (m && m.id) || ''; },
+  },
+};
+
+// 模块级会话缓存:provider → {models, ts}。同一 provider 会话内只拉一次,之后弹窗
+// 重开/输入密钥过程反复重渲染都直接命中;provider 切换因 key 不同自然不命中。
+// OpenRouter 无鉴权、Claude/Groq 的密钥在会话内基本不变——刻意不按密钥区分缓存
+// (保持简单,换密钥不重拉,任务说明已确认接受)。
+const modelListCache = {};
+
+// fetchProviderModels(provider, apiKey) -> Promise<Array<{id,label}> | null>
+// null = 失败(不抛异常,与 callAI 同约定)。超时复用 AI_CALL_TIMEOUT_MS 的 15s
+// AbortController 竞速模式。成功后结果写进 modelListCache,同 provider 第二次调用
+// 直接命中缓存不再发请求。
+function fetchProviderModels(provider, apiKey){
+  const cached = modelListCache[provider];
+  if(cached) return Promise.resolve(cached.models);
+  const spec = MODEL_LIST_API[provider];
+  if(!spec) return Promise.resolve(null);
+  const hasAbort = typeof AbortController !== 'undefined';
+  const controller = hasAbort ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(function(){ controller.abort(); }, AI_CALL_TIMEOUT_MS) : null;
+  return fetch(spec.url, {
+    method: 'GET',
+    headers: spec.headers(apiKey || ''),
+    signal: controller ? controller.signal : undefined,
+  }).then(function(res){
+    if(timeoutId) clearTimeout(timeoutId);
+    if(!res.ok) return null;
+    return res.json().then(function(json){
+      if(!json || !Array.isArray(json.data)) return null;
+      const models = json.data.map(function(m){
+        return { id: (m && m.id) || '', label: spec.labelOf(m) };
+      }).filter(function(x){ return !!x.id; });
+      if(models.length) modelListCache[provider] = { models: models, ts: Date.now() };
+      return models;
+    }, function(){ return null; });
+  }, function(){
+    if(timeoutId) clearTimeout(timeoutId);
+    return null;
+  });
+}
+
+// ---------- 模型列表渲染(顶层可测函数) ----------
+// renderModelPicker 把"搜索框 + 过滤按钮列表 + 自定义入口"这一整块抽成顶层函数,
+// 便于 vm 测试直接调用(renderModelPicker 本身是 showAiKeyModal 的闭包,测试够不到)。
+// opts = { selectedId, defaultValueId, onPick }:
+//   selectedId     —— 当前 aiApiModel(可能为空;为空时默认项视觉高亮但不写入,语义
+//                     见 renderModelPicker 的注释,和旧版"预选第一项不写入"等价)
+//   defaultValueId —— 该 provider 内置默认档位,匹配的项 label 追加「(默认)」
+//   onPick(id)     —— 点击列表项/自定义项后的回调(写入 aiApiModel + persistAiState)
+// 搜索框的 input 事件只重建 #aiModelList 容器、不重建搜索框自身 → 打字不丢焦点;
+// 点击选项后清空搜索框并重建列表,选中态高亮由内部 curSel 维护,不依赖调用方重渲染。
+function renderModelListInto(modelWrap, list, opts){
+  opts = opts || {};
+  const defaultValueId = opts.defaultValueId || null;
+  const onPick = opts.onPick || function(){};
+  let curSel = opts.selectedId || '';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.id = 'aiModelSearchInput';
+  searchInput.className = 'ai-model-search';
+  searchInput.placeholder = '搜索模型…';
+  searchInput.autocomplete = 'off';
+  modelWrap.appendChild(searchInput);
+
+  const listWrap = document.createElement('div');
+  listWrap.id = 'aiModelList';
+  listWrap.className = 'ai-model-list';
+  modelWrap.appendChild(listWrap);
+
+  function renderList(){
+    listWrap.innerHTML = '';
+    const kw = (searchInput.value || '').trim();
+    const shown = kw ? list.filter(function(m){
+      return m.id.indexOf(kw) >= 0 || m.label.indexOf(kw) >= 0;
+    }) : list;
+    // aiApiModel 为空 → 视觉预选默认项(不写入,见函数头注释)
+    const effectiveSel = curSel || defaultValueId;
+    shown.forEach(function(m){
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = m.label + (m.id === defaultValueId ? '(默认)' : '');
+      if(m.id === effectiveSel) b.classList.add('selected');
+      b.onclick = function(){
+        searchInput.value = '';
+        curSel = m.id;
+        onPick(m.id);
+        renderList();
+      };
+      listWrap.appendChild(b);
+    });
+    // 固定排在列表末尾的"自定义"入口:当前模型ID不在列表里(自定义遗留)时高亮
+    const isCustom = !!curSel && !list.some(function(m){ return m.id === curSel; });
+    const customBtn = document.createElement('button');
+    customBtn.type = 'button';
+    customBtn.textContent = '自定义(手动输入模型ID)';
+    if(isCustom) customBtn.classList.add('selected');
+    customBtn.onclick = function(){
+      searchInput.value = '';
+      curSel = AI_MODEL_CUSTOM_VALUE;
+      onPick(AI_MODEL_CUSTOM_VALUE);
+      renderList();
+    };
+    listWrap.appendChild(customBtn);
+  }
+
+  searchInput.oninput = renderList;
+  renderList();
+}
+
 // ---------- 密钥询问弹窗 ----------
 // showAiKeyModal(onDone) 渲染进 index.html 里静态占位的 #aiKeyModal(和 #confirmModal
 // 同一套"fixed 遮罩 + 圆角卡片"结构,但内容形状不同——一段文字+确定/取消这个固定形状
@@ -362,81 +506,90 @@ function showAiKeyModal(onDone){
     saveBtn.disabled = !!(aiApiKey && !aiProvider);
   }
 
-  // renderModelPicker:provider 确定之后才渲染的"选择模型"下拉框——没有 provider
-  // (还没识别出来/还没手动选)时留空,不渲染任何内容。选项来自 AI_MODEL_OPTIONS[provider]
-  // + 一个固定的"自定义"项(AI_MODEL_CUSTOM_VALUE)。默认选中态由 aiApiModel 当前值
-  // 决定:①aiApiModel 匹配候选表里某一项 → 选中那一项;②aiApiModel 非空但不在候选表
-  // 里(比如上次手动填过一个自定义ID)→ 选中"自定义"并把文本框预填这个值;③aiApiModel
-  // 为空 → 选中候选表第一项(=该 provider 的内置默认档位)但不写入 aiApiModel——留空
-  // 就是"不覆盖,交给 buildRequest 自己的默认值"这条既定语义,视觉上预选第一项只是让
-  // 用户看得到"现在实际用的是哪个",不代表这个值已经被写进 aiApiModel。
+  // renderModelPicker:provider 确定之后才渲染的"模型选择器"。数据源优先级:
+  // modelListCache[provider](会话缓存)→ 拉取成功 → AI_MODEL_OPTIONS[provider]
+  // 静态表回退(拉取失败)。选中态由 aiApiModel 当前值决定:①aiApiModel 匹配列表里
+  // 某一项 → 那一项高亮;②aiApiModel 非空但不在列表里(自定义遗留)→ 显示自定义
+  // 文本框并预填;③aiApiModel 为空 → 该 provider 内置默认档位视觉高亮但不写入——
+  // 留空就是"不覆盖,交给 buildRequest 自己的默认值"这条既定语义(见 AI_DEFAULT_MODEL
+  // 注释,和旧版"预选第一项不写入"等价)。列表本体渲染在顶层函数 renderModelListInto
+  // (搜索框+过滤按钮+自定义项),这里只负责数据源选择和状态行。
   function renderModelPicker(){
     modelWrap.innerHTML = '';
     if(!aiProvider) return;
-    const options = AI_MODEL_OPTIONS[aiProvider] || [];
+    const provider = aiProvider;
+
     const label = document.createElement('label');
     label.textContent = '模型';
     label.style.cssText = 'margin-top:8px;';
     modelWrap.appendChild(label);
 
-    const sel = document.createElement('select');
-    sel.id = 'aiModelSelect';
-    const knownIds = options.map(o=>o.id);
-    const isCustom = !!aiApiModel && !knownIds.includes(aiApiModel);
-    // aiApiModel 为空(!isCustom 且不匹配任何已知项)时,视觉上默认预选候选表第一项——
-    // 这一项本来就等于该 provider 的内置默认档位(见文件顶部 AI_MODEL_OPTIONS 注释里
-    // "第一项固定等于 buildRequest 硬编码默认值"这条约定),只是"预选"不等于"写入
-    // aiApiModel",不选默认档位对应的 option.selected 也不会让 aiApiModel 变成非空。
-    options.forEach((o,i)=>{
-      const opt = document.createElement('option');
-      opt.value = o.id; opt.textContent = o.label;
-      if(aiApiModel===o.id || (!aiApiModel && i===0)) opt.selected = true;
-      sel.appendChild(opt);
-    });
-    const optCustom = document.createElement('option');
-    optCustom.value = AI_MODEL_CUSTOM_VALUE; optCustom.textContent = '自定义(手动输入模型ID)';
-    if(isCustom) optCustom.selected = true;
-    sel.appendChild(optCustom);
-    modelWrap.appendChild(sel);
+    const statusNote = document.createElement('div');
+    statusNote.id = 'aiModelStatusNote';
+    statusNote.className = 'ai-key-warn';
+    statusNote.style.cssText = 'margin-top:4px;';
+    modelWrap.appendChild(statusNote);
 
-    const customInput = document.createElement('input');
-    customInput.type = 'text';
-    customInput.id = 'aiModelCustomInput';
-    customInput.placeholder = '精确的模型ID,例如 openai/gpt-5.4-mini';
-    customInput.autocomplete = 'off';
-    // 统一用逐个属性直接赋值(不用 style.cssText 塞一整条字符串)——下面 sel.onchange
-    // 切换显隐时用的就是这种写法,创建时的初始状态也保持同一种写法,不要混用两种方式
-    // 表达同一件事。
-    customInput.style.marginLeft = '8px';
-    customInput.style.display = isCustom ? 'inline-block' : 'none';
-    customInput.value = isCustom ? aiApiModel : '';
-    modelWrap.appendChild(customInput);
-
-    function commitCustomModel(){
-      aiApiModel = customInput.value.trim();
-      persistAiState();
-    }
-    customInput.addEventListener('input', commitCustomModel);
-    customInput.addEventListener('blur', commitCustomModel);
-
-    sel.onchange = ()=>{
-      if(sel.value===AI_MODEL_CUSTOM_VALUE){
-        customInput.style.display = 'inline-block';
-        aiApiModel = customInput.value.trim(); // 可能是空字符串,commitCustomModel 会在用户真正输入后覆盖
-      } else {
-        customInput.style.display = 'none';
-        customInput.value = '';
-        aiApiModel = sel.value;
+    function applyList(list, fromFallback){
+      statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型');
+      // 自定义遗留(aiApiModel 非空且不在列表)→ 显示文本框并预填
+      const isCustom = !!aiApiModel && !list.some(function(m){ return m.id === aiApiModel; });
+      const customInput = document.createElement('input');
+      customInput.type = 'text';
+      customInput.id = 'aiModelCustomInput';
+      customInput.placeholder = '精确的模型ID,例如 openai/gpt-5.4-mini';
+      customInput.autocomplete = 'off';
+      customInput.style.marginLeft = '8px';
+      customInput.style.display = isCustom ? 'inline-block' : 'none';
+      customInput.value = isCustom ? aiApiModel : '';
+      function commitCustomModel(){
+        aiApiModel = customInput.value.trim();
+        persistAiState();
       }
-      persistAiState();
-    };
+      customInput.addEventListener('input', commitCustomModel);
+      customInput.addEventListener('blur', commitCustomModel);
+      // 先渲染搜索框+列表;自定义文本框跟在列表末尾的"自定义"按钮下方,超时提示垫底
+      renderModelListInto(modelWrap, list, {
+        selectedId: aiApiModel,
+        defaultValueId: AI_DEFAULT_MODEL[provider] || null,
+        onPick: function(id){
+          if(id === AI_MODEL_CUSTOM_VALUE){
+            customInput.style.display = 'inline-block';
+            aiApiModel = customInput.value.trim(); // 可能是空字符串,commitCustomModel 会在用户真正输入后覆盖
+          } else {
+            customInput.style.display = 'none';
+            customInput.value = '';
+            aiApiModel = id;
+          }
+          persistAiState();
+        },
+      });
+      modelWrap.appendChild(customInput);
+      const modelNote = document.createElement('div');
+      modelNote.className = 'ai-key-warn';
+      modelNote.style.cssText = 'margin-top:4px;';
+      modelNote.textContent = '更强的模型通常更贵、单次决策也可能更慢——如果响应超过'
+        +(AI_CALL_TIMEOUT_MS/1000)+'秒会自动回退到本地机器人规则,不会卡住游戏。';
+      modelWrap.appendChild(modelNote);
+    }
 
-    const modelNote = document.createElement('div');
-    modelNote.className = 'ai-key-warn';
-    modelNote.style.cssText = 'margin-top:4px;';
-    modelNote.textContent = '更强的模型通常更贵、单次决策也可能更慢——如果响应超过'
-      +(AI_CALL_TIMEOUT_MS/1000)+'秒会自动回退到本地机器人规则,不会卡住游戏。';
-    modelWrap.appendChild(modelNote);
+    // 数据源优先级:会话缓存 → 拉取成功 → 静态表 AI_MODEL_OPTIONS 回退
+    const cached = modelListCache[provider];
+    if(cached){
+      applyList(cached.models, false);
+    } else {
+      statusNote.textContent = '加载模型列表…';
+      fetchProviderModels(provider, aiApiKey).then(function(list){
+        // 拉取期间 provider 可能又变了(输入框继续敲键)——这次结果已不属于当前
+        // provider,丢弃即可;每次输入都会重新走这里,不会丢列表。
+        if(aiProvider !== provider) return;
+        if(list && list.length){
+          applyList(list, false);
+        } else {
+          applyList(AI_MODEL_OPTIONS[provider] || [], true);
+        }
+      });
+    }
   }
 
   function updateStatusLine(){

@@ -1145,6 +1145,13 @@
      的 renderModelPicker——label/select/input 复用全局表单样式,这里只补容器间距,
      里面那句 .ai-key-warn(用量/延迟提示)复用既有的 warn 文案样式,不新造一套配色。 */
   .ai-key-panel .ai-model-picker select{margin-top:2px;}
+  /* 动态模型列表(搜索框+选项按钮列表),渲染逻辑见 ai-bot.js 的 renderModelListInto——
+     搜索框/列表容器/选项按钮/选中态四件套,深色主题与 ai-key-panel 同系 */
+  .ai-key-panel .ai-model-search{width:100%;box-sizing:border-box;margin:6px 0 4px;padding:6px 8px;border:1px solid rgba(212,175,55,.35);border-radius:6px;background:#16100c;color:var(--paper);font-size:13px;}
+  .ai-key-panel .ai-model-list{max-height:120px;overflow-y:auto;border:1px solid #3a3126;border-radius:6px;padding:2px;}
+  .ai-key-panel .ai-model-list button{display:block;width:100%;text-align:left;padding:6px 8px;background:transparent;border:none;color:var(--paper-dim);font-size:13px;border-radius:4px;cursor:pointer;}
+  .ai-key-panel .ai-model-list button:hover{background:rgba(255,255,255,.06);color:var(--paper);}
+  .ai-key-panel .ai-model-list button.selected{background:rgba(212,175,55,.22);color:var(--gold);}
   .ai-key-panel .ai-key-warn{margin-top:12px;font-size:12px;color:var(--paper-dim);line-height:1.55;}
   .ai-key-panel .ai-key-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;}
 
@@ -2032,18 +2039,18 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=268"></script>
-<script src="data.js?v=268"></script>
-<script src="room-lifecycle.js?v=268"></script>
-<script src="game.js?v=268"></script>
-<script src="weapons.js?v=268"></script>
-<script src="skills.js?v=268"></script>
-<script src="bot.js?v=268"></script>
-<script src="ai-bot.js?v=268"></script>
-<script src="render.js?v=268"></script>
-<script src="render-table.js?v=268"></script>
-<script src="render-hand.js?v=268"></script>
-<script src="render-controls.js?v=268"></script>
-<script src="render-log.js?v=268"></script>
+<script src="config.js?v=269"></script>
+<script src="data.js?v=269"></script>
+<script src="room-lifecycle.js?v=269"></script>
+<script src="game.js?v=269"></script>
+<script src="weapons.js?v=269"></script>
+<script src="skills.js?v=269"></script>
+<script src="bot.js?v=269"></script>
+<script src="ai-bot.js?v=269"></script>
+<script src="render.js?v=269"></script>
+<script src="render-table.js?v=269"></script>
+<script src="render-hand.js?v=269"></script>
+<script src="render-controls.js?v=269"></script>
+<script src="render-log.js?v=269"></script>
 </body>
 </html>
