@@ -3,11 +3,11 @@
  * callAiChooseIndex 摘要注入
  *
  * 加载真实 data.js + ai-bot.js + bot.js 进共享 vm 沙箱(与 run_ai_bus_info_test.js
- * 同一套惯例),mock callAI 记录收到的 opts 并返回可控结果。覆盖 13 项:
+ * 同一套惯例),mock callAI 记录收到的 opts 并返回可控结果。覆盖 14 项:
  * S1 八项(首回合无摘要且不注入 / updateAiSummary 写回 / 注入进 systemPrompt /
  * 失败沿用 / 迭代携带旧摘要 / 座位变化清空 / 500 字上限 / fire-and-forget 不阻塞)
- * + S2 五项(scheduleBotTurn 回合检测 / over 清空 / 弹窗含清除按钮 / 点击清除 /
- * setupRefreshWarning 移除)。
+ * + S2 六项(scheduleBotTurn 回合检测 / over 清空 / 弹窗含清除按钮 / 点击清除 /
+ * 真人回合不清记忆 / setupRefreshWarning 移除)。
  *
  * S2 的弹窗用例需要驱动真实 showAiKeyModal,把 document stub 升级成
  * run_ai_model_picker_test.js 同款树形 stub(appendChild/remove/getElementById 按
@@ -131,7 +131,7 @@ files.forEach(function(file){
 });
 
 console.log('\n' + '='.repeat(60));
-console.log('  AI 摘要测试(13 项)');
+console.log('  AI 摘要测试(14 项)');
 console.log('='.repeat(60) + '\n');
 
 // 断言脚本整体在沙箱内执行(和 run_ai_bus_core_test.js 同一惯例),
@@ -347,6 +347,35 @@ const testCode = String.raw`
     if(!noteFound) throw new Error('应出现就地"已清除本局AI记忆"提示');
   });
 
+  // 13. 真人回合(seat===-1)不清 AI 记忆:scheduleBotTurn 每次渲染都跑,若此时
+  //      aiSummarySeat!==-1 就 reset,机器人跨回合记忆每过一个真人回合就被清空
+  //      (2人局=1真人+1机器人时功能等于报废)。seat>=0 守卫后:不 reset、不更新。
+  await check('13 真人回合(seat=-1)不清 aiSummary', async function(){
+    var _origSt = setTimeout, _origCt = clearTimeout;
+    setTimeout = function(){ return 424243; };
+    clearTimeout = function(){};
+    var spyCalls = 0;
+    updateAiSummary = async function(g2, s){ spyCalls++; };
+    try{
+      // isBotController 为真(turn 指向真人座位 0 → botSeatForState 返回 -1)
+      var g13 = {
+        roundNum: 5, turn: 0, phase: 'play', gameMode: 'ffa', shaUsed: false,
+        players: [
+          { name: '人类', cid: 'test-client', hp: 4, maxHp: 4, alive: true, hand: [], equips: {}, delays: [], general: 'sunquan' },
+          { name: '机器人1', isBot: true, cid: 'bot-1', hp: 3, maxHp: 3, alive: true, hand: [], equips: {}, delays: [], general: 'guanyu' },
+        ],
+        pending: null, log: [], discard: [], deck: [],
+      };
+      aiSummary = '旧记忆'; aiSummarySeat = 1; aiSummaryRound = 5; aiSummaryTurn = 0;
+      scheduleBotTurn(g13);
+      if(aiSummary !== '旧记忆') throw new Error('真人回合不应清空 aiSummary,实际 "' + aiSummary + '"');
+      if(aiSummarySeat !== 1) throw new Error('真人回合不应动 aiSummarySeat,实际 ' + aiSummarySeat);
+      if(spyCalls !== 0) throw new Error('真人回合不应触发 updateAiSummary,实际 ' + spyCalls);
+    } finally {
+      setTimeout = _origSt; clearTimeout = _origCt;
+    }
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
@@ -366,17 +395,17 @@ vm.runInContext(testCode, sandbox);
   while (sandbox.__testDone !== true) {
     await new Promise(function(r){ setTimeout(r, 10); });
   }
-  // 13(宿主机):setupRefreshWarning 函数+调用、window.aiConversations 引用已从
+  // 14(宿主机):setupRefreshWarning 函数+调用、window.aiConversations 引用已从
   // ai-bot.js 移除(等价于 `rg "setupRefreshWarning" ai-bot.js` 无输出)
   const aiBotSrc = fs.readFileSync('ai-bot.js', 'utf8');
   if(aiBotSrc.indexOf('setupRefreshWarning') !== -1){
-    console.log('  FAIL 13 setupRefreshWarning 仍存在于 ai-bot.js');
+    console.log('  FAIL 14 setupRefreshWarning 仍存在于 ai-bot.js');
     sandbox.__testFail = true;
   } else if(aiBotSrc.indexOf('aiConversations') !== -1){
-    console.log('  FAIL 13 aiConversations 引用仍存在于 ai-bot.js');
+    console.log('  FAIL 14 aiConversations 引用仍存在于 ai-bot.js');
     sandbox.__testFail = true;
   } else {
-    console.log('  PASS 13 setupRefreshWarning 与 aiConversations 引用已移除');
+    console.log('  PASS 14 setupRefreshWarning 与 aiConversations 引用已移除');
   }
   process.exit(sandbox.__testFail ? 1 : 0);
 })().catch(function(e){

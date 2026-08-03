@@ -151,7 +151,10 @@ function scheduleBotTurn(g){
   // (fire-and-forget,不阻塞决策;更新完成后的下一轮决策才带上新摘要)
   if(g.phase==='over'){ aiSummaryReset(); return; }
   const seat=botSeatForState(g);
-  if(aiSummarySeat !== seat) aiSummaryReset();
+  // seat>=0 才碰摘要座位:seat===-1 是真人回合(scheduleBotTurn 每次渲染都跑),
+  // 此时 reset 会把机器人的跨回合记忆清掉,2人局(1真人+1机器人)记忆永远活不过
+  // 一个真人回合。只有"换到另一个机器人座位"(或首遇机器人座位)才该清空。
+  if(seat >= 0 && aiSummarySeat !== seat) aiSummaryReset();
   if(seat >= 0){
     aiSummarySeat = seat;
     if(aiSummary && (aiSummaryRound !== g.roundNum || aiSummaryTurn !== g.turn)){
