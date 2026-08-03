@@ -107,6 +107,13 @@ const testCode = String.raw`
   window.__endPlayCalls = 0;
   playCard = function(cardIdx, action, target){ window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target }); };
   endPlay = function(){ window.__endPlayCalls++; };
+  // ---- spy:discardCards/pickResolve/endTurn(L2 弃牌/拆顺,同为函数声明绑定) ----
+  window.__discardCalls = [];
+  window.__pickCalls = [];
+  window.__endTurnCalls = 0;
+  discardCards = function(cardIdxList){ window.__discardCalls.push(cardIdxList.slice()); };
+  pickResolve = function(choice){ window.__pickCalls.push(choice); };
+  endTurn = function(){ window.__endTurnCalls++; };
   // ---- mock callAI:每次调用记录参数,结果从队列里取 ----
   window.__mockAiCalls = 0;
   window.__mockAiArgs = null;
@@ -236,6 +243,124 @@ const testCode = String.raw`
     var g = mkG([card('杀')], { gameMode: 'identity', roleOf: ['fan', 'zhu', 'zhong'], roleRevealed: [false, false, true] });
     await botPlay(g, 0);
     if(window.__mockAiCalls !== before) throw new Error('无密钥不应调用 callAI');
+  });
+
+  // ---- T7~T12:L2 弃牌组合/拆顺选牌(座位0机器人,经 runBotDecision 全链路) ----
+  // 弃牌:4张手牌 hp=2 → need=2;默认组合=末尾[2,3](桃/杀),价值升序变体=[0,1](闪/酒)
+  function mkDiscardG(hand, hp){
+    var players = [];
+    for(var i = 0; i < 3; i++){
+      players.push({
+        name: i === 0 ? '机器人0' : ('玩家' + i),
+        alive: true, hp: i === 0 ? hp : 4, maxHp: 4,
+        hand: i === 0 ? hand : [],
+        equips: emptyEquips(), delays: [],
+        isBot: i === 0,
+        role: 'zhu'
+      });
+    }
+    return { players: players, gameMode: 'ffa', roundNum: 1, phase: 'discard', turn: 0, log: [], pending: null, started: true };
+  }
+  // 拆顺:座位1是目标(可选手牌/装备/判定区),pending 标准结构 {type:'pick',from:0,to:1}
+  function mkPickG(targetHand, targetEquips, targetDelays){
+    var players = [];
+    for(var i = 0; i < 3; i++){
+      players.push({
+        name: i === 0 ? '机器人0' : ('玩家' + i),
+        alive: true, hp: 4, maxHp: 4,
+        hand: i === 1 ? (targetHand || []) : [],
+        equips: i === 1 ? (targetEquips || emptyEquips()) : emptyEquips(),
+        delays: i === 1 ? (targetDelays || []) : [],
+        isBot: i === 0,
+        role: 'zhu'
+      });
+    }
+    return { players: players, gameMode: 'ffa', roundNum: 1, phase: 'pick', turn: 1, log: [], pending: { type: 'pick', trick: '顺手牵羊', from: 0, to: 1 }, started: true };
+  }
+
+  await check('弃牌无密钥:默认弃末尾 need 张(与旧算法一致)→ discardCards([2,3])', async function(){
+    window.__discardCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkDiscardG([card('闪'), card('酒'), card('桃'), card('杀')], 2);
+    await runBotDecision(g, 0);
+    if(window.__discardCalls.length !== 1) throw new Error('discardCards 应被调1次,实际 ' + window.__discardCalls.length);
+    if(window.__discardCalls[0].join(',') !== '2,3') throw new Error('应弃默认末尾[2,3](桃/杀),实际 ' + JSON.stringify(window.__discardCalls[0]));
+  });
+
+  await check('弃牌有密钥:默认组合必在场+去重+每组合恰need张+下标升序;mock选变体→参数匹配', async function(){
+    window.__discardCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkDiscardG([card('闪'), card('酒'), card('桃'), card('杀')], 2);
+    var cands = BOT_DECISIONS.discardSubset.buildCandidates(g, 0);
+    if(!cands[0] || cands[0].isDefault !== true) throw new Error('候选0应为默认组合,实际 ' + JSON.stringify(cands[0]));
+    if(cands[0].discardIndices.join(',') !== '2,3') throw new Error('默认组合应为[2,3],实际 ' + cands[0].discardIndices.join(','));
+    if(cands.length < 2 || cands.length > 20) throw new Error('候选数应在2~20,实际 ' + cands.length);
+    var keys = cands.map(function(c){ return c.discardIndices.join(','); });
+    if(new Set(keys).size !== keys.length) throw new Error('候选组合应去重,实际 ' + JSON.stringify(keys));
+    cands.forEach(function(c){
+      if(c.discardIndices.length !== 2) throw new Error('每组都应恰好 need 张,实际 ' + JSON.stringify(c.discardIndices));
+      var sorted = c.discardIndices.slice().sort(function(a,b){ return a - b; });
+      if(c.discardIndices.join(',') !== sorted.join(',')) throw new Error('下标应升序,实际 ' + c.discardIndices.join(','));
+      if(typeof c.label !== 'string' || c.label.length === 0) throw new Error('应带中文 label,实际 ' + JSON.stringify(c));
+    });
+    await runBotDecision(g, 0);
+    if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
+    if(window.__discardCalls.length !== 1) throw new Error('discardCards 应被调1次,实际 ' + window.__discardCalls.length);
+    if(window.__discardCalls[0].join(',') !== '0,1') throw new Error('AI应选价值升序变体[0,1](闪/酒),实际 ' + JSON.stringify(window.__discardCalls[0]));
+  });
+
+  await check('弃牌无需求:手牌<=hp → endTurn,不走 discardCards', async function(){
+    window.__endTurnCalls = 0;
+    window.__discardCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkDiscardG([card('杀'), card('闪')], 4);
+    await runBotDecision(g, 0);
+    if(window.__endTurnCalls !== 1) throw new Error('endTurn 应被调1次,实际 ' + window.__endTurnCalls);
+    if(window.__discardCalls.length !== 0) throw new Error('不应 discardCards');
+  });
+
+  await check('拆顺无密钥:目标有手牌+装备+判定区 → 本地回退选 hand', async function(){
+    window.__pickCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var e = emptyEquips(); e.weapon = card('青龙偃月刀');
+    var g = mkPickG([card('杀')], e, [card('乐不思蜀')]);
+    await runBotDecision(g, 0);
+    if(window.__pickCalls.length !== 1) throw new Error('pickResolve 应被调1次,实际 ' + window.__pickCalls.length);
+    if(window.__pickCalls[0] !== 'hand') throw new Error('应选 hand,实际 ' + window.__pickCalls[0]);
+  });
+
+  await check('拆顺无密钥:目标无手牌有+1马 → 本地回退选装备槽 plus1', async function(){
+    window.__pickCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var e = emptyEquips(); e.plus1 = card('的卢');
+    var g = mkPickG([], e, []);
+    await runBotDecision(g, 0);
+    if(window.__pickCalls.length !== 1) throw new Error('pickResolve 应被调1次,实际 ' + window.__pickCalls.length);
+    if(window.__pickCalls[0] !== 'plus1') throw new Error('应选 plus1,实际 ' + window.__pickCalls[0]);
+  });
+
+  await check('拆顺有密钥:mock 选判定区 → pickResolve("delay:0")', async function(){
+    window.__pickCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":2}' }]; // [0]=hand [1]=武器 [2]=判定区
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var e = emptyEquips(); e.weapon = card('青龙偃月刀');
+    var g = mkPickG([card('杀')], e, [card('乐不思蜀')]);
+    var cands = BOT_DECISIONS.pickSlot.buildCandidates(g, 0);
+    if(cands.length !== 3) throw new Error('应有3个候选(手牌/武器/判定区),实际 ' + cands.length + ' ' + JSON.stringify(cands.map(function(c){return c.pickKey;})));
+    if(cands[2].pickKey !== 'delay:0') throw new Error('候选2应为判定区,实际 ' + cands[2].pickKey);
+    await runBotDecision(g, 0);
+    if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
+    if(window.__pickCalls.length !== 1) throw new Error('pickResolve 应被调1次,实际 ' + window.__pickCalls.length);
+    if(window.__pickCalls[0] !== 'delay:0') throw new Error('AI应选 delay:0,实际 ' + window.__pickCalls[0]);
   });
 
   console.log('\n' + '='.repeat(60));

@@ -685,6 +685,127 @@ BOT_DECISIONS.controlsChoice = {
   buildSystemPrompt: buildControlsChoiceSystemPrompt,
 };
 
+// ================= L2:discardSubset(弃牌阶段选弃哪几张,Task B4) =================
+// 【本决策点是什么】弃牌阶段"弃掉哪 need 张"是资源取舍判断,不是纯机械规则——候选列表
+// 是若干组"完整的弃牌下标集合"(每组都恰好 need 张、从自己的手牌里弃掉),AI 从中选一组;
+// 无密钥回退默认组合 = 末尾 need 张(与旧硬编码分支逐字一致,无密钥回归红线)。
+// 【候选生成策略】默认组合永远在场;变体1 = 按 botCardPriority 价值升序(优先弃低价值)
+// 取前 need 张;变体2+ = 从价值组合出发逐位换成"下一位未选中下标"的小变异,凑足 20 个
+// 上限。下标一律升序(服务端 discardCards 内部自己按降序 splice,顺序不影响结果)。
+function discardSubsetMatch(g, seat){
+  return g.phase==='discard' && g.turn===seat;
+}
+function discardSubsetBuildCandidates(g, seat){
+  const p = g.players[seat];
+  const hand = p.hand || [];
+  const need = hand.length - p.hp;
+  if(need <= 0) return []; // need<=0 的 endTurn 短路径在 runBotDecision 里处理,这里永不触发
+  // 默认组合:末尾 need 张(旧算法)
+  const defaultIndices = [];
+  for(let i = hand.length - need; i < hand.length; i++) defaultIndices.push(i);
+  const seen = new Set();
+  const out = [];
+  function addVariant(idxArr, isDefault){
+    const sorted = idxArr.slice().sort((a,b)=>a-b);
+    const key = sorted.join(',');
+    if(seen.has(key) || out.length >= 20) return;
+    seen.add(key);
+    out.push({
+      label: (isDefault ? '默认弃牌(与本地一致):' : '弃牌组合'+out.length+':')
+        + sorted.map(i=>hand[i].name).join('/'),
+      discardIndices: sorted,
+      isDefault: isDefault
+    });
+  }
+  addVariant(defaultIndices, true);
+  // 变体1:按价值升序(优先弃低价值)取前 need 张
+  const byValue = hand.map((c,i)=>({ i:i, v: botCardPriority(c.name) }))
+    .sort((a,b)=>a.v-b.v || a.i-b.i);
+  addVariant(byValue.slice(0, need).map(x=>x.i), false);
+  // 变体2+:从价值组合出发,逐位换成"下一位未选中的更高下标"(小变异)
+  for(let k = 0; k < need && out.length < 20; k++){
+    const base = byValue.slice(0, need).map(x=>x.i).sort((a,b)=>a-b);
+    let next = base[k] + 1;
+    while(base.indexOf(next) >= 0) next++;
+    if(next >= hand.length) continue;
+    const v = base.slice(); v[k] = next;
+    addVariant(v, false);
+  }
+  return out;
+}
+function discardSubsetLocalFallback(g, seat, candidates){
+  return candidates.find(c=>c.isDefault===true) || candidates[0];
+}
+function discardSubsetExecute(g, seat, choice){
+  botInvoke(seat, ()=>discardCards(choice.discardIndices));
+}
+function buildDiscardSubsetSystemPrompt(){
+  return '你在扮演网页版三国杀的AI机器人。当前是你的弃牌阶段,你必须恰好弃置 need 张牌'
+    +'(候选列表每一项是一组完整的弃牌下标集合,均从你当前手牌中弃掉,弃哪组都一样合法)。'
+    +'思考要保留哪些牌:桃/无中生有/装备/锦囊等价值高的优先保留,闪/酒等价值低的优先弃置。'
+    +'只能选择列表内的组合,不能发明列表之外的选项。请只输出 {"choice":数字},不要解释。';
+}
+BOT_DECISIONS.discardSubset = {
+  match: discardSubsetMatch,
+  buildCandidates: discardSubsetBuildCandidates,
+  localFallback: discardSubsetLocalFallback,
+  execute: discardSubsetExecute,
+  buildSystemPrompt: buildDiscardSubsetSystemPrompt,
+  maxTokens: 120,
+};
+
+// ================= L2:pickSlot(顺手/拆桥选拿/拆哪个对象,Task B4) =================
+// 【本决策点是什么】顺手牵羊/过河拆桥的选牌子阶段:目标的手牌(整体1个随机选项)、每件
+// 装备、判定区每张延时锦囊各算一个候选。AI 从中选拿/拆哪个;无密钥回退与旧分支顺序
+// 逐字一致(手牌优先 → 第一个占用装备槽 → delay:0)。
+function pickSlotMatch(g, seat){
+  return g.phase==='pick' && g.pending && g.pending.type==='pick' && g.pending.from===seat;
+}
+function pickSlotBuildCandidates(g, seat){
+  const d = g.pending || {};
+  const target = g.players[d.to];
+  if(!target || !target.alive) return [];
+  const out = [];
+  if((target.hand||[]).length > 0){
+    out.push({ pickKey: 'hand', label: '随机手牌(共'+(target.hand||[]).length+'张)' });
+  }
+  (typeof EQUIP_SLOTS!=='undefined' ? EQUIP_SLOTS : []).forEach(slot=>{
+    const c = target.equips && target.equips[slot];
+    if(c) out.push({ pickKey: slot, label: '装备:' + c.name });
+  });
+  (target.delays||[]).forEach((c, i)=>{
+    out.push({ pickKey: 'delay:'+i, label: '判定区:' + c.name });
+  });
+  return out;
+}
+function pickSlotLocalFallback(g, seat, candidates){
+  const byKey = {};
+  candidates.forEach(c=>{ byKey[c.pickKey] = c; });
+  const target = g.players[(g.pending||{}).to];
+  if((target && target.hand || []).length && byKey.hand) return byKey.hand;
+  const slot = (typeof EQUIP_SLOTS!=='undefined' ? EQUIP_SLOTS : [])
+    .find(s=>target && target.equips && target.equips[s]);
+  if(slot && byKey[slot]) return byKey[slot];
+  if(byKey['delay:0']) return byKey['delay:0'];
+  return candidates[0];
+}
+function pickSlotExecute(g, seat, choice){
+  botInvoke(seat, ()=>pickResolve(choice.pickKey));
+}
+function buildPickSlotSystemPrompt(){
+  return '你在扮演网页版三国杀的AI机器人。你使用了顺手牵羊/过河拆桥,需要从目标处选择'
+    +'拿/拆的对象(候选列表每一项是一个具体对象:随机手牌/某件装备/判定区某张延时锦囊)。'
+    +'结合当前局面判断哪个对象价值最高(拆武器/拆+1马/拿装备/拆延时锦囊等)。只能选择'
+    +'列表内的选项,不能发明列表之外的选项。请只输出 {"choice":数字},不要解释。';
+}
+BOT_DECISIONS.pickSlot = {
+  match: pickSlotMatch,
+  buildCandidates: pickSlotBuildCandidates,
+  localFallback: pickSlotLocalFallback,
+  execute: pickSlotExecute,
+  buildSystemPrompt: buildPickSlotSystemPrompt,
+};
+
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
     +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
@@ -1411,9 +1532,10 @@ async function runBotDecision(g,seat){
   if(g.phase==='play'&&g.turn===seat){ await botPlay(g,seat); return; }
   if(g.phase==='discard'&&g.turn===seat){
     const need=Math.max(0,(p.hand||[]).length-p.hp);
-    if(need>0) botInvoke(seat,()=>discardCards([...Array(need).keys()].map(i=>p.hand.length-1-i)));
-    else botInvoke(seat,endTurn);
-    return;
+    if(need<=0){ botInvoke(seat,endTurn); return; }
+    // L2 discardSubset:弃牌组合决策由总线接管(无密钥回退=旧算法末尾 need 张,逐字一致)。
+    // botDecide 返回 true 表示已执行;need>0 时候选必非空,不存在"无候选落空"的分支。
+    if(await botDecide('discardSubset', g, seat)) return;
   }
   if(g.phase==='respond'&&d.to===seat){
     // 不能只看"手里有没有能当闪的牌":马超【铁骑】判红/黄忠【烈弓】触发时 d.noShan===true,
@@ -1464,14 +1586,9 @@ async function runBotDecision(g,seat){
   if(g.phase==='huogongReveal'&&d.to===seat){ botInvoke(seat,()=>respondHuogongReveal(0)); return; }
   if(g.phase==='huogong'&&d.from===seat){ botInvoke(seat,()=>respondHuogong(false)); return; }
   if(g.phase==='pick'&&d.from===seat){
-    const target=g.players[d.to];
-    let choice='hand';
-    if(!(target.hand||[]).length){
-      choice=EQUIP_SLOTS.find(s=>target.equips&&target.equips[s]);
-      if(!choice&&Array.isArray(target.delays)&&target.delays.length) choice='delay:0';
-    }
-    if(choice) botInvoke(seat,()=>pickResolve(choice));
-    return;
+    // L2 pickSlot:顺手/拆桥选对象决策由总线接管(无密钥回退=旧分支 hand→装备槽→delay:0)。
+    // d.from===seat 与 pickSlotMatch 是同一道守卫,保留作双保险。
+    if(await botDecide('pickSlot', g, seat)) return;
   }
   if(g.phase==='qilin'&&d.from===seat){
     const target=g.players[d.to];
