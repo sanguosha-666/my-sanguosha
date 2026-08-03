@@ -19,6 +19,10 @@
  *    (duanLiang/qiXi/guoSe/playCard)收到(牌idx, 目标);无密钥 fallback=null → true
  *    不调服务端;userPrompt 不含他人手牌名;候选排除:断粮距离>2、奇袭无可拆牌、
  *    国色已有乐、武圣空城、双雄帷幕
+ *  - 剩余简单单选 4 个(挑衅/反间/青囊/驱虎伤害):match=出牌阶段门槛镜像
+ *    render-controls(hasCap/限一次/手牌非空);候选=挑衅排除无手牌、青囊含自己且
+ *    排除满血、驱虎伤害只取 pending.targets;有密钥 mock → respondTiaoxin/fanJian/
+ *    qingNang(idx,seat)/respondQuhuDamage;无密钥 fallback=null → true 不调服务端
  *
  * 已知的 vm 坑:aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,必须用
  * runInContext 里裸标识符赋值;guhuoChooseTarget/pickXuanfengTarget/callAI 都是函数
@@ -139,7 +143,7 @@ const testCode = String.raw`
       players.push({
         name: i === 0 ? '机器人0' : ('玩家' + i),
         alive: opt.aliveOf ? opt.aliveOf[i] !== false : true,
-        hp: 4, maxHp: 4,
+        hp: (opt.hpOf && opt.hpOf[i] !== undefined) ? opt.hpOf[i] : 4, maxHp: 4,
         hand: i === 0 ? (opt.myHand || []) : (opt.hands ? (opt.hands[i] || []) : []),
         equips: emptyEquips(), delays: opt.delaysOf ? (opt.delaysOf[i] || []) : [],
         isBot: i === 0,
@@ -152,6 +156,9 @@ const testCode = String.raw`
     if(opt.shuangxiongColor) players[0].shuangxiongColor = opt.shuangxiongColor;
     if(opt.shaUsed) g.shaUsed = true;
     if(opt.duanliangUsed) g.duanliangUsed = true;
+    if(opt.tiaoxinUsed) g.tiaoxinUsed = true;
+    if(opt.fanJianUsed) g.fanJianUsed = true;
+    if(opt.qingNangUsed) g.qingNangUsed = true;
     return g;
   }
   function card(name, id, suit, rank){
@@ -169,14 +176,18 @@ const testCode = String.raw`
   qiXi = spyService('qixi');
   guoSe = spyService('guose');
   playCard = spyService('playCard');
+  respondTiaoxin = spyService('tiaoxin');
+  fanJian = spyService('fanjian');
+  qingNang = spyService('qingnang');
+  respondQuhuDamage = spyService('quhuDamage');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
-  await check('BOT_SEAT_PICKS 存在且恰含 7 个技能;无命中时 botDecide 返回 false', async function(){
+  await check('BOT_SEAT_PICKS 存在且恰含 11 个技能;无命中时 botDecide 返回 false', async function(){
     if(typeof BOT_SEAT_PICKS === 'undefined') throw new Error('BOT_SEAT_PICKS 未定义');
     var keys = Object.keys(BOT_SEAT_PICKS).sort().join(',');
-    if(keys !== 'duanliang,guhuoTarget,guose,qixi,shuangxiong,wusheng,xuanfeng')
-      throw new Error('注册表应恰为 7 项,实际 ' + keys);
+    if(keys !== 'duanliang,fanjian,guhuoTarget,guose,qingnang,qixi,quhuDamage,shuangxiong,tiaoxin,wusheng,xuanfeng')
+      throw new Error('注册表应恰为 11 项,实际 ' + keys);
     var g = mkSeatG({});
     var r = await botDecide('seatPick', g, 0);
     if(r !== false) throw new Error('无技能命中应返回 false(走旧分支),实际 ' + r);
@@ -525,6 +536,185 @@ const testCode = String.raw`
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
     if(window.__playCardCalls.length !== 0) throw new Error('无密钥不应调用 playCard,实际 ' + window.__playCardCalls.length);
+  });
+
+  // ================= T3:剩余简单单选 4 个(挑衅/反间/青囊/驱虎伤害) =================
+  // 合法性镜像 render.js 座位卡分支 + render-controls.js 入口按钮门槛(hasCap/限一次/手牌非空):
+  // 挑衅=出牌阶段+hasCap+未用,目标=存活有手牌非自己(render-controls.js:3730);
+  // 反间=出牌阶段+hasCap+未用+自己手牌非空(render-controls.js:3750 门槛,比 brief 多限一次判断);
+  // 青囊=出牌阶段+hasCap+未用+自己手牌非空(render-controls.js:3762 门槛),目标=存活且 hp<maxHp(可自己);
+  // 驱虎伤害=quhuDamageChoice 阶段+pending.seat===本人(render-controls.js:2220),目标=pending.targets 成员(服务端权威)。
+
+  // ---- 挑衅 tiaoxin ----
+  await check('挑衅:无技能/已用过 match false;有技能 match true 且候选=存活有手牌非自己', function(){
+    var s = BOT_SEAT_PICKS.tiaoxin;
+    if(!s) throw new Error('BOT_SEAT_PICKS.tiaoxin 未注册');
+    var g1 = mkSeatG({ myHand: [card('杀','t0')] });
+    if(s.match(g1, 0)) throw new Error('无挑衅技能不应命中');
+    var g2 = mkSeatG({ caps0: { tiaoxin: true }, tiaoxinUsed: true, hands: { 1: [card('杀','t1')] } });
+    if(s.match(g2, 0)) throw new Error('本回合已用挑衅不应命中');
+    var g3 = mkSeatG({ caps0: { tiaoxin: true }, hands: { 1: [card('杀','t2')], 2: [] } });
+    if(!s.match(g3, 0)) throw new Error('有技能+存在有手牌目标应命中');
+    if(pickSeats(s, g3) !== '1') throw new Error('无手牌目标(座位2)应排除,实际 ' + pickSeats(s, g3));
+    var cands = s.buildSeatCandidates(g3, 0);
+    if(cands[0].label.indexOf('挑衅') < 0) throw new Error('label 应含挑衅前缀,实际 ' + cands[0].label);
+  });
+
+  await check('挑衅有密钥:mock 选目标 → respondTiaoxin(座位);userPrompt 不含他人手牌', async function(){
+    window.__tiaoxinCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { tiaoxin: true }, hands: { 1: [card('桃园结义','sec')], 2: [card('杀','t3')] } });
+    var r = await botDecide('seatPick', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__tiaoxinCalls.length !== 1 || window.__tiaoxinCalls[0][0] !== 2)
+      throw new Error('应 respondTiaoxin(座位2),实际 ' + JSON.stringify(window.__tiaoxinCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+  });
+
+  await check('挑衅无密钥:fallback=null → botDecide true 且不调 respondTiaoxin', async function(){
+    window.__tiaoxinCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkSeatG({ caps0: { tiaoxin: true }, hands: { 1: [card('杀','t4')], 2: [card('桃','t5')] } });
+    var r = await botDecide('seatPick', g, 0);
+    if(r !== true) throw new Error('无密钥应返回 true,实际 ' + r);
+    if(window.__tiaoxinCalls.length !== 0) throw new Error('不应调用 respondTiaoxin,实际 ' + window.__tiaoxinCalls.length);
+  });
+
+  // ---- 反间 fanjian ----
+  await check('反间:无技能/无手牌/已用过 match false;有技能+有手牌 match true 且候选=存活非自己', function(){
+    var s = BOT_SEAT_PICKS.fanjian;
+    if(!s) throw new Error('BOT_SEAT_PICKS.fanjian 未注册');
+    var g1 = mkSeatG({ myHand: [card('杀','f0')] });
+    if(s.match(g1, 0)) throw new Error('无反间技能不应命中');
+    var g2 = mkSeatG({ caps0: { fanjian: true }, myHand: [] });
+    if(s.match(g2, 0)) throw new Error('无手牌不应命中');
+    var g3 = mkSeatG({ caps0: { fanjian: true }, myHand: [card('杀','f1')], fanJianUsed: true });
+    if(s.match(g3, 0)) throw new Error('本回合已用反间不应命中');
+    var g4 = mkSeatG({ caps0: { fanjian: true }, myHand: [card('杀','f2')], hands: { 1: [], 2: [] } });
+    if(!s.match(g4, 0)) throw new Error('有技能+有手牌应命中');
+    if(pickSeats(s, g4) !== '1,2') throw new Error('存活非自己均应为候选,实际 ' + pickSeats(s, g4));
+    var g5 = mkSeatG({ caps0: { fanjian: true }, myHand: [card('杀','f3')], aliveOf: { 2: false } });
+    if(pickSeats(s, g5) !== '1') throw new Error('死者(座位2)应排除,实际 ' + pickSeats(s, g5));
+    var cands = s.buildSeatCandidates(g4, 0);
+    if(cands[0].label.indexOf('反间') < 0) throw new Error('label 应含反间前缀,实际 ' + cands[0].label);
+  });
+
+  await check('反间有密钥:mock 选目标 → fanJian(座位);无密钥 null 不调', async function(){
+    window.__fanjianCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { fanjian: true }, myHand: [card('杀','f4')],
+      hands: { 1: [card('桃园结义','sec')], 2: [card('桃','f5')] } });
+    var r = await botDecide('seatPick', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__fanjianCalls.length !== 1 || window.__fanjianCalls[0][0] !== 2)
+      throw new Error('应 fanJian(座位2),实际 ' + JSON.stringify(window.__fanjianCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+
+    window.__fanjianCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g2 = mkSeatG({ caps0: { fanjian: true }, myHand: [card('杀','f6')], hands: { 1: [card('桃','f7')], 2: [card('闪','f8')] } });
+    var r2 = await botDecide('seatPick', g2, 0);
+    if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
+    if(window.__fanjianCalls.length !== 0) throw new Error('无密钥不应调用 fanJian,实际 ' + window.__fanjianCalls.length);
+  });
+
+  // ---- 青囊 qingnang ----
+  await check('青囊:无技能/无手牌/已用过 match false;有技能 match true 且候选=存活且 hp<maxHp(含自己)', function(){
+    var s = BOT_SEAT_PICKS.qingnang;
+    if(!s) throw new Error('BOT_SEAT_PICKS.qingnang 未注册');
+    var g1 = mkSeatG({ myHand: [card('杀','c0')] });
+    if(s.match(g1, 0)) throw new Error('无青囊技能不应命中');
+    var g2 = mkSeatG({ caps0: { qingnang: true }, myHand: [] });
+    if(s.match(g2, 0)) throw new Error('无手牌不应命中');
+    var g3 = mkSeatG({ caps0: { qingnang: true }, myHand: [card('杀','c1')], qingNangUsed: true });
+    if(s.match(g3, 0)) throw new Error('本回合已用青囊不应命中');
+    var g4 = mkSeatG({ caps0: { qingnang: true }, myHand: [card('杀','c2')], hpOf: { 0: 3, 2: 2 } });
+    if(!s.match(g4, 0)) throw new Error('有技能+有手牌应命中');
+    if(pickSeats(s, g4) !== '0,2') throw new Error('满血座位1排除、自己(受伤)应入候选,实际 ' + pickSeats(s, g4));
+    var cands = s.buildSeatCandidates(g4, 0);
+    if(cands[0].label.indexOf('青囊') < 0) throw new Error('label 应含青囊前缀,实际 ' + cands[0].label);
+  });
+
+  await check('青囊有密钥:mock 选目标 → qingNang(第一张手牌idx, 目标);无密钥 null 不调', async function(){
+    window.__qingnangCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { qingnang: true }, myHand: [card('杀','c3','♥'), card('桃','c4','♦')], hpOf: { 0: 3, 2: 2 } });
+    var r = await botDecide('seatPick', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__qingnangCalls.length !== 1 || window.__qingnangCalls[0][0] !== 0 || window.__qingnangCalls[0][1] !== 2)
+      throw new Error('应 qingNang(0, 座位2),实际 ' + JSON.stringify(window.__qingnangCalls));
+
+    window.__qingnangCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g2 = mkSeatG({ caps0: { qingnang: true }, myHand: [card('杀','c5')], hpOf: { 0: 3, 1: 3 } });
+    var r2 = await botDecide('seatPick', g2, 0);
+    if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
+    if(window.__qingnangCalls.length !== 0) throw new Error('无密钥不应调用 qingNang,实际 ' + window.__qingnangCalls.length);
+  });
+
+  // ---- 驱虎伤害 quhuDamage(只做选伤害目标;quhuRespond 拼点阶段不在本任务) ----
+  function mkQuhuDamageG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'quhuDamageChoice';
+    g.pending = opt.pending || { type: 'quhuDamageChoice', seat: 0, targetSeat: 1, targets: [1, 2] };
+    return g;
+  }
+
+  await check('驱虎伤害:无 pending/他人选择/拼点阶段 match false;有 pending match true 且候选=pending.targets', function(){
+    var s = BOT_SEAT_PICKS.quhuDamage;
+    if(!s) throw new Error('BOT_SEAT_PICKS.quhuDamage 未注册');
+    var g1 = mkSeatG({});
+    if(s.match(g1, 0)) throw new Error('无 quhuDamageChoice pending 不应命中');
+    var g2 = mkQuhuDamageG({});
+    g2.pending.seat = 1;
+    if(s.match(g2, 0)) throw new Error('pending.seat 非本人不应命中');
+    if(!s.match(g2, 1)) throw new Error('pending.seat 本人(座位1)应命中');
+    var g3 = mkQuhuDamageG({ pending: { type: 'quhuRespond', seat: 0, targetSeat: 1 } });
+    if(s.match(g3, 0)) throw new Error('quhuRespond 拼点阶段不应命中驱虎伤害');
+    var g4 = mkQuhuDamageG({});
+    if(!s.match(g4, 0)) throw new Error('本人选伤害目标应命中');
+    if(pickSeats(s, g4) !== '1,2') throw new Error('候选应恰为 pending.targets 成员 1,2,实际 ' + pickSeats(s, g4));
+    var g5 = mkQuhuDamageG({ pending: { type: 'quhuDamageChoice', seat: 0, targetSeat: 1, targets: [1] } });
+    if(pickSeats(s, g5) !== '1') throw new Error('候选应只含 targets 里的座位,实际 ' + pickSeats(s, g5));
+    var cands = s.buildSeatCandidates(g4, 0);
+    if(cands[0].label.indexOf('驱虎伤害') < 0) throw new Error('label 应含驱虎伤害前缀,实际 ' + cands[0].label);
+  });
+
+  await check('驱虎伤害有密钥:botDecide 全链 → respondQuhuDamage(目标);无密钥 null 不调', async function(){
+    window.__quhuDamageCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkQuhuDamageG({ hands: { 1: [card('桃园结义','sec')] } });
+    var r = await botDecide('seatPick', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__quhuDamageCalls.length !== 1 || window.__quhuDamageCalls[0][0] !== 2)
+      throw new Error('应 respondQuhuDamage(座位2),实际 ' + JSON.stringify(window.__quhuDamageCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+
+    window.__quhuDamageCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g2 = mkQuhuDamageG({});
+    var r2 = await botDecide('seatPick', g2, 0);
+    if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
+    if(window.__quhuDamageCalls.length !== 0) throw new Error('无密钥不应调用 respondQuhuDamage,实际 ' + window.__quhuDamageCalls.length);
   });
 
   console.log('\n' + '='.repeat(60));

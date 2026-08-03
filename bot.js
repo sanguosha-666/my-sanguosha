@@ -912,7 +912,7 @@ BOT_DECISIONS.guhuoQuestion = {
 const BOT_SEAT_PICKS = Object.create(null);
 
 function seatPickMatch(g, seat){
-  if(!g || g.phase!=='play' && !(g.pending && (g.pending.type==='guhuoTarget'||g.pending.type==='xuanfengPick'))) return false;
+  if(!g || g.phase!=='play' && !(g.pending && (g.pending.type==='guhuoTarget'||g.pending.type==='xuanfengPick'||g.pending.type==='quhuDamageChoice'))) return false;
   return Object.keys(BOT_SEAT_PICKS).some(function(key){
     const s = BOT_SEAT_PICKS[key];
     return typeof s.match==='function' && s.match(g, seat);
@@ -1201,6 +1201,106 @@ BOT_SEAT_PICKS.shuangxiong = {
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(function(c){ return canShuangxiongDuelCard(me, c); });
     if(idx>=0) botInvoke(seat, function(){ playCard(idx, '决斗', targetSeat); });
+  },
+};
+
+// ================= L3: 剩余简单单选 4 个(挑衅/反间/青囊/驱虎伤害,Task L3-T3) =================
+// 【合法性来源】render.js 座位卡分支 + render-controls.js 入口按钮门槛(hasCap/限一次/手牌非空)。
+// 【与 brief 的偏差,以 render-controls.js 为准】①反间 match 在 brief 的 hasCap+play+turn
+// 之外,加 render-controls.js:3750 入口门槛的 !g.fanJianUsed && (me.hand||[]).length>=1
+// (服务端 fanJian 同样以这两条为前置守卫,不加会导致 AI 选一个必被服务端拒的选项);
+// ②青囊 match 同样加 !g.qingNangUsed(render-controls.js:3762 门槛);③挑衅经 rg 确认
+// render-controls.js:3730 是"点按钮→进入 tiaoxinMode→点座位"两步 UI,但服务端
+// respondTiaoxin(targetSeat) 可直接调用、无"发动"前置阶段,属简单单选,按本任务
+// 注册进 seatPick(非 Task 4 多步框架)。④驱虎伤害是独立阶段
+// (quhuDamageChoice,pending.seat===本人),seatPickMatch 外层闸门已加
+// pending.type==='quhuDamageChoice' 放行;quhuRespond 拼点阶段不在本任务。
+BOT_SEAT_PICKS.tiaoxin = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me || !hasCap(me,'tiaoxin') || g.tiaoxinUsed) return false;
+    return true;
+  },
+  buildSeatCandidates: function(g, seat){
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if((p.hand||[]).length===0) return;
+      out.push({ seat: i, label: '挑衅→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用挑衅
+  execute: function(g, seat, targetSeat){
+    botInvoke(seat, function(){ respondTiaoxin(targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.fanjian = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me || !hasCap(me,'fanjian') || g.fanJianUsed) return false;
+    return (me.hand||[]).length>=1;
+  },
+  buildSeatCandidates: function(g, seat){
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      out.push({ seat: i, label: '反间→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用反间
+  execute: function(g, seat, targetSeat){
+    botInvoke(seat, function(){ fanJian(targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.qingnang = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me || !hasCap(me,'qingnang') || g.qingNangUsed) return false;
+    return (me.hand||[]).length>=1;
+  },
+  buildSeatCandidates: function(g, seat){
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive) return;
+      if(p.hp>=p.maxHp) return;
+      out.push({ seat: i, label: '青囊→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用青囊
+  execute: function(g, seat, targetSeat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return !!c; }); // 弃第一张手牌(与真人"点一张手牌"一致)
+    if(idx>=0) botInvoke(seat, function(){ qingNang(idx, targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.quhuDamage = {
+  match: function(g, seat){
+    const d = g.pending;
+    return !!(g && g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice'
+      && d.seat===seat && Array.isArray(d.targets));
+  },
+  buildSeatCandidates: function(g, seat){
+    const d = g.pending;
+    const out = [];
+    (d.targets||[]).forEach(function(i){
+      const p = g.players[i];
+      if(!p || !p.alive) return;
+      out.push({ seat: i, label: '驱虎伤害→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前 quhuDamageChoice 对机器人无覆盖(走 botSafePrompt),保守不动
+  execute: function(g, seat, targetSeat){
+    botInvoke(seat, function(){ respondQuhuDamage(targetSeat); });
   },
 };
 
