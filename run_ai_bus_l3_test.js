@@ -23,6 +23,11 @@
  *    render-controls(hasCap/限一次/手牌非空);候选=挑衅排除无手牌、青囊含自己且
  *    排除满血、驱虎伤害只取 pending.targets;有密钥 mock → respondTiaoxin/fanJian/
  *    qingNang(idx,seat)/respondQuhuDamage;无密钥 fallback=null → true 不调服务端
+ *  - 多步两阶段框架(借刀杀人 jiedaoTwoStep):botTwoStepA 仅客户端本地不入 Firebase;
+ *    阶段A候选=有武器且有合法B的存活其他角色(hasSomeB 镜像 render.js)、阶段B候选=
+ *    A攻击范围内非A非空城者;两调度序列 阶段A挂起→阶段B提交 jieDaoShaRen(借刀idx,
+ *    seatA,seatB) 并重置;有密钥 mock 选 seatB;候选空→botDecide false 不崩;
+ *    runBotDecision 接线:阶段A/B命中即 return、未命中才走 runBotActionWindow
  *
  * 已知的 vm 坑:aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,必须用
  * runInContext 里裸标识符赋值;guhuoChooseTarget/pickXuanfengTarget/callAI 都是函数
@@ -180,6 +185,7 @@ const testCode = String.raw`
   fanJian = spyService('fanjian');
   qingNang = spyService('qingnang');
   respondQuhuDamage = spyService('quhuDamage');
+  jieDaoShaRen = spyService('jiedao');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -715,6 +721,181 @@ const testCode = String.raw`
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
     if(window.__quhuDamageCalls.length !== 0) throw new Error('无密钥不应调用 respondQuhuDamage,实际 ' + window.__quhuDamageCalls.length);
+  });
+
+  // ================= T3:多步两阶段框架(借刀杀人 jiedaoTwoStep) =================
+  // botTwoStepA 仅客户端本地(仿 render.js jiedaoSeatA),不入 Firebase、无新 pending 类型。
+  // 阶段A候选=有武器且有合法B(hasSomeB)的存活其他角色(镜像 render.js 1467-1468);
+  // 阶段B候选=A 攻击范围内、非A、非空城的存活者(镜像 render.js 1473);
+  // execute:阶段A只挂起 botTwoStepA 等下一调度;阶段B提交 jieDaoShaRen(cardIdx,seatA,seatB)。
+
+  await check('借刀:jiedaoTwoStep 已注册;match=出牌阶段+自己回合+手牌有借刀;阶段A候选=有武器且有合法B的存活其他角色', function(){
+    var s = BOT_DECISIONS.jiedaoTwoStep;
+    if(!s) throw new Error('BOT_DECISIONS.jiedaoTwoStep 未注册');
+    if(typeof resetBotTwoStep !== 'function') throw new Error('resetBotTwoStep 未定义');
+    var g1 = mkSeatG({ myHand: [card('杀','j1')] });
+    if(s.match(g1, 0)) throw new Error('无借刀不应命中');
+    var g2 = mkSeatG({ myHand: [card('借刀杀人','j2')] });
+    if(!s.match(g2, 0)) throw new Error('手牌有借刀应命中');
+    g2.turn = 1;
+    if(s.match(g2, 0)) throw new Error('非自己回合不应命中');
+    g2.turn = 0; g2.phase = 'discard';
+    if(s.match(g2, 0)) throw new Error('非出牌阶段不应命中');
+    // 无人持武器 → 阶段A候选空
+    var g3 = mkSeatG({ myHand: [card('借刀杀人','j3')] });
+    if(s.buildCandidates(g3, 0).length !== 0) throw new Error('无人持武器时阶段A候选应为空');
+    // 座位1持青龙偃月刀(range3)且存在合法B → 候选=[1]
+    var g4 = mkSeatG({ myHand: [card('借刀杀人','j4')] });
+    g4.players[1].equips.weapon = { name: '青龙偃月刀' };
+    var c4 = s.buildCandidates(g4, 0);
+    if(c4.length !== 1 || c4[0].a !== 1 || c4[0].step !== 'A') throw new Error('阶段A候选应=[座位1],实际 ' + JSON.stringify(c4));
+    if(c4[0].label.indexOf('借刀') < 0) throw new Error('label 应含借刀前缀,实际 ' + c4[0].label);
+    // 座位1有武器但所有B候选都是空城 → hasSomeB=false → 排除(镜像 render.js hasSomeB)
+    var g5 = mkSeatG({ myHand: [], caps0: { kongcheng: true } });
+    g5.players[1].equips.weapon = { name: '青龙偃月刀' };
+    g5.players[1].hand = [card('杀','j5')];
+    g5.players[2].caps = { kongcheng: true };
+    g5.players[2].hand = [];
+    if(s.buildCandidates(g5, 0).length !== 0) throw new Error('无合法B时武器持有者应被排除(hasSomeB)');
+    // 自己持武器不算A
+    var g6 = mkSeatG({ myHand: [card('借刀杀人','j6')] });
+    g6.players[0].equips.weapon = { name: '青龙偃月刀' };
+    if(s.buildCandidates(g6, 0).length !== 0) throw new Error('自己持武器不能作为A');
+    // resetBotTwoStep 清空挂起状态
+    botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
+    resetBotTwoStep();
+    if(botTwoStepA !== null) throw new Error('resetBotTwoStep 应清空 botTwoStepA');
+  });
+
+  await check('借刀阶段B:候选=在A攻击范围内、非A、非空城的存活者(镜像 render.js 1473)', function(){
+    var s = BOT_DECISIONS.jiedaoTwoStep;
+    // A=1(青龙偃月刀 range3):3人局可达 0(自己)和 2
+    var g1 = mkSeatG({ myHand: [card('借刀杀人','j7')] });
+    g1.players[1].equips.weapon = { name: '青龙偃月刀' };
+    botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
+    var c1 = s.buildCandidates(g1, 0);
+    var seats = c1.map(function(c){ return c.seatB; }).sort(function(a,b){ return a-b; }).join(',');
+    if(seats !== '0,2') throw new Error('阶段B候选应为0,2,实际 ' + seats);
+    if(c1[0].step !== 'B' || c1[0].seatA !== 1) throw new Error('阶段B候选应带 step:B 和 seatA,实际 ' + JSON.stringify(c1[0]));
+    if(c1[0].label.indexOf('杀 ') < 0) throw new Error('label 应含"令A杀B",实际 ' + c1[0].label);
+    // 空城者排除
+    var g2 = mkSeatG({ myHand: [card('借刀杀人','j8')] });
+    g2.players[1].equips.weapon = { name: '青龙偃月刀' };
+    g2.players[2].caps = { kongcheng: true };
+    g2.players[2].hand = [];
+    botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
+    var c2 = s.buildCandidates(g2, 0);
+    if(c2.length !== 1 || c2[0].seatB !== 0) throw new Error('空城者应排除,只剩座位0,实际 ' + JSON.stringify(c2));
+    // A 自己不能当B
+    var g3 = mkSeatG({ myHand: [card('借刀杀人','j9')] });
+    g3.players[1].equips.weapon = { name: '青龙偃月刀' };
+    botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
+    var c3 = s.buildCandidates(g3, 0);
+    if(c3.some(function(c){ return c.seatB === 1; })) throw new Error('A 自己不能出现在阶段B候选');
+    botTwoStepA = null;
+  });
+
+  await check('借刀两阶段无密钥:调度1 阶段A选中候选[0]并挂起 botTwoStepA;调度2 阶段B提交 jieDaoShaRen(借刀idx,seatA,seatB) 并重置', async function(){
+    window.__jiedaoCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkSeatG({ myHand: [card('借刀杀人','j10')] });
+    g.players[1].equips.weapon = { name: '青龙偃月刀' };
+    var r1 = await botDecide('jiedaoTwoStep', g, 0);
+    if(r1 !== true) throw new Error('阶段A应返回 true,实际 ' + r1);
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'jiedaoTwoStep' || botTwoStepA.a !== 1)
+      throw new Error('阶段A后 botTwoStepA 应={decisionId,a:1},实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__jiedaoCalls.length !== 0) throw new Error('阶段A不应提交 jieDaoShaRen');
+    var r2 = await botDecide('jiedaoTwoStep', g, 0);
+    if(r2 !== true) throw new Error('阶段B应返回 true,实际 ' + r2);
+    if(botTwoStepA !== null) throw new Error('阶段B提交后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__jiedaoCalls.length !== 1) throw new Error('jieDaoShaRen 应被调1次,实际 ' + window.__jiedaoCalls.length);
+    var call0 = window.__jiedaoCalls[0];
+    if(call0[0] !== 0 || call0[1] !== 1 || call0[2] !== 0) throw new Error('应 jieDaoShaRen(0,1,0),实际 ' + JSON.stringify(call0));
+  });
+
+  await check('借刀阶段B有密钥:mock 选 seatB → jieDaoShaRen(借刀idx,seatA,seatB);userPrompt 不含他人手牌', async function(){
+    window.__jiedaoCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ myHand: [card('借刀杀人','j11')], hands: { 1: [card('桃园结义','sec')] } });
+    g.players[1].equips.weapon = { name: '青龙偃月刀' };
+    botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
+    var r = await botDecide('jiedaoTwoStep', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__jiedaoCalls.length !== 1 || window.__jiedaoCalls[0][1] !== 1 || window.__jiedaoCalls[0][2] !== 2)
+      throw new Error('应 jieDaoShaRen(idx,1,2),实际 ' + JSON.stringify(window.__jiedaoCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+    botTwoStepA = null;
+  });
+
+  await check('借刀:无武器持有者时 match true 但候选空 → botDecide 返回 false(走 runBotActionWindow,不崩)', async function(){
+    var s = BOT_DECISIONS.jiedaoTwoStep;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkSeatG({ myHand: [card('借刀杀人','j12')] });
+    if(!s.match(g, 0)) throw new Error('手牌有借刀应命中 match');
+    if(s.buildCandidates(g, 0).length !== 0) throw new Error('无武器持有者时候选应为空');
+    var r = await botDecide('jiedaoTwoStep', g, 0);
+    if(r !== false) throw new Error('候选空应返回 false(runBotActionWindow 继续),实际 ' + r);
+  });
+
+  await check('借刀接线:runBotDecision play 分支先尝试 jiedaoTwoStep;阶段B命中→提交且不再走 runBotActionWindow;未命中→走 runBotActionWindow', async function(){
+    var realBotDecide = botDecide;
+    var realWindow = runBotActionWindow;
+    var wired = [];
+    botDecide = async function(decisionId, gg, seat){ wired.push(decisionId); return realBotDecide(decisionId, gg, seat); };
+    runBotActionWindow = async function(){ window.__windowCalls++; };
+
+    // 场景1:botTwoStepA 已挂起(阶段B态) → 一次调度内直接提交,不走窗口
+    window.__windowCalls = 0;
+    window.__jiedaoCalls = [];
+    botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
+    var g1 = mkSeatG({ myHand: [card('借刀杀人','j13')] });
+    g1.players[1].equips.weapon = { name: '青龙偃月刀' };
+    await runBotDecision(g1, 0);
+    if(window.__windowCalls !== 0) throw new Error('阶段B命中后不应再走 runBotActionWindow');
+    if(wired.filter(function(x){ return x === 'jiedaoTwoStep'; }).length !== 1) throw new Error('阶段B应恰尝试1次 jiedaoTwoStep,实际 ' + JSON.stringify(wired));
+    if(window.__jiedaoCalls.length !== 1) throw new Error('runBotDecision 链应提交 jieDaoShaRen');
+
+    // 场景2:无 botTwoStepA(阶段A态) → 选中即挂起,不走窗口
+    wired = [];
+    window.__windowCalls = 0;
+    window.__jiedaoCalls = [];
+    botTwoStepA = null;
+    var g2 = mkSeatG({ myHand: [card('借刀杀人','j14')] });
+    g2.players[1].equips.weapon = { name: '青龙偃月刀' };
+    await runBotDecision(g2, 0);
+    if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走 runBotActionWindow(等下一调度)');
+    if(!botTwoStepA || botTwoStepA.a !== 1) throw new Error('阶段A应挂起 botTwoStepA,实际 ' + JSON.stringify(botTwoStepA));
+
+    // 场景3:手牌无借刀 → 未命中 → 走 runBotActionWindow(第一处尝试被 botTwoStepA 守卫挡住,只试1次)
+    wired = [];
+    window.__windowCalls = 0;
+    botTwoStepA = null;
+    var g3 = mkSeatG({ myHand: [card('杀','j15')] });
+    await runBotDecision(g3, 0);
+    if(window.__windowCalls !== 1) throw new Error('jiedaoTwoStep 未命中时应走 runBotActionWindow,实际 ' + window.__windowCalls);
+    if(wired.join(',') !== 'jiedaoTwoStep') throw new Error('无挂起态时应恰尝试1次(第二处接线),实际 ' + wired.join(','));
+
+    // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两处尝试均 false → 走窗口不崩
+    wired = [];
+    window.__windowCalls = 0;
+    window.__jiedaoCalls = [];
+    botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
+    var g4 = mkSeatG({ myHand: [card('借刀杀人','j16')], aliveOf: { 2: false } });
+    g4.players[0].equips.plus1 = { name: '的卢' };
+    await runBotDecision(g4, 0);
+    if(window.__windowCalls !== 1) throw new Error('阶段B无候选时应走 runBotActionWindow,实际 ' + window.__windowCalls);
+    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep') throw new Error('阶段B无候选应尝试2次后放行,实际 ' + wired.join(','));
+    if(window.__jiedaoCalls.length !== 0) throw new Error('阶段B无候选不应提交 jieDaoShaRen');
+
+    botDecide = realBotDecide;
+    runBotActionWindow = realWindow;
+    botTwoStepA = null;
   });
 
   console.log('\n' + '='.repeat(60));

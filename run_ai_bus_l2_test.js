@@ -552,20 +552,26 @@ const testCode = String.raw`
     if(window.__mockAiCalls !== 1) throw new Error('合并候选应只问1次,实际 ' + window.__mockAiCalls + '次');
   });
 
-  await check('借刀杀人:存在合法A/B时仍不在候选(两步流程,保持排除)', async function(){
+  await check('借刀杀人:两步流程接管(不走 playCard 候选,阶段A挂起等下一调度)', async function(){
     window.__playCalls = [];
     window.__endPlayCalls = 0;
     window.__mockAiCalls = 0;
-    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }]; // 只剩 [0=结束]
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
     aiApiKey = 'test-key';
     aiProvider = 'claude';
     var g = mkG([card('借刀杀人')]);
     // 座位1 持武器(青龙偃月刀 range3),可够到座位2 → canPlay 若不被排除必为真
     var e1 = emptyEquips(); e1.weapon = card('青龙偃月刀');
     g.players[1].equips = e1;
+    botTwoStepA = null;
     await runBotDecision(g, 0);
-    if(window.__endPlayCalls !== 1) throw new Error('应 endPlay(候选只剩结束项),实际 endPlay=' + window.__endPlayCalls);
     if(window.__playCalls.length !== 0) throw new Error('借刀杀人不应出现在候选,实际 ' + JSON.stringify(window.__playCalls));
+    // L3 起借刀由 jiedaoTwoStep 两步流程接管:阶段A选中合法A后本地挂起,等下一调度走阶段B,
+    // 不结束出牌、不经 playCard —— 取代旧的"排除后直接 endPlay"(行为变化,见 T4 报告)。
+    if(window.__endPlayCalls !== 0) throw new Error('阶段A挂起期间不应 endPlay,实际 endPlay=' + window.__endPlayCalls);
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'jiedaoTwoStep' || botTwoStepA.a !== 1)
+      throw new Error('应挂起 botTwoStepA={jiedaoTwoStep,a:1},实际 ' + JSON.stringify(botTwoStepA));
+    botTwoStepA = null;
   });
 
   console.log('\n' + '='.repeat(60));

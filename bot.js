@@ -1304,6 +1304,71 @@ BOT_SEAT_PICKS.quhuDamage = {
   },
 };
 
+// ================= L3: 多步两阶段框架(借刀杀人,Task T4) =================
+// 【两阶段状态】botTwoStepA 仅客户端本地、不入 Firebase(仿 render.js 的 jiedaoSeatA),
+// 不新增 pending 类型:阶段A选中 A 后挂起,等下一调度走阶段B;阶段B提交后立即重置。
+// runBotDecision 每轮调度入口先检查 botTwoStepA 是否属于当前决策(decisionId 防跨决策
+// 残留)。【无密钥兜底语义】改动前机器人从不用借刀(botPlay 枚举排除借刀),这里取
+// candidates[0](最小合法组合)而不是"不动作"——因为 jiedaoTwoStep 的 match 只看
+// "手牌有借刀",若阶段A选完不落子,每个调度都会再次命中 match 重新问一遍、永无终局;
+// 阶段B提交后借刀被 jieDaoShaRen 消耗,下一调度 match 自然为 false 收尾。
+let botTwoStepA = null;
+function resetBotTwoStep(){ botTwoStepA = null; }
+
+BOT_DECISIONS.jiedaoTwoStep = {
+  match: function(g, seat){
+    if(g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players[seat];
+    const hasJiedao = (me.hand||[]).some(function(c){ return c.name==='借刀杀人'; });
+    return hasJiedao;
+  },
+  buildCandidates: function(g, seat){
+    const me = g.players[seat];
+    const jiedaoIdx = (me.hand||[]).findIndex(function(c){ return c.name==='借刀杀人'; });
+    const out = [];
+    if(botTwoStepA && botTwoStepA.decisionId==='jiedaoTwoStep'){
+      // 阶段 B:镜像 render.js 1473 —— A 攻击范围内、非A、非空城的存活者
+      const A = botTwoStepA.a;
+      g.players.forEach(function(p, i){
+        if(!p || !p.alive || i===A) return;
+        if(!canReachSha(g, A, i)) return;
+        if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
+        out.push({ index: 0, label: '借刀:令 '+g.players[A].name+' 杀 '+p.name, step:'B', seatA: A, seatB: i, jiedaoIdx: jiedaoIdx });
+      });
+      return out;
+    }
+    // 阶段 A:镜像 render.js 1467-1468 —— 有武器且存在合法B(hasSomeB)的存活其他角色
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if(!p.equips || !p.equips.weapon) return;
+      const hasSomeB = g.players.some(function(B, bi){
+        return B && B.alive && bi!==i && canReachSha(g, i, bi)
+          && !(hasCap(B,'kongcheng') && (B.hand||[]).length===0);
+      });
+      if(!hasSomeB) return;
+      out.push({ index: 0, label: '借刀:选 '+p.name, step:'A', a: i, jiedaoIdx: jiedaoIdx });
+    });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    if(!candidates.length) return null;
+    return candidates[0];
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    if(choice.step==='A'){
+      botTwoStepA = { decisionId: 'jiedaoTwoStep', a: choice.a };
+      return; // 等下一调度走阶段 B
+    }
+    // 阶段 B:提交借刀专属流程(jieDaoShaRen(cardIdx,seatA,seatB),render.js 1478 分支同款)
+    resetBotTwoStep();
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return c.name==='借刀杀人'; });
+    if(idx<0) return;
+    botInvoke(seat, function(){ jieDaoShaRen(idx, choice.seatA, choice.seatB); });
+  },
+};
+
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
     +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
@@ -1986,7 +2051,16 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondXunxun(all.slice(0,take),all.slice(take))); return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
-  if(g.phase==='play'&&g.turn===seat){ await runBotActionWindow(g,seat); return; }
+  // L3 多步两阶段(借刀杀人):阶段A选中后 botTwoStepA 本地挂起,等下一调度走阶段B;
+  // 两处都尝试:有 botTwoStepA 时先走阶段B,没有则走阶段A;命中即 return,不让
+  // runBotActionWindow 重复决策(借刀在出牌枚举里已被排除,两路天然不冲突)。
+  if(botTwoStepA && botTwoStepA.decisionId==='jiedaoTwoStep' && g.phase==='play' && g.turn===seat){
+    if(await botDecide('jiedaoTwoStep', g, seat)) return;
+  }
+  if(g.phase==='play'&&g.turn===seat){
+    if(await botDecide('jiedaoTwoStep', g, seat)) return;
+    await runBotActionWindow(g, seat); return;
+  }
   if(g.phase==='discard'&&g.turn===seat){
     const need=Math.max(0,(p.hand||[]).length-p.hp);
     if(need<=0){ botInvoke(seat,endTurn); return; }
