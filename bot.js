@@ -546,6 +546,97 @@ function parseBotPlayAiChoice(text){
   return r;
 }
 
+// ================= AI可操作面决策总线(骨架,Task B0) =================
+// 【本段是什么】把"一个可操作面决策点"收敛成统一的注册-匹配-候选-询问-执行五段式:
+// 新决策点只需往 BOT_DECISIONS 注册 {match, buildCandidates, execute, localFallback,
+// onEmpty?, extraState?, buildSystemPrompt?, maxTokens?},其余(密钥守卫、候选规范化、
+// AI 调用、超时兜底、本地回退)全部由 botDecide 统一处理,和既有的 tryAiBotPlay/
+// tryAiBotBestTarget 共用同一套 parseBotPlayAiChoice 解析与 callAI 基础设施。
+// 【当前状态】本阶段只交付骨架:注册表为空、botDecide 对未注册的 decisionId 返回
+// false(调用方按"无此决策点"处理)。首个真实决策点由后续任务注册。
+const BOT_DECISIONS = Object.create(null);
+
+function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
+  return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
+    +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
+}
+
+function buildBotDefaultUserPrompt(state, candidates){
+  return '当前局面:\n'+JSON.stringify(state)
+    +'\n\n合法候选(index从0开始):\n'+JSON.stringify(candidates.map(c=>({
+      index:c.index, label:c.label, action:c.action, card:c.card, seat:c.seat,
+      handIndex:c.handIndex, pickKey:c.pickKey, discardIndices:c.discardIndices
+    })))
+    +'\n\n只返回 {"choice":数字}';
+}
+
+// callAiChooseIndex:一次"候选列表→索引"的AI询问,返回规范化后的合法下标或 null。
+// 守卫/超时/解析失败/越界全部收敛到这一处,与 tryAiBotPlay 同一套取舍:任何失败都
+// 返回 null 交给调用方回退本地逻辑,不重试、不阻塞、不抛异常。
+async function callAiChooseIndex(opts){
+  const candidates = opts.candidates || [];
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
+  if(candidates.length<=1) return candidates.length===1 ? 0 : null;
+  const g = opts.g, seat = opts.seat;
+  showAiThinkingIndicator(g, seat);
+  let result;
+  try{
+    result = await callAI(aiProvider, aiApiKey, {
+      systemPrompt: opts.systemPrompt || buildBotDefaultSystemPrompt(),
+      userPrompt: opts.userPrompt,
+      maxTokens: opts.maxTokens || 80,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
+    });
+  }catch(e){
+    result = { ok:false, reason:'other', detail:String(e) };
+  }finally{
+    hideAiThinkingIndicator();
+  }
+  if(!result || !result.ok) return null;
+  const idx = parseBotPlayAiChoice(result.text);
+  if(idx===null || idx<0 || idx>=candidates.length) return null;
+  return idx;
+}
+
+// botDecide:决策总线入口。匹配失败/无候选且无 onEmpty 时返回 false(调用方按
+// "无此决策点"处理);否则总是执行(spec.execute 负责真正落子)并返回 true。
+// 注意:即使返回 true,execute 内部也可能因服务端校验失败而静默不生效——那是
+// 具体决策点自己的职责,不在总线层保证。
+async function botDecide(decisionId, g, seat){
+  const spec = BOT_DECISIONS[decisionId];
+  if(!spec || typeof spec.match!=='function' || !spec.match(g, seat)) return false;
+  const candidates = spec.buildCandidates(g, seat) || [];
+  if(!candidates.length){
+    if(typeof spec.onEmpty==='function'){ spec.onEmpty(g, seat); return true; }
+    return false;
+  }
+  // 规范 index
+  candidates.forEach((c,i)=>{ c.index = i; });
+  let idx = null;
+  const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
+  if(aiReady && candidates.length>1){
+    const state = buildBotVisibleState(g, seat);
+    if(typeof spec.extraState==='function'){
+      Object.assign(state, spec.extraState(g, seat) || {});
+    }
+    const systemPrompt = (typeof spec.buildSystemPrompt==='function')
+      ? spec.buildSystemPrompt(g, seat, { state, candidates })
+      : buildBotDefaultSystemPrompt(g, seat);
+    const userPrompt = buildBotDefaultUserPrompt(state, candidates);
+    idx = await callAiChooseIndex({ g, seat, systemPrompt, userPrompt, candidates, maxTokens: spec.maxTokens||80 });
+  } else if(aiReady && candidates.length===1){
+    idx = 0;
+  }
+  let choice;
+  if(idx===null){
+    choice = spec.localFallback(g, seat, candidates);
+  } else {
+    choice = candidates[idx];
+  }
+  spec.execute(g, seat, choice);
+  return true;
+}
+
 // tryAiBotPlay:唯一的AI决策入口,返回 options 数组里的一项、或字符串 'pass'(选中了
 // "结束出牌阶段"那个候选)、或 null(没有密钥/AI没有正确响应/索引不合法——这几种情况
 // 一视同仁,统一交给 botPlay 落回本地启发式,不重试、不阻塞游戏)。
