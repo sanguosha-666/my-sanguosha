@@ -1726,3 +1726,61 @@ async function runBotDecision(g,seat){
   if(botSafePrompt(g,seat)) return;
   console.warn('机器人暂未覆盖阶段',g.phase,d.type,seat);
 }
+
+// ================= Milestone C 基础:窗口谓词 + 一步动作枚举(Task C0) =================
+// 【窗口谓词】C 循环的"该不该让 AI 接管"判定:只有"自己的出牌阶段、且当前没有任何挂起的
+// 询问/结算(pending 为空)"才属于 C 的可操作窗口。第一版刻意只做 play 窗——响应类一步
+// (出闪/无懈/濒死求桃等)足够,不强制进 C 循环;g.pending 非空(无懈窗口、濒死询问、选牌
+// 子阶段等)一律不属于 play 窗。注意:本函数只判窗口,不负责执行——runBotDecision 现在
+// 仍走 botPlay 老链路,C 循环接入是后续任务。
+function isBotActionWindow(g, seat){
+  if(!g || !g.players[seat] || !g.players[seat].alive) return false;
+  if(g.phase==='play' && g.turn===seat && !g.pending) return true;
+  return false;
+}
+// 【一步动作枚举】C 相对 B 的关键:一个候选 = 一个完整的合法动作(牌+目标合并成一条),
+// AI 只问一次就能拿到"出什么牌、打给谁",消灭 botPlay 的"先问牌、再问目标"两次询问。
+// 合法性枚举与 botPlay(botPlay ~1392)逐字同源:同一套 CARD_PLAYS.canPlay/canTarget、
+// 借刀杀人排除、忠臣禁用群体AOE、满血桃排除——差别只在把需要目标的牌按目标展开成一条
+// 条独立候选(botPlay 用 botBestTarget 挑一个最优目标,这里每个合法目标都各占一条)。
+// 【mySeat 借用窗口】与 botPlay 枚举阶段同一约定:CARD_PLAYS 的 canPlay/canTarget 读取
+// 全局 mySeat(杀的距离 canReachSha、闪电的 onlySelf 判定都读),评估期间必须切到机器人
+// 座位、结束立刻归还。本函数纯同步,借用窗口和 botPlay 枚举段一样短,不跨越任何 await。
+// 【v1 刻意不含】play 阶段 renderControls 渲染的主动技按钮(collectControlsCandidates)
+// 没有并入——C0 只做"手牌×目标"展开,合并 controls 候选是 C1 的扩展项。
+function enumerateAllLegalOneStepActions(g, seat){
+  const out = [];
+  const me = g.players[seat];
+  const humanSeat = mySeat;
+  mySeat = seat;
+  try{
+    (me.hand||[]).forEach((card, idx)=>{
+      const action = botActionId(card), spec = CARD_PLAYS[action];
+      if(!spec || action==='借刀杀人') return;
+      if(!spec.canPlay(g, me, card)) return;
+      if(me.role==='zhong' && (action==='南蛮入侵'||action==='万箭齐发')) return;
+      if(action==='桃' && me.hp>=me.maxHp) return;
+      if(spec.target){
+        // 展开:每个合法目标一条候选(合法性判定与 botBestTarget 同一道 canTarget)
+        g.players.forEach((p,i)=>{
+          if(!p || !p.alive || i===seat) return;
+          if(spec.canTarget && !spec.canTarget(g, me, card, i)) return;
+          out.push({ label: '出【'+action+'】→'+p.name, action, card: botCardBrief(card), handIndex: idx, seat: i, target: i });
+        });
+        // allowSelf 自目标兜底(沿用 botPlay 的 L3 通用写法,不按牌名特判):onlySelf 型
+        // 延时锦囊(闪电)的合法目标只有自己,上面循环跳过自己后一个都不剩,这里补上;
+        // 铁索连环这类 allowSelf 但可打他人的牌,canTarget 对己为真时同样多出一条合法候选
+        // (playCard 的 allowSelf 放行自选目标,是完整合法的一步,不算越权)。
+        if(spec.allowSelf && spec.canTarget && spec.canTarget(g, me, card, seat)){
+          out.push({ label: '出【'+action+'】→自己', action, card: botCardBrief(card), handIndex: idx, seat, target: seat });
+        }
+      } else {
+        out.push({ label: '出【'+action+'】', action, card: botCardBrief(card), handIndex: idx, target: null });
+      }
+    });
+  } finally {
+    mySeat = humanSeat;
+  }
+  out.push({ label: '结束出牌阶段', action: '结束出牌阶段', card: null, handIndex: null, target: null, isEndPlay: true });
+  return out;
+}
