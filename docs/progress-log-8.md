@@ -122,3 +122,25 @@
   run_ai_bus_info_test.js 惯例(data.js+ai-bot.js+bot.js,distance/attackRange stub)。
 - **回归**:summary 8/0、core 7/0、l2 23/0、l3 93/0、c_window 25/0,`node --check bot.js`
   通过。`index.html` `?v=` 282→283 共 13 处。`normalize` 无需改(纯客户端状态,不进 g)。
+- **S2(AI摘要回合检测 + 清除按钮 + 移除刷新警告)**:①`scheduleBotTurn` 重构(bot.js)——
+  早退拆成 `if(!g||!isBotController(g)) return;` + `if(g.phase==='over'){ aiSummaryReset(); return; }`,
+  `botSeatForState` 提前到摘要检测处计算(原 botDecisionInFlight 分支内的重复计算改为复用
+  这个 seat,行为零变化):座位不匹配(aiSummarySeat!==seat)先 reset;seat>=0 且已有摘要、
+  且 roundNum/turn 任一变化时,更新 aiSummaryRound/aiSummaryTurn 并 fire-and-forget 调
+  `updateAiSummary(g,seat)`(不 await,不阻塞决策——更新完成后的下一轮决策才带上新摘要)。
+  首回合(摘要空)不触发。既有过滤链(seat<0 且无兜底候选 return / botStateKey 防抖 /
+  botScheduledKey)原样保留,c_window 25 项回归锁定。②`showAiKeyModal` btnRow 末尾新增
+  `#aiMemoryClearBtn`(ghost 按钮"清除AI记忆",照 spec §4.5-B 逐字):点击 → `aiSummaryReset()`
+  → 就地 `replaceWith` 成"已清除本局AI记忆。"提示,弹窗不关闭;密钥/模型/aiPromptDismissed
+  等配置一律不清。③删除 `setupRefreshWarning` 函数+调用+`window.aiConversations` 引用
+  (全项目仅此一处引用,死代码——aiConversations 从未被写入,警告实际从不触发)。
+- **测试(`run_ai_summary_test.js` 8→13 项)**:新增 ⑤项——⑨scheduleBotTurn 回合变化触发
+  updateAiSummary spy(回合变→调1次/回合不变→不调/摘要空→不调;stub setTimeout 防真定时器);
+  ⑩over 清空 aiSummary+aiSummarySeat;⑪弹窗含 #aiMemoryClearBtn(树形 document stub 驱动
+  真实 showAiKeyModal,harness 升级成 run_ai_model_picker_test.js 同款:appendChild 维护树+
+  按树 getElementById+classList 真实增删+onclick 属性事件+replaceWith);⑫点击清除 → 摘要
+  清空/密钥模型不受影响/弹窗不隐藏/就地提示出现;⑬宿主侧断言 ai-bot.js 无 setupRefreshWarning
+  与 aiConversations。
+- **回归**:summary 13/0、core 7/0、c_window 25/0、l2 23/0、l3 93/0、model_picker 13/0、
+  l1 8/0、info 10/0,`node --check bot.js`/`ai-bot.js` 通过。`?v=` 283→284 共 13 处。
+  `normalize` 无需改(纯客户端内存状态,不进 g)。

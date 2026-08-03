@@ -496,6 +496,22 @@ function showAiKeyModal(onDone){
   saveBtn.textContent = '确定';
   btnRow.appendChild(saveBtn);
 
+  // 清除AI记忆按钮:主动清除入口(替代已移除的页面刷新警告)——只清记忆(本局 AI 自
+  // 维护摘要),密钥/模型选择等配置不清;点击后弹窗不关闭,就地替换成"已清除"提示。
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'ghost';
+  clearBtn.id = 'aiMemoryClearBtn';
+  clearBtn.textContent = '清除AI记忆';
+  clearBtn.onclick = function(){
+    aiSummaryReset();          // 清空本局 AI 自维护摘要
+    // 【未来扩展】若叠加了会话历史窗口(aiSessionHistory),同样在此清空
+    const note = document.createElement('div');
+    note.className = 'ai-key-warn';
+    note.textContent = '已清除本局AI记忆。';
+    clearBtn.replaceWith(note); // 就地替换成提示,不关闭弹窗
+  };
+  btnRow.appendChild(clearBtn);
+
   wrap.appendChild(btnRow);
 
   function updateSaveBtnState(){
@@ -727,20 +743,3 @@ function handleAddBotClick(){
   }
 }
 
-// ---------- 页面刷新警告 ----------
-// 当AI会话存在时，提醒操作者刷新页面会丢失会话历史
-function setupRefreshWarning() {
-  // 检查是否有AI会话数据（有任何机器人已经配置了密钥）
-  const hasAiSessions = Object.keys(window.aiConversations || {}).length > 0;
-  
-  if (hasAiSessions) {
-    window.addEventListener('beforeunload', function(e) {
-      e.preventDefault();
-      e.returnValue = '页面刷新后AI机器人的会话历史将丢失，确定要刷新吗？';
-      return e.returnValue;
-    });
-  }
-}
-
-// 自动设置刷新警告
-setupRefreshWarning();

@@ -146,16 +146,26 @@ let botDecisionInFlight=false;
 // scheduleBotTurn 自己即可自愈,不需要为多次丢弃分别记录/重放。
 let botMissedSchedule=false;
 function scheduleBotTurn(g){
-  if(!g || !isBotController(g) || g.phase==='over') return;
+  if(!g || !isBotController(g)) return;
+  // 【AI摘要】游戏结束清空记忆;回合变化(roundNum/turn)且已有摘要时,异步更新记忆
+  // (fire-and-forget,不阻塞决策;更新完成后的下一轮决策才带上新摘要)
+  if(g.phase==='over'){ aiSummaryReset(); return; }
+  const seat=botSeatForState(g);
+  if(aiSummarySeat !== seat) aiSummaryReset();
+  if(seat >= 0){
+    aiSummarySeat = seat;
+    if(aiSummary && (aiSummaryRound !== g.roundNum || aiSummaryTurn !== g.turn)){
+      aiSummaryRound = g.roundNum; aiSummaryTurn = g.turn;
+      updateAiSummary(g, seat);
+    }
+  }
   if(botDecisionInFlight){
-    const droppedSeat=botSeatForState(g);
-    if(droppedSeat>=0 || botFallbackSeats(g).length){
-      const droppedKey=botStateKey(g,droppedSeat);
+    if(seat>=0 || botFallbackSeats(g).length){
+      const droppedKey=botStateKey(g,seat);
       if(droppedKey!==botScheduledKey) botMissedSchedule=true;
     }
     return;
   }
-  const seat=botSeatForState(g);
   // seat<0 有两种情况:该行动的是真人(不该我们插手),或这个阶段 runBotDecision 没覆盖
   // (需要走兜底逐个试)。只有后者才继续排程。
   if(seat<0 && !botFallbackSeats(g).length) return;

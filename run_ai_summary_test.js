@@ -3,9 +3,15 @@
  * callAiChooseIndex 摘要注入
  *
  * 加载真实 data.js + ai-bot.js + bot.js 进共享 vm 沙箱(与 run_ai_bus_info_test.js
- * 同一套惯例),mock callAI 记录收到的 opts 并返回可控结果。覆盖 8 项:
- * 首回合无摘要且不注入 / updateAiSummary 写回 / 注入进 systemPrompt / 失败沿用 /
- * 迭代携带旧摘要 / 座位变化清空 / 500 字上限 / fire-and-forget 不阻塞。
+ * 同一套惯例),mock callAI 记录收到的 opts 并返回可控结果。覆盖 13 项:
+ * S1 八项(首回合无摘要且不注入 / updateAiSummary 写回 / 注入进 systemPrompt /
+ * 失败沿用 / 迭代携带旧摘要 / 座位变化清空 / 500 字上限 / fire-and-forget 不阻塞)
+ * + S2 五项(scheduleBotTurn 回合检测 / over 清空 / 弹窗含清除按钮 / 点击清除 /
+ * setupRefreshWarning 移除)。
+ *
+ * S2 的弹窗用例需要驱动真实 showAiKeyModal,把 document stub 升级成
+ * run_ai_model_picker_test.js 同款树形 stub(appendChild/remove/getElementById 按
+ * 树搜索 + classList 真实增删 + onclick/oninput 属性事件 + replaceWith)。
  *
  * 已知的 vm 坑:aiApiKey/aiProvider/aiApiModel 是 ai-bot.js 脚本作用域的 let 绑定,
  * 必须用 runInContext 里裸标识符赋值;callAI 是函数声明绑定,可直接在 runInContext
@@ -16,9 +22,9 @@
 const vm = require('vm');
 const fs = require('fs');
 
-// 共享上下文:ai-bot.js 顶层 IIFE 读 sessionStorage,setupRefreshWarning 读
-// window.aiConversations,showAiThinkingIndicator/hideAiThinkingIndicator 读
-// document.getElementById(...).classList —— 全部在这里给最小 stub。
+// 共享上下文:ai-bot.js 顶层 IIFE 读 sessionStorage;showAiThinkingIndicator/
+// hideAiThinkingIndicator 读 document.getElementById(守卫 null);S2 弹窗用例驱动
+// showAiKeyModal,需要树形 document stub —— 全部在这里给最小 stub。
 const context = {
   console: console,
   setTimeout: setTimeout,
@@ -36,22 +42,6 @@ const context = {
     setItem: function(k, v){ this._d[k] = String(v); },
     removeItem: function(k){ delete this._d[k]; }
   },
-  document: {
-    getElementById: function(){ return {
-      textContent: '', className: '', style: {},
-      classList: { add: function(){}, remove: function(){}, toggle: function(){}, contains: function(){ return false; } },
-      addEventListener: function(){}, appendChild: function(){ return {}; }, remove: function(){}
-    }; },
-    createElement: function(){ return {
-      textContent: '', className: '', style: {},
-      classList: { add: function(){}, remove: function(){}, toggle: function(){}, contains: function(){ return false; } },
-      addEventListener: function(){}, appendChild: function(){ return {}; }, setAttribute: function(){}
-    }; },
-    addEventListener: function(){},
-    body: { appendChild: function(){ return {}; } },
-    querySelector: function(){ return null; },
-    querySelectorAll: function(){ return []; }
-  },
   window: {
     aiConversations: {},
     addEventListener: function(){},
@@ -60,6 +50,65 @@ const context = {
 };
 // 沙箱内裸 sessionStorage 与 window.sessionStorage 同源指向上面这个 stub
 context.window.sessionStorage = context.sessionStorage;
+
+// ---- 树形最小 DOM(run_ai_model_picker_test.js 同款):appendChild/remove 维护树、
+//      按树 getElementById、classList 真实增删、onclick/oninput/onblur 属性事件、
+//      replaceWith(清除按钮"就地替换成提示"需要)。----
+function mkEl(tag){
+  const el = {
+    tagName: String(tag).toUpperCase(),
+    children: [], style: {}, _text: '', _html: '',
+    id: '', className: '', disabled: false, parentEl: null,
+    value: '', type: '', placeholder: '', autocomplete: '',
+    onclick: null, oninput: null, onchange: null, onblur: null,
+    _cls: {}, _ls: {},
+    classList: {
+      add: function(c){ el._cls[c] = 1; },
+      remove: function(c){ delete el._cls[c]; },
+      contains: function(c){ return !!el._cls[c]; },
+    },
+    appendChild: function(ch){ ch.parentEl = this; this.children.push(ch); return ch; },
+    removeChild: function(ch){ const i = this.children.indexOf(ch); if(i>=0){ this.children.splice(i,1); ch.parentEl = null; } return ch; },
+    remove: function(){ if(this.parentEl) this.parentEl.removeChild(this); },
+    replaceWith: function(n){ if(this.parentEl){ const i = this.parentEl.children.indexOf(this); if(i>=0){ this.parentEl.children[i] = n; n.parentEl = this.parentEl; } this.parentEl = null; } },
+    set textContent(v){ this._text = String(v==null?'':v); },
+    get textContent(){ return this._text; },
+    set innerHTML(v){ this._html = String(v==null?'':v); this.children = []; },
+    get innerHTML(){ return this._html; },
+    addEventListener: function(type, fn){ this._ls[type] = fn; },
+    click: function(){ if(typeof this.onclick === 'function') this.onclick(); },
+    querySelectorAll: function(sel){
+      const out = [];
+      const wantSelected = sel === 'button.selected';
+      (function walk(n){
+        if(n !== el && n.tagName === 'BUTTON' && (!wantSelected || n.classList.contains('selected'))) out.push(n);
+        (n.children || []).forEach(walk);
+      })(el);
+      return out;
+    }
+  };
+  return el;
+}
+
+const modalEl = mkEl('div'); modalEl.id = 'aiKeyModal';
+const bodyEl = mkEl('body'); bodyEl.appendChild(modalEl);
+context.document = {
+  body: bodyEl,
+  getElementById: function(id){
+    let found = null;
+    (function walk(n){
+      if(found) return;
+      if(n.id === id){ found = n; return; }
+      (n.children || []).forEach(walk);
+    })(bodyEl);
+    return found;
+  },
+  createElement: function(tag){ return mkEl(tag); },
+  createTextNode: function(t){ return { nodeValue: t, textContent: t }; },
+  addEventListener: function(){},
+  querySelector: function(){ return null; },
+  querySelectorAll: function(){ return []; }
+};
 
 const sandbox = vm.createContext(context, { name: 'sgs-ai-summary-sandbox' });
 
@@ -82,7 +131,7 @@ files.forEach(function(file){
 });
 
 console.log('\n' + '='.repeat(60));
-console.log('  AI 摘要测试(8 项)');
+console.log('  AI 摘要测试(13 项)');
 console.log('='.repeat(60) + '\n');
 
 // 断言脚本整体在沙箱内执行(和 run_ai_bus_core_test.js 同一惯例),
@@ -212,6 +261,92 @@ const testCode = String.raw`
     if(window.__mockSummaryCalls < before + 1) throw new Error('updateAiSummary 应已触发 callAI');
   });
 
+  // ---- S2:scheduleBotTurn 回合检测 / over 清空 / 清除按钮 ----
+
+  // 9. scheduleBotTurn:回合号变化且已有摘要 → updateAiSummary 被调(spy);
+  //    回合不变 → 不调;首回合(摘要空)→ 不调。stub setTimeout/clearTimeout
+  //    避免真实 650~1150ms 防抖定时器跑起来。
+  await check('9 scheduleBotTurn 回合变化触发 updateAiSummary(spy)', async function(){
+    var _origSt = setTimeout, _origCt = clearTimeout;
+    setTimeout = function(){ return 424242; };
+    clearTimeout = function(){};
+    try{
+      var spyCalls = 0;
+      updateAiSummary = async function(g2, s){ spyCalls++; };
+      // isBotController 为真:players[0] 是带 cid 的真人(控制器),turn 指向机器人座位
+      var g2 = {
+        roundNum: 5, turn: 1, phase: 'play', gameMode: 'ffa', shaUsed: false,
+        players: [
+          { name: '人类', cid: 'test-client', hp: 4, maxHp: 4, alive: true, hand: [], equips: {}, delays: [], general: 'sunquan' },
+          { name: '机器人1', isBot: true, cid: 'bot-1', hp: 3, maxHp: 3, alive: true, hand: [], equips: {}, delays: [], general: 'guanyu' },
+          { name: '机器人2', isBot: true, cid: 'bot-2', hp: 3, maxHp: 3, alive: true, hand: [], equips: {}, delays: [], general: 'machao' },
+        ],
+        pending: null, log: [], discard: [], deck: [],
+      };
+      // a. 回合变化(roundNum 4→5)、座位匹配、已有摘要 → 触发
+      aiSummary = '上一轮的摘要'; aiSummarySeat = 1; aiSummaryRound = 4; aiSummaryTurn = 1;
+      scheduleBotTurn(g2);
+      if(spyCalls !== 1) throw new Error('回合变化应触发 updateAiSummary 1 次,实际 ' + spyCalls);
+      if(aiSummaryRound !== 5 || aiSummaryTurn !== 1) throw new Error('应记录本次回合号');
+      // b. 同一状态再来一次(回合没变)→ 不触发
+      scheduleBotTurn(g2);
+      if(spyCalls !== 1) throw new Error('回合不变不应再触发,实际 ' + spyCalls);
+      // c. 首回合:摘要空 → 不触发(第一次决策前没内容可总结)
+      aiSummaryReset();
+      g2.roundNum = 6;
+      scheduleBotTurn(g2);
+      if(spyCalls !== 1) throw new Error('摘要为空不应触发,实际 ' + spyCalls);
+    } finally {
+      setTimeout = _origSt; clearTimeout = _origCt;
+    }
+  });
+
+  // 10. phase==='over' → aiSummary 清空(aiSummarySeat 一并置 null)
+  await check('10 scheduleBotTurn over 清空 aiSummary', async function(){
+    aiSummary = '残存记忆'; aiSummarySeat = 1; aiSummaryRound = 3; aiSummaryTurn = 1;
+    var gOver = { phase: 'over',
+      players: [ { name: '人类', cid: 'test-client' }, { name: '机器人1', isBot: true }, { name: '机器人2', isBot: true } ],
+      pending: null };
+    scheduleBotTurn(gOver);
+    if(aiSummary !== '') throw new Error('over 后 aiSummary 应为空,实际 "' + aiSummary + '"');
+    if(aiSummarySeat !== null) throw new Error('over 后 aiSummarySeat 应为 null,实际 ' + aiSummarySeat);
+  });
+
+  // 11. showAiKeyModal 弹窗按钮区含 #aiMemoryClearBtn(结构性断言)
+  await check('11 弹窗含清除AI记忆按钮 #aiMemoryClearBtn', async function(){
+    aiApiKey = 'test-key'; aiProvider = null; aiApiModel = '';
+    showAiKeyModal();
+    var clearBtn = document.getElementById('aiMemoryClearBtn');
+    if(!clearBtn) throw new Error('btnRow 应含 #aiMemoryClearBtn');
+    if(clearBtn.textContent !== '清除AI记忆') throw new Error('按钮文案应为 清除AI记忆,实际 "' + clearBtn.textContent + '"');
+  });
+
+  // 12. 点击清除按钮 → aiSummary 清空、aiSummarySeat=null;密钥/模型不受影响;
+  //     弹窗不关闭(#aiKeyModal 未加 hidden);就地提示出现
+  await check('12 点击清除按钮清空摘要且不关弹窗', async function(){
+    aiApiKey = 'test-key'; aiProvider = null; aiApiModel = 'keep-model';
+    aiSummary = '旧记忆'; aiSummarySeat = 1;
+    showAiKeyModal();
+    var clearBtn = document.getElementById('aiMemoryClearBtn');
+    if(!clearBtn) throw new Error('弹窗应含清除按钮');
+    clearBtn.click();
+    if(aiSummary !== '') throw new Error('点击后 aiSummary 应为空,实际 "' + aiSummary + '"');
+    if(aiSummarySeat !== null) throw new Error('点击后 aiSummarySeat 应为 null,实际 ' + aiSummarySeat);
+    if(aiApiKey !== 'test-key') throw new Error('密钥不应被清除,实际 "' + aiApiKey + '"');
+    if(aiApiModel !== 'keep-model') throw new Error('模型选择不应被清除,实际 "' + aiApiModel + '"');
+    var m = document.getElementById('aiKeyModal');
+    if(!m) throw new Error('#aiKeyModal 应存在');
+    if(m.classList.contains('hidden')) throw new Error('弹窗不应关闭(hidden class 不应出现)');
+    // 就地提示:树里应能找到"已清除本局AI记忆。"文本节点
+    var noteFound = false;
+    (function walk(n){
+      if(noteFound) return;
+      if(typeof n.textContent === 'string' && n.textContent.indexOf('已清除本局AI记忆') >= 0){ noteFound = true; return; }
+      (n.children || []).forEach(walk);
+    })(document.body);
+    if(!noteFound) throw new Error('应出现就地"已清除本局AI记忆"提示');
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
@@ -230,6 +365,18 @@ vm.runInContext(testCode, sandbox);
 (async function(){
   while (sandbox.__testDone !== true) {
     await new Promise(function(r){ setTimeout(r, 10); });
+  }
+  // 13(宿主机):setupRefreshWarning 函数+调用、window.aiConversations 引用已从
+  // ai-bot.js 移除(等价于 `rg "setupRefreshWarning" ai-bot.js` 无输出)
+  const aiBotSrc = fs.readFileSync('ai-bot.js', 'utf8');
+  if(aiBotSrc.indexOf('setupRefreshWarning') !== -1){
+    console.log('  FAIL 13 setupRefreshWarning 仍存在于 ai-bot.js');
+    sandbox.__testFail = true;
+  } else if(aiBotSrc.indexOf('aiConversations') !== -1){
+    console.log('  FAIL 13 aiConversations 引用仍存在于 ai-bot.js');
+    sandbox.__testFail = true;
+  } else {
+    console.log('  PASS 13 setupRefreshWarning 与 aiConversations 引用已移除');
   }
   process.exit(sandbox.__testFail ? 1 : 0);
 })().catch(function(e){
