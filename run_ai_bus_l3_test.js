@@ -28,6 +28,11 @@
  *    A攻击范围内非A非空城者;两调度序列 阶段A挂起→阶段B提交 jieDaoShaRen(借刀idx,
  *    seatA,seatB) 并重置;有密钥 mock 选 seatB;候选空→botDecide false 不崩;
  *    runBotDecision 接线:阶段A/B命中即 return、未命中才走 runBotActionWindow
+ *  - 多步两阶段扩展(离间/丈八/仁德):lijianTwoStep 阶段A=存活男性(含自己)、阶段B=
+ *    ≠from 男性;zhangbaTwoStep 三阶段 A/B=两张手牌、C=canReachSha+非空城目标;
+ *    rendeTwoStep 阶段A=存活非自己、阶段B=每张手牌;botTwoStepA 扩展 {a,b?} 向后兼容;
+ *    全链路序列提交 liJian(idx,from,to)/playZhangbaSha(a,b,target)/renDe(idx,target);
+ *    接线优先级 借刀>离间>丈八>仁德,挂起期只处理挂起的那一个决策
  *
  * 已知的 vm 坑:aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,必须用
  * runInContext 里裸标识符赋值;guhuoChooseTarget/pickXuanfengTarget/callAI 都是函数
@@ -164,6 +169,8 @@ const testCode = String.raw`
     if(opt.tiaoxinUsed) g.tiaoxinUsed = true;
     if(opt.fanJianUsed) g.fanJianUsed = true;
     if(opt.qingNangUsed) g.qingNangUsed = true;
+    if(opt.liJianUsed) g.liJianUsed = true;
+    if(opt.jiangchiNoSlash) players[0].jiangchiNoSlash = true;
     return g;
   }
   function card(name, id, suit, rank){
@@ -186,6 +193,9 @@ const testCode = String.raw`
   qingNang = spyService('qingnang');
   respondQuhuDamage = spyService('quhuDamage');
   jieDaoShaRen = spyService('jiedao');
+  liJian = spyService('lijian');
+  renDe = spyService('rende');
+  playZhangbaSha = spyService('zhangba');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -872,16 +882,17 @@ const testCode = String.raw`
     if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走 runBotActionWindow(等下一调度)');
     if(!botTwoStepA || botTwoStepA.a !== 1) throw new Error('阶段A应挂起 botTwoStepA,实际 ' + JSON.stringify(botTwoStepA));
 
-    // 场景3:手牌无借刀 → 未命中 → 走 runBotActionWindow(第一处尝试被 botTwoStepA 守卫挡住,只试1次)
+    // 场景3:手牌无借刀(也无其它多步技能) → 4个决策依次未命中 → 走 runBotActionWindow
     wired = [];
     window.__windowCalls = 0;
     botTwoStepA = null;
     var g3 = mkSeatG({ myHand: [card('杀','j15')] });
     await runBotDecision(g3, 0);
     if(window.__windowCalls !== 1) throw new Error('jiedaoTwoStep 未命中时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep') throw new Error('无挂起态时应恰尝试1次(第二处接线),实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
+      throw new Error('无挂起态时应按序尝试4个决策(第二处接线),实际 ' + wired.join(','));
 
-    // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两处尝试均 false → 走窗口不崩
+    // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策不命中 → 走窗口不崩
     wired = [];
     window.__windowCalls = 0;
     window.__jiedaoCalls = [];
@@ -890,8 +901,350 @@ const testCode = String.raw`
     g4.players[0].equips.plus1 = { name: '的卢' };
     await runBotDecision(g4, 0);
     if(window.__windowCalls !== 1) throw new Error('阶段B无候选时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep') throw new Error('阶段B无候选应尝试2次后放行,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
+      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中后放行,实际 ' + wired.join(','));
     if(window.__jiedaoCalls.length !== 0) throw new Error('阶段B无候选不应提交 jieDaoShaRen');
+
+    botDecide = realBotDecide;
+    runBotActionWindow = realWindow;
+    botTwoStepA = null;
+  });
+
+  // ================= T5:多步两阶段扩展(离间/丈八/仁德) =================
+  // 离间:入口门槛镜像 render-controls.js:3746(hasCap+限一次+手牌≥1+存活男性≥2);
+  //   阶段A=存活男性(render.js 1358 isMale(p) 无自己排除,含自己);阶段B=≠from 的存活男性。
+  // 丈八:入口门槛镜像 render-controls.js:3712(twoAsSha+手牌≥2+canSha)+服务端
+  //   playZhangbaSha 的将驰/次数守卫;三阶段:A/B=两张手牌(≠a)、C=目标(canReachSha+非空城)。
+  // 仁德:render.js 1401-1410(无入口按钮,选中手牌后在目标座位出现"仁德:交给此人");
+  //   服务端 renDe 无本回合次数限制(renDeCount 只用于第2张后的回复),match 不加次数守卫。
+
+  await check('离间:match=出牌阶段+自己回合+hasCap+未用+手牌≥1+男性≥2;阶段A候选=存活男性(含自己)', function(){
+    var s = BOT_DECISIONS.lijianTwoStep;
+    if(!s) throw new Error('BOT_DECISIONS.lijianTwoStep 未注册');
+    var g1 = mkSeatG({ myHand: [card('杀','l0')] });
+    if(s.match(g1, 0)) throw new Error('无离间技能不应命中');
+    var g2 = mkSeatG({ caps0: { lijian: true }, myHand: [] });
+    if(s.match(g2, 0)) throw new Error('无手牌不应命中');
+    var g3 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l1')], aliveOf: { 1: false, 2: false } });
+    if(s.match(g3, 0)) throw new Error('男性<2(只剩自己)不应命中');
+    var g4 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l2')], liJianUsed: true });
+    if(s.match(g4, 0)) throw new Error('本回合已用离间不应命中');
+    var g5 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l3')] });
+    if(!s.match(g5, 0)) throw new Error('男性≥2+有手牌应命中');
+    g5.turn = 1;
+    if(s.match(g5, 0)) throw new Error('非自己回合不应命中');
+    g5.turn = 0; g5.phase = 'discard';
+    if(s.match(g5, 0)) throw new Error('非出牌阶段不应命中');
+    g5.phase = 'play';
+    // 阶段A:默认3人全是男性(于吉)→ 候选含自己 0,1,2(镜像 render.js 1358 无自己排除)
+    var c5 = s.buildCandidates(g5, 0);
+    var seats = c5.map(function(c){ return c.a; }).sort().join(',');
+    if(seats !== '0,1,2') throw new Error('阶段A候选应为 0,1,2(含自己),实际 ' + seats);
+    if(c5[0].step !== 'A' || c5[0].label.indexOf('离间') < 0)
+      throw new Error('候选应带 step:A+离间前缀,实际 ' + JSON.stringify(c5[0]));
+    // 女将自己(大乔)不是候选
+    var g6 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l4')], generalOf: { 0: 'daqiao' } });
+    var c6 = s.buildCandidates(g6, 0);
+    if(c6.map(function(c){ return c.a; }).join(',') !== '1,2')
+      throw new Error('女将自己应排除,实际 ' + JSON.stringify(c6));
+  });
+
+  await check('离间阶段B:候选=≠from 的存活男性(镜像 render.js 1364)', function(){
+    var s = BOT_DECISIONS.lijianTwoStep;
+    var g1 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l5')] });
+    botTwoStepA = { decisionId: 'lijianTwoStep', a: 1 };
+    var c1 = s.buildCandidates(g1, 0);
+    var seats = c1.map(function(c){ return c.toSeat; }).sort().join(',');
+    if(seats !== '0,2') throw new Error('阶段B候选应为 0,2,实际 ' + seats);
+    if(c1[0].step !== 'B' || c1[0].fromSeat !== 1)
+      throw new Error('候选应带 step:B+fromSeat,实际 ' + JSON.stringify(c1[0]));
+    // 死者排除
+    var g2 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l6')], aliveOf: { 2: false } });
+    botTwoStepA = { decisionId: 'lijianTwoStep', a: 1 };
+    var c2 = s.buildCandidates(g2, 0);
+    if(c2.length !== 1 || c2[0].toSeat !== 0) throw new Error('死者(座位2)应排除,实际 ' + JSON.stringify(c2));
+    // from 自己不能当 to
+    var g3 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l7')] });
+    botTwoStepA = { decisionId: 'lijianTwoStep', a: 0 };
+    var c3 = s.buildCandidates(g3, 0);
+    if(c3.some(function(c){ return c.toSeat === 0; })) throw new Error('from 自己不能出现在阶段B');
+    botTwoStepA = null;
+  });
+
+  await check('离间两阶段无密钥:调度1 阶段A挂起 botTwoStepA;调度2 阶段B提交 liJian(第一张手牌idx,from,to) 并重置;无AI调用', async function(){
+    window.__lijianCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    // 女将自己+两名男对手:阶段A候选=1,2 → candidates[0]=1;阶段B=≠1 → 2
+    var g = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l8')], generalOf: { 0: 'daqiao' } });
+    var r1 = await botDecide('lijianTwoStep', g, 0);
+    if(r1 !== true) throw new Error('阶段A应返回 true,实际 ' + r1);
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'lijianTwoStep' || botTwoStepA.a !== 1)
+      throw new Error('阶段A后 botTwoStepA 应={lijianTwoStep,a:1},实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__lijianCalls.length !== 0) throw new Error('阶段A不应提交 liJian');
+    var r2 = await botDecide('lijianTwoStep', g, 0);
+    if(r2 !== true) throw new Error('阶段B应返回 true,实际 ' + r2);
+    if(botTwoStepA !== null) throw new Error('阶段B提交后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__lijianCalls.length !== 1) throw new Error('liJian 应被调1次,实际 ' + window.__lijianCalls.length);
+    var call0 = window.__lijianCalls[0];
+    if(call0[0] !== 0 || call0[1] !== 1 || call0[2] !== 2)
+      throw new Error('应 liJian(0,1,2),实际 ' + JSON.stringify(call0));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('离间阶段B有密钥:mock 选 to → liJian(0,from,to);userPrompt 不含他人手牌', async function(){
+    window.__lijianCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l9')],
+      hands: { 1: [card('桃园结义','sec')], 2: [card('桃','la')] } });
+    botTwoStepA = { decisionId: 'lijianTwoStep', a: 1 };
+    var r = await botDecide('lijianTwoStep', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__lijianCalls.length !== 1 || window.__lijianCalls[0][1] !== 1 || window.__lijianCalls[0][2] !== 2)
+      throw new Error('应 liJian(0,1,2),实际 ' + JSON.stringify(window.__lijianCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+    botTwoStepA = null;
+  });
+
+  await check('丈八:match=出牌阶段+自己回合+装丈八(twoAsSha)+手牌≥2+还能出杀+存在可达目标;阶段A候选=每张手牌', function(){
+    var s = BOT_DECISIONS.zhangbaTwoStep;
+    if(!s) throw new Error('BOT_DECISIONS.zhangbaTwoStep 未注册');
+    var g1 = mkSeatG({ myHand: [card('杀','z0'), card('闪','z1')] });
+    if(s.match(g1, 0)) throw new Error('未装丈八不应命中');
+    var g2 = mkSeatG({ myHand: [card('杀','z2')] });
+    g2.players[0].equips.weapon = { name: '丈八蛇矛' };
+    if(s.match(g2, 0)) throw new Error('手牌<2不应命中');
+    var g3 = mkSeatG({ myHand: [card('杀','z3'), card('闪','z4')], shaUsed: true });
+    g3.players[0].equips.weapon = { name: '丈八蛇矛' };
+    if(s.match(g3, 0)) throw new Error('本回合已出杀(无无限杀)不应命中');
+    var g4 = mkSeatG({ caps0: { unlimitedSha: true }, myHand: [card('杀','z5'), card('闪','z6')], shaUsed: true });
+    g4.players[0].equips.weapon = { name: '丈八蛇矛' };
+    if(!s.match(g4, 0)) throw new Error('无限杀者已出杀仍应命中');
+    var g5 = mkSeatG({ myHand: [card('杀','z7'), card('闪','z8')], aliveOf: { 1: false, 2: false } });
+    g5.players[0].equips.weapon = { name: '丈八蛇矛' };
+    if(s.match(g5, 0)) throw new Error('无存活目标不应命中');
+    var g6 = mkSeatG({ myHand: [card('杀','z9'), card('闪','za')] });
+    g6.players[0].equips.weapon = { name: '丈八蛇矛' };
+    if(!s.match(g6, 0)) throw new Error('装丈八+手牌≥2+能出杀应命中');
+    g6.players[0].jiangchiNoSlash = true;
+    if(s.match(g6, 0)) throw new Error('将驰选项1(本回合不能出杀)不应命中');
+    g6.players[0].jiangchiNoSlash = undefined;
+    g6.turn = 1;
+    if(s.match(g6, 0)) throw new Error('非自己回合不应命中');
+    g6.turn = 0; g6.phase = 'discard';
+    if(s.match(g6, 0)) throw new Error('非出牌阶段不应命中');
+    g6.phase = 'play';
+    var c6 = s.buildCandidates(g6, 0);
+    if(c6.length !== 2 || c6[0].step !== 'A' || c6[0].a !== 0 || c6[1].a !== 1)
+      throw new Error('阶段A候选应为两张手牌 0,1,实际 ' + JSON.stringify(c6));
+    if(c6[0].label.indexOf('丈八') < 0) throw new Error('label 应含丈八前缀,实际 ' + c6[0].label);
+  });
+
+  await check('丈八阶段B/C:阶段B=≠a 的手牌;阶段C=存活非自己+canReachSha+非空城', function(){
+    var s = BOT_DECISIONS.zhangbaTwoStep;
+    var g1 = mkSeatG({ myHand: [card('杀','zb'), card('闪','zc'), card('桃','zd')] });
+    g1.players[0].equips.weapon = { name: '丈八蛇矛' };
+    botTwoStepA = { decisionId: 'zhangbaTwoStep', a: 0 };
+    var c1 = s.buildCandidates(g1, 0);
+    var idxs = c1.map(function(c){ return c.b; }).sort().join(',');
+    if(idxs !== '1,2') throw new Error('阶段B候选应为手牌 1,2(≠a),实际 ' + idxs);
+    if(c1[0].step !== 'B' || c1[0].a !== 0) throw new Error('候选应带 step:B+a,实际 ' + JSON.stringify(c1[0]));
+    botTwoStepA = { decisionId: 'zhangbaTwoStep', a: 0, b: 1 };
+    var c2 = s.buildCandidates(g1, 0);
+    var seats = c2.map(function(c){ return c.targetSeat; }).sort().join(',');
+    if(seats !== '1,2') throw new Error('阶段C候选应为 1,2,实际 ' + seats);
+    if(c2[0].step !== 'C' || c2[0].a !== 0 || c2[0].b !== 1)
+      throw new Error('候选应带 step:C+a+b,实际 ' + JSON.stringify(c2[0]));
+    // 空城者排除(诸葛亮)
+    var g2 = mkSeatG({ myHand: [card('杀','ze'), card('闪','zf')] });
+    g2.players[0].equips.weapon = { name: '丈八蛇矛' };
+    g2.players[1].general = 'zhuge';
+    g2.players[1].hand = [];
+    botTwoStepA = { decisionId: 'zhangbaTwoStep', a: 0, b: 1 };
+    var c3 = s.buildCandidates(g2, 0);
+    if(c3.length !== 1 || c3[0].targetSeat !== 2) throw new Error('空城诸葛亮(座位1)应排除,实际 ' + JSON.stringify(c3));
+    botTwoStepA = null;
+  });
+
+  await check('丈八三阶段无密钥:调度1/2/3 依次挂起 A→B→提交 playZhangbaSha(a,b,target) 并重置;无AI调用', async function(){
+    window.__zhangbaCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkSeatG({ myHand: [card('杀','zg'), card('闪','zh')] });
+    g.players[0].equips.weapon = { name: '丈八蛇矛' };
+    var r1 = await botDecide('zhangbaTwoStep', g, 0);
+    if(r1 !== true || !botTwoStepA || botTwoStepA.decisionId !== 'zhangbaTwoStep' || botTwoStepA.a !== 0 || botTwoStepA.b !== undefined)
+      throw new Error('调度1后应挂起 {zhangbaTwoStep,a:0},实际 ' + JSON.stringify(botTwoStepA));
+    var r2 = await botDecide('zhangbaTwoStep', g, 0);
+    if(r2 !== true || !botTwoStepA || botTwoStepA.b !== 1)
+      throw new Error('调度2后应挂起 {zhangbaTwoStep,a:0,b:1},实际 ' + JSON.stringify(botTwoStepA));
+    var r3 = await botDecide('zhangbaTwoStep', g, 0);
+    if(r3 !== true) throw new Error('调度3应返回 true,实际 ' + r3);
+    if(botTwoStepA !== null) throw new Error('调度3提交后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__zhangbaCalls.length !== 1 || window.__zhangbaCalls[0][0] !== 0 || window.__zhangbaCalls[0][1] !== 1 || window.__zhangbaCalls[0][2] !== 1)
+      throw new Error('应 playZhangbaSha(0,1,1),实际 ' + JSON.stringify(window.__zhangbaCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('丈八阶段C有密钥:mock 选目标 → playZhangbaSha(a,b,target);userPrompt 不含他人手牌', async function(){
+    window.__zhangbaCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ myHand: [card('杀','zi'), card('闪','zj')],
+      hands: { 1: [card('桃园结义','sec')], 2: [card('桃','zk')] } });
+    g.players[0].equips.weapon = { name: '丈八蛇矛' };
+    botTwoStepA = { decisionId: 'zhangbaTwoStep', a: 0, b: 1 };
+    var r = await botDecide('zhangbaTwoStep', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__zhangbaCalls.length !== 1 || window.__zhangbaCalls[0][0] !== 0 || window.__zhangbaCalls[0][1] !== 1 || window.__zhangbaCalls[0][2] !== 2)
+      throw new Error('应 playZhangbaSha(0,1,2),实际 ' + JSON.stringify(window.__zhangbaCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+    botTwoStepA = null;
+  });
+
+  await check('仁德:match=出牌阶段+自己回合+hasCap+手牌非空(服务端无次数限制,不加次数守卫);阶段A=存活非自己;阶段B=每张手牌', function(){
+    var s = BOT_DECISIONS.rendeTwoStep;
+    if(!s) throw new Error('BOT_DECISIONS.rendeTwoStep 未注册');
+    var g1 = mkSeatG({ myHand: [card('杀','r0')] });
+    if(s.match(g1, 0)) throw new Error('无仁德技能不应命中');
+    var g2 = mkSeatG({ caps0: { rende: true }, myHand: [] });
+    if(s.match(g2, 0)) throw new Error('无手牌不应命中');
+    var g3 = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r1')] });
+    if(!s.match(g3, 0)) throw new Error('有技能+有手牌应命中');
+    g3.turn = 1;
+    if(s.match(g3, 0)) throw new Error('非自己回合不应命中');
+    g3.turn = 0; g3.phase = 'discard';
+    if(s.match(g3, 0)) throw new Error('非出牌阶段不应命中');
+    g3.phase = 'play';
+    var c3 = s.buildCandidates(g3, 0);
+    if(c3.map(function(c){ return c.a; }).join(',') !== '1,2')
+      throw new Error('阶段A候选应为 1,2(存活非自己),实际 ' + JSON.stringify(c3));
+    if(c3[0].step !== 'A' || c3[0].label.indexOf('仁德') < 0)
+      throw new Error('候选应带 step:A+仁德前缀,实际 ' + JSON.stringify(c3[0]));
+    botTwoStepA = { decisionId: 'rendeTwoStep', a: 1 };
+    var c4 = s.buildCandidates(g3, 0);
+    if(c4.length !== 1 || c4[0].step !== 'B' || c4[0].cardIdx !== 0 || c4[0].targetSeat !== 1)
+      throw new Error('阶段B候选应为每张手牌一项,实际 ' + JSON.stringify(c4));
+    if(c4[0].label.indexOf('仁德') < 0) throw new Error('阶段B label 应含仁德前缀,实际 ' + c4[0].label);
+    botTwoStepA = null;
+  });
+
+  await check('仁德两阶段无密钥:调度1 阶段A挂起;调度2 阶段B提交 renDe(cardIdx,targetSeat) 并重置;无AI调用', async function(){
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r2'), card('桃','r3')] });
+    var r1 = await botDecide('rendeTwoStep', g, 0);
+    if(r1 !== true || !botTwoStepA || botTwoStepA.decisionId !== 'rendeTwoStep' || botTwoStepA.a !== 1)
+      throw new Error('调度1后应挂起 {rendeTwoStep,a:1},实际 ' + JSON.stringify(botTwoStepA));
+    var r2 = await botDecide('rendeTwoStep', g, 0);
+    if(r2 !== true) throw new Error('调度2应返回 true,实际 ' + r2);
+    if(botTwoStepA !== null) throw new Error('调度2提交后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__rendeCalls.length !== 1 || window.__rendeCalls[0][0] !== 0 || window.__rendeCalls[0][1] !== 1)
+      throw new Error('应 renDe(0,1),实际 ' + JSON.stringify(window.__rendeCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('仁德阶段B有密钥:mock 选手牌 → renDe(cardIdx,targetSeat);userPrompt 不含他人手牌', async function(){
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r4'), card('桃','r5')],
+      hands: { 1: [card('桃园结义','sec')], 2: [card('闪','r6')] } });
+    botTwoStepA = { decisionId: 'rendeTwoStep', a: 1 };
+    var r = await botDecide('rendeTwoStep', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__rendeCalls.length !== 1 || window.__rendeCalls[0][0] !== 1 || window.__rendeCalls[0][1] !== 1)
+      throw new Error('应 renDe(1,1),实际 ' + JSON.stringify(window.__rendeCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+    botTwoStepA = null;
+  });
+
+  await check('多步接线:优先级 借刀>离间>丈八>仁德;挂起期只处理挂起的那一个决策;阶段B提交后不再走 runBotActionWindow;未命中才走窗口', async function(){
+    var realBotDecide = botDecide;
+    var realWindow = runBotActionWindow;
+    var wired = [];
+    botDecide = async function(decisionId, gg, seat){ wired.push(decisionId); return realBotDecide(decisionId, gg, seat); };
+    runBotActionWindow = async function(){ window.__windowCalls++; };
+
+    // 场景1:借刀+离间同时可发动(手牌有借刀+有离间能力+男性≥2) → 借刀优先命中,挂起 jiedao
+    wired = []; window.__windowCalls = 0;
+    botTwoStepA = null;
+    var g1 = mkSeatG({ caps0: { lijian: true }, myHand: [card('借刀杀人','m0')] });
+    g1.players[1].equips.weapon = { name: '青龙偃月刀' };
+    await runBotDecision(g1, 0);
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'jiedaoTwoStep')
+      throw new Error('借刀应优先于离间命中,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走窗口');
+
+    // 场景2:无借刀,离间可发动 → lijianTwoStep 挂起(阶段A),不走窗口
+    wired = []; window.__windowCalls = 0;
+    botTwoStepA = null;
+    var g2 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','m1')], generalOf: { 0: 'daqiao' } });
+    await runBotDecision(g2, 0);
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'lijianTwoStep' || botTwoStepA.a !== 1)
+      throw new Error('离间阶段A应挂起,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走窗口');
+
+    // 场景3:挂起离间后手牌补一张借刀 → 下一调度只处理 lijianTwoStep(挂起守卫挡住借刀)
+    wired = []; window.__windowCalls = 0;
+    window.__lijianCalls = [];
+    g2.players[0].hand.push(card('借刀杀人','m2'));
+    await runBotDecision(g2, 0);
+    if(window.__lijianCalls.length !== 1) throw new Error('挂起离间应走阶段B提交 liJian,实际 ' + JSON.stringify(window.__lijianCalls));
+    if(wired.join(',') !== 'lijianTwoStep') throw new Error('挂起期只应尝试 lijianTwoStep,实际 ' + wired.join(','));
+    if(window.__windowCalls !== 0) throw new Error('阶段B命中后不应走窗口');
+    if(botTwoStepA !== null) throw new Error('提交后应重置,实际 ' + JSON.stringify(botTwoStepA));
+
+    // 场景4:丈八三阶段挂起至阶段C → 一次调度提交 playZhangbaSha,不走窗口
+    wired = []; window.__windowCalls = 0;
+    window.__zhangbaCalls = [];
+    botTwoStepA = { decisionId: 'zhangbaTwoStep', a: 0, b: 1 };
+    var g4 = mkSeatG({ myHand: [card('杀','m3'), card('闪','m4')] });
+    g4.players[0].equips.weapon = { name: '丈八蛇矛' };
+    await runBotDecision(g4, 0);
+    if(window.__zhangbaCalls.length !== 1 || window.__zhangbaCalls[0][2] !== 1)
+      throw new Error('丈八阶段C应提交,实际 ' + JSON.stringify(window.__zhangbaCalls));
+    if(botTwoStepA !== null) throw new Error('丈八提交后应重置');
+    if(wired.join(',') !== 'zhangbaTwoStep') throw new Error('挂起期只应尝试 zhangbaTwoStep,实际 ' + wired.join(','));
+
+    // 场景5:仁德可发动(无其它多步) → 挂起 rendeTwoStep 阶段A;下一调度阶段B提交 renDe
+    wired = []; window.__windowCalls = 0;
+    botTwoStepA = null;
+    var g5 = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','m5')] });
+    await runBotDecision(g5, 0);
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'rendeTwoStep' || botTwoStepA.a !== 1)
+      throw new Error('仁德阶段A应挂起,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走窗口');
+    wired = []; window.__windowCalls = 0;
+    window.__rendeCalls = [];
+    await runBotDecision(g5, 0);
+    if(window.__rendeCalls.length !== 1 || window.__rendeCalls[0][0] !== 0 || window.__rendeCalls[0][1] !== 1)
+      throw new Error('仁德阶段B应提交 renDe(0,1),实际 ' + JSON.stringify(window.__rendeCalls));
+    if(botTwoStepA !== null) throw new Error('仁德提交后应重置');
+    if(wired.join(',') !== 'rendeTwoStep') throw new Error('挂起期只应尝试 rendeTwoStep,实际 ' + wired.join(','));
+
+    // 场景6:全未命中(无技能无武器) → 只试4个决策各1次后走窗口
+    wired = []; window.__windowCalls = 0;
+    botTwoStepA = null;
+    var g6 = mkSeatG({ myHand: [card('杀','m6')] });
+    await runBotDecision(g6, 0);
+    if(window.__windowCalls !== 1) throw new Error('全未命中应走 runBotActionWindow,实际 ' + window.__windowCalls);
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
+      throw new Error('全未命中应按序尝试4个决策,实际 ' + wired.join(','));
 
     botDecide = realBotDecide;
     runBotActionWindow = realWindow;

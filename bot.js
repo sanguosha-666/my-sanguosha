@@ -1318,6 +1318,8 @@ function resetBotTwoStep(){ botTwoStepA = null; }
 BOT_DECISIONS.jiedaoTwoStep = {
   match: function(g, seat){
     if(g.phase!=='play' || g.turn!==seat) return false;
+    // 挂起守卫:另一个多步决策进行中时本决策不参与(防阶段A覆盖别人已选的状态)
+    if(botTwoStepA && botTwoStepA.decisionId!=='jiedaoTwoStep') return false;
     const me = g.players[seat];
     const hasJiedao = (me.hand||[]).some(function(c){ return c.name==='借刀杀人'; });
     return hasJiedao;
@@ -1366,6 +1368,160 @@ BOT_DECISIONS.jiedaoTwoStep = {
     const idx = (me.hand||[]).findIndex(function(c){ return c.name==='借刀杀人'; });
     if(idx<0) return;
     botInvoke(seat, function(){ jieDaoShaRen(idx, choice.seatA, choice.seatB); });
+  },
+};
+
+// ================= L3: 离间(liJian,两阶段) =================
+// 入口门槛镜像 render-controls.js:3746(hasCap+限一次+手牌≥1+存活男性≥2);
+// 阶段A=存活男性(render.js 1358 isMale(p) 无自己排除——左慈化身借用离间时自己也可以是男性,
+//   服务端 liJian 只查 isMale(from),不查性别与座位关系,镜像 render 含自己);
+// 阶段B=≠from 的存活男性(render.js 1364 else if 分支整体嵌在 isMale(p) 块内)。
+BOT_DECISIONS.lijianTwoStep = {
+  match: function(g, seat){
+    if(g.phase!=='play' || g.turn!==seat) return false;
+    if(botTwoStepA && botTwoStepA.decisionId!=='lijianTwoStep') return false;
+    const me = g.players[seat];
+    if(!me || !me.alive || !hasCap(me,'lijian') || g.liJianUsed) return false;
+    if((me.hand||[]).length < 1) return false;
+    const maleCount = g.players.filter(function(p){ return p && p.alive && isMale(p); }).length;
+    return maleCount >= 2;
+  },
+  buildCandidates: function(g, seat){
+    const out = [];
+    if(botTwoStepA && botTwoStepA.decisionId==='lijianTwoStep'){
+      const from = botTwoStepA.a;
+      g.players.forEach(function(p, i){
+        if(!p || !p.alive || i===from || !isMale(p)) return;
+        out.push({ index: 0, label: '离间:令 '+g.players[from].name+' 对 '+p.name+' 使用【决斗】', step:'B', fromSeat: from, toSeat: i });
+      });
+      return out;
+    }
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || !isMale(p)) return;
+      out.push({ index: 0, label: '离间:选 '+p.name+' 为【决斗】使用者', step:'A', a: i });
+    });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    return candidates.length ? candidates[0] : null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    if(choice.step==='A'){
+      botTwoStepA = { decisionId: 'lijianTwoStep', a: choice.a };
+      return; // 等下一调度走阶段 B
+    }
+    resetBotTwoStep();
+    const me = g.players[seat];
+    if(!(me.hand||[]).length) return;
+    const idx = 0; // 离间可弃任意手牌(render-hand.js 205-207 usable=true),取第一张
+    botInvoke(seat, function(){ liJian(idx, choice.fromSeat, choice.toSeat); });
+  },
+};
+
+// ================= L3: 丈八蛇矛(zhangbaTwoStep,三阶段) =================
+// botTwoStepA 扩展为 {decisionId,a,b?}:阶段A=第一张手牌、阶段B=第二张(≠a)、阶段C=杀目标。
+// 入口门槛镜像 render-controls.js:3712(hasCap twoAsSha+手牌≥2+canSha)叠加服务端
+// playZhangbaSha 的次数/将驰守卫(!jiangchiNoSlash、shaUsed 且无 unlimitedSha 且无
+// jiangchiExtraShaLeft 时拒绝)。match 额外要求存在至少一个合法杀目标——目标不可达时
+// 服务端必然拒绝、三阶段流程白挂起,且陈旧挂起态会堵住其它多步决策,不如不进流程。
+BOT_DECISIONS.zhangbaTwoStep = {
+  match: function(g, seat){
+    if(g.phase!=='play' || g.turn!==seat) return false;
+    if(botTwoStepA && botTwoStepA.decisionId!=='zhangbaTwoStep') return false;
+    const me = g.players[seat];
+    if(!me || !me.alive || !hasCap(me,'twoAsSha')) return false;
+    if(me.jiangchiNoSlash) return false; // 曹彰【将驰】选项1:本回合不能使用/打出杀
+    if(g.shaUsed && !hasCap(me,'unlimitedSha') && !(g.jiangchiExtraShaLeft > 0)) return false;
+    if((me.hand||[]).length < 2) return false;
+    return g.players.some(function(p, i){
+      if(!p || !p.alive || i===seat) return false;
+      if(!canReachSha(g, seat, i)) return false;
+      if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return false;
+      return true;
+    });
+  },
+  buildCandidates: function(g, seat){
+    const me = g.players[seat];
+    const out = [];
+    if(botTwoStepA && botTwoStepA.decisionId==='zhangbaTwoStep'){
+      const a = botTwoStepA.a;
+      if(botTwoStepA.b === undefined){
+        // 阶段 B:镜像 render-hand.js 223-230 —— 第二张手牌,≠第一张
+        (me.hand||[]).forEach(function(c, i){
+          if(i===a) return;
+          out.push({ index: 0, label: '丈八:第2张牌 '+c.name, step:'B', a: a, b: i });
+        });
+        return out;
+      }
+      // 阶段 C:镜像 render.js 1234-1252 —— 存活、非自己、canReachSha、非空城
+      const b = botTwoStepA.b;
+      g.players.forEach(function(p, i){
+        if(!p || !p.alive || i===seat) return;
+        if(!canReachSha(g, seat, i)) return;
+        if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
+        out.push({ index: 0, label: '丈八:两张牌当【杀】打 '+p.name, step:'C', a: a, b: b, targetSeat: i });
+      });
+      return out;
+    }
+    // 阶段 A:镜像 render-hand.js 223-230 —— 第一张手牌
+    (me.hand||[]).forEach(function(c, i){
+      out.push({ index: 0, label: '丈八:第1张牌 '+c.name, step:'A', a: i });
+    });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    return candidates.length ? candidates[0] : null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    if(choice.step==='A'){ botTwoStepA = { decisionId: 'zhangbaTwoStep', a: choice.a }; return; }
+    if(choice.step==='B'){ botTwoStepA = { decisionId: 'zhangbaTwoStep', a: choice.a, b: choice.b }; return; }
+    resetBotTwoStep();
+    botInvoke(seat, function(){ playZhangbaSha(choice.a, choice.b, choice.targetSeat); });
+  },
+};
+
+// ================= L3: 仁德(rendeTwoStep,两阶段) =================
+// 入口=render.js 1401-1410(选中任意手牌后目标座位出现"仁德:交给此人"按钮):hasCap(rende)+
+// 手牌非空+存活非自己目标;服务端 renDe 无本回合次数限制(renDeCount 只用于第2张后的回复),
+// 故 match 不加次数守卫。阶段A=目标(存活非自己)、阶段B=每张手牌一项。
+BOT_DECISIONS.rendeTwoStep = {
+  match: function(g, seat){
+    if(g.phase!=='play' || g.turn!==seat) return false;
+    if(botTwoStepA && botTwoStepA.decisionId!=='rendeTwoStep') return false;
+    const me = g.players[seat];
+    if(!me || !me.alive || !hasCap(me,'rende')) return false;
+    if((me.hand||[]).length < 1) return false;
+    return true;
+  },
+  buildCandidates: function(g, seat){
+    const me = g.players[seat];
+    const out = [];
+    if(botTwoStepA && botTwoStepA.decisionId==='rendeTwoStep'){
+      const targetSeat = botTwoStepA.a;
+      (me.hand||[]).forEach(function(c, i){
+        out.push({ index: 0, label: '仁德:交给 '+g.players[targetSeat].name+' '+c.name, step:'B', cardIdx: i, targetSeat: targetSeat });
+      });
+      return out;
+    }
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      out.push({ index: 0, label: '仁德:选目标 '+p.name, step:'A', a: i });
+    });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    return candidates.length ? candidates[0] : null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    if(choice.step==='A'){
+      botTwoStepA = { decisionId: 'rendeTwoStep', a: choice.a };
+      return; // 等下一调度走阶段 B
+    }
+    resetBotTwoStep();
+    botInvoke(seat, function(){ renDe(choice.cardIdx, choice.targetSeat); });
   },
 };
 
@@ -2051,14 +2207,24 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondXunxun(all.slice(0,take),all.slice(take))); return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
-  // L3 多步两阶段(借刀杀人):阶段A选中后 botTwoStepA 本地挂起,等下一调度走阶段B;
-  // 两处都尝试:有 botTwoStepA 时先走阶段B,没有则走阶段A;命中即 return,不让
-  // runBotActionWindow 重复决策(借刀在出牌枚举里已被排除,两路天然不冲突)。
-  if(botTwoStepA && botTwoStepA.decisionId==='jiedaoTwoStep' && g.phase==='play' && g.turn===seat){
-    if(await botDecide('jiedaoTwoStep', g, seat)) return;
+  // L3 多步两阶段(借刀/离间/丈八/仁德):阶段A选中后 botTwoStepA 本地挂起,等下一调度走
+  // 阶段B(丈八再等第三调度选目标);命中即 return,不让 runBotActionWindow 重复决策
+  // (借刀在出牌枚举里已被排除,其余三项也不在 CARD_PLAYS 里,两路天然不冲突)。
+  // 优先级 借刀 > 离间 > 丈八 > 仁德,if 链先命中者胜——同一时刻只会有一个决策匹配
+  // (各 match 带 "!botTwoStepA||botTwoStepA.decisionId===id" 挂起守卫,挂起期间其它
+  // 决策的 match 直接 false,不会覆盖阶段A已选的状态)。
+  if(botTwoStepA && g.phase==='play' && g.turn===seat){
+    const pid = botTwoStepA.decisionId;
+    if(pid==='jiedaoTwoStep' && await botDecide('jiedaoTwoStep', g, seat)) return;
+    if(pid==='lijianTwoStep' && await botDecide('lijianTwoStep', g, seat)) return;
+    if(pid==='zhangbaTwoStep' && await botDecide('zhangbaTwoStep', g, seat)) return;
+    if(pid==='rendeTwoStep' && await botDecide('rendeTwoStep', g, seat)) return;
   }
   if(g.phase==='play'&&g.turn===seat){
     if(await botDecide('jiedaoTwoStep', g, seat)) return;
+    if(await botDecide('lijianTwoStep', g, seat)) return;
+    if(await botDecide('zhangbaTwoStep', g, seat)) return;
+    if(await botDecide('rendeTwoStep', g, seat)) return;
     await runBotActionWindow(g, seat); return;
   }
   if(g.phase==='discard'&&g.turn===seat){
