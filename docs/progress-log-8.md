@@ -53,8 +53,37 @@
     `run_ai_bus_c_window_test.js`（+10 项、context 补裸 setTimeout、保存 `__realPlayCard` 供提交失败测试）；
     `run_ai_bus_l2_test.js`（context 补裸 setTimeout）；`index.html` `?v=` 279→280 共 13 处。`game.js`
     零改动（SC1 已带回调）。`normalize` 无需改（纯客户端模块级函数/常量，不进 `g`）。
-  - **commit**：`feat(bot): 强C同窗多步循环(有密钥)+提交回调等待`（wenwen_dev，1cec383）。
-  - **遗留（刻意不处理，记录在案）**：①无密钥路径仍会 `await executePlayWindowChoiceAwait`（等 onCommitted
-    或 5s 超时）后才 return——语义与弱C一致（执行一步），只是多一次超时兜底等待；真实环境 playCard 的
-    tx 回调总会触发，超时几乎不会真的走到，但 stub/异常环境最多拖 5s，可接受；②强C 只覆盖出牌窗
-    （`runBotActionWindow`），响应类一步决策点维持单步，不扩展回调到 30+ 个 respond 函数（计划既定边界）。
+- **commit**：`feat(bot): 强C同窗多步循环(有密钥)+提交回调等待`（wenwen_dev，1cec383）。
+- **遗留（刻意不处理，记录在案）**：①无密钥路径仍会 `await executePlayWindowChoiceAwait`（等 onCommitted
+  或 5s 超时）后才 return——语义与弱C一致（执行一步），只是多一次超时兜底等待；真实环境 playCard 的
+  tx 回调总会触发，超时几乎不会真的走到，但 stub/异常环境最多拖 5s，可接受；②强C 只覆盖出牌窗
+  （`runBotActionWindow`），响应类一步决策点维持单步，不扩展回调到 30+ 个 respond 函数（计划既定边界）。
+
+## 信息层五项字段（I1+I2，SDD 计划「2026-08-03-ai-strong-c-and-info-layer」Part B 两批）
+
+- **I1（commit `703ecc8`）——弃牌堆/牌堆剩余/攻击射程（bot.js `buildBotVisibleState`）**：
+  ①`discardPile`：弃牌堆是公开信息（桌面展示），投影 `{count, byName}`——count 总张数、byName 按牌名
+  计数（含同名多张），`(g.discard||[])` 防空；②`deckLeft`：牌堆剩余张数（牌堆背面可见，张数人人知道），
+  `(g.deck||[]).length`；③`myAttackRange`：自己的攻击射程，读武器槽 `getEquip().range`、无武器/无 range
+  回退 1——只投影自己，和 `distance` 已有投影配套。全部只读公开信息，不进 Firebase、不动 game.js。
+- **I2（本条）——desc 全量 + recentLog 20 条（bot.js `buildBotVisibleState`）**：
+  - **`generalDesc` 去截断**：`String(GENERALS[p.general].desc||'').slice(0,120)` → 全量
+    `String(GENERALS[p.general].desc||'')`，顺带把守卫从 `GENERALS &&` 加强为
+    `typeof GENERALS!=='undefined' &&`（和规则 24 的裸标识符纪律一致，防未加载 data.js 时 ReferenceError）。
+    token 预算：全量 desc 通常 30-80 字/将，7 人局 ~7×80=560 字 ≈150 tokens，可接受（规格 B2.4 已评估）。
+  - **`recentLog` 10→20 条**：`slice(-10)` → `slice(-20)`。这是对规格早期草案"按 round 聚类"的简化修正：
+    `g.log` 条目是 `{seq, text}`、**没有 roundNum 字段**——强行聚类要么改 log 结构（进 Firebase，需
+    normalize 防御，收益低）要么按 seq 猜（不可靠），故只扩条数（~20×15 字 ≈300 字 ≈80 tokens），覆盖
+    约 1-2 回合、零结构改动。注释同步更新。
+  - **测试（`run_ai_bus_info_test.js` 8→10，TDD RED→GREEN）**：①新增"desc 超120字仍全量"——沙箱内
+    临时改 `GENERALS['guojia'].desc` 为 156 字长文（try/finally 恢复），断言
+    `generalDesc === 长文全文` 且 JSON 里出现尾部 20 字；RED 阶段旧 slice(0,120) 输出 120 字即失败；
+    ②`recentLog` 30 条日志 → 长度 20、首项 日志11/末项 日志30 对齐；RED 阶段输出 10 条失败；
+    ③**规则 20 修正旧断言**：原"desc 应截断到120"（`gd.length>120` 抛错）命题已随实现变更失效
+    （真实 guojia desc 仅 71 字，该断言在旧实现下永远绿、本就没测到东西），更新为
+    `gd === String(GENERALS['guojia'].desc||'')` 全量相等命题。
+  - **回归**：info 10/0、core 7/0、l2 23/0、l3 93/0、c_window 25/0，`node --check bot.js` 通过
+    （node v22.23.1）。
+  - **改动范围**：`bot.js`（`buildBotVisibleState` 两行）；`run_ai_bus_info_test.js`（+2 项、更新 2 项、
+    文件头注释同步）；`index.html` `?v=` 281→282 共 13 处。`normalize` 无需改（纯客户端投影，不进 g）。
+  - **commit**：`feat(bot): AI可见状态 desc全量与recentLog 20条`（wenwen_dev）。

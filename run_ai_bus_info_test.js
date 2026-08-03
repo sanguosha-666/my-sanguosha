@@ -3,8 +3,8 @@
  *
  * 加载真实 data.js + ai-bot.js + bot.js 进共享 vm 沙箱(与 run_ai_bus_core_test.js
  * 同一套 fs.readFileSync + vm.Script + vm.createContext 惯例),在沙箱内运行断言。
- * 覆盖:generalSkill/generalDesc 不依赖 isFirstTurn 常开、recentLog 取最近10条并
- * 对齐末项、myFlags 自身标志投影、buildBotGuhuoVisibleState 不泄露 actualCard
+ * 覆盖:generalSkill/generalDesc 不依赖 isFirstTurn 常开(desc 全量不截断)、recentLog
+ * 取最近20条并对齐末项、myFlags 自身标志投影、buildBotGuhuoVisibleState 不泄露 actualCard
  * 真实牌名(回归)。
  *
  * 已知的 vm 坑:aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,必须用
@@ -120,7 +120,7 @@ const testCode = String.raw`
     return { players: players, gameMode: 'ffa', roundNum: 1, phase: 'play', turn: 0 };
   }
 
-  // 1. generalSkill/generalDesc 常开:已知武将 id 下非空字符串
+  // 1. generalSkill/generalDesc 常开:已知武将 id 下非空字符串,desc 为全量原文
   await check('generalSkill 为 guojia 技能非空字符串', function(){
     var g = mkG();
     var s = buildBotVisibleState(g, 0);
@@ -128,7 +128,25 @@ const testCode = String.raw`
     if(typeof gs !== 'string' || gs.length === 0) throw new Error('期望非空字符串,实际 ' + JSON.stringify(gs));
     var gd = s.players[0].generalDesc;
     if(typeof gd !== 'string' || gd.length === 0) throw new Error('期望非空字符串,实际 ' + JSON.stringify(gd));
-    if(gd.length > 120) throw new Error('desc 应截断到120,实际长度 ' + gd.length);
+    if(gd !== String(GENERALS['guojia'].desc||'')) throw new Error('desc 应为全量原文,实际长度 ' + gd.length);
+  });
+
+  // 1b. desc 全量:构造 200 字长 desc(>120 截断阈值)→ JSON 里出现完整尾部,截断则断言失败
+  await check('desc 超120字仍全量(尾部20字在JSON中)', function(){
+    var g = mkG();
+    var longDesc = '决断与谋略并重,行险而不失其正,料敌机先,善守善攻。'.repeat(6); // 20×6=120+ 超阈值
+    var orig = GENERALS['guojia'].desc;
+    try {
+      GENERALS['guojia'].desc = longDesc;
+      var s = buildBotVisibleState(g, 0);
+      var gd = s.players[0].generalDesc;
+      if(gd !== longDesc) throw new Error('期望全量 ' + longDesc.length + ' 字,实际 ' + (gd ? gd.length : String(gd)));
+      var json = JSON.stringify(s);
+      var tail = longDesc.slice(-20);
+      if(json.indexOf(tail) === -1) throw new Error('JSON 中应出现 desc 尾部: ' + tail);
+    } finally {
+      GENERALS['guojia'].desc = orig;
+    }
   });
 
   // 2. 不传第三参(或显式 false)也有 skill —— 证明不依赖 isFirstTurn
@@ -140,17 +158,17 @@ const testCode = String.raw`
     }
   });
 
-  // 3. recentLog:15 条日志 → 只留最近10条,且末项对齐第15条
-  await check('recentLog 长度10且末项对齐', function(){
+  // 3. recentLog:30 条日志 → 只留最近20条,且末项对齐第30条
+  await check('recentLog 长度20且末项对齐', function(){
     var g = mkG();
     g.log = [];
-    for(var i = 1; i <= 15; i++){ g.log.push({ seq: i, text: '日志' + i }); }
+    for(var i = 1; i <= 30; i++){ g.log.push({ seq: i, text: '日志' + i }); }
     var s = buildBotVisibleState(g, 0);
-    if(!Array.isArray(s.recentLog) || s.recentLog.length !== 10){
-      throw new Error('期望长度10,实际 ' + (s.recentLog && s.recentLog.length));
+    if(!Array.isArray(s.recentLog) || s.recentLog.length !== 20){
+      throw new Error('期望长度20,实际 ' + (s.recentLog && s.recentLog.length));
     }
-    if(s.recentLog[9] !== '日志15') throw new Error('末项应为 日志15,实际 ' + s.recentLog[9]);
-    if(s.recentLog[0] !== '日志6') throw new Error('首项应为 日志6,实际 ' + s.recentLog[0]);
+    if(s.recentLog[19] !== '日志30') throw new Error('末项应为 日志30,实际 ' + s.recentLog[19]);
+    if(s.recentLog[0] !== '日志11') throw new Error('首项应为 日志11,实际 ' + s.recentLog[0]);
   });
 
   // 4. myFlags:shaUsed / jiangchiNoSlash 布尔投影(自身座位)

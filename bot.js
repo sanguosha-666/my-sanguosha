@@ -411,7 +411,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
         deadRole: !p.alive && g.gameMode==='identity' ? knownRole : undefined, // 已死玩家的身份
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
         generalSkill: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].skill||'') : undefined, // 武将技能常开(公开信息)
-        generalDesc: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].desc||'').slice(0,120) : undefined, // 武将描述常开,截断到120
+        generalDesc: (p.general && typeof GENERALS!=='undefined' && GENERALS[p.general]) ? String(GENERALS[p.general].desc||'') : undefined, // 武将描述常开,全量不截断
         distance: i !== seat ? distance(g, seat, i) : 0, // 与自己的距离
         suspicionHint: botSuspicionHint(g, i), // 身份局限定,undefined 时 JSON 里不出现这个键
         // 特殊状态信息
@@ -422,8 +422,8 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
         },
       };
     }),
-    // 最近日志:公开信息,取最近10条;log 项是 {seq,text} 对象,取 text 字段
-    recentLog: (g.log||[]).slice(-10).map(e => (e && typeof e==='object') ? e.text : String(e==null?'':e)),
+    // 最近日志:公开信息,取最近20条;log 项是 {seq,text} 对象,取 text 字段
+    recentLog: (g.log||[]).slice(-20).map(e => (e && typeof e==='object') ? e.text : String(e==null?'':e)),
     // 自身回合内标志:只投影自己的(shaUsed 全局、jiangchiNoSlash 每人一份),不含他人私有状态
     myFlags: { shaUsed: !!g.shaUsed, jiangchiNoSlash: !!(me.jiangchiNoSlash) },
     // 弃牌堆:公开信息(展示在桌面),count 总数 + byName 按牌名计数(含同名多张)
