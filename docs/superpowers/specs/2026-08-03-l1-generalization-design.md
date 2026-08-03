@@ -115,6 +115,57 @@ qilin, hanbing, mengjin, shaOffsetChoice
 
 ---
 
+## 6.5 补充：seatPick 接线修复（bug）+ 分配类技能覆盖
+
+### 6.5.1 seatPick 接线修复（必须，bug）
+
+**现状**：`BOT_SEAT_PICKS` 注册了 11 个技能（蛊惑目标/旋风/断粮/奇袭/国色/武圣/双雄/挑衅/反间/青囊/驱虎伤害），但 `runBotDecision` 中**没有任何 `botDecide('seatPick')` 调用点**——T1-T3 的测试全部是直接调 `botDecide('seatPick', g, 0)` 的单元测试，从未测过 runBotDecision 全链路。**后果：机器人永远不会主动使用这 11 个技能**（武圣/双雄等转化技只有 seatPick 一条路，等于完全不可达）。
+
+**修复**：
+```js
+// runBotDecision play 分支(四个多步之后、runBotActionWindow 之前):
+if(g.phase==='play'&&g.turn===seat){
+  if(await botDecide('jiedaoTwoStep', g, seat)) return;
+  if(await botDecide('lijianTwoStep', g, seat)) return;
+  if(await botDecide('zhangbaTwoStep', g, seat)) return;
+  if(await botDecide('rendeTwoStep', g, seat)) return;
+  if(await botDecide('seatPick', g, seat)) return;   // ← 新增接线
+  await runBotActionWindow(g, seat); return;
+}
+// 三个 pending 阶段(guhuoTarget/xuanfengPick/quhuDamageChoice)各自加一处:
+if(g.phase==='guhuoTarget' && d && d.type==='guhuoTarget' && d.sourceSeat===seat){
+  if(await botDecide('seatPick', g, seat)) return;
+}
+// xuanfengPick / quhuDamageChoice 同理(实现时按 runBotDecision 现有结构插入)
+```
+
+**注意**：`seatPickMatch` 的 play 分支条件已存在（`g.phase==='play'` 且技能 match），接线后 play 阶段先试四个多步（有挂起守卫）→ seatPick（11 技能候选合并）→ runBotActionWindow（手牌枚举）——三者互不冲突。seatPick 命中的技能在 runBotActionWindow 的 `enumerateAllLegalOneStepActions` 里**不会重复出现**（断粮/奇袭/国色等无 CARD_PLAYS 入口；武圣/双雄走 CARD_PLAYS 的牌会在枚举里出现但那是"当杀/当决斗"的普通路径，与 seatPick 的"技能按钮"路径候选 label 不同——**实现时核对是否双候选，若重复则在 seatPick 候选生成时排除已在 CARD_PLAYS 枚举中的转化技，或接受双路径（AI 选哪个都合法）**，以测试锁定）。
+
+### 6.5.2 分配类技能覆盖（6-8 个）
+
+**探索结论：分配类技能分两种形态，覆盖方式不同**：
+
+| 形态 | 阶段 | L1 泛化 | 需专用注册 |
+|------|------|---------|-----------|
+| **纯按钮**（弃X→目标组合已渲染成按钮） | `liuli`（流离：弃牌选项×目标组合）、`tianxiang`（天香：红桃×目标组合）、`lirangRecover`（获得/不获得）、`zhengyi`（争义：发动/不发动）、`xiaoguoChoice`（骁果选装备弃置） | ✅ **自动覆盖**（L1 泛化后无需任何注册） | 否 |
+| **选牌/多步状态机** | `yijiAssign`（遗计分配：每张牌选接收者，累积到最后一张提交）、`lirangAsk`（礼让发动：选 2 张手牌→交人）、`xiaoguo`（骁果发动：按钮只切 xiaoguoMode，选牌在手牌点击） | ❌ 按钮点击只切 mode/累积、不提交 → **L1 覆盖不了，且直接接管会卡死**（点一下状态不变、无新调度） | ✅ 需专用注册 |
+
+**专用注册设计（复用 handPick/两阶段模式）**：
+
+1. **`yijiAssign`（遗计分配）**：候选 = 每张待分配牌 × 存活角色（`给 牌X → 角色Y`），**同一次 AI 选择提交全部**（AI 一次选"每张牌给谁"的完整组合？还是逐张选？）——**设计决定：逐张 AI 选**（仿真人"每张牌选接收者"）：候选 = 当前牌 `cards[idx]` × 存活角色按钮；`execute` 提交 `respondYijiAssign` 只在最后一张时调用，非最后一张时累积到客户端 `yijiPicks` 并**显式触发下一次调度**（关键：机器人端不能依赖"状态变化触发 render"，需要自己 `scheduleBotTurn` 或直接返回让调度器重入——实现时用 `botTwoStepA` 同款机制：非最后一张时设置 `botTwoStepA={decisionId:'yijiAssign', picks}`，runBotDecision 下轮重入继续）。
+2. **`lirangAsk`（礼让发动）**：候选 = "选 2 张手牌"的完整组合（`buildHandPickCandidates` 复用，组合≤N）→ 目标角色；或两阶段（先组合后目标）。**设计决定：两阶段**——阶段A=2 张手牌组合（仿 discardSubset 组合生成），阶段B=目标角色（pending.to 是服务端算好的唯一目标？核实 lirangAsk 的 pending.to——render-controls 显示"交给 '目标'"是单个目标，即服务端已定目标 → 只需阶段A选组合，execute `respondLiRang(true, picks)`）。
+3. **`xiaoguo`（骁果发动）**：按钮"发动【骁果】"只切 mode。**专用注册**：候选 = 手牌中每张基本牌（杀/闪/桃）→ `respondXiaoguo` 直接提交（服务端签名核实：`respondXiaoguo(cardIdx?)` 还是 `respondXiaoguo(true)+后续`？实现时 rg 确认，若无单步提交函数则用"选牌+提交"封装）。**或者简化：把 xiaoguo 加入 EXCLUDE（AI 不发动，保持 botSafePrompt 兜底）**——骁果价值低，可暂缓，实现时按成本决定（记录）。
+
+**实现顺序**：先做纯按钮类（L1 泛化自动覆盖，零注册）→ yijiAssign → lirangAsk → xiaoguo（或 EXCLUDE 暂缓）。
+
+### 6.5.3 验收补充
+
+- seatPick 接线：runBotDecision 全链路测试（play 阶段 11 技能候选出现、mock 选择生效）——**第一批的测试缺口在此补齐**
+- yijiAssign/lirangAsk：多步累积跨调度完成（复用 botTwoStepA 机制），无密钥 fallback 逐字
+- liuli/tianxiang/lirangRecover/zhengyi/xiaoguoChoice：L1 泛化后自动覆盖（测试断言候选=按钮）
+
+---
+
 ## 7. 审阅检查清单（作者自检）
 
 - [x] 无 TBD 占位
