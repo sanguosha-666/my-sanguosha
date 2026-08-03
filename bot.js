@@ -368,6 +368,8 @@ function botSuspicionHint(g, targetSeat){
   if(s<=-30) return '公开行为显示出一定的偏向忠于主公一方的倾向,反贼嫌疑较低';
   return undefined;
 }
+// isFirstTurn 参数保留仅为向后兼容(历史调用方可能传第三参),本函数不再依赖它:
+// 武将技能/描述是公开信息(座位卡上人人可见),任何回合都该提供给 AI。
 function buildBotVisibleState(g, seat, isFirstTurn=false){
   const me = g.players[seat];
   
@@ -408,8 +410,8 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
         knownRole: knownRole, // 复用既有的安全揭示逻辑,不知道就是 null
         deadRole: !p.alive && g.gameMode==='identity' ? knownRole : undefined, // 已死玩家的身份
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
-        generalSkill: isFirstTurn && p.general && GENERALS && GENERALS[p.general] ? GENERALS[p.general].skill : undefined, // 第一回合提供武将技能
-        generalDesc: isFirstTurn && p.general && GENERALS && GENERALS[p.general] ? GENERALS[p.general].desc : undefined, // 第一回合提供武将描述
+        generalSkill: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].skill||'') : undefined, // 武将技能常开(公开信息)
+        generalDesc: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].desc||'').slice(0,120) : undefined, // 武将描述常开,截断到120
         distance: i !== seat ? distance(g, seat, i) : 0, // 与自己的距离
         suspicionHint: botSuspicionHint(g, i), // 身份局限定,undefined 时 JSON 里不出现这个键
         // 特殊状态信息
@@ -420,6 +422,10 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
         },
       };
     }),
+    // 最近日志:公开信息,取最近10条;log 项是 {seq,text} 对象,取 text 字段
+    recentLog: (g.log||[]).slice(-10).map(e => (e && typeof e==='object') ? e.text : String(e==null?'':e)),
+    // 自身回合内标志:只投影自己的(shaUsed 全局、jiangchiNoSlash 每人一份),不含他人私有状态
+    myFlags: { shaUsed: !!g.shaUsed, jiangchiNoSlash: !!(me.jiangchiNoSlash) },
   };
 }
 
