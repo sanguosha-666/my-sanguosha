@@ -846,12 +846,14 @@ function ganglieChoiceMatch(g, seat){
   return g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice' && g.pending.sourceSeat===seat;
 }
 function ganglieChoiceBuildCandidates(g, seat){
+  // 候选顺序与 buildBotGanglieSystemPrompt 的 choice 语义对齐(1=弃牌、0=受伤):
+  // index0=受伤、index1=弃置,AI 按 prompt 选 index 时动作不会错位。
   // 手牌不足2张时 finishGanglieJudge 会直接跳过这个 pending 自动结算伤害,这里镜像同一
   // 规则只保留"受伤"一个候选(botDecide 单候选短路,不浪费AI调用)。
   const me = g.players[seat];
   const out = [];
-  if((me.hand||[]).length>=2) out.push({ action:'弃置2张手牌', discard:true });
   out.push({ action:'受到1点伤害', discard:false });
+  if((me.hand||[]).length>=2) out.push({ action:'弃置2张手牌', discard:true });
   return out;
 }
 function ganglieChoiceLocalFallback(g, seat, candidates){
@@ -876,9 +878,11 @@ function guhuoQuestionMatch(g, seat){
   return g.phase==='guhuoQuestion' && g.pending && g.pending.type==='guhuoQuestion' && g.pending.asking===seat;
 }
 function guhuoQuestionBuildCandidates(){
+  // 候选顺序与 buildBotGuhuoSystemPrompt 的 choice 语义对齐(1=质疑、0=不质疑):
+  // index0=不质疑、index1=质疑,AI 按 prompt 选 index 时动作不会错位。
   return [
-    { action:'质疑', question:true },
     { action:'不质疑', question:false },
+    { action:'质疑', question:true },
   ];
 }
 function guhuoQuestionLocalFallback(g, seat, candidates){
@@ -1143,9 +1147,9 @@ function buildBotGuhuoUserPrompt(state){
 }
 
 // 【本决策点的注册入口】BOT_DECISIONS.guhuoQuestion(见文件前面"响应类三兄弟"段):
-// 候选=[质疑,不质疑],localFallback 是旧硬编码分支的固定30%随机,execute 提交
-// respondGuhuoQuestion(question);AI视角经 extraState=buildBotGuhuoVisibleState 构造,
-// 结构上不可能引用到 d.actualCard。
+// 候选=[不质疑,质疑](顺序与 prompt 的 choice 语义对齐:1=质疑在index1),localFallback
+// 是旧硬编码分支的固定30%随机,execute 提交 respondGuhuoQuestion(question);AI视角经
+// extraState=buildBotGuhuoVisibleState 构造,结构上不可能引用到 d.actualCard。
 //
 // 【mySeat 借用窗口,已核实确认不需要】respondGuhuoQuestion(skills.js)内部对 mySeat
 // 的唯一引用是标准的调用者身份守卫(g.pending.asking!==mySeat)和 g.players[mySeat]
@@ -1217,8 +1221,8 @@ function buildBotGanglieUserPrompt(state){
 }
 
 // 【本决策点的注册入口】BOT_DECISIONS.ganglieChoice(见文件前面"响应类三兄弟"段):
-// 候选=[弃置2张(手牌>=2时), 受伤],localFallback 与旧硬编码分支逐字一致,execute
-// 提交 respondGanglieChoice(action,picks)。
+// 候选=[受伤, 弃置2张(手牌>=2时)](顺序与 prompt 的 choice 语义对齐:1=弃牌在index1),
+// localFallback 与旧硬编码分支逐字一致,execute 提交 respondGanglieChoice(action,picks)。
 
 // ================= AI机器人接入第四阶段第二批:guicai(郭嘉【鬼才】要不要发动改判)
 // =================

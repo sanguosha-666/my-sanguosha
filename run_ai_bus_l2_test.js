@@ -449,7 +449,7 @@ const testCode = String.raw`
     if(c.action !== 'damage' || c.picks.length !== 0) throw new Error('应受伤,实际 ' + JSON.stringify(c));
   });
 
-  await check('刚烈有密钥:mock 选受伤(choice1) → respondGanglieChoice("damage",[])', async function(){
+  await check('刚烈有密钥:mock 选弃置(choice1) → respondGanglieChoice("discard",[0,1])', async function(){
     window.__ganglieCalls = [];
     window.__mockAiCalls = 0;
     window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
@@ -459,12 +459,12 @@ const testCode = String.raw`
       pending: { type: 'ganglieChoice', sourceSeat: 0, seat: 1, resume: { kind: 'ganglieJudge' } } });
     var cands = BOT_DECISIONS.ganglieChoice.buildCandidates(g, 0);
     if(cands.length !== 2) throw new Error('手牌>=2 应2个候选,实际 ' + cands.length + ' ' + JSON.stringify(cands));
-    if(cands[0].discard !== true || cands[1].discard !== false) throw new Error('候选顺序应为[弃置,受伤],实际 ' + JSON.stringify(cands));
+    if(cands[0].discard !== false || cands[1].discard !== true) throw new Error('候选顺序应为[受伤,弃置],实际 ' + JSON.stringify(cands));
     await runBotDecision(g, 0);
     if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
     if(window.__ganglieCalls.length !== 1) throw new Error('respondGanglieChoice 应被调1次,实际 ' + window.__ganglieCalls.length);
     var c = window.__ganglieCalls[0];
-    if(c.action !== 'damage' || c.picks.length !== 0) throw new Error('AI应选受伤,实际 ' + JSON.stringify(c));
+    if(c.action !== 'discard' || c.picks.join(',') !== '0,1') throw new Error('AI应选弃置[0,1],实际 ' + JSON.stringify(c));
   });
 
   await check('刚烈有密钥:手牌<2 仅1候选 → 无AI调用直接受伤', async function(){
@@ -491,7 +491,7 @@ const testCode = String.raw`
     if(typeof window.__guhuoCalls[0].question !== 'boolean') throw new Error('参数应为布尔,实际 ' + JSON.stringify(window.__guhuoCalls[0]));
   });
 
-  await check('蛊惑有密钥:mock 不质疑(choice1) → respondGuhuoQuestion(false);userPrompt 含声明名不含真实牌', async function(){
+  await check('蛊惑有密钥:mock 质疑(choice1) → respondGuhuoQuestion(true);userPrompt 含声明名不含真实牌', async function(){
     window.__guhuoCalls = [];
     window.__mockAiCalls = 0;
     window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
@@ -501,11 +501,11 @@ const testCode = String.raw`
       pending: { type: 'guhuoQuestion', asking: 0, sourceSeat: 1, claimedCard: card('杀'), actualCard: { id: 'hid', name: '无中生有', suit: '♠', rank: 9 } } });
     var cands = BOT_DECISIONS.guhuoQuestion.buildCandidates(g, 0);
     if(cands.length !== 2) throw new Error('应2个候选,实际 ' + cands.length);
-    if(cands[0].question !== true || cands[1].question !== false) throw new Error('候选顺序应为[质疑,不质疑],实际 ' + JSON.stringify(cands));
+    if(cands[0].question !== false || cands[1].question !== true) throw new Error('候选顺序应为[不质疑,质疑],实际 ' + JSON.stringify(cands));
     await runBotDecision(g, 0);
     if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
     if(window.__guhuoCalls.length !== 1) throw new Error('respondGuhuoQuestion 应被调1次,实际 ' + window.__guhuoCalls.length);
-    if(window.__guhuoCalls[0].question !== false) throw new Error('应不质疑,实际 ' + JSON.stringify(window.__guhuoCalls[0]));
+    if(window.__guhuoCalls[0].question !== true) throw new Error('应质疑,实际 ' + JSON.stringify(window.__guhuoCalls[0]));
     var up = window.__mockAiArgs.opts.userPrompt;
     if(up.indexOf('杀') < 0) throw new Error('userPrompt 应含声明牌名(杀),实际 ' + up);
     if(up.indexOf('无中生有') >= 0) throw new Error('userPrompt 泄露真实牌(无中生有)!实际 ' + up);
