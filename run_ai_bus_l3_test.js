@@ -1746,6 +1746,297 @@ const testCode = String.raw`
     if(window.__guanxingCalls.length !== 1) throw new Error('respondGuanxing 应恰被调1次(旧分支不应再触发),实际 ' + window.__guanxingCalls.length);
   });
 
+  // ================= T9: 化身/巧变移动/恩怨选项进总线 =================
+  // pending 服务端真实结构:huashenPick={type:'huashenPick',seat}(room-lifecycle.js
+  // checkHuashenBeforeAssign);huashenChangeAskStart/End={type:同名,seat};qiaobianMove=
+  // {type:'qiaobianMove',seat}(skills.js respondQiaobianMove 守卫);enyuanChooseOption=
+  // {type:'enyuanChooseOption',damagerSeat,...}(game.js chooseEnyuanOption 守卫)。
+  respondHuashenPick = spyService('huashenPick');
+  respondHuashenChangeAskStart = spyService('huashenChangeStart');
+  respondHuashenChangeAskEnd = spyService('huashenChangeEnd');
+  respondQiaobianMove = spyService('qiaobianMove');
+  chooseEnyuanOption = spyService('enyuanOption');
+
+  function mkHuashenSkillG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'huashenPick';
+    g.pending = { type: 'huashenPick', seat: 0 };
+    g.players[0].huashenPool = opt.pool || ['guojia'];
+    return g;
+  }
+
+  await check('huashenSkill:注册存在;match=化身阶段+本人;错阶段/错座位/无pending false', function(){
+    var s = BOT_DECISIONS.huashenSkill;
+    if(!s) throw new Error('BOT_DECISIONS.huashenSkill 未注册');
+    var g1 = mkHuashenSkillG({});
+    if(!s.match(g1, 0)) throw new Error('化身阶段+本人应命中');
+    if(s.match(g1, 1)) throw new Error('非本人座位不应命中');
+    var g3 = mkHuashenSkillG({}); g3.phase = 'play';
+    if(s.match(g3, 0)) throw new Error('错阶段不应命中');
+    var g5 = mkHuashenSkillG({}); g5.pending = null;
+    if(s.match(g5, 0)) throw new Error('无 pending 不应命中');
+  });
+
+  await check('huashenSkill:候选=池内每个有技能武将{generalId,skillName,label};无技能武将剔除', function(){
+    var s = BOT_DECISIONS.huashenSkill;
+    var g = mkHuashenSkillG({ pool: ['zuoci', 'guojia', 'zhaoyun'] }); // zuoci 不在化身技能表
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 2) throw new Error('应2个候选(guojia/zhaoyun),实际 ' + c.length + ' ' + JSON.stringify(c));
+    if(c[0].generalId !== 'guojia' || c[0].skillName !== '天妒' || c[0].label !== '天妒(guojia)')
+      throw new Error('候选0应为 guojia/天妒,实际 ' + JSON.stringify(c[0]));
+    if(c[1].generalId !== 'zhaoyun' || c[1].skillName !== '龙胆' || c[1].label !== '龙胆(zhaoyun)')
+      throw new Error('候选1应为 zhaoyun/龙胆,实际 ' + JSON.stringify(c[1]));
+  });
+
+  await check('huashenSkill无密钥:fallback=旧逻辑首个可用技能将 → respondHuashenPick(id, 首技能名)', async function(){
+    window.__huashenPickCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g = mkHuashenSkillG({ pool: ['zuoci', 'zhangfei'] });
+    var r = await botDecide('huashenSkill', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__huashenPickCalls.length !== 1) throw new Error('respondHuashenPick 应被调1次,实际 ' + window.__huashenPickCalls.length);
+    if(window.__huashenPickCalls[0][0] !== 'zhangfei' || window.__huashenPickCalls[0][1] !== '咆哮')
+      throw new Error('应选池内首个有技能武将 zhangfei/咆哮(zuoci 无技能跳过),实际 ' + JSON.stringify(window.__huashenPickCalls));
+  });
+
+  await check('huashenSkill有密钥:mock 选第2项 → respondHuashenPick(该武将id,该技能名);userPrompt 不含他人手牌', async function(){
+    window.__huashenPickCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkHuashenSkillG({ pool: ['guojia', 'zhaoyun'], hands: { 1: [card('桃园结义', 'sec')] } });
+    var r = await botDecide('huashenSkill', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__huashenPickCalls.length !== 1) throw new Error('respondHuashenPick 应被调1次,实际 ' + window.__huashenPickCalls.length);
+    if(window.__huashenPickCalls[0][0] !== 'zhaoyun' || window.__huashenPickCalls[0][1] !== '龙胆')
+      throw new Error('mock 选第2项应 respondHuashenPick(zhaoyun,龙胆),实际 ' + JSON.stringify(window.__huashenPickCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+    if(up.indexOf('天妒(guojia)') < 0 || up.indexOf('龙胆(zhaoyun)') < 0)
+      throw new Error('userPrompt 应含技能候选label,实际 ' + up);
+  });
+
+  function mkHuashenChangeG(phase, opt){
+    var g = mkSeatG(opt);
+    g.phase = phase;
+    g.pending = { type: phase, seat: 0 };
+    return g;
+  }
+
+  await check('huashenChangeStart:注册存在;match=询问阶段+本人+类型;错阶段/错座位/错类型 false', function(){
+    var s = BOT_DECISIONS.huashenChangeStart;
+    if(!s) throw new Error('BOT_DECISIONS.huashenChangeStart 未注册');
+    var g1 = mkHuashenChangeG('huashenChangeAskStart', {});
+    if(!s.match(g1, 0)) throw new Error('询问阶段+本人应命中');
+    if(s.match(g1, 1)) throw new Error('非本人不应命中');
+    var g2 = mkHuashenChangeG('huashenChangeAskEnd', {});
+    if(s.match(g2, 0)) throw new Error('错阶段(AskEnd)不应命中');
+    var g3 = mkHuashenChangeG('huashenChangeAskStart', {}); g3.pending.type = 'other';
+    if(s.match(g3, 0)) throw new Error('错 pending 类型不应命中');
+  });
+
+  await check('huashenChangeStart:候选=[更改【化身】,不更改]', function(){
+    var s = BOT_DECISIONS.huashenChangeStart;
+    var c = s.buildCandidates(mkHuashenChangeG('huashenChangeAskStart', {}), 0);
+    if(c.length !== 2) throw new Error('应2个候选,实际 ' + c.length + ' ' + JSON.stringify(c));
+    if(c[0].change !== true || c[1].change !== false) throw new Error('候选应[更改,不更改],实际 ' + JSON.stringify(c));
+  });
+
+  await check('huashenChangeStart无密钥:fallback=不更改 → respondHuashenChangeAskStart(false)', async function(){
+    window.__huashenChangeStartCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g = mkHuashenChangeG('huashenChangeAskStart', {});
+    var r = await botDecide('huashenChangeStart', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__huashenChangeStartCalls.length !== 1 || window.__huashenChangeStartCalls[0][0] !== false)
+      throw new Error('应 respondHuashenChangeAskStart(false),实际 ' + JSON.stringify(window.__huashenChangeStartCalls));
+  });
+
+  await check('huashenChangeStart有密钥:mock 选更改 → respondHuashenChangeAskStart(true)', async function(){
+    window.__huashenChangeStartCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkHuashenChangeG('huashenChangeAskStart', {});
+    var r = await botDecide('huashenChangeStart', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__huashenChangeStartCalls.length !== 1 || window.__huashenChangeStartCalls[0][0] !== true)
+      throw new Error('mock 选更改应 respondHuashenChangeAskStart(true),实际 ' + JSON.stringify(window.__huashenChangeStartCalls));
+  });
+
+  await check('huashenChangeEnd:注册存在;match=结束询问+本人+类型;候选[更改,不更改];无密钥 → respondHuashenChangeAskEnd(false)', async function(){
+    var s = BOT_DECISIONS.huashenChangeEnd;
+    if(!s) throw new Error('BOT_DECISIONS.huashenChangeEnd 未注册');
+    var g1 = mkHuashenChangeG('huashenChangeAskEnd', {});
+    if(!s.match(g1, 0)) throw new Error('结束询问+本人应命中');
+    if(s.match(g1, 1)) throw new Error('非本人不应命中');
+    var g2 = mkHuashenChangeG('huashenChangeAskStart', {});
+    if(s.match(g2, 0)) throw new Error('错阶段(AskStart)不应命中');
+    var c = s.buildCandidates(g1, 0);
+    if(c.length !== 2 || c[0].change !== true || c[1].change !== false)
+      throw new Error('候选应[更改,不更改],实际 ' + JSON.stringify(c));
+    window.__huashenChangeEndCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var r = await botDecide('huashenChangeEnd', g1, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__huashenChangeEndCalls.length !== 1 || window.__huashenChangeEndCalls[0][0] !== false)
+      throw new Error('应 respondHuashenChangeAskEnd(false),实际 ' + JSON.stringify(window.__huashenChangeEndCalls));
+  });
+
+  await check('huashenChangeEnd有密钥:mock 选更改 → respondHuashenChangeAskEnd(true)', async function(){
+    window.__huashenChangeEndCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkHuashenChangeG('huashenChangeAskEnd', {});
+    var r = await botDecide('huashenChangeEnd', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__huashenChangeEndCalls.length !== 1 || window.__huashenChangeEndCalls[0][0] !== true)
+      throw new Error('mock 选更改应 respondHuashenChangeAskEnd(true),实际 ' + JSON.stringify(window.__huashenChangeEndCalls));
+  });
+
+  function mkQiaobianG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'qiaobianMove';
+    g.pending = { type: 'qiaobianMove', seat: 0 };
+    if(opt.srcEquips) g.players[0].equips = Object.assign(emptyEquips(), opt.srcEquips);
+    if(opt.dstEquips) g.players[1].equips = Object.assign(emptyEquips(), opt.dstEquips);
+    return g;
+  }
+
+  await check('qiaobianMove:注册存在;match=巧变移动+本人+类型;错阶段/错座位/错类型 false', function(){
+    var s = BOT_DECISIONS.qiaobianMove;
+    if(!s) throw new Error('BOT_DECISIONS.qiaobianMove 未注册');
+    var g1 = mkQiaobianG({});
+    if(!s.match(g1, 0)) throw new Error('巧变阶段+本人应命中');
+    if(s.match(g1, 1)) throw new Error('非本人不应命中');
+    var g2 = mkQiaobianG({}); g2.phase = 'play';
+    if(s.match(g2, 0)) throw new Error('错阶段不应命中');
+    var g3 = mkQiaobianG({}); g3.pending.type = 'other';
+    if(s.match(g3, 0)) throw new Error('错 pending 类型不应命中');
+  });
+
+  await check('qiaobianMove:候选=不移动+合法移动组合(源槽非空→目标同槽空);label 含装备名;同源槽→同目标不重复;上限9', function(){
+    var s = BOT_DECISIONS.qiaobianMove;
+    var g = mkQiaobianG({
+      srcEquips: { weapon: card('青龙偃月刀', 'w0'), armor: card('八卦阵', 'a0') }
+    });
+    var c = s.buildCandidates(g, 0);
+    if(c.length < 2) throw new Error('应含不移动+至少1个移动组合,实际 ' + c.length + ' ' + JSON.stringify(c));
+    if(c[0].move !== null) throw new Error('首候选应为不移动,实际 ' + JSON.stringify(c[0]));
+    var moveCand = c.find(function(x){ return x.move && x.move.kind === 'equip' && x.move.srcSeat === 0 && x.move.dstSeat === 1 && x.move.slot === 'weapon'; });
+    if(!moveCand) throw new Error('应有 weapon:0→1 的移动候选,实际 ' + JSON.stringify(c));
+    if(moveCand.action.indexOf('青龙偃月刀') < 0) throw new Error('action 应含装备名,实际 ' + JSON.stringify(moveCand) + ' 全候选 ' + JSON.stringify(c));
+    if(c.length > 9) throw new Error('候选上限应为9(不移动+8移动),实际 ' + c.length);
+    var slots = c.filter(function(x){ return x.move && x.move.srcSeat === 0 && x.move.dstSeat === 1; }).map(function(x){ return x.move.slot; });
+    if(new Set(slots).size !== slots.length) throw new Error('同一源槽→同一目标不应重复,实际 ' + JSON.stringify(slots));
+  });
+
+  await check('qiaobianMove无密钥:fallback=不移动 → respondQiaobianMove(null)', async function(){
+    window.__qiaobianMoveCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g = mkQiaobianG({ srcEquips: { weapon: card('青龙偃月刀', 'w0') } });
+    var r = await botDecide('qiaobianMove', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__qiaobianMoveCalls.length !== 1 || window.__qiaobianMoveCalls[0][0] !== null)
+      throw new Error('应 respondQiaobianMove(null),实际 ' + JSON.stringify(window.__qiaobianMoveCalls));
+  });
+
+  await check('qiaobianMove有密钥:mock 选移动组合 → respondQiaobianMove(该move对象)', async function(){
+    window.__qiaobianMoveCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkQiaobianG({ srcEquips: { weapon: card('青龙偃月刀', 'w0') } });
+    var r = await botDecide('qiaobianMove', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__qiaobianMoveCalls.length !== 1) throw new Error('respondQiaobianMove 应被调1次,实际 ' + window.__qiaobianMoveCalls.length);
+    var mv = window.__qiaobianMoveCalls[0][0];
+    if(!mv || mv.srcSeat !== 0 || mv.dstSeat !== 1 || mv.kind !== 'equip' || mv.slot !== 'weapon')
+      throw new Error('mock 应选 weapon 0→1 的move,实际 ' + JSON.stringify(mv));
+  });
+
+  function mkEnyuanG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'enyuanChooseOption';
+    g.pending = { type: 'enyuanChooseOption', damagerSeat: 0, sourceSeat: 1 };
+    return g;
+  }
+
+  await check('enyuanOption:注册存在;match=恩怨选项+damager本人;错阶段/错座位 false', function(){
+    var s = BOT_DECISIONS.enyuanOption;
+    if(!s) throw new Error('BOT_DECISIONS.enyuanOption 未注册');
+    var g1 = mkEnyuanG({});
+    if(!s.match(g1, 0)) throw new Error('damagerSeat 本人应命中');
+    if(s.match(g1, 1)) throw new Error('非 damager 不应命中');
+    var g2 = mkEnyuanG({}); g2.phase = 'enyuanChoose';
+    if(s.match(g2, 0)) throw new Error('错阶段不应命中');
+  });
+
+  await check('enyuanOption:候选=有红桃→[给红桃,掉血];无红桃→[掉血]', function(){
+    var s = BOT_DECISIONS.enyuanOption;
+    var c1 = s.buildCandidates(mkEnyuanG({ myHand: [card('桃', 'e0', '♥'), card('杀', 'e1', '♠')] }), 0);
+    if(c1.length !== 2 || c1[0].option !== 'giveCard' || c1[1].option !== 'loseHp')
+      throw new Error('有红桃应2候选[giveCard,loseHp],实际 ' + JSON.stringify(c1));
+    var c2 = s.buildCandidates(mkEnyuanG({ myHand: [card('杀', 'e2', '♠')] }), 0);
+    if(c2.length !== 1 || c2[0].option !== 'loseHp')
+      throw new Error('无红桃应1候选[loseHp],实际 ' + JSON.stringify(c2));
+  });
+
+  await check('enyuanOption无密钥:fallback=旧逻辑(有红桃给牌/无红桃掉血)', async function(){
+    window.__enyuanOptionCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g1 = mkEnyuanG({ myHand: [card('桃', 'e3', '♥')] });
+    var r1 = await botDecide('enyuanOption', g1, 0);
+    if(r1 !== true || window.__enyuanOptionCalls.length !== 1 || window.__enyuanOptionCalls[0][0] !== 'giveCard')
+      throw new Error('有红桃应 chooseEnyuanOption(giveCard),实际 ' + JSON.stringify(window.__enyuanOptionCalls));
+    window.__enyuanOptionCalls = [];
+    var g2 = mkEnyuanG({ myHand: [card('杀', 'e4', '♠')] });
+    var r2 = await botDecide('enyuanOption', g2, 0);
+    if(r2 !== true || window.__enyuanOptionCalls.length !== 1 || window.__enyuanOptionCalls[0][0] !== 'loseHp')
+      throw new Error('无红桃应 chooseEnyuanOption(loseHp),实际 ' + JSON.stringify(window.__enyuanOptionCalls));
+  });
+
+  await check('enyuanOption有密钥:mock 选掉血 → chooseEnyuanOption(loseHp)', async function(){
+    window.__enyuanOptionCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkEnyuanG({ myHand: [card('桃', 'e5', '♥')] });
+    var r = await botDecide('enyuanOption', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__enyuanOptionCalls.length !== 1 || window.__enyuanOptionCalls[0][0] !== 'loseHp')
+      throw new Error('mock 选第2项应 chooseEnyuanOption(loseHp),实际 ' + JSON.stringify(window.__enyuanOptionCalls));
+  });
+
+  await check('接线:runBotDecision 5 个阶段各命中 botDecide 恰1次且服务端只调1次(旧分支已删)', async function(){
+    window.__huashenPickCalls = []; window.__huashenChangeStartCalls = [];
+    window.__huashenChangeEndCalls = []; window.__qiaobianMoveCalls = []; window.__enyuanOptionCalls = [];
+    window.__botDecideCalls = [];
+    var __origBotDecide = botDecide;
+    botDecide = async function(id, gg, ss){ window.__botDecideCalls.push(id); return __origBotDecide(id, gg, ss); };
+    aiApiKey = ''; aiProvider = null;
+    await runBotDecision(mkHuashenSkillG({ pool: ['guojia'] }), 0);
+    await runBotDecision(mkHuashenChangeG('huashenChangeAskStart', {}), 0);
+    await runBotDecision(mkHuashenChangeG('huashenChangeAskEnd', {}), 0);
+    await runBotDecision(mkQiaobianG({ srcEquips: { weapon: card('青龙偃月刀', 'w0') } }), 0);
+    await runBotDecision(mkEnyuanG({ myHand: [card('桃', 'e6', '♥')] }), 0);
+    botDecide = __origBotDecide;
+    ['huashenSkill', 'huashenChangeStart', 'huashenChangeEnd', 'qiaobianMove', 'enyuanOption'].forEach(function(id){
+      if(window.__botDecideCalls.filter(function(x){ return x === id; }).length !== 1)
+        throw new Error('应恰1次 botDecide(' + id + '),实际 ' + JSON.stringify(window.__botDecideCalls));
+    });
+    if(window.__huashenPickCalls.length !== 1) throw new Error('respondHuashenPick 应恰1次,实际 ' + window.__huashenPickCalls.length);
+    if(window.__huashenChangeStartCalls.length !== 1 || window.__huashenChangeStartCalls[0][0] !== false)
+      throw new Error('respondHuashenChangeAskStart 应恰1次(false),实际 ' + JSON.stringify(window.__huashenChangeStartCalls));
+    if(window.__huashenChangeEndCalls.length !== 1 || window.__huashenChangeEndCalls[0][0] !== false)
+      throw new Error('respondHuashenChangeAskEnd 应恰1次(false),实际 ' + JSON.stringify(window.__huashenChangeEndCalls));
+    if(window.__qiaobianMoveCalls.length !== 1 || window.__qiaobianMoveCalls[0][0] !== null)
+      throw new Error('respondQiaobianMove 应恰1次(null),实际 ' + JSON.stringify(window.__qiaobianMoveCalls));
+    if(window.__enyuanOptionCalls.length !== 1 || window.__enyuanOptionCalls[0][0] !== 'giveCard')
+      throw new Error('chooseEnyuanOption 应恰1次(giveCard),实际 ' + JSON.stringify(window.__enyuanOptionCalls));
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

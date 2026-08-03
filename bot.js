@@ -1145,6 +1145,133 @@ BOT_DECISIONS.guanxing = {
   },
 };
 
+// ================= T9: 化身/巧变移动/恩怨选项进总线 =================
+// 五个决策点的 localFallback 与改动前 runBotDecision 硬编码分支逐字一致:
+// huashenSkill=池里第一个可用技能将(取其第一个技能名);huashenChangeStart/End=不更改;
+// qiaobianMove=不移动;enyuanOption=有红桃给牌否则掉血。
+// 守卫字段:huashenChangeAskStart/End 与 qiaobianMove 的 pending.type 均=phase 同名
+// (skills.js/room-lifecycle.js 各自 respond 函数守卫),和 render-controls.js 真人分支
+// 同源;enyuanChooseOption 的 pending.type 由 game.js chooseEnyuanOption 守卫。
+BOT_DECISIONS.huashenSkill = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='huashenPick' && d && d.seat===seat;
+  },
+  buildCandidates: function(g, seat){
+    const p = g.players[seat];
+    return (p.huashenPool||[]).filter(function(id){ return HUASHEN_SKILL_TABLE[id] && (HUASHEN_SKILL_TABLE[id]||[]).length; }).map(function(id){
+      const entry = HUASHEN_SKILL_TABLE[id][0];
+      return { generalId: id, skillName: entry && entry.name, label: (entry&&entry.name?entry.name+'('+id+')':id) };
+    });
+  },
+  localFallback: function(g, seat, candidates){
+    // 旧分支逐字:取池里第一个可用技能将
+    const p = g.players[seat];
+    const generalId = (p.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
+    if(generalId===undefined || generalId===null) return candidates[0] || null;
+    return candidates.find(function(c){ return c.generalId===generalId; }) || candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    const entry = (HUASHEN_SKILL_TABLE[choice.generalId]||[])[0];
+    botInvoke(seat, function(){ respondHuashenPick(choice.generalId, entry && entry.name); });
+  },
+};
+BOT_DECISIONS.huashenChangeStart = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='huashenChangeAskStart' && d && d.type==='huashenChangeAskStart' && d.seat===seat;
+  },
+  buildCandidates: function(g, seat){
+    return [{ action: '更改【化身】', change: true }, { action: '不更改', change: false }];
+  },
+  localFallback: function(g, seat, candidates){
+    // 旧分支逐字:不更改
+    return candidates.find(function(c){ return c.change===false; }) || candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    botInvoke(seat, function(){ respondHuashenChangeAskStart(!!(choice && choice.change)); });
+  },
+};
+BOT_DECISIONS.huashenChangeEnd = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='huashenChangeAskEnd' && d && d.type==='huashenChangeAskEnd' && d.seat===seat;
+  },
+  buildCandidates: function(g, seat){
+    return [{ action: '更改【化身】', change: true }, { action: '不更改', change: false }];
+  },
+  localFallback: function(g, seat, candidates){
+    // 旧分支逐字:不更改
+    return candidates.find(function(c){ return c.change===false; }) || candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    botInvoke(seat, function(){ respondHuashenChangeAskEnd(!!(choice && choice.change)); });
+  },
+};
+BOT_DECISIONS.qiaobianMove = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='qiaobianMove' && d && d.type==='qiaobianMove' && d.seat===seat;
+  },
+  buildCandidates: function(g, seat){
+    // 候选=「不移动」+ 至多8个「装备源槽→目标角色」组合(源槽=任一存活角色非空装备槽,
+    // 目标=任一存活角色且同槽为空;同一源槽→同一目标去重,共≤9项)。只列装备移动:
+    // 判定区延时牌移动(doQiaobianMove 的 kind==='delay')机器人生成不出有意义评估,保守
+    // 不列,与旧分支"不移动"的保守口径一致。
+    const out = [{ action: '不移动', move: null }];
+    const seen = {};
+    if(!g.players[seat]) return out;
+    g.players.forEach(function(src, srcSeat){
+      if(!src || !src.alive) return;
+      EQUIP_SLOTS.forEach(function(slot){
+        const card = src.equips && src.equips[slot];
+        if(!card) return;
+        g.players.forEach(function(dst, dstSeat){
+          if(!dst || !dst.alive || dstSeat===srcSeat) return;
+          if(dst.equips && dst.equips[slot]) return; // 目标同槽已占用
+          const key = srcSeat+':'+slot+':'+dstSeat;
+          if(seen[key] || out.length>=9) return;
+          seen[key] = true;
+          out.push({
+            action: '移'+src.name+'的'+card.name+'→'+dst.name,
+            move: { srcSeat: srcSeat, dstSeat: dstSeat, kind: 'equip', slot: slot }
+          });
+        });
+      });
+    });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    // 旧分支逐字:不移动
+    return candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    botInvoke(seat, function(){ respondQiaobianMove(choice && choice.move!==undefined ? choice.move : null); });
+  },
+};
+BOT_DECISIONS.enyuanOption = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='enyuanChooseOption' && d && d.damagerSeat===seat;
+  },
+  buildCandidates: function(g, seat){
+    const p = g.players[seat];
+    const hasHeart = (p.hand||[]).some(function(c){ return c.suit==='♥'; });
+    if(hasHeart) return [{ action: '给一张红桃牌', option: 'giveCard' }, { action: '失去1点体力', option: 'loseHp' }];
+    return [{ action: '失去1点体力', option: 'loseHp' }];
+  },
+  localFallback: function(g, seat, candidates){
+    // 旧分支逐字:有红桃给牌否则掉血
+    const p = g.players[seat];
+    const want = (p.hand||[]).some(function(c){ return c.suit==='♥'; }) ? 'giveCard' : 'loseHp';
+    return candidates.find(function(c){ return c.option===want; }) || candidates[candidates.length-1] || null;
+  },
+  execute: function(g, seat, choice){
+    botInvoke(seat, function(){ chooseEnyuanOption(choice && choice.option || 'loseHp'); });
+  },
+};
+
 // ================= L3: seatPick 通用座位协议(第一批扩展,Task L3-T1) =================
 // 【本协议是什么】把"从合法座位里选一个"这一大类交互收敛成通用协议:BOT_SEAT_PICKS
 // 按技能注册 {match, buildSeatCandidates, fallbackSeat, execute},seatPick 动态收集
@@ -2442,10 +2569,9 @@ async function runBotDecision(g,seat){
     if(await botDecide('pickGeneral',g,seat)) return;
   }
   if(g.phase==='huashenPick'&&d.seat===seat){
-    const generalId=(p.huashenPool||[]).find(id=>(HUASHEN_SKILL_TABLE[id]||[]).length);
-    const entry=generalId&&(HUASHEN_SKILL_TABLE[generalId]||[])[0];
-    if(entry) botInvoke(seat,()=>respondHuashenPick(generalId,entry.name));
-    return;
+    // 决策已进 BOT_DECISIONS.huashenSkill(无密钥回退=池里第一个可用技能将,与旧分支
+    // 逐字一致,见注册表上方注释)。phase+seat 守卫保留作双保险,命中即 return。
+    if(await botDecide('huashenSkill',g,seat)) return;
   }
   if(g.phase==='guanxingReview'&&d.seat===seat){
     // 决策已进 BOT_DECISIONS.guanxing(默认方案=旧行为"全置顶原序",逐字一致,见注册表
@@ -2577,7 +2703,9 @@ async function runBotDecision(g,seat){
     botInvoke(seat,triggerEnyuan); return;
   }
   if(g.phase==='enyuanChooseOption'&&d.damagerSeat===seat){
-    botInvoke(seat,()=>chooseEnyuanOption((p.hand||[]).some(c=>c.suit==='♥')?'giveCard':'loseHp')); return;
+    // 决策已进 BOT_DECISIONS.enyuanOption(无密钥回退=有红桃给牌否则掉血,与旧分支逐字
+    // 一致,见注册表上方注释)。phase+damagerSeat 守卫保留作双保险,命中即 return。
+    if(await botDecide('enyuanOption',g,seat)) return;
   }
   if(g.phase==='enyuanGiveCard'&&d.damagerSeat===seat){
     const heart=(p.hand||[]).findIndex(c=>c.suit==='♥');
@@ -2601,13 +2729,14 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondLuoshen(true)); return;
   }
   if(g.phase==='huashenChangeAskStart'&&d.seat===seat){
-    // 左慈【化身】回合开始阶段"是否更改借用的技能":要不要换需要评估全局局势,超出"合理
-    // 默认"的范畴——安全默认是不更改,维持现状,不做任何越权评估。
-    botInvoke(seat,()=>respondHuashenChangeAskStart(false)); return;
+    // 决策已进 BOT_DECISIONS.huashenChangeStart(无密钥回退=不更改,与旧分支逐字一致,
+    // 见注册表上方注释)。phase+seat 守卫保留作双保险,命中即 return。
+    if(await botDecide('huashenChangeStart',g,seat)) return;
   }
   if(g.phase==='huashenChangeAskEnd'&&d.seat===seat){
-    // 同上,回合结束阶段的同一个决策,同一个安全默认。
-    botInvoke(seat,()=>respondHuashenChangeAskEnd(false)); return;
+    // 决策已进 BOT_DECISIONS.huashenChangeEnd(无密钥回退=不更改,与旧分支逐字一致,
+    // 见注册表上方注释)。phase+seat 守卫保留作双保险,命中即 return。
+    if(await botDecide('huashenChangeEnd',g,seat)) return;
   }
   if(g.phase==='guhuoQuestion'&&d.asking===seat){
     // 于吉【蛊惑】质疑判断由总线接管(无密钥回退=固定30%随机质疑,与旧分支逐字一致;
@@ -2615,10 +2744,9 @@ async function runBotDecision(g,seat){
     if(await botDecide('guhuoQuestion', g, seat)) return;
   }
   if(g.phase==='qiaobianMove'&&d.seat===seat){
-    // 张郃【巧变】跳过出牌阶段后"是否移动一张装备/判定牌":真人走的是"选来源+选目的地"
-    // 纯客户端本地选牌流程,机器人不需要走这套UI,直接调用服务端函数决定"不移动"——弃牌+
-    // 跳过阶段这个效果本身已经生效,不移动不影响这个前提,不需要评估移动哪张牌对谁更有利。
-    botInvoke(seat,()=>respondQiaobianMove(null)); return;
+    // 决策已进 BOT_DECISIONS.qiaobianMove(无密钥回退=不移动,与旧分支逐字一致,见注册表
+    // 上方注释)。phase+seat 守卫保留作双保险,命中即 return。
+    if(await botDecide('qiaobianMove',g,seat)) return;
   }
   if(botSafePrompt(g,seat)) return;
   console.warn('机器人暂未覆盖阶段',g.phase,d.type,seat);
