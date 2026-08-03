@@ -2817,24 +2817,21 @@ function enumerateAllLegalOneStepActions(g, seat){
 }
 
 // ================= Milestone C1:弱C出牌窗执行器 =================
-// 【弱C探测结论(本任务实证,勿重做)】game.js 的 tx(fn)(~2295)是 fire-and-forget:内部
-// 调 gameRef.transaction(...) 后直接返回 void,不返回 Promise、不 await;playCard(~2806)
-// 全部状态变更都发生在 tx 回调里(Firebase 事务收到的快照对象,不是调用方本地 g 引用)。
-// 因此一次 playCard 调用后,本地 g/currentG 不会同 tick 更新——currentG 只在 Firebase
-// 回声回来触发 render(g) 时才刷新(render 函数体第一行 currentG=g)。**强C(一次调度内
-// 多步循环)在本架构下不可行**:循环体第二步枚举读到的还是旧状态,会把同一张牌打两次或
-// 打出已被服务端拒绝的动作。要支持强C必须给 playCard/tx 加"提交后回调"通知 bot 侧拿到
-// 新快照再继续——那是 C1b 的未来工作,需要动 game.js(本任务禁止)。
-// 【弱C语义】runBotActionWindow 每次调度恰好执行一步:候选已把"牌×目标"合并成完整动作
-// (消灭旧 botPlay 的"先问牌、再问目标"两次AI调用),AI 一次拿到全部信息;多步组合
-// (拆马→杀)由 scheduleBotTurn 对同一 phase=play 窗口的下一次调度再入本函数推进,跨步
-// 连续性由 buildBotVisibleState 的 recentLog(B1 已含)传达。BOT_WINDOW_MAX_STEPS 保留
-// 作未来强C的循环上限(见 progress-log C1 条目),弱C下每调度恰好 1 步、用不到它。
+// ================= Milestone C2:强C出牌窗执行器(同窗多步循环) =================
+// 【弱C→强C】C1 的探测结论(tx fire-and-forget、currentG 不同 tick 更新、同窗多步不可行)
+// 在 SC1 给 tx/playCard/endPlay 加了可选提交回调之后不再成立:execute 后能拿到提交后的
+// 新快照,循环体重枚举读到的就是最新状态。因此 runBotActionWindow 恢复循环——每次 execute
+// 后 await 提交回调,拿新快照重枚举再决策,直到 结束出牌/步数上限/窗口失效/提交失败。
 // 【无密钥兜底=旧规则逐字复刻】旧 botPlay 的启发式是"options[0].value>25 才打最高价值
 // 牌,否则结束出牌"。localFallbackPlayWindow 在合并候选里找 localHeuristicScore 最大的
 // 非结束候选,>25 就打它、否则打结束项——和旧 botPlay 每步行为完全一致(回归红线,
-// run_ai_bus_c_window_test 有逐条断言)。
-const BOT_WINDOW_MAX_STEPS = 8; // 弱C下每调度1步,此常量保留作未来强C上限(progress-log 注明)
+// run_ai_bus_c_window_test 有逐条断言)。无密钥时只执行一步即 return,不等待提交、
+// 不循环(与 C1 弱C 逐字一致)——强C 只在 aiReady 时启用。
+const BOT_WINDOW_MAX_STEPS = 8; // 强C循环步数上限(有密钥同窗多步时真正生效;无密钥每调度1步用不到)
+// 提交回调超时兜底(毫秒):executePlayWindowChoiceAwait 等不到 onCommitted 时 resolve null,
+// 防 stub/异常环境把 runBotActionWindow 挂死。测试可用裸标识符赋值覆盖(缩小到几十毫秒
+// 加速超时路径——注意这是 let 不是 const,正是为了可覆盖)。
+let BOT_COMMIT_TIMEOUT_MS = 5000;
 function localFallbackPlayWindow(g, seat, candidates){
   let best = null;
   candidates.forEach(c=>{
@@ -2844,39 +2841,62 @@ function localFallbackPlayWindow(g, seat, candidates){
   if(best && (best.localHeuristicScore||0) > 25) return best;
   return candidates.find(c=>c.isEndPlay) || candidates[candidates.length-1];
 }
-function executePlayWindowChoice(g, seat, choice){
-  if(choice && choice.isEndPlay){ botInvoke(seat, endPlay); return; }
-  botInvoke(seat, ()=>playCard(choice.handIndex, choice.action, (choice.target!=null ? choice.target : null)));
+function executePlayWindowChoiceAwait(g, seat, choice){
+  return new Promise(function(resolve){
+    let settled = false;
+    const timer = setTimeout(function(){ if(!settled){ settled = true; resolve(null); } }, BOT_COMMIT_TIMEOUT_MS);
+    const onCommitted = function(newG){
+      if(settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(newG);
+    };
+    if(choice && choice.isEndPlay){
+      botInvoke(seat, function(){ endPlay(onCommitted); });
+    } else {
+      botInvoke(seat, function(){ playCard(choice.handIndex, choice.action, (choice.target != null ? choice.target : null), onCommitted); });
+    }
+  });
 }
 async function runBotActionWindow(g, seat){
-  // 弱C:每次调度恰好一步(见上方探测注释:tx 是 fire-and-forget,currentG 不会同tick更新,
-  // 强C多步循环在本架构下不可行——每步交给 scheduleBotTurn 再入窗)
-  const latest = (typeof currentG!=='undefined' && currentG) ? currentG : g;
-  if(!isBotActionWindow(latest, seat)) return;
-  const candidates = enumerateAllLegalOneStepActions(latest, seat);
-  if(!candidates.length) return;
-  candidates.forEach((c,i)=>{ c.index=i; });
-  let idx = null;
+  // 强C(Part A):有密钥时启用同窗多步循环——每次 execute 后等提交回调拿新快照,
+  // 重枚举再决策,直到结束出牌/步数上限/窗口失效/提交失败。无密钥时保持弱C行为
+  // (执行一步直接 return,不等待提交、不循环)——回归红线,测试锁定。
   const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
-  if(aiReady && candidates.length>1){
-    const state = buildBotVisibleState(latest, seat);
-    state.windowStep = 1; // 弱C每次调度是窗口内的第1步(跨调度的第N步由 recentLog 传达)
-    idx = await callAiChooseIndex({
-      g: latest, seat,
-      systemPrompt: buildBotDefaultSystemPrompt()
-        + '你处于同一出牌窗口的连续决策(一次调度选一步),每步只选一个完整合法动作(牌+目标已合并)。',
-      userPrompt: buildBotDefaultUserPrompt(state, candidates),
-      candidates,
-      maxTokens: 100,
-    });
-  } else if(candidates.length===1){
-    idx = 0;
+  let steps = 0;
+  let lastG = (typeof currentG!=='undefined' && currentG) ? currentG : g;
+  while(steps < BOT_WINDOW_MAX_STEPS){
+    if(!isBotActionWindow(lastG, seat)) break;
+    const candidates = enumerateAllLegalOneStepActions(lastG, seat);
+    if(!candidates.length) break;
+    candidates.forEach((c,i)=>{ c.index=i; });
+    let idx = null;
+    if(aiReady && candidates.length>1){
+      const state = buildBotVisibleState(lastG, seat);
+      state.windowStep = steps;
+      idx = await callAiChooseIndex({
+        g: lastG, seat,
+        systemPrompt: buildBotDefaultSystemPrompt()
+          + '你处于同一出牌窗口的连续决策,每步只选一个完整合法动作(牌+目标已合并)。'
+          + '你上一步执行后局面已经变化,请根据最新局面继续选择,直到选择结束出牌。',
+        userPrompt: buildBotDefaultUserPrompt(state, candidates),
+        candidates, maxTokens: 100,
+      });
+    } else if(candidates.length===1){
+      idx = 0;
+    }
+    let choice;
+    if(idx===null){
+      choice = localFallbackPlayWindow(lastG, seat, candidates);
+    } else {
+      choice = candidates[idx];
+    }
+    const newG = await executePlayWindowChoiceAwait(lastG, seat, choice);
+    steps++;
+    if(choice && (choice.isEndPlay || choice.action==='结束出牌阶段')) break;
+    // 无密钥:执行一步即返回(与弱C逐字一致);有密钥:等提交回调,拿不到新快照就 break
+    if(!aiReady) return;
+    if(!newG || newG===lastG) break;
+    lastG = newG;
   }
-  let choice;
-  if(idx===null){
-    choice = localFallbackPlayWindow(latest, seat, candidates);
-  } else {
-    choice = candidates[idx];
-  }
-  executePlayWindowChoice(latest, seat, choice);
 }

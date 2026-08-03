@@ -56,6 +56,10 @@ const context = {
   joinRoom: function() {},
   mySeat: 0,
   pushLog: function(log, text) { log.push({seq: log.length, text: text}); return log; },
+  // SC2:vm 沙箱默认没有裸 setTimeout/clearTimeout(只有 window.setTimeout),而
+  // executePlayWindowChoiceAwait 用裸标识符 → 必须在这里补,否则强C循环运行时 ReferenceError。
+  setTimeout: function(f, t) { return setTimeout(f, t); },
+  clearTimeout: function(t) { return clearTimeout(t); },
   console: console,
   Math: Math,
   Date: Date,
@@ -263,6 +267,9 @@ const testCode = String.raw`
 
   // ================= C1:弱C出牌窗 =================
   // ---- spy:playCard/endPlay(函数声明绑定,整体替换即可,与 l2 同一套) ----
+  // SC2:替换前先保存真实引用(提交失败测试需要真实 playCard 走 tx 的 reject→onCommitted(null))
+  window.__realPlayCard = playCard;
+  window.__realEndPlay = endPlay;
   window.__playCalls = [];
   window.__endPlayCalls = 0;
   playCard = function(cardIdx, action, target){ window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target }); };
@@ -375,6 +382,164 @@ const testCode = String.raw`
     if(window.__playCalls[0].action !== '桃') throw new Error('应出桃,实际 ' + window.__playCalls[0].action);
     if(window.__playCalls[0].target !== null) throw new Error('桃无目标,实际 target=' + window.__playCalls[0].target);
     if(window.__endPlayCalls !== 0) throw new Error('不应 endPlay');
+  });
+
+  // ================= SC2:强C同窗多步循环(有密钥)+提交回调等待 =================
+  // bot.js 顶层 let(BOT_COMMIT_TIMEOUT_MS)与 aiApiKey 同款 vm 坑:裸标识符赋值才命中;
+  // 缩小到 50ms 让"spy 不调 onCommitted → 超时兜底"路径快速结束,不用等真实 5s。
+  BOT_COMMIT_TIMEOUT_MS = 50;
+  // 默认恢复 dumb spy(记录但不调 onCommitted → 走超时兜底路径);强C两步测试单独换
+  // smart spy(onCommitted 用测试驱动的演化快照)。callAI mock 升级为记录 userPrompt。
+  playCard = function(cardIdx, action, target){ window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target }); };
+  endPlay = function(){ window.__endPlayCalls++; };
+  window.__mockAiPrompts = [];
+  callAI = async function(provider, apiKey, opts){
+    window.__mockAiCalls++;
+    window.__mockAiPrompts.push(opts && opts.userPrompt || '');
+    return window.__mockAiResults.length ? window.__mockAiResults.shift() : { ok: false, reason: 'other', detail: '队列已空' };
+  };
+
+  // ---- T17:强C两步(一次调度内 拆桥→杀,提交回调驱动循环) ----
+  // g1 手牌 [过河拆桥,杀],座位1装 +1马(的卢):初始 杀→1 距离2>射程1 非法;
+  // mock AI 序列 step1 选拆桥、step2 选杀。测试用 __simG 闭包维护演化态:
+  // smart spy 每次提交后"拆桥已结算(摘牌+拆马)/杀已打出(摘牌)"再深拷贝出新引用快照,
+  // 交给 onCommitted——不依赖真实锦囊效果/无懈/pick 机制(确定性)。
+  // 注意:快照必须每次是"新引用"(JSON 深拷贝),否则 newG===lastG 会被循环判成
+  // "提交没产生新状态"而 break,两步永远走不完——stripUndefined 原地返回同一对象,
+  // 默认快照(=fn 返回值)在这里恰好是陷阱。
+  await check('强C两步:一次 runBotActionWindow 内 拆桥→杀 连续两步(windowStep 0/1)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiPrompts = [];
+    window.__mockAiResults = [
+      { ok: true, text: '{"choice":0}' },
+      { ok: true, text: '{"choice":0}' }
+    ];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g1 = mkG([card('过河拆桥'), card('杀')]);
+    g1.players[1].equips.plus1 = card('的卢');
+    window.__simG = JSON.parse(JSON.stringify(g1));
+    playCard = function(cardIdx, action, target, onCommitted){
+      window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target });
+      var sim = window.__simG;
+      if(action === '过河拆桥'){ sim.players[0].hand.splice(cardIdx, 1); sim.players[1].equips.plus1 = null; }
+      else { sim.players[0].hand.splice(cardIdx, 1); }
+      var next = JSON.parse(JSON.stringify(sim));
+      window.__simG = next;
+      if(onCommitted) onCommitted(next);
+    };
+    await runBotActionWindow(g1, 0);
+    if(window.__playCalls.length !== 2) throw new Error('应恰2次 playCard(拆桥→杀),实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    if(window.__playCalls[0].action !== '过河拆桥' || window.__playCalls[0].target !== 1) throw new Error('第1步应拆桥→座位1,实际 ' + JSON.stringify(window.__playCalls[0]));
+    if(window.__playCalls[1].action !== '杀' || window.__playCalls[1].target !== 1) throw new Error('第2步应杀→座位1(马已拆,距离1合法),实际 ' + JSON.stringify(window.__playCalls[1]));
+    if(window.__mockAiCalls !== 2) throw new Error('应恰2次AI询问,实际 ' + window.__mockAiCalls);
+    if(window.__mockAiPrompts[0].indexOf('"windowStep":0') < 0) throw new Error('第1次AI应 windowStep=0,实际 ' + window.__mockAiPrompts[0].slice(0, 150));
+    if(window.__mockAiPrompts[1].indexOf('"windowStep":1') < 0) throw new Error('第2次AI应 windowStep=1,实际 ' + window.__mockAiPrompts[1].slice(0, 150));
+    if(window.__endPlayCalls !== 1) throw new Error('手牌打空后应自然走到结束出牌(恰1次endPlay),实际 ' + window.__endPlayCalls);
+  });
+
+  // ---- T18:endPlay 终止(choice.isEndPlay → 循环 break,不再枚举/询问) ----
+  await check('endPlay 终止:mock 选结束 → endPlay 执行后循环 break,不再枚举/询问', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiPrompts = [];
+    window.__mockAiResults = [ { ok: true, text: '{"choice":3}' } ]; // 杀→1,杀→2,桃,结束 → 结束=3
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG([card('杀'), card('桃')], { myHp: 2 });
+    await runBotActionWindow(g, 0);
+    if(window.__endPlayCalls !== 1) throw new Error('endPlay 应恰1次,实际 ' + window.__endPlayCalls);
+    if(window.__playCalls.length !== 0) throw new Error('不应 playCard,实际 ' + JSON.stringify(window.__playCalls));
+    if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI询问(选完结束即停),实际 ' + window.__mockAiCalls);
+  });
+
+  // ---- T19:快照失效 break(提交回调快照 turn 已变 → isBotActionWindow false → break) ----
+  await check('快照失效 break:提交回调快照 turn 已变 → 循环 break,不执行下一步', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiPrompts = [];
+    window.__mockAiResults = [ { ok: true, text: '{"choice":0}' } ];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG([card('杀'), card('桃')], { myHp: 2 });
+    var next = JSON.parse(JSON.stringify(g));
+    next.turn = 1; // 模拟别人操作插入:窗口失效
+    playCard = function(cardIdx, action, target, onCommitted){
+      window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target });
+      if(onCommitted) onCommitted(next);
+    };
+    await runBotActionWindow(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('应恰1次 playCard(第2步窗口失效不再执行),实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI询问,实际 ' + window.__mockAiCalls);
+  });
+
+  // ---- T20:提交失败 break(真实 playCard + gameRef.transaction 拒绝 → onCommitted(null)) ----
+  // 走真实 tx 链路:stub transaction 返回 Promise.reject → tx 的 rejection 分支 onCommitted(null)
+  // → executePlayWindowChoiceAwait resolve(null) → newG null → break,不挂死。
+  await check('提交失败 break:transaction 拒绝 → onCommitted(null) → 循环 break 不挂死', async function(){
+    window.__mockAiCalls = 0;
+    window.__mockAiPrompts = [];
+    window.__mockAiResults = [ { ok: true, text: '{"choice":0}' } ];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    playCard = window.__realPlayCard; // 真实 playCard:onCommitted 经 tx 的 reject 收到 null
+    var g = mkG([card('桃'), card('杀')], { myHp: 2 });
+    _g = JSON.parse(JSON.stringify(g));
+    gameRef = { transaction: function(fn){ fn(_g); return Promise.reject(new Error('模拟提交失败')); } };
+    await runBotActionWindow(g, 0);
+    if(_g.players[0].hand.length !== 1) throw new Error('真实 playCard 应已打出桃(手牌2→1),实际 ' + _g.players[0].hand.length);
+    if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI询问(提交失败后 break,不再问第2次),实际 ' + window.__mockAiCalls);
+    // 恢复 Promise stub(卫生)
+    gameRef = { __txSnapshot: null, transaction: function(fn){ var result = fn(typeof _g !== "undefined" ? _g : {}); var snap = gameRef.__txSnapshot !== null ? gameRef.__txSnapshot : result; return Promise.resolve({ snapshot: { val: function(){ return snap; } } }); } };
+  });
+
+  // ---- T21:无密钥只执行一步(弱C逐字:fallback 一步,不等待提交、不循环) ----
+  await check('无密钥:只执行一步(fallback),不等待提交、不循环(弱C逐字一致)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    playCard = function(cardIdx, action, target){ window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target }); };
+    endPlay = function(){ window.__endPlayCalls++; };
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG([card('桃')], { myHp: 2 });
+    await runBotActionWindow(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('应恰1次 playCard(桃,价值100),实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    if(window.__playCalls[0].action !== '桃') throw new Error('应出桃,实际 ' + window.__playCalls[0].action);
+    if(window.__endPlayCalls !== 0) throw new Error('不应 endPlay,实际 ' + window.__endPlayCalls);
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应询问AI,实际 ' + window.__mockAiCalls);
+  });
+
+  // ---- T22:maxSteps(AI 永不选结束、快照持续有效 → 恰 8 步后停) ----
+  await check('maxSteps:AI 永不选结束、快照持续有效 → 恰 8 步后停(BOT_WINDOW_MAX_STEPS)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiPrompts = [];
+    var manySha = [];
+    for(var s = 0; s < 8; s++){ manySha.push(card('杀', 'sha' + s)); }
+    window.__mockAiResults = [];
+    for(var r = 0; r < 8; r++){ window.__mockAiResults.push({ ok: true, text: '{"choice":0}' }); }
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG(manySha);
+    window.__simG = JSON.parse(JSON.stringify(g));
+    playCard = function(cardIdx, action, target, onCommitted){
+      window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target });
+      var sim = window.__simG;
+      sim.players[0].hand.splice(cardIdx, 1);
+      var next = JSON.parse(JSON.stringify(sim));
+      window.__simG = next;
+      if(onCommitted) onCommitted(next);
+    };
+    await runBotActionWindow(g, 0);
+    if(window.__playCalls.length !== 8) throw new Error('应恰8次 playCard(maxSteps 截断),实际 ' + window.__playCalls.length);
+    if(window.__mockAiCalls !== 8) throw new Error('应恰8次AI询问,实际 ' + window.__mockAiCalls);
+    if(window.__endPlayCalls !== 0) throw new Error('AI 未选结束,不应 endPlay,实际 ' + window.__endPlayCalls);
   });
 
   console.log('\n' + '='.repeat(60));

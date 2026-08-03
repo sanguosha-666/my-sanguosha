@@ -52,6 +52,10 @@ const context = {
   joinRoom: function() {},
   mySeat: 0,
   pushLog: function(log, text) { log.push({seq: log.length, text: text}); return log; },
+  // SC2:runBotActionWindow 强C循环的 executePlayWindowChoiceAwait 用裸 setTimeout/clearTimeout,
+  // vm 沙箱默认没有(只有 window.setTimeout)→ 必须补,否则走到出牌窗的测试 ReferenceError。
+  setTimeout: function(f, t) { return setTimeout(f, t); },
+  clearTimeout: function(t) { return clearTimeout(t); },
   console: console,
   Math: Math,
   Date: Date,
