@@ -206,6 +206,28 @@ btnRow.appendChild(clearBtn);
 4. 点击后弹窗不关闭（`#aiKeyModal` 仍可见）、就地提示出现。
 5. 清除后 `callAiChooseIndex` 的 systemPrompt 不含摘要段。
 
+---
+
+## 4.6 补充：token 优化（用户确认参数）
+
+**背景**：7 人局每次 AI 决策的 userPrompt 可达 2-4k tokens（局面投影大头）。用户确认以下三项优化，**只改投影/候选生成，不动架构、无密钥行为零变化**：
+
+| 项 | 参数 | 改动 |
+|----|------|------|
+| **弃牌堆统计** | 删除 | `buildBotVisibleState` 移除 `discardPile` 字段（含 byName/count）；`run_ai_bus_info_test.js` 对应断言删除 |
+| **recentLog** | 20 → 15 条 | `slice(-20)` → `slice(-15)`；info 测试断言更新（30 条日志 → 长度 15） |
+| **候选 Top-K** | K=25 | `enumerateAllLegalOneStepActions`：按 `localHeuristicScore` 降序排序 → 截断 Top-25 → **「结束出牌阶段」恒在列表末尾**（显式保护，不能被截掉） |
+
+**Top-K 安全论证**：
+- 无密钥 `localFallbackPlayWindow` 取最高分候选（Top-1 恒在截断结果里）→ 行为逐字不变（测试锁定）。
+- 服务端校验仍是最后防线（AI 只能从截断后的列表选，列表外不合法）。
+- 被截掉的低分候选 = 本地启发式认为较差的选择——有意的取舍（token 换聚焦）。
+
+**测试**：
+- info：删 discardPile 断言；recentLog 长度 15 且末项对齐。
+- c_window：构造 30+ 原始候选的场景（多手牌×多目标）→ 截断后候选 ≤26 条（25 + 结束项）且结束项恒在；Top-1 恒在。
+- 回归：全 AI-bus 套件 + 仓库套件。
+
 
 ---
 
