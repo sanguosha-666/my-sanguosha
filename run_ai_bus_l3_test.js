@@ -1473,6 +1473,183 @@ const testCode = String.raw`
       throw new Error('aoeResp 阶段不应误调 dying/duel');
   });
 
+  // ================= T7:wugu挑牌 + pickGeneral(含主公选将)进总线 =================
+  // 服务端真实状态:wugu={type:'wugu',from,order,idx,pool}(skills.js wuguPick);
+  // 选将:respondPickGeneral/respondPickLordGeneral(room-lifecycle.js)都校验
+  // p.generalChoices——主公候选也存 generalChoices(room-lifecycle.js 把
+  // g.lordGeneralPool 直接赋给主公的 generalChoices),lordChoices 字段不存在,
+  // 注册表用 p.lordChoices||p.generalChoices 自然回退到真实字段。
+  // 本地回退与旧 runBotDecision 分支逐字一致:wugu=池首张、选将=botPickGeneral 打分。
+  respondPickGeneral = spyService('pickGeneral');
+  respondPickLordGeneral = spyService('pickLordGeneral');
+  wuguPick = spyService('wugu');
+
+  function mkWuguG(opt){
+    opt = opt || {};
+    var g = mkSeatG(opt);
+    g.phase = 'wugu';
+    g.pending = { type: 'wugu', from: 1,
+      order: opt.order || [0, 1, 2],
+      idx: opt.idx !== undefined ? opt.idx : 0,
+      pool: opt.pool || [card('杀','w0'), card('桃','w1'), card('闪','w2')] };
+    return g;
+  }
+
+  await check('wugu:注册存在;match=phase+type+轮到+池非空;错阶段/未轮到/空池/错type false', function(){
+    var s = BOT_DECISIONS.wuguPick;
+    if(!s) throw new Error('BOT_DECISIONS.wuguPick 未注册');
+    var g1 = mkWuguG();
+    if(!s.match(g1, 0)) throw new Error('order[0]=0 轮到应命中');
+    if(s.match(g1, 1)) throw new Error('未轮到(seat1)不应命中');
+    var g2 = mkWuguG(); g2.phase = 'play';
+    if(s.match(g2, 0)) throw new Error('错阶段不应命中');
+    var g3 = mkWuguG({ order: [1, 0] });
+    if(s.match(g3, 0)) throw new Error('order[0]=1 未轮到0不应命中');
+    var g4 = mkWuguG({ pool: [] });
+    if(s.match(g4, 0)) throw new Error('空池不应命中');
+    var g5 = mkWuguG(); g5.pending.type = 'wuxie';
+    if(s.match(g5, 0)) throw new Error('错type不应命中');
+  });
+
+  await check('wugu:候选=每张池牌一项且带牌名;extraState 含 orderIdx/poolCount', function(){
+    var s = BOT_DECISIONS.wuguPick;
+    var g = mkWuguG({ idx: 1 });
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 3) throw new Error('3张池牌应3候选,实际 ' + c.length);
+    if(c[0].poolIdx !== 0 || c[1].poolIdx !== 1 || c[2].poolIdx !== 2) throw new Error('poolIdx 应0/1/2');
+    if(c[0].cardId !== 'w0' || c[1].cardId !== 'w1' || c[2].cardId !== 'w2') throw new Error('cardId 应取自池牌');
+    if(c[0].label !== '拿【杀】' || c[1].label !== '拿【桃】' || c[2].label !== '拿【闪】')
+      throw new Error('label 应含池牌名,实际 ' + JSON.stringify(c));
+    var st = s.extraState(g, 0);
+    if(!st.wugu || st.wugu.orderIdx !== 1 || st.wugu.poolCount !== 3)
+      throw new Error('extraState.wugu 应{orderIdx:1,poolCount:3},实际 ' + JSON.stringify(st));
+  });
+
+  await check('wugu无密钥:fallback=池首张 → wuguPick(0, idx, 首张id)', async function(){
+    window.__wuguCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g = mkWuguG({ idx: 2, order: [1, 2, 0] });
+    var r = await botDecide('wuguPick', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__wuguCalls.length !== 1 || window.__wuguCalls[0][0] !== 0 || window.__wuguCalls[0][1] !== 2 || window.__wuguCalls[0][2] !== 'w0')
+      throw new Error('应 wuguPick(0,2,w0),实际 ' + JSON.stringify(window.__wuguCalls));
+  });
+
+  await check('wugu有密钥:mock 选第3项 → wuguPick(2, idx, 第3张id);userPrompt 含池牌名、不含他人手牌', async function(){
+    window.__wuguCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":2}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkWuguG({ idx: 1, order: [2, 0, 1], hands: { 1: [card('桃园结义','sec')] } });
+    var r = await botDecide('wuguPick', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__wuguCalls.length !== 1 || window.__wuguCalls[0][0] !== 2 || window.__wuguCalls[0][1] !== 1 || window.__wuguCalls[0][2] !== 'w2')
+      throw new Error('应 wuguPick(2,1,w2),实际 ' + JSON.stringify(window.__wuguCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('拿【杀】') < 0 || up.indexOf('拿【桃】') < 0 || up.indexOf('拿【闪】') < 0)
+      throw new Error('userPrompt 应含池牌名,实际 ' + up);
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+  });
+
+  function mkPickGeneralG(opt){
+    opt = opt || {};
+    var g = mkSeatG(opt);
+    g.phase = opt.phase || 'pickingGeneral';
+    var seat = opt.seat !== undefined ? opt.seat : 0;
+    g.players[seat].general = undefined; // 未选将
+    g.players[seat].generalChoices = opt.generalChoices || ['zhangfei','simayi'];
+    if(opt.isBotOf !== undefined) g.players[seat].isBot = opt.isBotOf;
+    if(opt.roles){ g.players.forEach(function(p,i){ p.role = opt.roles[i] || p.role; }); }
+    return g;
+  }
+
+  await check('pickGeneral:注册存在;match=选将阶段+机器人+未选;错阶段/非bot/已选 false;主公阶段仅主公命中', function(){
+    var s = BOT_DECISIONS.pickGeneral;
+    if(!s) throw new Error('BOT_DECISIONS.pickGeneral 未注册');
+    var g1 = mkPickGeneralG();
+    if(!s.match(g1, 0)) throw new Error('选将阶段+bot+未选应命中');
+    if(s.match(g1, 1)) throw new Error('非bot座位不应命中');
+    var g2 = mkPickGeneralG(); g2.phase = 'play';
+    if(s.match(g2, 0)) throw new Error('错阶段不应命中');
+    var g3 = mkPickGeneralG(); g3.players[0].general = 'zhangfei';
+    if(s.match(g3, 0)) throw new Error('已选将不应命中');
+    var g4 = mkPickGeneralG({ phase: 'pickingLordGeneral', seat: 1, roles: ['zhong','zhu','fan'] });
+    if(s.match(g4, 0)) throw new Error('非主公不应命中(主公阶段)');
+    if(!s.match(g4, 1)) throw new Error('主公座位应命中(主公阶段)');
+  });
+
+  await check('pickGeneral:候选=generalChoices 每项,label 含武将名+技能名;主公候选同样来自 generalChoices(lordChoices 字段不存在)', function(){
+    var s = BOT_DECISIONS.pickGeneral;
+    var g = mkPickGeneralG({ generalChoices: ['zhangfei','simayi'] });
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 2) throw new Error('应2候选,实际 ' + c.length);
+    if(c[0].generalId !== 'zhangfei' || c[1].generalId !== 'simayi') throw new Error('generalId 顺序应同候选池');
+    if(c[0].label !== '张飞(咆哮)' || c[1].label !== '司马懿(反馈)')
+      throw new Error('label 应含武将名+技能,实际 ' + JSON.stringify(c));
+    var gl = mkPickGeneralG({ phase: 'pickingLordGeneral', seat: 1, roles: ['zhong','zhu','fan'], generalChoices: ['xuchu','sunshangxiang'] });
+    var cl = s.buildCandidates(gl, 1);
+    if(cl.length !== 2 || cl[0].generalId !== 'xuchu' || cl[1].generalId !== 'sunshangxiang')
+      throw new Error('主公候选应来自 generalChoices,实际 ' + JSON.stringify(cl));
+  });
+
+  await check('pickGeneral无密钥:打分最高者(赵云:闪+杀+4血) → respondPickGeneral(对应id);与 botPickGeneral 行为一致', async function(){
+    window.__pickGeneralCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g = mkPickGeneralG({ generalChoices: ['zhangfei','simayi','zhaoyun'] });
+    var r = await botDecide('pickGeneral', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__pickGeneralCalls.length !== 1 || window.__pickGeneralCalls[0][0] !== 'zhaoyun')
+      throw new Error('打分最高应 zhaoyun(74>张飞58>司马懿46),实际 ' + JSON.stringify(window.__pickGeneralCalls));
+    var g2 = mkPickGeneralG({ generalChoices: ['zhangfei','simayi','zhaoyun'] });
+    botPickGeneral(g2, 0, false);
+    if(window.__pickGeneralCalls.length !== 2 || window.__pickGeneralCalls[1][0] !== 'zhaoyun')
+      throw new Error('botPickGeneral 对照应同样选 zhaoyun,实际 ' + JSON.stringify(window.__pickGeneralCalls));
+  });
+
+  await check('pickGeneral无密钥(主公):打分含主公加成(刘备84>许褚74) → respondPickLordGeneral(刘备)', async function(){
+    window.__pickLordGeneralCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g = mkPickGeneralG({ phase: 'pickingLordGeneral', seat: 1, roles: ['zhong','zhu','fan'], generalChoices: ['liubei','xuchu'] });
+    var r = await botDecide('pickGeneral', g, 1);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__pickLordGeneralCalls.length !== 1 || window.__pickLordGeneralCalls[0][0] !== 'liubei')
+      throw new Error('主公加成后应选 liubei(回复+主公+20),实际 ' + JSON.stringify(window.__pickLordGeneralCalls));
+    var g2 = mkPickGeneralG({ phase: 'pickingLordGeneral', seat: 1, roles: ['zhong','zhu','fan'], generalChoices: ['liubei','xuchu'] });
+    botPickGeneral(g2, 1, true);
+    if(window.__pickLordGeneralCalls.length !== 2 || window.__pickLordGeneralCalls[1][0] !== 'liubei')
+      throw new Error('botPickGeneral 主公对照应同样选 liubei,实际 ' + JSON.stringify(window.__pickLordGeneralCalls));
+  });
+
+  await check('pickGeneral有密钥:mock 选 index1 → respondPickGeneral(第2项id);主公 mock → respondPickLordGeneral', async function(){
+    window.__pickGeneralCalls = []; window.__pickLordGeneralCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkPickGeneralG({ generalChoices: ['zhangfei','simayi','zhaoyun'] });
+    var r = await botDecide('pickGeneral', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__pickGeneralCalls.length !== 1 || window.__pickGeneralCalls[0][0] !== 'simayi')
+      throw new Error('mock 选第2项应 respondPickGeneral(simayi),实际 ' + JSON.stringify(window.__pickGeneralCalls));
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    var gl = mkPickGeneralG({ phase: 'pickingLordGeneral', seat: 1, roles: ['zhong','zhu','fan'], generalChoices: ['zhangfei','simayi'] });
+    var rl = await botDecide('pickGeneral', gl, 1);
+    if(rl !== true || window.__mockAiCalls !== 1) throw new Error('主公 AI 调用异常,实际 rl=' + rl);
+    if(window.__pickLordGeneralCalls.length !== 1 || window.__pickLordGeneralCalls[0][0] !== 'simayi')
+      throw new Error('主公 mock 选第2项应 respondPickLordGeneral(simayi),实际 ' + JSON.stringify(window.__pickLordGeneralCalls));
+  });
+
+  await check('接线:runBotDecision pickingGeneral/wugu 命中即走 botDecide 并调服务端,不崩', async function(){
+    window.__pickGeneralCalls = []; window.__wuguCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g1 = mkPickGeneralG({ generalChoices: ['zhangfei','simayi'] });
+    await runBotDecision(g1, 0);
+    if(window.__pickGeneralCalls.length !== 1 || window.__pickGeneralCalls[0][0] !== 'zhangfei')
+      throw new Error('pickingGeneral 接线应 respondPickGeneral(zhangfei),实际 ' + JSON.stringify(window.__pickGeneralCalls));
+    var g2 = mkWuguG({ order: [0], idx: 0, pool: [card('杀','x0'), card('桃','x1')] });
+    await runBotDecision(g2, 0);
+    if(window.__wuguCalls.length !== 1 || window.__wuguCalls[0][0] !== 0 || window.__wuguCalls[0][1] !== 0 || window.__wuguCalls[0][2] !== 'x0')
+      throw new Error('wugu 接线应 wuguPick(0,0,x0),实际 ' + JSON.stringify(window.__wuguCalls));
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

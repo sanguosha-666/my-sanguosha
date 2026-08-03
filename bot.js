@@ -1024,6 +1024,82 @@ BOT_DECISIONS.aoeResp = {
   maxTokens: 80,
 };
 
+// ================= L3:wugu挑牌 + pickGeneral(选将,含主公)进总线(Task T7) =================
+// 【本批是什么】五谷丰登"从公共池挑一张"和开局选将两个决策点,从 runBotDecision 硬编码
+// 分支收敛进 BOT_DECISIONS 注册表。两条 localFallback 与改动前分支逐字一致(wugu=池首张、
+// 选将=botPickGeneral 打分公式),无密钥行为零变化。
+// 【字段真相】选将的服务端校验(room-lifecycle.js respondPickGeneral/respondPickLordGeneral)
+// 统一读 p.generalChoices——主公候选也是 room-lifecycle.js 把 g.lordGeneralPool 直接赋给
+// 主公的 generalChoices,项目里不存在 p.lordChoices 字段;buildCandidates 用
+// p.lordChoices||p.generalChoices 的写法对不存在字段自然回退,行为正确。
+// 【expectedIdx 约定】wuguPick(poolIdx,expectedIdx,expectedCardId) 的 expectedIdx 是乐观
+// 并发校验("我看到的时候轮到第几个人挑"),必须传当前真实的 d.idx,不能硬编码 0——曾经
+// 硬编码成 0 导致机器人不是第一个挑牌人时服务端静默 return、挑牌轮次卡死。
+BOT_DECISIONS.wuguPick = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='wugu' && d && d.type==='wugu' && Array.isArray(d.order) && d.order[d.idx||0]===seat && Array.isArray(d.pool) && d.pool.length>0;
+  },
+  buildCandidates: function(g, seat){
+    const d = g.pending;
+    return (d.pool||[]).map(function(c, i){
+      return { poolIdx: i, cardId: c && c.id, label: '拿【'+(c&&c.name||'?')+'】' };
+    });
+  },
+  extraState: function(g, seat){
+    const d = g.pending;
+    return { wugu: { orderIdx: d.idx || 0, poolCount: (d.pool||[]).length } };
+  },
+  localFallback: function(g, seat, candidates){
+    // 旧分支逐字:wuguPick(0, d.idx||0, d.pool[0]&&d.pool[0].id)
+    return candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    const d = g.pending;
+    botInvoke(seat, function(){ wuguPick(choice.poolIdx, d.idx || 0, choice.cardId); });
+  },
+};
+
+BOT_DECISIONS.pickGeneral = {
+  match: function(g, seat){
+    if(g.phase==='pickingGeneral'){ const p=g.players[seat]; return !!p && p.isBot && !p.general; }
+    if(g.phase==='pickingLordGeneral'){ return getLordSeat(g)===seat; }
+    return false;
+  },
+  buildCandidates: function(g, seat){
+    const p = g.players[seat];
+    const lordPick = g.phase==='pickingLordGeneral';
+    const ids = lordPick ? (p.lordChoices||p.generalChoices||[]) : (p.generalChoices||[]);
+    return ids.filter(function(id){ return GENERALS[id]; }).map(function(id){
+      const gen = GENERALS[id];
+      return { generalId: id, label: gen.name + (gen.skill ? '('+gen.skill+')' : ''), generalName: gen.name };
+    });
+  },
+  localFallback: function(g, seat, candidates){
+    // 旧 botPickGeneral 打分逐字(直接复用现有函数):选打分最高者
+    const p = g.players[seat], lordPick = g.phase==='pickingLordGeneral';
+    const choices = (p.generalChoices||[]).filter(function(id){ return GENERALS[id]; });
+    if(!choices.length) return candidates[0] || null;
+    const score = function(id){
+      const gen = GENERALS[id], text = (gen.skill||'') + (gen.desc||'');
+      return generalMaxHp(id)*12 +
+        (/回复|摸.*牌|防止|免疫|闪/.test(text)?16:0) +
+        (/伤害|杀|弃置/.test(text)?10:0) + (lordPick && /主公|回复|防止/.test(text)?20:0);
+    };
+    choices.sort(function(a,b){ return score(b)-score(a); });
+    const best = choices[0];
+    return candidates.find(function(c){ return c.generalId===best; }) || candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){
+      if(g.phase==='pickingLordGeneral') respondPickLordGeneral(choice.generalId);
+      else respondPickGeneral(choice.generalId);
+    });
+  },
+};
+
 // ================= L3: seatPick 通用座位协议(第一批扩展,Task L3-T1) =================
 // 【本协议是什么】把"从合法座位里选一个"这一大类交互收敛成通用协议:BOT_SEAT_PICKS
 // 按技能注册 {match, buildSeatCandidates, fallbackSeat, execute},seatPick 动态收集
@@ -2312,8 +2388,14 @@ async function runBotDecision(g,seat){
   const p=g.players[seat];
   if(!p||!p.isBot||!p.alive&&g.phase!=='pickingGeneral') return;
   const d=g.pending||{};
-  if(g.phase==='pickingLordGeneral'){ botPickGeneral(g,seat,true); return; }
-  if(g.phase==='pickingGeneral'){ botPickGeneral(g,seat,false); return; }
+  if(g.phase==='pickingLordGeneral'){
+    // 决策已进 BOT_DECISIONS.pickGeneral(无密钥回退=botPickGeneral 打分,与旧分支逐字
+    // 一致,见注册表上方注释)。phase 守卫保留作双保险。
+    if(await botDecide('pickGeneral',g,seat)) return;
+  }
+  if(g.phase==='pickingGeneral'){
+    if(await botDecide('pickGeneral',g,seat)) return;
+  }
   if(g.phase==='huashenPick'&&d.seat===seat){
     const generalId=(p.huashenPool||[]).find(id=>(HUASHEN_SKILL_TABLE[id]||[]).length);
     const entry=generalId&&(HUASHEN_SKILL_TABLE[generalId]||[])[0];
@@ -2386,10 +2468,10 @@ async function runBotDecision(g,seat){
   // 旧的 respondWuxie(false) 硬编码分支已删除:回退顺序 safe 正则第一命中"不出",等价。
   if(await botDecide('controlsChoice', g, seat)) return;
   if(g.phase==='wugu'&&d.type==='wugu'&&Array.isArray(d.order)&&d.order[d.idx||0]===seat&&Array.isArray(d.pool)&&d.pool.length){
-    // expectedIdx 是乐观并发校验("我看到的时候轮到第几个人挑"),必须传当前真实的
-    // d.idx。曾经硬编码成 0,于是只要机器人不是五谷丰登的第一个挑牌人,服务端的
-    // idx!==expectedIdx 就会静默 return、什么都不做 —— 挑牌轮次卡在这里再也不动。
-    botInvoke(seat,()=>wuguPick(0,d.idx||0,d.pool[0]&&d.pool[0].id)); return;
+    // 决策已进 BOT_DECISIONS.wuguPick(无密钥回退=池首张,与旧分支逐字一致;expectedIdx
+    // 乐观并发校验必须传当前真实 d.idx,见注册表上方注释)。phase+pending 守卫保留作
+    // 双保险,命中即 return。
+    if(await botDecide('wuguPick',g,seat)) return;
   }
   if(g.phase==='tieqi'&&d.from===seat){ botInvoke(seat,()=>respondTieqi(true)); return; }
   if(g.phase==='liegong'&&d.from===seat){ botInvoke(seat,()=>respondLiegong(true)); return; }
