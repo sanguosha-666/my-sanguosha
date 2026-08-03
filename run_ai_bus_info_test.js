@@ -4,8 +4,8 @@
  * 加载真实 data.js + ai-bot.js + bot.js 进共享 vm 沙箱(与 run_ai_bus_core_test.js
  * 同一套 fs.readFileSync + vm.Script + vm.createContext 惯例),在沙箱内运行断言。
  * 覆盖:generalSkill/generalDesc 不依赖 isFirstTurn 常开(desc 全量不截断)、recentLog
- * 取最近20条并对齐末项、myFlags 自身标志投影、buildBotGuhuoVisibleState 不泄露 actualCard
- * 真实牌名(回归)。
+ * 取最近15条并对齐末项、无 discardPile 键(token 优化)、myFlags 自身标志投影、
+ * buildBotGuhuoVisibleState 不泄露 actualCard 真实牌名(回归)。
  *
  * 已知的 vm 坑:aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,必须用
  * runInContext 里裸标识符赋值;distance/attackRange 是 game.js 的函数声明,沙箱不
@@ -158,17 +158,17 @@ const testCode = String.raw`
     }
   });
 
-  // 3. recentLog:30 条日志 → 只留最近20条,且末项对齐第30条
-  await check('recentLog 长度20且末项对齐', function(){
+  // 3. recentLog:30 条日志 → 只留最近15条,且末项对齐第30条
+  await check('recentLog 长度15且末项对齐', function(){
     var g = mkG();
     g.log = [];
     for(var i = 1; i <= 30; i++){ g.log.push({ seq: i, text: '日志' + i }); }
     var s = buildBotVisibleState(g, 0);
-    if(!Array.isArray(s.recentLog) || s.recentLog.length !== 20){
-      throw new Error('期望长度20,实际 ' + (s.recentLog && s.recentLog.length));
+    if(!Array.isArray(s.recentLog) || s.recentLog.length !== 15){
+      throw new Error('期望长度15,实际 ' + (s.recentLog && s.recentLog.length));
     }
-    if(s.recentLog[19] !== '日志30') throw new Error('末项应为 日志30,实际 ' + s.recentLog[19]);
-    if(s.recentLog[0] !== '日志11') throw new Error('首项应为 日志11,实际 ' + s.recentLog[0]);
+    if(s.recentLog[14] !== '日志30') throw new Error('末项应为 日志30,实际 ' + s.recentLog[14]);
+    if(s.recentLog[0] !== '日志16') throw new Error('首项应为 日志16,实际 ' + s.recentLog[0]);
   });
 
   // 4. myFlags:shaUsed / jiangchiNoSlash 布尔投影(自身座位)
@@ -201,26 +201,12 @@ const testCode = String.raw`
     if(json.indexOf('杀') === -1) throw new Error('应包含声明牌名 杀');
   });
 
-  // 6. discardPile:弃牌堆是公开信息 → count 总数 + byName 按牌名计数
-  await check('discardPile 按牌名计数(杀/闪/桃各1)', function(){
+  // 6. token 优化:buildBotVisibleState 输出不含 discardPile 键(弃牌堆统计已从投影删除)
+  await check('可见状态不含 discardPile 键', function(){
     var g = mkG();
     g.discard = [ {name:'杀'}, {name:'闪'}, {name:'桃'} ];
-    var s = buildBotVisibleState(g, 0);
-    if(!s.discardPile) throw new Error('discardPile 缺失');
-    if(s.discardPile.count !== 3) throw new Error('count 期望3,实际 ' + s.discardPile.count);
-    if(s.discardPile.byName['杀'] !== 1 || s.discardPile.byName['闪'] !== 1 || s.discardPile.byName['桃'] !== 1){
-      throw new Error('byName 期望 {杀:1,闪:1,桃:1},实际 ' + JSON.stringify(s.discardPile.byName));
-    }
-  });
-
-  // 7. discardPile 空弃牌堆 → count 0、byName 空对象
-  await check('discardPile 空弃牌堆 count0 byName空', function(){
-    var g = mkG();
-    g.discard = [];
-    var s = buildBotVisibleState(g, 0);
-    if(s.discardPile.count !== 0) throw new Error('count 期望0,实际 ' + s.discardPile.count);
-    var keys = Object.keys(s.discardPile.byName);
-    if(keys.length !== 0) throw new Error('byName 应为空对象,实际 ' + JSON.stringify(s.discardPile.byName));
+    var json = JSON.stringify(buildBotVisibleState(g, 0));
+    if(json.indexOf('discardPile') !== -1) throw new Error('不应出现 discardPile 键');
   });
 
   // 8. deckLeft:牌堆剩余张数(公开信息)

@@ -144,3 +144,26 @@
 - **回归**:summary 13/0、core 7/0、c_window 25/0、l2 23/0、l3 93/0、model_picker 13/0、
   l1 8/0、info 10/0,`node --check bot.js`/`ai-bot.js` 通过。`?v=` 283→284 共 13 处。
   `normalize` 无需改(纯客户端内存状态,不进 g)。
+
+## token 优化 T1:删 discardPile + recentLog 15 条(SDD 计划「2026-08-03-ai-summary-token-optimization」)
+
+- **动机**:规格 §4.6 评估弃牌堆统计对 AI 决策价值低(牌名构成对"下一手该打什么"几乎无信息量),
+  却是 prompt 里最长的非必要开销(全量 byName 随对局增长);recentLog 20 条覆盖约 2 回合、15 条
+  足够维持跨步连续性。token 优化第一步。
+- **`buildBotVisibleState`(bot.js)**:①删除 `discardPile: (function(){...})()` 整块
+  (count+byName 统计,含 `(g.discard||[])` 防御一并移除——g.discard 本身还在,只是不再投影);
+  ②`recentLog` `slice(-20)` → `slice(-15)`,注释同步。
+- **`updateAiSummary`(bot.js)**:userPrompt 的最近局面 JSON 从
+  `{round, recentLog, discardPile, players}` 去掉 `discardPile: state.discardPile,`——
+  字段删除后该项恒为 undefined,JSON.stringify 会静默丢弃(无害),但显式清理保持 prompt 形状
+  真实反映可见状态,避免将来某天字段复活却忘记接线。
+- **测试(`run_ai_bus_info_test.js` 10→9 项,TDD RED→GREEN)**:①删除 discardPile 两条断言
+  (count/byName、空弃牌堆),改为一条「可见状态不含 discardPile 键」
+  (`JSON.stringify(buildBotVisibleState(g,0)).indexOf('discardPile')===-1`,g.discard 置 3 张牌
+  确保不是"恰好空堆"的假绿);②recentLog 断言 30 条→20 改 30 条→15(长度 15、首项 日志16、
+  末项 日志30)。RED 阶段实测两处失败(长度 20、键仍存在)。规则 20:删除的旧断言命题随实现
+  变更失效,新"不含键"断言已确认能变红。
+- **回归**:info 9/0、summary 13/0、core 7/0、l2 23/0、l3 93/0、c_window 25/0,
+  `node --check bot.js` 通过。全项目 `rg discardPile` 确认无其它测试/调用点引用该字段
+  (仅 specs/plans 文档)。`index.html` `?v=` 284→285 共 13 处。`normalize` 无需改
+  (纯客户端投影删除,不进 g)。
