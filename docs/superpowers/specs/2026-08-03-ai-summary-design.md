@@ -160,13 +160,19 @@ async function callAiChooseIndex(opts){
 
 ---
 
-## 4.5 补充：清除 AI 记忆按钮（用户新增需求）
+## 4.5 补充：移除刷新警告 + 清除 AI 记忆按钮（用户新增需求）
 
 ### 背景
 
-`setupRefreshWarning`（ai-bot.js ~579）本意是"有 AI 会话时刷新弹警告"——但它检查的 `window.aiConversations` 是空壳（从未被写入），警告实际从不触发。用户需求：**加一个主动清除 AI 记忆的按钮**，不依赖刷新。
+`setupRefreshWarning`（ai-bot.js:732-746）在刷新时弹"页面刷新后AI机器人的会话历史将丢失，确定要刷新吗？"的 beforeunload 警告——它检查的 `window.aiConversations` 是空壳（从未被写入），警告实际从不触发，属死代码。用户需求：**移除这个刷新警告**。
 
-### 设计
+### 设计 A：移除 `setupRefreshWarning`
+
+- 删除 `setupRefreshWarning()` 函数（ai-bot.js:732-745）及其调用（ai-bot.js:746 `setupRefreshWarning();`）。
+- `window.aiConversations` 相关引用一并清除（全项目仅此处引用）。
+- **效果**：刷新页面不再弹出任何 AI 记录丢失警告。
+
+### 设计 B：清除 AI 记忆按钮（主动清除入口，替代被动警告）
 
 **位置**：`showAiKeyModal` 弹窗按钮区（`btnRow`，ai-bot.js:484-493）——"跳过,使用本地机器人"旁新增一个 ghost 按钮：
 
@@ -191,14 +197,14 @@ btnRow.appendChild(clearBtn);
 - 只清**记忆**（`aiSummary` 摘要 + 未来可能的会话历史）——**密钥/模型选择/aiPromptDismissed 等配置不清**（配置与记忆是两回事）。
 - 点击后弹窗不关闭（用户可能还要改密钥/模型），就地显示"已清除"提示。
 - 清除后下一次 AI 决策无摘要（像失忆的人类）。
-
-**与 `setupRefreshWarning` 的关系**：刷新警告逻辑保留（若未来 aiConversations 真被使用才生效）；清除按钮是主动替代品——用户现在可以随时清，不必等刷新。
+- **与移除刷新警告的关系**：被动警告删除后，主动清除按钮是唯一的管理入口——用户随时可清，不必等刷新。
 
 **测试**：
-1. 弹窗含 `aiMemoryClearBtn` 按钮（结构性断言）。
-2. 点击 → `aiSummary===''` 且 `aiSummarySeat===null`；密钥/`aiApiModel` 不受影响。
-3. 点击后弹窗不关闭（`#aiKeyModal` 仍可见）、就地提示出现。
-4. 清除后 `callAiChooseIndex` 的 systemPrompt 不含摘要段。
+1. `rg "setupRefreshWarning" ai-bot.js` → 无输出（函数与调用均已移除）。
+2. 弹窗含 `aiMemoryClearBtn` 按钮（结构性断言）。
+3. 点击 → `aiSummary===''` 且 `aiSummarySeat===null`；密钥/`aiApiModel` 不受影响。
+4. 点击后弹窗不关闭（`#aiKeyModal` 仍可见）、就地提示出现。
+5. 清除后 `callAiChooseIndex` 的 systemPrompt 不含摘要段。
 
 
 ---
