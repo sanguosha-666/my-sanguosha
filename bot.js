@@ -1400,18 +1400,34 @@ async function botPlay(g,seat){
     options=[];
     (me.hand||[]).forEach((card,idx)=>{
       const action=botActionId(card),spec=CARD_PLAYS[action];
-      if(!spec||action==='借刀杀人'||action==='铁索连环'||action==='闪电') return;
+      // 【Milestone B L3 最小集——出牌排除牌审计,行号对照 game.js】
+      // ①借刀杀人(game.js ~2579):effect:()=>{} 刻意留空,真实效果是"选A(持武器者)→
+      //   选B(A攻击范围内)"两步专用流程 jieDaoShaRen,单目标 playCard 模型无法表达 →
+      //   保持排除,完整支持(同窗口多步)属 Milestone C。
+      // ②铁索连环(game.js ~2626):target:true/allowSelf:true,effect 接受单目标或数组
+      //   (单目标 [targetSeat] 合法,startTieSuoTargets 收 1 目标)→ 纳入,由
+      //   botBestTarget 照常选他人为目标;重铸(recast)是独立动作、不经 playCard →
+      //   不在本模型内,记录为后续候选,不视为缺口。
+      // ③闪电(delayTrickPlay,game.js ~2701):target:true/allowSelf:true 且
+      //   DELAY_TRICKS['闪电'].onlySelf:true(合法目标只有自己)→ botBestTarget
+      //   跳过自己返回 -1,由下方 allowSelf 自目标兜底纳入——通用写法,不按牌名特判。
+      if(!spec||action==='借刀杀人') return;
       if(!spec.canPlay(g,me,card)) return;
       // 忠臣不主动使用会伤到主公的群体牌。
       if(me.role==='zhong'&&(action==='南蛮入侵'||action==='万箭齐发')) return;
       let target=null;
       if(spec.target){
         target=botBestTarget(g,seat,card,action);
+        // L3 最小集:onlySelf 型延时锦囊(闪电)的合法目标只有自己,botBestTarget 刻意跳过
+        // 自己(i===seat)会返回 -1。generic 兜底:allowSelf 且 canTarget 对己为真时直接以
+        // 自己为目标(不查 botTargetScore —— 它对 seat===targetSeat 恒为 -Infinity,会
+        // 把 value 污染成 -Infinity)。铁索连环有他人可打,botBestTarget 正常返回,不走这里。
+        if(target<0 && spec.allowSelf && spec.canTarget(g,me,card,seat)) target=seat;
         if(target<0) return;
       }
       let value=botCardPriority(action);
       if(action==='桃'&&me.hp>=me.maxHp) return;
-      if(target!==null) value+=botTargetScore(g,seat,target,action);
+      if(target!==null && target!==seat) value+=botTargetScore(g,seat,target,action);
       options.push({idx,action,target,value});
     });
     options.sort((a,b)=>b.value-a.value);

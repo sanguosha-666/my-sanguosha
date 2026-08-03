@@ -137,6 +137,7 @@ const testCode = String.raw`
         hand: i === 0 ? hand : [],
         equips: emptyEquips(),
         delays: [],
+        isBot: i === 0,
         role: opt.roleOf ? opt.roleOf[i] : 'zhu',
         roleRevealed: !!(opt.roleRevealed && opt.roleRevealed[i])
       });
@@ -509,6 +510,60 @@ const testCode = String.raw`
     var up = window.__mockAiArgs.opts.userPrompt;
     if(up.indexOf('杀') < 0) throw new Error('userPrompt 应含声明牌名(杀),实际 ' + up);
     if(up.indexOf('无中生有') >= 0) throw new Error('userPrompt 泄露真实牌(无中生有)!实际 ' + up);
+  });
+
+  // ---- T19~T21:L3 最小集(闪电/铁索纳入候选,借刀保持排除) ----
+  // 闪电:onlySelf 延时锦囊(合法目标只有自己)。botBestTarget 跳过自己(i===seat)返回 -1,
+  // 靠 botPlay 枚举的 allowSelf 自目标兜底把 target 定为自己的座位。用有密钥路径验证:
+  // mock 选闪电(choice0);选目标阶段 buildBotTargetCandidates 不含自己(候选为空,不再
+  // 发起第二次AI询问),chosen.target 保持枚举阶段算好的 0 → playCard(idx,'闪电',0)。
+  // 无密钥路径刻意不测:本地兜底要求 options[0].value>25,闪电基础分20 不会触发(手牌
+  // 只有闪电时无密钥机器人直接结束出牌阶段——既有行为,不是本次改动范围)。
+  await check('闪电:可打出时出现在候选且目标为自己 → playCard("闪电",0)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }]; // [0=闪电, 1=结束]
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG([card('闪电')]);
+    await runBotDecision(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('playCard 应被调1次(闪电),实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    if(window.__playCalls[0].action !== '闪电') throw new Error('应出闪电,实际 ' + window.__playCalls[0].action);
+    if(window.__playCalls[0].target !== 0) throw new Error('闪电目标应为自己(0),实际 target=' + window.__playCalls[0].target);
+    if(window.__mockAiCalls !== 1) throw new Error('选目标候选为空应不再询问,实际 ' + window.__mockAiCalls + '次');
+    if(window.__endPlayCalls !== 0) throw new Error('不应 endPlay');
+  });
+
+  await check('铁索连环:可打出时出现在候选且目标为他人 → playCard("铁索连环",1)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }, { ok: true, text: '{"choice":0}' }]; // [0=铁索,1=结束];目标候选[0]=座位1
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG([card('铁索连环')]);
+    await runBotDecision(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('playCard 应被调1次(铁索),实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    if(window.__playCalls[0].action !== '铁索连环') throw new Error('应出铁索连环,实际 ' + window.__playCalls[0].action);
+    if(window.__playCalls[0].target !== 1) throw new Error('铁索目标应为座位1,实际 target=' + window.__playCalls[0].target);
+    if(window.__mockAiCalls !== 2) throw new Error('选牌+选目标应各1次询问,实际 ' + window.__mockAiCalls + '次');
+  });
+
+  await check('借刀杀人:存在合法A/B时仍不在候选(两步流程,保持排除)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }]; // 只剩 [0=结束]
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG([card('借刀杀人')]);
+    // 座位1 持武器(青龙偃月刀 range3),可够到座位2 → canPlay 若不被排除必为真
+    var e1 = emptyEquips(); e1.weapon = card('青龙偃月刀');
+    g.players[1].equips = e1;
+    await runBotDecision(g, 0);
+    if(window.__endPlayCalls !== 1) throw new Error('应 endPlay(候选只剩结束项),实际 endPlay=' + window.__endPlayCalls);
+    if(window.__playCalls.length !== 0) throw new Error('借刀杀人不应出现在候选,实际 ' + JSON.stringify(window.__playCalls));
   });
 
   console.log('\n' + '='.repeat(60));
