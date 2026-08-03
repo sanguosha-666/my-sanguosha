@@ -575,6 +575,116 @@ function parseBotPlayAiChoice(text){
 // false(调用方按"无此决策点"处理)。首个真实决策点由后续任务注册。
 const BOT_DECISIONS = Object.create(null);
 
+// ================= L1:controlsChoice(镜像真实 controls 按钮,Task B3) =================
+// 【本决策点是什么】把"响应阶段由 renderControls 渲染出的一组按钮"整体镜像成候选列表:
+// AI 从按钮里选、无密钥时本地回退按"和改动前硬编码分支完全一致"的顺序点按钮。与
+// botSafePrompt 的关系:同一个 DOM 隔离模式(真实 #controls 临时改名 → 隐藏 box 渲染 →
+// 收集按钮),区别是 ①收集所有 button:not(:disabled)(不筛安全正则);②box 在收集后
+// 【保留】到 execute 点击完才销毁——botSafePrompt 的收集+点击在同一次同步调用里完成,
+// L1 的 AI 等待期间 box 必须还活着、click 才有对象可点,所以销毁(defer)交给 execute,
+// 不在 collect;③回退选择顺序与 botSafePrompt 相同(先 safe 正则、再 mandatory 正则、
+// 最后第一项)。
+// 【allowlist 判定,不可随意扩表】只有"旧本地分支的动作 == 按回退顺序点出来的按钮动作"
+// 的阶段才允许迁移,否则无密钥行为会悄悄改变(回归红线,见 CLAUDE.md 无密钥回归原则)。
+// 逐个读了 render-controls.js 对应分支核对:
+//  wuxie      (2840行):按钮[打出【无懈可击】(手里无牌时 disabled), 不出];旧分支
+//             respondWuxie(false);safe 正则第一命中"不出" → 等价。✓
+//  luoyingAsk (847行) :按钮[获得, 不获得];旧分支 respondLuoying(true);"不获得"不命中
+//             safe 正则、"获得/不获得"都不命中 mandatory 正则 → 回退 candidates[0]="获得"
+//             → 等价。✓
+//  luoshen    (2632行):按钮[发动【洛神】判定, 不再发动];旧分支 respondLuoshen(true);
+//             "不再发动"不含"不发动"子串、两个按钮都含"发动"被 mandatory 排除 →
+//             回退 candidates[0]="发动【洛神】判定" → 等价。✓
+//  铁骑/烈弓刻意不迁移:按钮是[发动X, 不发动],safe 正则第一命中"不发动",而旧分支是
+//  respondTieqi(true)/respondLiegong(true),回退会变行为 → 违反无密钥回归红线。
+// 不在 allowlist 的阶段 match 返回 false,继续走 runBotDecision 既有硬编码分支,零变化。
+const CONTROLS_CHOICE_ALLOWLIST = new Set(['wuxie','luoyingAsk','luoshen']);
+// collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
+let controlsChoiceCtx = null;
+
+function collectControlsCandidates(g, seat){
+  const real = document.getElementById('controls');
+  if(!real || typeof renderControls!=='function') return { candidates: [], dispose: null };
+  const oldId = real.id; real.id = 'human-controls';
+  const box = document.createElement('div');
+  box.id = 'controls'; box.style.display = 'none';
+  document.body.appendChild(box);
+  const humanSeat = mySeat; mySeat = seat;
+  const list = [];
+  try{
+    renderControls(g);
+    const buttons = [...box.querySelectorAll('button:not(:disabled)')];
+    buttons.forEach((btn, i)=>{
+      const label = (btn.textContent||'').trim() || ('按钮'+i);
+      list.push({
+        index: i,
+        label,
+        source: 'controls',
+        invoke: ()=>{ btn.click(); },
+      });
+    });
+  } catch(e){ console.warn('collectControlsCandidates', e); }
+  finally { mySeat = humanSeat; }
+  return {
+    candidates: list,
+    dispose: function(){
+      box.remove();
+      real.id = oldId;
+      // 与 botSafePrompt 同一约定:借用期间 setBanner 写的是机器人文案,归还后重渲染一次,
+      // 把 banner/controls 恢复成真人视角(仅当渲染快照可用时;沙箱测试里 currentG 不存在则跳过)
+      if(typeof currentG!=='undefined' && currentG) renderControls(currentG);
+    }
+  };
+}
+function controlsChoiceMatch(g, seat){
+  if(!g || !g.pending || !CONTROLS_CHOICE_ALLOWLIST.has(g.phase)) return false;
+  return botSeatForState(g)===seat;
+}
+function controlsChoiceBuildCandidates(g, seat){
+  const res = collectControlsCandidates(g, seat);
+  if(!res.candidates.length){
+    // 没有可点按钮:立即归还 DOM(否则真实 #controls 会一直顶着改名后的 id,真人界面坏掉),
+    // 返回空让 botDecide 走 false → 旧分支继续处理。
+    if(res.dispose) res.dispose();
+    return [];
+  }
+  controlsChoiceCtx = res;
+  return res.candidates;
+}
+function controlsChoiceLocalFallback(g, seat, candidates){
+  // 与 botSafePrompt 同款选择顺序:先 safe 正则、再 mandatory 正则、最后第一项。
+  // 对 allowlist 三个阶段逐项核对过:落点与旧硬编码分支完全一致(见上面 allowlist 注释)。
+  const safe = candidates.find(c=>/不发动|不使用|不出|取消|跳过|放弃|结束/.test(c.label));
+  if(safe) return safe;
+  const mandatory = candidates.find(c=>!/发动/.test(c.label)&&/选择|交给|弃置|摸牌|回复|打出/.test(c.label));
+  if(mandatory) return mandatory;
+  return candidates[0];
+}
+function controlsChoiceExecute(g, seat, choice){
+  const ctx = controlsChoiceCtx;
+  try{
+    botInvoke(seat, ()=>{ if(choice && typeof choice.invoke==='function') choice.invoke(); });
+  } finally {
+    if(ctx && ctx.dispose) ctx.dispose();
+    controlsChoiceCtx = null;
+  }
+}
+function buildControlsChoiceSystemPrompt(g, seat, ctx){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。当前阶段,游戏界面为你渲染了一组'
+    +'可点击的按钮(候选列表里的每一项对应一个按钮),每个按钮是一个合法动作。请结合当前'
+    +'局面(你视角下真实合法可见的信息)与按钮文案,选出你认为最合适的动作。只能选择候选'
+    +'列表里的按钮,不能发明列表之外的选项。'
+    +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},不要输出任何解释文字、'
+    +'代码块标记或多余字段。';
+}
+BOT_DECISIONS.controlsChoice = {
+  match: controlsChoiceMatch,
+  buildCandidates: controlsChoiceBuildCandidates,
+  localFallback: controlsChoiceLocalFallback,
+  execute: controlsChoiceExecute,
+  buildSystemPrompt: buildControlsChoiceSystemPrompt,
+};
+
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
     +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
@@ -1331,7 +1441,12 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondDying(save));
     return;
   }
-  if(g.phase==='wuxie'&&d.asking===seat){ botInvoke(seat,()=>respondWuxie(false)); return; }
+  // L1 controlsChoice:镜像真实 controls 按钮的响应决策(wuxie/luoyingAsk/luoshen,
+  // allowlist 及逐阶段等价性核对见 BOT_DECISIONS.controlsChoice 上方注释)。命中则整条
+  // 决策链(含无密钥本地回退,与旧硬编码分支动作逐字一致)由总线接管并 return;未命中
+  // (非 allowlist 阶段/没有可点按钮)返回 false,继续走下面既有的硬编码分支,行为零变化。
+  // 旧的 respondWuxie(false) 硬编码分支已删除:回退顺序 safe 正则第一命中"不出",等价。
+  if(await botDecide('controlsChoice', g, seat)) return;
   if(g.phase==='wugu'&&d.type==='wugu'&&Array.isArray(d.order)&&d.order[d.idx||0]===seat&&Array.isArray(d.pool)&&d.pool.length){
     // expectedIdx 是乐观并发校验("我看到的时候轮到第几个人挑"),必须传当前真实的
     // d.idx。曾经硬编码成 0,于是只要机器人不是五谷丰登的第一个挑牌人,服务端的

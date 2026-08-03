@@ -1,0 +1,319 @@
+/**
+ * AI 总线 B3 层测试 - L1 controlsChoice(镜像真实 controls 按钮)
+ *
+ * 加载真实完整链路(config/data/room-lifecycle/game/weapons/skills/bot/ai-bot/
+ * render-controls)进共享 vm 沙箱。与 run_ai_bus_l2_test.js 同一套 firebase/gameRef
+ * stub 与异步 check 断言;额外提供一组"可用的最小 DOM"(支持 appendChild/remove/
+ * querySelectorAll('button:not(:disabled)')/id 换名后 getElementById 按树查找)——L1
+ * 走的是 botSafePrompt 同款 DOM 隔离模式,必须真的能渲染出按钮才能收集候选。
+ *
+ * 【render-controls.js 加载路径:真实文件,不用 stub】它顶层只有 let/function 声明、
+ * 无立即执行的 DOM 操作,在沙箱里能干净加载;renderControls 运行期需要的外部函数
+ * setBanner/escapeHtml(真实定义在 render.js,本测试不加载 render.js)在这里给最小 stub。
+ *
+ * 已知的 vm 坑(沿用 L2):aiApiKey/aiProvider 是脚本作用域 let 绑定,必须用 runInContext
+ * 裸标识符赋值;respondWuxie/respondLuoying/respondLuoshen 都是函数声明绑定,可直接
+ * 整体替换成 spy。
+ */
+
+const vm = require('vm');
+const fs = require('fs');
+
+// ---- 可用的最小 DOM:元素支持树形 appendChild/remove,按钮支持 click/textContent/disabled ----
+function mkEl(tag){
+  const el = {
+    tagName: String(tag).toUpperCase(),
+    children: [], style: {}, _text: '', _html: '',
+    id: '', className: '', disabled: false, onclick: null, parentEl: null,
+    classList: { add: function() {}, remove: function() {}, contains: function() { return false; } },
+    appendChild: function(ch){ ch.parentEl = this; this.children.push(ch); return ch; },
+    removeChild: function(ch){ const i = this.children.indexOf(ch); if(i>=0){ this.children.splice(i,1); ch.parentEl = null; } return ch; },
+    remove: function(){ if(this.parentEl) this.parentEl.removeChild(this); },
+    set textContent(v){ this._text = String(v==null?'':v); },
+    get textContent(){ return this._text; },
+    set innerHTML(v){ this._html = String(v==null?'':v); this.children = []; },
+    get innerHTML(){ return this._html; },
+    click: function(){ if(typeof this.onclick === 'function') this.onclick(); },
+    // 只支持 'button:not(:disabled)' 这一个选择器(collect 唯一的用法),递归收集
+    querySelectorAll: function(sel){
+      const out = [];
+      const self = this;
+      (function walk(n){
+        if(n !== self && n.tagName === 'BUTTON' && !n.disabled) out.push(n);
+        (n.children || []).forEach(walk);
+      })(self);
+      return out;
+    }
+  };
+  return el;
+}
+const realControls = mkEl('div'); realControls.id = 'controls';
+const bodyEl = mkEl('body'); bodyEl.appendChild(realControls);
+const documentStub = {
+  body: bodyEl,
+  // 按树查找 id:真实 DOM 语义——collect 把真实控件改名后,getElementById('controls')
+  // 必须落到新挂上的隐藏 box 上
+  getElementById: function(id){
+    let found = null;
+    (function walk(n){
+      if(found) return;
+      if(n.id === id){ found = n; return; }
+      (n.children || []).forEach(walk);
+    })(bodyEl);
+    // 找不到时返回一个可丢弃的元素(模拟 L2 的宽松 stub):game.js 顶层会绑定
+    // joinBtn/closeRoomBtn 等非 controls 元素的 onclick,不能在这里崩
+    return found || mkEl('div');
+  },
+  createElement: function(tag){ return mkEl(tag); },
+  createTextNode: function(t){ return { nodeValue: t, textContent: t }; },
+};
+
+const context = {
+  gameRef: {
+    transaction: function(fn) {
+      return fn(context.g || {});
+    }
+  },
+  firebase: {
+    initializeApp: function() { return { database: function() { return { ref: function() { return { on: function() {}, once: function() {}, push: function() { return { set: function() {}, key: 'mock_key' }; }, transaction: function(fn) { var cb = fn(function() {}); if (cb) cb(); return {}; }, set: function() {}, update: function() {}, child: function() { return {}; }, remove: function() {}, get: function() { return { val: function() { return null; } }; } }; } }; } }; },
+    database: function() { return { ref: function() { return { on: function() {}, once: function() {}, push: function() { return { set: function() {}, key: 'mock_key' }; }, transaction: function() { return {}; }, set: function() {}, child: function() { return {}; }, remove: function() {}, get: function() { return { val: function() { return null; } }; } }; } }; }
+  },
+  document: documentStub,
+  // renderControls 运行期依赖的外部函数(真实定义在 render.js,不在加载范围)
+  setBanner: function() {},
+  escapeHtml: function(s){ return String(s==null?'':s); },
+  window: {
+    firebase: null,
+    location: { search: '', href: 'http://localhost', reload: function() {} },
+    localStorage: { getItem: function() { return null; }, setItem: function() {}, removeItem: function() {}, clear: function() {} },
+    sessionStorage: { getItem: function() { return null; }, setItem: function() {} },
+    addEventListener: function() {}, removeEventListener: function() {},
+    setTimeout: function(f, t) { return setTimeout(f, t); }, clearTimeout: function(t) { return clearTimeout(t); },
+    setInterval: function(f, t) { return setInterval(f, t); }, clearInterval: function(t) { return clearInterval(t); },
+    alert: function() {}, confirm: function() { return true; }, prompt: function() { return null; },
+    open: function() { return null; }, close: function() {},
+    history: { pushState: function() {}, replaceState: function() {} },
+    navigator: { userAgent: 'Mozilla/5.0', platform: 'Win32', language: 'zh-CN', onLine: true }
+  },
+  joinRoom: function() {},
+  mySeat: 0,
+  pushLog: function(log, text) { log.push({seq: log.length, text: text}); return log; },
+  console: console,
+  Math: Math,
+  Date: Date,
+  JSON: JSON,
+  RegExp: RegExp,
+  __realControls: realControls
+};
+
+context.window.firebase = context.firebase;
+context.window.document = context.document;
+context.global = context;
+context.__bodyEl = bodyEl;
+
+const sandbox = vm.createContext(context, { name: 'sgs-ai-bus-l1-sandbox' });
+
+console.log('Loading AI 总线 L1 测试环境...\n');
+
+// 加载顺序遵循 index.html:room-lifecycle 必须在 game.js 之前;render-controls 最后(真实文件)
+const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot.js', 'ai-bot.js', 'render-controls.js'];
+files.forEach(function(file){
+  try {
+    const code = fs.readFileSync(file, 'utf8');
+    vm.runInContext(code, sandbox, { filename: file });
+    console.log('  OK ' + file);
+    if (file === 'game.js') {
+      vm.runInContext('tx = function(fn) { return fn(typeof _g !== "undefined" ? _g : {}); };', sandbox);
+      vm.runInContext('gameRef = { transaction: function(fn) { return tx(fn); } };', sandbox);
+      vm.runInContext('mySeat = 0;', sandbox);
+    }
+  } catch (e) {
+    console.log('  FAIL ' + file + ': ' + e.message);
+    if (e.stack) console.log('     ' + e.stack.split('\n').slice(1, 3).join('\n     '));
+    process.exit(1);
+  }
+});
+
+console.log('\n' + '='.repeat(60));
+console.log('  AI 总线 L1 测试(controlsChoice 镜像全部可点按钮)');
+console.log('='.repeat(60) + '\n');
+
+const testCode = String.raw`
+(async function(){
+  var pass = 0, fail = 0;
+  function check(name, fn){
+    return Promise.resolve().then(fn).then(function(){
+      console.log('  PASS ' + name); pass++;
+    }, function(e){
+      console.log('  FAIL ' + name + ' - ' + (e && e.message || e)); fail++;
+    });
+  }
+
+  // ---- spy:respondWuxie/respondLuoying/respondLuoshen 是函数声明绑定,整体替换即可 ----
+  window.__wuxieCalls = [];
+  window.__luoyingCalls = [];
+  window.__luoshenCalls = [];
+  respondWuxie = function(use){ window.__wuxieCalls.push(use); };
+  respondLuoying = function(use){ window.__luoyingCalls.push(use); };
+  respondLuoshen = function(use){ window.__luoshenCalls.push(use); };
+  // ---- mock callAI ----
+  window.__mockAiCalls = 0;
+  window.__mockAiArgs = null;
+  window.__mockAiResults = [];
+  callAI = async function(provider, apiKey, opts){
+    window.__mockAiCalls++;
+    window.__mockAiArgs = { provider: provider, apiKey: apiKey, opts: opts };
+    return window.__mockAiResults.length ? window.__mockAiResults.shift() : { ok: false, reason: 'other', detail: '队列已空' };
+  };
+
+  // 3 人局,座位0是机器人(无武将,不触发蛊惑按钮),turn=1(真人1的回合)
+  function mkG(phase, pending, hand, opt){
+    opt = opt || {};
+    var players = [];
+    for(var i = 0; i < 3; i++){
+      players.push({
+        name: i === 0 ? '机器人0' : ('玩家' + i),
+        alive: true, hp: 3, maxHp: 3,
+        hand: i === 0 ? (hand || []) : [],
+        equips: emptyEquips(), delays: [],
+        isBot: i === 0,
+        role: 'zhu'
+      });
+    }
+    return { players: players, gameMode: 'ffa', roundNum: 1, phase: phase, turn: 1, log: [], pending: pending, started: true };
+  }
+  function card(name, id){
+    return { id: id || (name + ''), name: name, suit: '♥', rank: 5 };
+  }
+  function wuxiePending(){
+    return { type: 'wuxie', trick: '决斗', from: 1, to: 0, exclude: 1, depth: 0, asking: 0 };
+  }
+
+  // ---- T1:collect 只收集 enabled 按钮;无懈不在手 → 只剩「不出」 ----
+  await check('collect:wuxie无懈不在手只收集「不出」', function(){
+    var g = mkG('wuxie', wuxiePending(), [card('杀')]);
+    var res = collectControlsCandidates(g, 0);
+    try{
+      if(!res || !Array.isArray(res.candidates)) throw new Error('应返回 {candidates, dispose}');
+      if(res.candidates.length !== 1) throw new Error('应恰1个可点按钮,实际 ' + res.candidates.length + ' labels=' + JSON.stringify(res.candidates.map(function(c){return c.label;})));
+      if(res.candidates[0].label !== '不出') throw new Error('应为「不出」,实际 ' + res.candidates[0].label);
+      if(typeof res.dispose !== 'function') throw new Error('应带 dispose');
+    } finally {
+      res.dispose();
+    }
+  });
+
+  // ---- T2:有懈在手 → 两个按钮,顺序为 打出【无懈可击】、不出 ----
+  await check('collect:wuxie有懈在手收集两个按钮且顺序正确', function(){
+    var g = mkG('wuxie', wuxiePending(), [card('无懈可击')]);
+    var res = collectControlsCandidates(g, 0);
+    try{
+      if(res.candidates.length !== 2) throw new Error('应恰2个可点按钮,实际 ' + res.candidates.length);
+      if(res.candidates[0].label !== '打出【无懈可击】') throw new Error('按钮0应为打出,实际 ' + res.candidates[0].label);
+      if(res.candidates[1].label !== '不出') throw new Error('按钮1应为不出,实际 ' + res.candidates[1].label);
+    } finally {
+      res.dispose();
+    }
+  });
+
+  // ---- T3:无密钥,wuxie 本地回退 = 旧硬编码 respondWuxie(false),且 dispose 归还 DOM ----
+  await check('无密钥:botDecide(controlsChoice) 回退点「不出」=respondWuxie(false)', async function(){
+    window.__wuxieCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG('wuxie', wuxiePending(), [card('杀')]);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true(已接管),实际 ' + r);
+    if(window.__wuxieCalls.length !== 1) throw new Error('respondWuxie 应被调1次,实际 ' + window.__wuxieCalls.length);
+    if(window.__wuxieCalls[0] !== false) throw new Error('应 respondWuxie(false),实际 ' + window.__wuxieCalls[0]);
+    // dispose 生效:真实控件 id 恢复、临时 box 已移除
+    var c = document.getElementById('controls');
+    if(c !== __realControls) throw new Error('controls 应恢复为真实元素');
+    if(c.id !== 'controls') throw new Error('真实控件 id 应恢复为 controls,实际 ' + c.id);
+    if(document.body.children.length !== 1) throw new Error('body 应只剩真实控件,临时 box 未移除');
+  });
+
+  // ---- T4:有密钥,只有「不出」一个候选 → 不调AI、直接点它 ----
+  await check('有密钥:单候选短路不调AI,点「不出」', async function(){
+    window.__wuxieCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('wuxie', wuxiePending(), [card('杀')]);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true');
+    if(window.__mockAiCalls !== 0) throw new Error('单候选不应调 callAI,实际 ' + window.__mockAiCalls);
+    if(window.__wuxieCalls[0] !== false) throw new Error('应 respondWuxie(false)');
+  });
+
+  // ---- T5:有密钥,mock 选「打出【无懈可击】」→ respondWuxie(true),prompt 描述按钮 ----
+  await check('有密钥:mock 选打出无懈 → respondWuxie(true)', async function(){
+    window.__wuxieCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('wuxie', wuxiePending(), [card('无懈可击')]);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true');
+    if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
+    if(window.__wuxieCalls.length !== 1 || window.__wuxieCalls[0] !== true) throw new Error('应 respondWuxie(true),实际 ' + JSON.stringify(window.__wuxieCalls));
+    var sp = window.__mockAiArgs.opts.systemPrompt || '';
+    if(sp.indexOf('按钮') < 0) throw new Error('systemPrompt 应说明这些是UI按钮,实际 ' + sp);
+    if((window.__mockAiArgs.opts.userPrompt || '').indexOf('打出【无懈可击】') < 0) throw new Error('userPrompt 应含按钮文案');
+  });
+
+  // ---- T6:非 allowlist 阶段(duel)→ botDecide 返回 false,旧分支继续 ----
+  await check('非allowlist阶段(duel):botDecide 返回 false', async function(){
+    var g = mkG('duel', { type: 'duel', active: 0, from: 0, to: 1 }, [card('杀')]);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== false) throw new Error('duel 不应由 controlsChoice 接管,实际 ' + r);
+    // 且没有产生 DOM 残留(未触发 collect)
+    if(document.body.children.length !== 1) throw new Error('不应产生临时 box');
+  });
+
+  // ---- T7:luoyingAsk 无密钥回退 = 旧硬编码 respondLuoying(true)(candidates[0]=获得) ----
+  await check('无密钥:luoyingAsk 回退点「获得」=respondLuoying(true)', async function(){
+    window.__luoyingCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG('luoyingAsk', { type: 'luoyingAsk', seat: 0, cardIds: [1, 2], cardsPreview: [{ name: '闪', suit: '♣' }] }, []);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true');
+    if(window.__luoyingCalls.length !== 1 || window.__luoyingCalls[0] !== true) throw new Error('应 respondLuoying(true),实际 ' + JSON.stringify(window.__luoyingCalls));
+  });
+
+  // ---- T8:luoshen 无密钥回退 = 旧硬编码 respondLuoshen(true)(candidates[0]=发动) ----
+  await check('无密钥:luoshen 回退点「发动【洛神】判定」=respondLuoshen(true)', async function(){
+    window.__luoshenCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG('luoshen', { type: 'luoshen', seat: 0 }, []);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true');
+    if(window.__luoshenCalls.length !== 1 || window.__luoshenCalls[0] !== true) throw new Error('应 respondLuoshen(true),实际 ' + JSON.stringify(window.__luoshenCalls));
+  });
+
+  console.log('\n' + '='.repeat(60));
+  console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
+  console.log('='.repeat(60) + '\n');
+  __testFail = fail > 0;
+  __testDone = true;
+})().catch(function(e){
+  console.log('FATAL: ' + (e && e.stack || e));
+  __testFail = true;
+  __testDone = true;
+});
+`;
+
+vm.runInContext(testCode, sandbox);
+
+(async function(){
+  while (sandbox.__testDone !== true) {
+    await new Promise(function(r){ setTimeout(r, 10); });
+  }
+  process.exit(sandbox.__testFail ? 1 : 0);
+})().catch(function(e){
+  console.log('FATAL: ' + (e && e.stack || e));
+  process.exit(1);
+});
