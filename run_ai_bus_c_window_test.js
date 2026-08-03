@@ -1,15 +1,20 @@
 /**
- * AI 总线 C0 层测试 - isBotActionWindow / enumerateAllLegalOneStepActions
+ * AI 总线 C0/C1 层测试 - isBotActionWindow / enumerateAllLegalOneStepActions /
+ * runBotActionWindow(弱C出牌窗)
  *
  * 加载真实完整链路(config/data/room-lifecycle/game/weapons/skills/bot/ai-bot)
  * 进共享 vm 沙箱(与 run_ai_bus_l2_test.js 同一套 firebase/document/window stub
- * 与异步 check 断言惯例),在沙箱内直接调用两个新函数。
- * 覆盖:窗口谓词四态(play/turn/无pending 为真;有 pending、非 play、阵亡为假);
+ * 与异步 check 断言惯例),在沙箱内直接调用新函数。
+ * C0 覆盖:窗口谓词四态(play/turn/无pending 为真;有 pending、非 play、阵亡为假);
  * 杀按目标展开成多条候选;闪电 allowSelf 自目标;满血桃排除;结束项恒为最后。
+ * C1 覆盖:候选带 localHeuristicScore(非结束数字、结束 null);localFallbackPlayWindow
+ * 的"最高分>25 打、否则结束"旧规则复刻;弱C两步序列(调度1拆马→模拟回声→调度2杀,
+ * 牌×目标合并、每调度恰1步);无密钥兜底(闪电20→endPlay、缺体力桃100→playCard)。
  *
  * 已知的 vm 坑:mySeat 是 game.js 顶层 let 绑定,加载后需 runInContext 里赋值;
  * CARD_PLAYS 的 canPlay/canTarget(杀的距离、闪电的 onlySelf)读取全局 mySeat,
- * 枚举函数内部会像 botPlay 一样临时借用 mySeat 再归还。
+ * 枚举函数内部会像 botPlay 一样临时借用 mySeat 再归还。aiApiKey/aiProvider 是
+ * ai-bot.js 顶层 let,测试直接赋值切换有密钥/无密钥两档。
  */
 
 const vm = require('vm');
@@ -86,7 +91,7 @@ files.forEach(function(file){
 });
 
 console.log('\n' + '='.repeat(60));
-console.log('  AI 总线 C0 测试(窗口谓词/一步动作枚举)');
+console.log('  AI 总线 C0/C1 测试(窗口谓词/一步枚举/弱C出牌窗)');
 console.log('='.repeat(60) + '\n');
 
 const testCode = String.raw`
@@ -205,6 +210,122 @@ const testCode = String.raw`
     var end = list[0];
     if(end.isEndPlay !== true || end.action !== '结束出牌阶段') throw new Error('结束项字段不对,实际 ' + JSON.stringify(end));
     if(end.handIndex !== null || end.card !== null || end.target !== null) throw new Error('结束项应无牌无目标,实际 ' + JSON.stringify(end));
+  });
+
+  // ================= C1:弱C出牌窗 =================
+  // ---- spy:playCard/endPlay(函数声明绑定,整体替换即可,与 l2 同一套) ----
+  window.__playCalls = [];
+  window.__endPlayCalls = 0;
+  playCard = function(cardIdx, action, target){ window.__playCalls.push({ cardIdx: cardIdx, action: action, target: target }); };
+  endPlay = function(){ window.__endPlayCalls++; };
+  // ---- mock callAI:结果从队列里取 ----
+  window.__mockAiCalls = 0;
+  window.__mockAiResults = [];
+  callAI = async function(provider, apiKey, opts){
+    window.__mockAiCalls++;
+    return window.__mockAiResults.length ? window.__mockAiResults.shift() : { ok: false, reason: 'other', detail: '队列已空' };
+  };
+
+  // ---- T9:localHeuristicScore 合并候选打分(非结束数字、结束 null) ----
+  // mkG 全员 role='zhu' 且无嫌疑值 → botTargetScore 对杀的目标恒 -Infinity(忠臣式保守),
+  // typeof 检查仍应通过;桃无目标分=botCardPriority(桃)=100。
+  await check('枚举:非结束候选 localHeuristicScore 为数字,结束项为 null', function(){
+    var g = mkG([card('桃'), card('杀')], { myHp: 2 });
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    var end = list[list.length - 1];
+    if(end.localHeuristicScore !== null) throw new Error('结束项 localHeuristicScore 应为 null,实际 ' + end.localHeuristicScore);
+    list.filter(function(c){ return !c.isEndPlay; }).forEach(function(c){
+      if(typeof c.localHeuristicScore !== 'number') throw new Error('非结束候选应有数字分,实际 ' + JSON.stringify(c));
+    });
+    var tao = list.filter(function(c){ return c.action === '桃'; });
+    if(tao.length !== 1 || tao[0].localHeuristicScore !== 100) throw new Error('桃价值应为100,实际 ' + JSON.stringify(tao));
+    var shaSelf = list.filter(function(c){ return c.action === '杀' && c.target === 2; });
+    if(shaSelf.length === 1 && typeof shaSelf[0].localHeuristicScore !== 'number') throw new Error('杀候选也应有数字分');
+  });
+
+  // ---- T10:localFallbackPlayWindow 旧规则复刻(最高分>25 打、否则结束) ----
+  await check('兜底:最高分>25 → 选该候选', function(){
+    var c1 = { label: 'a', localHeuristicScore: 30 };
+    var c2 = { label: 'b', localHeuristicScore: 10 };
+    var end = { label: '结束出牌阶段', localHeuristicScore: null, isEndPlay: true };
+    var pick = localFallbackPlayWindow({}, 0, [c1, c2, end]);
+    if(pick !== c1) throw new Error('应选30分候选,实际 ' + JSON.stringify(pick));
+  });
+
+  await check('兜底:最高分<=25 → 结束项', function(){
+    var c1 = { label: 'a', localHeuristicScore: 20 };
+    var end = { label: '结束出牌阶段', localHeuristicScore: null, isEndPlay: true };
+    var pick = localFallbackPlayWindow({}, 0, [c1, end]);
+    if(!pick.isEndPlay) throw new Error('应选结束项,实际 ' + JSON.stringify(pick));
+  });
+
+  await check('兜底:全部 -Infinity(身份保守无合法目标)→ 结束项', function(){
+    var c1 = { label: 'a', localHeuristicScore: -Infinity };
+    var end = { label: '结束出牌阶段', localHeuristicScore: null, isEndPlay: true };
+    var pick = localFallbackPlayWindow({}, 0, [c1, end]);
+    if(!pick.isEndPlay) throw new Error('应选结束项,实际 ' + JSON.stringify(pick));
+  });
+
+  // ---- T11:弱C两步序列(有密钥)——调度1拆马 → 模拟回声 → 调度2杀 ----
+  // 座位1装 +1马(的卢):初始 杀→座位1 距离2>射程1 非法;过河拆桥无距离限制合法。
+  // 第1步候选:[0]拆桥→1,[1]拆桥→2,[2]杀→2,[3]结束。mock 选 0 → playCard(拆桥,1)。
+  // 手动模拟 Firebase 回声:拆桥从手牌摘掉、+1马被拆清空、turn 不变;第2步候选:
+  // [0]杀→1,[1]杀→2,[2]结束。mock 选 0 → playCard(杀,1)。证明弱C跨调度多步、牌×目标合并。
+  await check('弱C两步序列:调度1拆桥→调度2杀(跨调度多步,合并候选)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [
+      { ok: true, text: '{"choice":0}' },
+      { ok: true, text: '{"choice":0}' }
+    ];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG([card('过河拆桥'), card('杀')]);
+    g.players[1].equips.plus1 = card('的卢');
+    // 调度1
+    await runBotDecision(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('第1步应恰1次 playCard,实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    var first = window.__playCalls[0];
+    if(first.action !== '过河拆桥') throw new Error('第1步应出过河拆桥,实际 ' + first.action);
+    if(first.target !== 1) throw new Error('第1步目标应为座位1,实际 ' + first.target);
+    if(window.__mockAiCalls !== 1) throw new Error('第1步应恰1次AI调用(合并候选只问一次),实际 ' + window.__mockAiCalls);
+    // 模拟 Firebase 回声(弱C:同 tick 内 currentG 不会更新,见 runBotActionWindow 注释)
+    g.players[0].hand.splice(0, 1);
+    g.players[1].equips.plus1 = null;
+    // 调度2
+    await runBotDecision(g, 0);
+    if(window.__playCalls.length !== 2) throw new Error('两步共应2次 playCard,实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    var second = window.__playCalls[1];
+    if(second.action !== '杀') throw new Error('第2步应出杀,实际 ' + second.action);
+    if(second.target !== 1) throw new Error('第2步目标应为座位1,实际 ' + second.target);
+    if(window.__mockAiCalls !== 2) throw new Error('两步共应2次AI调用,实际 ' + window.__mockAiCalls);
+    if(window.__endPlayCalls !== 0) throw new Error('两步均不应 endPlay,实际 ' + window.__endPlayCalls);
+  });
+
+  // ---- T12:无密钥兜底(旧 botPlay 的 value>25 规则逐字复刻) ----
+  await check('无密钥:手牌[闪电](价值20) → endPlay', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG([card('闪电')]);
+    await runBotDecision(g, 0);
+    if(window.__endPlayCalls !== 1) throw new Error('endPlay 应恰1次,实际 ' + window.__endPlayCalls);
+    if(window.__playCalls.length !== 0) throw new Error('不应 playCard,实际 ' + JSON.stringify(window.__playCalls));
+  });
+
+  await check('无密钥:手牌[桃]缺体力(价值100) → playCard 桃', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG([card('桃')], { myHp: 2 });
+    await runBotDecision(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('playCard 应恰1次,实际 ' + window.__playCalls.length);
+    if(window.__playCalls[0].action !== '桃') throw new Error('应出桃,实际 ' + window.__playCalls[0].action);
+    if(window.__playCalls[0].target !== null) throw new Error('桃无目标,实际 target=' + window.__playCalls[0].target);
+    if(window.__endPlayCalls !== 0) throw new Error('不应 endPlay');
   });
 
   console.log('\n' + '='.repeat(60));

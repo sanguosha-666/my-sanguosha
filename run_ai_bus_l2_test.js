@@ -539,7 +539,7 @@ const testCode = String.raw`
     window.__playCalls = [];
     window.__endPlayCalls = 0;
     window.__mockAiCalls = 0;
-    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }, { ok: true, text: '{"choice":0}' }]; // [0=铁索,1=结束];目标候选[0]=座位1
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }]; // 合并候选 [0=铁索→座位1, 1=铁索→座位2, 2=结束]
     aiApiKey = 'test-key';
     aiProvider = 'claude';
     var g = mkG([card('铁索连环')]);
@@ -547,7 +547,9 @@ const testCode = String.raw`
     if(window.__playCalls.length !== 1) throw new Error('playCard 应被调1次(铁索),实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
     if(window.__playCalls[0].action !== '铁索连环') throw new Error('应出铁索连环,实际 ' + window.__playCalls[0].action);
     if(window.__playCalls[0].target !== 1) throw new Error('铁索目标应为座位1,实际 target=' + window.__playCalls[0].target);
-    if(window.__mockAiCalls !== 2) throw new Error('选牌+选目标应各1次询问,实际 ' + window.__mockAiCalls + '次');
+    // C1 弱C起 runBotDecision 的 play 分支改走 runBotActionWindow(牌×目标合并成完整候选),
+    // 旧 botPlay 的"先问牌、再问目标"两次询问被消灭为一次——这条断言的语义随 C1 更新。
+    if(window.__mockAiCalls !== 1) throw new Error('合并候选应只问1次,实际 ' + window.__mockAiCalls + '次');
   });
 
   await check('借刀杀人:存在合法A/B时仍不在候选(两步流程,保持排除)', async function(){

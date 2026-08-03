@@ -1389,6 +1389,9 @@ function buildBotGuicaiUserPrompt(state, candidates){
 // (p.hand||[]).length>0 才算有资格),但候选列表只剩"不发动"一项时 botDecide 的单候选
 // 短路也会跳过AI调用、不浪费一次网络请求。
 
+// 【遗留实现,仅测试引用】Milestone C1 起 runBotDecision 的 play 分支改走 runBotActionWindow
+// (弱C:一次调度一步、牌×目标合并候选)。botPlay 保留不删——run_ai_bus_l2 测试仍直接
+// 调用它,且它的"最高价值>25 才打"本地启发式是弱C兜底(localFallbackPlayWindow)的行为基准。
 async function botPlay(g,seat){
   // CARD_PLAYS 的合法性函数沿用旧架构，会读取全局 mySeat；评估阶段也必须切到机器人
   // 视角，不能只在最后真正提交动作时才切。
@@ -1576,7 +1579,7 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondXunxun(all.slice(0,take),all.slice(take))); return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
-  if(g.phase==='play'&&g.turn===seat){ await botPlay(g,seat); return; }
+  if(g.phase==='play'&&g.turn===seat){ await runBotActionWindow(g,seat); return; }
   if(g.phase==='discard'&&g.turn===seat){
     const need=Math.max(0,(p.hand||[]).length-p.hp);
     if(need<=0){ botInvoke(seat,endTurn); return; }
@@ -1743,6 +1746,12 @@ function isBotActionWindow(g, seat){
 // 合法性枚举与 botPlay(botPlay ~1392)逐字同源:同一套 CARD_PLAYS.canPlay/canTarget、
 // 借刀杀人排除、忠臣禁用群体AOE、满血桃排除——差别只在把需要目标的牌按目标展开成一条
 // 条独立候选(botPlay 用 botBestTarget 挑一个最优目标,这里每个合法目标都各占一条)。
+// 【C1 弱C新增】每条非结束候选补 localHeuristicScore,与 botPlay ~1428-1431 的本地启发式
+// 逐字同源:botCardPriority(action) + (target!=null && target!==seat ? botTargetScore(...) : 0),
+// 供无密钥兜底 localFallbackPlayWindow 复刻旧规则"最高价值牌 value>25 才打、否则结束出牌"
+// (见 runBotActionWindow 上方弱C探测注释)。不四舍五入、不额外加权——弱C每步的兜底选择
+// 必须和旧 botPlay 完全一致,这是 C1 的回归红线。botTargetScore 的 kind 参数照 botPlay
+// 原样传 action 名(顺手/拆桥的 'steal' 加成都因此不生效,保持逐字同源)。
 // 【mySeat 借用窗口】与 botPlay 枚举阶段同一约定:CARD_PLAYS 的 canPlay/canTarget 读取
 // 全局 mySeat(杀的距离 canReachSha、闪电的 onlySelf 判定都读),评估期间必须切到机器人
 // 座位、结束立刻归还。本函数纯同步,借用窗口和 botPlay 枚举段一样短,不跨越任何 await。
@@ -1765,22 +1774,87 @@ function enumerateAllLegalOneStepActions(g, seat){
         g.players.forEach((p,i)=>{
           if(!p || !p.alive || i===seat) return;
           if(spec.canTarget && !spec.canTarget(g, me, card, i)) return;
-          out.push({ label: '出【'+action+'】→'+p.name, action, card: botCardBrief(card), handIndex: idx, seat: i, target: i });
+          out.push({ label: '出【'+action+'】→'+p.name, action, card: botCardBrief(card), handIndex: idx, seat: i, target: i, localHeuristicScore: botCardPriority(action) + botTargetScore(g, seat, i, action) });
         });
         // allowSelf 自目标兜底(沿用 botPlay 的 L3 通用写法,不按牌名特判):onlySelf 型
         // 延时锦囊(闪电)的合法目标只有自己,上面循环跳过自己后一个都不剩,这里补上;
         // 铁索连环这类 allowSelf 但可打他人的牌,canTarget 对己为真时同样多出一条合法候选
         // (playCard 的 allowSelf 放行自选目标,是完整合法的一步,不算越权)。
         if(spec.allowSelf && spec.canTarget && spec.canTarget(g, me, card, seat)){
-          out.push({ label: '出【'+action+'】→自己', action, card: botCardBrief(card), handIndex: idx, seat, target: seat });
+          out.push({ label: '出【'+action+'】→自己', action, card: botCardBrief(card), handIndex: idx, seat, target: seat, localHeuristicScore: botCardPriority(action) });
         }
       } else {
-        out.push({ label: '出【'+action+'】', action, card: botCardBrief(card), handIndex: idx, target: null });
+        out.push({ label: '出【'+action+'】', action, card: botCardBrief(card), handIndex: idx, target: null, localHeuristicScore: botCardPriority(action) });
       }
     });
   } finally {
     mySeat = humanSeat;
   }
-  out.push({ label: '结束出牌阶段', action: '结束出牌阶段', card: null, handIndex: null, target: null, isEndPlay: true });
+  out.push({ label: '结束出牌阶段', action: '结束出牌阶段', card: null, handIndex: null, target: null, localHeuristicScore: null, isEndPlay: true });
   return out;
+}
+
+// ================= Milestone C1:弱C出牌窗执行器 =================
+// 【弱C探测结论(本任务实证,勿重做)】game.js 的 tx(fn)(~2295)是 fire-and-forget:内部
+// 调 gameRef.transaction(...) 后直接返回 void,不返回 Promise、不 await;playCard(~2806)
+// 全部状态变更都发生在 tx 回调里(Firebase 事务收到的快照对象,不是调用方本地 g 引用)。
+// 因此一次 playCard 调用后,本地 g/currentG 不会同 tick 更新——currentG 只在 Firebase
+// 回声回来触发 render(g) 时才刷新(render 函数体第一行 currentG=g)。**强C(一次调度内
+// 多步循环)在本架构下不可行**:循环体第二步枚举读到的还是旧状态,会把同一张牌打两次或
+// 打出已被服务端拒绝的动作。要支持强C必须给 playCard/tx 加"提交后回调"通知 bot 侧拿到
+// 新快照再继续——那是 C1b 的未来工作,需要动 game.js(本任务禁止)。
+// 【弱C语义】runBotActionWindow 每次调度恰好执行一步:候选已把"牌×目标"合并成完整动作
+// (消灭旧 botPlay 的"先问牌、再问目标"两次AI调用),AI 一次拿到全部信息;多步组合
+// (拆马→杀)由 scheduleBotTurn 对同一 phase=play 窗口的下一次调度再入本函数推进,跨步
+// 连续性由 buildBotVisibleState 的 recentLog(B1 已含)传达。BOT_WINDOW_MAX_STEPS 保留
+// 作未来强C的循环上限(见 progress-log C1 条目),弱C下每调度恰好 1 步、用不到它。
+// 【无密钥兜底=旧规则逐字复刻】旧 botPlay 的启发式是"options[0].value>25 才打最高价值
+// 牌,否则结束出牌"。localFallbackPlayWindow 在合并候选里找 localHeuristicScore 最大的
+// 非结束候选,>25 就打它、否则打结束项——和旧 botPlay 每步行为完全一致(回归红线,
+// run_ai_bus_c_window_test 有逐条断言)。
+const BOT_WINDOW_MAX_STEPS = 8; // 弱C下每调度1步,此常量保留作未来强C上限(progress-log 注明)
+function localFallbackPlayWindow(g, seat, candidates){
+  let best = null;
+  candidates.forEach(c=>{
+    if(c.isEndPlay) return;
+    if(best===null || (c.localHeuristicScore||0) > (best.localHeuristicScore||0)) best = c;
+  });
+  if(best && (best.localHeuristicScore||0) > 25) return best;
+  return candidates.find(c=>c.isEndPlay) || candidates[candidates.length-1];
+}
+function executePlayWindowChoice(g, seat, choice){
+  if(choice && choice.isEndPlay){ botInvoke(seat, endPlay); return; }
+  botInvoke(seat, ()=>playCard(choice.handIndex, choice.action, (choice.target!=null ? choice.target : null)));
+}
+async function runBotActionWindow(g, seat){
+  // 弱C:每次调度恰好一步(见上方探测注释:tx 是 fire-and-forget,currentG 不会同tick更新,
+  // 强C多步循环在本架构下不可行——每步交给 scheduleBotTurn 再入窗)
+  const latest = (typeof currentG!=='undefined' && currentG) ? currentG : g;
+  if(!isBotActionWindow(latest, seat)) return;
+  const candidates = enumerateAllLegalOneStepActions(latest, seat);
+  if(!candidates.length) return;
+  candidates.forEach((c,i)=>{ c.index=i; });
+  let idx = null;
+  const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
+  if(aiReady && candidates.length>1){
+    const state = buildBotVisibleState(latest, seat);
+    state.windowStep = 1; // 弱C每次调度是窗口内的第1步(跨调度的第N步由 recentLog 传达)
+    idx = await callAiChooseIndex({
+      g: latest, seat,
+      systemPrompt: buildBotDefaultSystemPrompt()
+        + '你处于同一出牌窗口的连续决策(一次调度选一步),每步只选一个完整合法动作(牌+目标已合并)。',
+      userPrompt: buildBotDefaultUserPrompt(state, candidates),
+      candidates,
+      maxTokens: 100,
+    });
+  } else if(candidates.length===1){
+    idx = 0;
+  }
+  let choice;
+  if(idx===null){
+    choice = localFallbackPlayWindow(latest, seat, candidates);
+  } else {
+    choice = candidates[idx];
+  }
+  executePlayWindowChoice(latest, seat, choice);
 }
