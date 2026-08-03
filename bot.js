@@ -426,6 +426,16 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     recentLog: (g.log||[]).slice(-10).map(e => (e && typeof e==='object') ? e.text : String(e==null?'':e)),
     // 自身回合内标志:只投影自己的(shaUsed 全局、jiangchiNoSlash 每人一份),不含他人私有状态
     myFlags: { shaUsed: !!g.shaUsed, jiangchiNoSlash: !!(me.jiangchiNoSlash) },
+    // 弃牌堆:公开信息(展示在桌面),count 总数 + byName 按牌名计数(含同名多张)
+    discardPile: (function(){
+      const byName = {};
+      (g.discard||[]).forEach(function(c){ if(c && c.name) byName[c.name] = (byName[c.name]||0)+1; });
+      return { count: (g.discard||[]).length, byName: byName };
+    })(),
+    // 牌堆剩余张数:公开信息(牌堆背面可见,张数人人知道)
+    deckLeft: (g.deck||[]).length,
+    // 自己的攻击射程:读武器槽 range(无武器默认 1),公开信息(装备区人人可见)
+    myAttackRange: attackRange(g, seat),
   };
 }
 

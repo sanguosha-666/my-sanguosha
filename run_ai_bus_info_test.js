@@ -8,8 +8,11 @@
  * 真实牌名(回归)。
  *
  * 已知的 vm 坑:aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,必须用
- * runInContext 里裸标识符赋值;distance 是 game.js 的函数声明,沙箱不加载 game.js,
- * 在 context 里给最小 stub(只返回常量,不影响本测试断言的结构字段)。
+ * runInContext 里裸标识符赋值;distance/attackRange 是 game.js 的函数声明,沙箱不
+ * 加载 game.js(为两个 6 行函数拖进 config/room-lifecycle/game/weapons/skills 整条
+ * 依赖链不值),在 context 里给最小 stub——attackRange 的 stub 逻辑与 game.js 2799
+ * 行真实实现逐行一致(读武器槽+getEquip 查 range,无武器回退 1),只测 buildBotVisibleState
+ * 的接线(正确调用 attackRange(g,seat) 并投影进 myAttackRange),不替真实实现背书。
  */
 
 const vm = require('vm');
@@ -28,6 +31,16 @@ const context = {
   myClientId: 'test-client',
   // game.js 的 distance 不在沙箱里,给最小 stub(buildBotVisibleState 用它算距离)
   distance: function(){ return 1; },
+  // game.js 的 attackRange 不在沙箱里,给最小 stub(逻辑与 game.js:2799 逐行一致:
+  // 武器槽的 getEquip().range,无武器/无 range 回退 1)——getEquip 来自已加载的 data.js,
+  // 是沙箱 realm 的全局,Node realm 的 stub 闭包拿不到裸标识符,经 context.getEquip 引用
+  // (data.js 加载后顶层 function 声明会挂到 context 上,和 distance stub 同款惯例)。
+  attackRange: function(g, seat){
+    var p = g && g.players && g.players[seat];
+    var w = p && p.equips && p.equips.weapon;
+    var info = w && context.getEquip(w.name);
+    return (info && typeof info.range === 'number') ? info.range : 1;
+  },
   sessionStorage: {
     _d: {},
     getItem: function(k){ return this._d[k] !== undefined ? this._d[k] : null; },
@@ -168,6 +181,47 @@ const testCode = String.raw`
     var json = JSON.stringify(buildBotGuhuoVisibleState(g, 0));
     if(json.indexOf('无中生有') !== -1) throw new Error('泄露了 actualCard 真实牌名');
     if(json.indexOf('杀') === -1) throw new Error('应包含声明牌名 杀');
+  });
+
+  // 6. discardPile:弃牌堆是公开信息 → count 总数 + byName 按牌名计数
+  await check('discardPile 按牌名计数(杀/闪/桃各1)', function(){
+    var g = mkG();
+    g.discard = [ {name:'杀'}, {name:'闪'}, {name:'桃'} ];
+    var s = buildBotVisibleState(g, 0);
+    if(!s.discardPile) throw new Error('discardPile 缺失');
+    if(s.discardPile.count !== 3) throw new Error('count 期望3,实际 ' + s.discardPile.count);
+    if(s.discardPile.byName['杀'] !== 1 || s.discardPile.byName['闪'] !== 1 || s.discardPile.byName['桃'] !== 1){
+      throw new Error('byName 期望 {杀:1,闪:1,桃:1},实际 ' + JSON.stringify(s.discardPile.byName));
+    }
+  });
+
+  // 7. discardPile 空弃牌堆 → count 0、byName 空对象
+  await check('discardPile 空弃牌堆 count0 byName空', function(){
+    var g = mkG();
+    g.discard = [];
+    var s = buildBotVisibleState(g, 0);
+    if(s.discardPile.count !== 0) throw new Error('count 期望0,实际 ' + s.discardPile.count);
+    var keys = Object.keys(s.discardPile.byName);
+    if(keys.length !== 0) throw new Error('byName 应为空对象,实际 ' + JSON.stringify(s.discardPile.byName));
+  });
+
+  // 8. deckLeft:牌堆剩余张数(公开信息)
+  await check('deckLeft 等于牌堆剩余张数', function(){
+    var g = mkG();
+    g.deck = [ {name:'杀'}, {name:'闪'}, {name:'桃'}, {name:'杀'}, {name:'无中生有'} ];
+    var s = buildBotVisibleState(g, 0);
+    if(s.deckLeft !== 5) throw new Error('deckLeft 期望5,实际 ' + s.deckLeft);
+  });
+
+  // 9. myAttackRange:装 range3 武器 → 3;无武器 → 1
+  await check('myAttackRange 武器range3/无武器1', function(){
+    var g = mkG();
+    g.players[0].equips = { weapon: { name: '青龙偃月刀' }, armor: null, plus1: null, minus1: null };
+    var s = buildBotVisibleState(g, 0);
+    if(s.myAttackRange !== 3) throw new Error('装青龙偃月刀时期望3,实际 ' + s.myAttackRange);
+    var g2 = mkG();
+    var s2 = buildBotVisibleState(g2, 0);
+    if(s2.myAttackRange !== 1) throw new Error('无武器期望1,实际 ' + s2.myAttackRange);
   });
 
   console.log('\n' + '='.repeat(60));
