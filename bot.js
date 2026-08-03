@@ -902,6 +902,128 @@ BOT_DECISIONS.guhuoQuestion = {
   maxTokens: 50,
 };
 
+// ================= L3:高价值响应三兄弟(dying/duel/aoeResp,Task T6) =================
+// 【本批是什么】濒死求桃/决斗出杀/南蛮万箭响应三个"要不要打出一张牌"的决策点,从
+// runBotDecision 硬编码分支收敛进 BOT_DECISIONS 注册表。三条 localFallback 与改动前
+// 分支逐字一致(dying 的 botCanSave&&canBotUseTaoForDying&&有桃、duel/aoeResp 的
+// canBotPlaySha&&findUsableAs),无密钥行为零变化。execute 只传 useTao/useSha/useCard
+// 一个布尔(和旧分支一致;respondDying 的 jijiuChoice 第二参是华佗急救专用,机器人
+// 不主动走那条路,不传)。
+function dyingMatch(g, seat){
+  return g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===seat;
+}
+function dyingBuildCandidates(g, seat){
+  const p = g.players[seat];
+  const hasTao = findUsableAs(p.hand, p, '桃') >= 0;
+  const out = [];
+  if(hasTao) out.push({ action:'打出【桃】救援', save:true });
+  out.push({ action:'不出', save:false });
+  return out;
+}
+function dyingExtraState(g, seat){
+  const d = g.pending;
+  const dyingP = g.players[d.seat];
+  return { dying: {
+    dyingSeat: d.seat,
+    dyingName: dyingP ? dyingP.name : '?',
+    dyingHp: dyingP ? dyingP.hp : null,
+    isSelf: d.seat===seat,
+  } };
+}
+function dyingLocalFallback(g, seat, candidates){
+  const d = g.pending;
+  const p = g.players[seat];
+  const save = botCanSave(g, seat, d.seat) && canBotUseTaoForDying(g, seat, d.seat) && findUsableAs(p.hand, p, '桃') >= 0;
+  return candidates.find(function(c){ return c.save === save; }) || candidates[candidates.length-1];
+}
+function dyingExecute(g, seat, choice){
+  botInvoke(seat, function(){ respondDying(!!(choice && choice.save)); });
+}
+function dyingSystemPrompt(){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。现在轮到你对濒死角色决定是否打出【桃】救援。'
+    +'参考自己的身份、已知身份信息与当前手牌,权衡救与不救的利弊。'
+    +'只有列表内选项。只输出 {"choice":数字}，不要解释。';
+}
+BOT_DECISIONS.dying = {
+  match: dyingMatch,
+  buildCandidates: dyingBuildCandidates,
+  extraState: dyingExtraState,
+  localFallback: dyingLocalFallback,
+  execute: dyingExecute,
+  buildSystemPrompt: dyingSystemPrompt,
+  maxTokens: 80,
+};
+
+function duelMatch(g, seat){
+  return g.phase==='duel' && g.pending && g.pending.type==='duel' && g.pending.active===seat;
+}
+function duelBuildCandidates(g, seat){
+  const p = g.players[seat];
+  const canSha = canBotPlaySha(p) && findUsableAs(p.hand, p, '杀') >= 0;
+  const out = [];
+  if(canSha) out.push({ action:'打出【杀】', play:true });
+  out.push({ action:'不出', play:false });
+  return out;
+}
+function duelLocalFallback(g, seat, candidates){
+  // 与旧分支逐字一致(含将驰禁杀判断,见 canBotPlaySha 注释——盲答"出杀"会被服务端拒)。
+  const p = g.players[seat];
+  const play = canBotPlaySha(p) && findUsableAs(p.hand, p, '杀') >= 0;
+  return candidates.find(function(c){ return c.play === play; }) || candidates[candidates.length-1];
+}
+function duelExecute(g, seat, choice){
+  botInvoke(seat, function(){ duelResponse(!!(choice && choice.play)); });
+}
+function duelSystemPrompt(){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。决斗中轮到你是否打出【杀】应战。'
+    +'参考双方体力、手牌与已知身份信息判断优劣——注意当前是否受【将驰】等限制不能使用或打出杀。'
+    +'只有列表内选项。只输出 {"choice":数字}，不要解释。';
+}
+BOT_DECISIONS.duel = {
+  match: duelMatch,
+  buildCandidates: duelBuildCandidates,
+  localFallback: duelLocalFallback,
+  execute: duelExecute,
+  buildSystemPrompt: duelSystemPrompt,
+  maxTokens: 80,
+};
+
+function aoeRespMatch(g, seat){
+  return g.phase==='aoeResp' && g.pending && g.pending.type==='aoeResp' && g.pending.to===seat;
+}
+function aoeRespBuildCandidates(g, seat){
+  const d = g.pending;
+  const p = g.players[seat];
+  const canResp = (d.need==='杀' ? canBotPlaySha(p) : true) && findUsableAs(p.hand, p, d.need) >= 0;
+  const out = [];
+  if(canResp) out.push({ action:'打出【'+d.need+'】', play:true });
+  out.push({ action:'不出', play:false });
+  return out;
+}
+function aoeRespLocalFallback(g, seat, candidates){
+  // 与旧分支逐字一致:need==='杀'(南蛮)受将驰限制,need==='闪'(万箭)不受。
+  const d = g.pending;
+  const p = g.players[seat];
+  const play = (d.need==='杀' ? canBotPlaySha(p) : true) && findUsableAs(p.hand, p, d.need) >= 0;
+  return candidates.find(function(c){ return c.play === play; }) || candidates[candidates.length-1];
+}
+function aoeRespExecute(g, seat, choice){
+  botInvoke(seat, function(){ aoeRespond(!!(choice && choice.play)); });
+}
+function aoeRespSystemPrompt(){
+  return '你在扮演一款网页版三国杀里的AI机器人玩家。南蛮入侵/万箭齐发轮到你响应,决定是否打出要求的牌。'
+    +'参考自己当前手牌与体力判断——注意当前是否受【将驰】等限制不能使用或打出杀。'
+    +'只有列表内选项。只输出 {"choice":数字}，不要解释。';
+}
+BOT_DECISIONS.aoeResp = {
+  match: aoeRespMatch,
+  buildCandidates: aoeRespBuildCandidates,
+  localFallback: aoeRespLocalFallback,
+  execute: aoeRespExecute,
+  buildSystemPrompt: aoeRespSystemPrompt,
+  maxTokens: 80,
+};
+
 // ================= L3: seatPick 通用座位协议(第一批扩展,Task L3-T1) =================
 // 【本协议是什么】把"从合法座位里选一个"这一大类交互收敛成通用协议:BOT_SEAT_PICKS
 // 按技能注册 {match, buildSeatCandidates, fallbackSeat, execute},seatPick 动态收集
@@ -2242,23 +2364,20 @@ async function runBotDecision(g,seat){
     return;
   }
   if(g.phase==='aoeResp'&&d.to===seat){
-    // need==='杀'(南蛮入侵)时同样受【将驰】限制,服务端 aoeRespond 会拒;need==='闪'
-    // (万箭齐发)不受影响,所以只在需要杀时才加这道判断。
-    const canRespond = (d.need==='杀' ? canBotPlaySha(p) : true) && findUsableAs(p.hand,p,d.need)>=0;
-    botInvoke(seat,()=>aoeRespond(canRespond));
-    return;
+    // 决策已进 BOT_DECISIONS.aoeResp(候选生成/本地回退与旧分支逐字一致,见注册表上方
+    // 注释——need==='杀'(南蛮)受将驰限制,need==='闪'(万箭)不受)。此处保留
+    // phase+pending.to 守卫作为冗余复核,命中即 return。
+    if(await botDecide('aoeResp',g,seat)) return;
   }
   if(g.phase==='duel'&&d.active===seat){
-    // 不能只看"手里有没有杀":曹彰【将驰】选项1 期间服务端 duelResponse 一上来就
-    // if(me.jiangchiNoSlash) return g —— 盲答 true 会被原地拒绝、状态不变,机器人下次
-    // 醒来重算又得到同样结论,永久死循环。仿 pick 分支"先探测实际可选项再决定"。
-    botInvoke(seat,()=>duelResponse(canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0));
-    return;
+    // 决策已进 BOT_DECISIONS.duel(本地回退含将驰禁杀判断,与旧分支逐字一致,见注册表
+    // 上方注释——盲答"出杀"会被服务端原地拒绝、永久死循环)。
+    if(await botDecide('duel',g,seat)) return;
   }
   if(g.phase==='dying'&&d.asking===seat){
-    const save=botCanSave(g,seat,d.seat)&&canBotUseTaoForDying(g,seat,d.seat)&&findUsableAs(p.hand,p,'桃')>=0;
-    botInvoke(seat,()=>respondDying(save));
-    return;
+    // 决策已进 BOT_DECISIONS.dying(本地回退=botCanSave&&canBotUseTaoForDying&&有桃,
+    // 与旧分支逐字一致,见注册表上方注释)。
+    if(await botDecide('dying',g,seat)) return;
   }
   // L1 controlsChoice:镜像真实 controls 按钮的响应决策(wuxie/luoyingAsk/luoshen,
   // allowlist 及逐阶段等价性核对见 BOT_DECISIONS.controlsChoice 上方注释)。命中则整条

@@ -1251,6 +1251,228 @@ const testCode = String.raw`
     botTwoStepA = null;
   });
 
+  // ================= T6:高价值响应三兄弟(dying/duel/aoeResp)进总线 =================
+  // 服务端真实 pending 结构:dying={type:'dying',seat(濒死者),asking};duel={type:'duel',
+  // from,to,active};aoeResp={type:'aoeResp',from,to,need}。本地回退与旧 runBotDecision
+  // 硬编码分支逐字一致(见 bot.js 注册表上方注释),无密钥行为零变化。
+  respondDying = spyService('dying');
+  duelResponse = spyService('duel');
+  aoeRespond = spyService('aoeResp');
+
+  function mkDyingG(opt){
+    opt = opt || {};
+    var g = mkSeatG(opt);
+    g.phase = 'dying';
+    g.pending = { type: 'dying', seat: opt.dyingSeat !== undefined ? opt.dyingSeat : 1, asking: 0, resume: { type: 'sha' } };
+    return g;
+  }
+  function mkDuelG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'duel';
+    g.pending = { type: 'duel', from: 1, to: 0, active: 0 };
+    return g;
+  }
+  function mkAoeG(opt){
+    opt = opt || {};
+    var g = mkSeatG(opt);
+    g.phase = 'aoeResp';
+    g.pending = { type: 'aoeResp', from: 1, to: 0, need: opt.need || '杀' };
+    return g;
+  }
+
+  await check('dying:注册存在;match=phase+type+asking;错阶段/错asking false;候选=有桃2项/无桃1项', function(){
+    var s = BOT_DECISIONS.dying;
+    if(!s) throw new Error('BOT_DECISIONS.dying 未注册');
+    var g1 = mkDyingG({ myHand: [card('桃','t0')] });
+    if(!s.match(g1, 0)) throw new Error('asking=0 应命中');
+    if(s.match(g1, 1)) throw new Error('非 asking 不应命中');
+    var g1b = mkDyingG({ myHand: [card('桃','t0')] });
+    g1b.phase = 'play';
+    if(s.match(g1b, 0)) throw new Error('错阶段不应命中');
+    var c1 = s.buildCandidates(g1, 0);
+    if(c1.length !== 2 || !c1[0].save || c1[1].save !== false)
+      throw new Error('有桃应2候选[打出桃,不出],实际 ' + JSON.stringify(c1));
+    var g3 = mkDyingG({ myHand: [] });
+    var c3 = s.buildCandidates(g3, 0);
+    if(c3.length !== 1 || c3[0].save !== false)
+      throw new Error('无桃应只1候选不出,实际 ' + JSON.stringify(c3));
+  });
+
+  await check('dying无密钥:忠臣救主公(有桃)→true;反贼救主公(有桃)→false;自救(有桃)→true', async function(){
+    window.__dyingCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g1 = mkDyingG({ myHand: [card('桃','t1')] });
+    g1.players[0].role = 'zhong'; g1.players[1].role = 'zhu';
+    await botDecide('dying', g1, 0);
+    if(window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== true)
+      throw new Error('忠臣救主公应 respondDying(true),实际 ' + JSON.stringify(window.__dyingCalls));
+    window.__dyingCalls = [];
+    var g2 = mkDyingG({ myHand: [card('桃','t2')] });
+    g2.players[0].role = 'fan'; g2.players[1].role = 'zhu';
+    await botDecide('dying', g2, 0);
+    if(window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== false)
+      throw new Error('反贼救主公应 respondDying(false),实际 ' + JSON.stringify(window.__dyingCalls));
+    window.__dyingCalls = [];
+    var g3 = mkDyingG({ dyingSeat: 0, myHand: [card('桃','t3')] });
+    g3.players[0].role = 'fan'; g3.players[1].role = 'zhu';
+    await botDecide('dying', g3, 0);
+    if(window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== true)
+      throw new Error('自救应 respondDying(true),实际 ' + JSON.stringify(window.__dyingCalls));
+  });
+
+  await check('dying单候选(无桃)有密钥:无AI调用,直接执行不出 → respondDying(false)', async function(){
+    window.__dyingCalls = []; window.__mockAiCalls = 0;
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkDyingG({ myHand: [] });
+    var r = await botDecide('dying', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__mockAiCalls !== 0) throw new Error('单候选不应调AI,实际 ' + window.__mockAiCalls);
+    if(window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== false)
+      throw new Error('应 respondDying(false),实际 ' + JSON.stringify(window.__dyingCalls));
+  });
+
+  await check('dying有密钥:mock 出桃(choice0,候选index=打出)→respondDying(true);mock 不出(choice1)→false;userPrompt 含濒死者公开名、不含他人手牌', async function(){
+    window.__dyingCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkDyingG({ myHand: [card('桃','t4')], hands: { 1: [card('桃园结义','sec')] } });
+    g.players[1].name = '濒死者甲';
+    var r = await botDecide('dying', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== true)
+      throw new Error('mock 出桃应 respondDying(true),实际 ' + JSON.stringify(window.__dyingCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('濒死者甲') < 0) throw new Error('userPrompt 应含濒死者公开名(濒死者甲),实际 ' + up);
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+    window.__dyingCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    await botDecide('dying', g, 0);
+    if(window.__mockAiCalls !== 1 || window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== false)
+      throw new Error('mock 不出应 respondDying(false),实际 ' + JSON.stringify(window.__dyingCalls));
+  });
+
+  await check('duel:注册存在;match=phase+active;候选=有杀2项/无杀或将驰禁杀1项', function(){
+    var s = BOT_DECISIONS.duel;
+    if(!s) throw new Error('BOT_DECISIONS.duel 未注册');
+    var g1 = mkDuelG({ myHand: [card('杀','s0')] });
+    if(!s.match(g1, 0)) throw new Error('active=0 应命中');
+    if(s.match(g1, 1)) throw new Error('非 active 不应命中');
+    var g1b = mkDuelG({ myHand: [card('杀','s0')] });
+    g1b.phase = 'play';
+    if(s.match(g1b, 0)) throw new Error('错阶段不应命中');
+    var c1 = s.buildCandidates(g1, 0);
+    if(c1.length !== 2 || !c1[0].play || c1[1].play !== false)
+      throw new Error('有杀应2候选[出杀,不出],实际 ' + JSON.stringify(c1));
+    var g2 = mkDuelG({ myHand: [] });
+    if(s.buildCandidates(g2, 0).length !== 1) throw new Error('无杀应1候选');
+    var g3 = mkDuelG({ jiangchiNoSlash: true, myHand: [card('杀','s1')] });
+    if(s.buildCandidates(g3, 0).length !== 1) throw new Error('将驰禁杀应1候选');
+  });
+
+  await check('duel无密钥:有杀→duelResponse(true);将驰禁杀+有杀→duelResponse(false)', async function(){
+    window.__duelCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g1 = mkDuelG({ myHand: [card('杀','s2')] });
+    await botDecide('duel', g1, 0);
+    if(window.__duelCalls.length !== 1 || window.__duelCalls[0][0] !== true)
+      throw new Error('有杀应 duelResponse(true),实际 ' + JSON.stringify(window.__duelCalls));
+    window.__duelCalls = [];
+    var g2 = mkDuelG({ jiangchiNoSlash: true, myHand: [card('杀','s3')] });
+    await botDecide('duel', g2, 0);
+    if(window.__duelCalls.length !== 1 || window.__duelCalls[0][0] !== false)
+      throw new Error('将驰禁杀应 duelResponse(false),实际 ' + JSON.stringify(window.__duelCalls));
+  });
+
+  await check('duel有密钥:mock 出杀(choice0)→duelResponse(true);mock 不出(choice1)→false;userPrompt 不含他人手牌', async function(){
+    window.__duelCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkDuelG({ myHand: [card('杀','s4')], hands: { 1: [card('无中生有','sec')] } });
+    await botDecide('duel', g, 0);
+    if(window.__mockAiCalls !== 1 || window.__duelCalls.length !== 1 || window.__duelCalls[0][0] !== true)
+      throw new Error('mock 出杀应 duelResponse(true),实际 ' + JSON.stringify(window.__duelCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('无中生有') >= 0) throw new Error('userPrompt 泄露他人手牌(无中生有)!实际 ' + up);
+    window.__duelCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    await botDecide('duel', g, 0);
+    if(window.__mockAiCalls !== 1 || window.__duelCalls.length !== 1 || window.__duelCalls[0][0] !== false)
+      throw new Error('mock 不出应 duelResponse(false),实际 ' + JSON.stringify(window.__duelCalls));
+  });
+
+  await check('aoeResp:注册存在;match=phase+to;候选按 need 出牌/不出(将驰只影响南蛮杀)', function(){
+    var s = BOT_DECISIONS.aoeResp;
+    if(!s) throw new Error('BOT_DECISIONS.aoeResp 未注册');
+    var g1 = mkAoeG({ need: '杀', myHand: [card('杀','a0')] });
+    if(!s.match(g1, 0)) throw new Error('to=0 应命中');
+    if(s.match(g1, 1)) throw new Error('非 to 不应命中');
+    var g1b = mkAoeG({ need: '杀', myHand: [card('杀','a0')] });
+    g1b.phase = 'play';
+    if(s.match(g1b, 0)) throw new Error('错阶段不应命中');
+    var c1 = s.buildCandidates(g1, 0);
+    if(c1.length !== 2 || !c1[0].play || c1[1].play !== false)
+      throw new Error('有杀应2候选,实际 ' + JSON.stringify(c1));
+    var g2 = mkAoeG({ need: '杀', myHand: [] });
+    if(s.buildCandidates(g2, 0).length !== 1) throw new Error('无杀应1候选');
+    var g3 = mkAoeG({ need: '杀', jiangchiNoSlash: true, myHand: [card('杀','a1')] });
+    if(s.buildCandidates(g3, 0).length !== 1) throw new Error('将驰禁杀应1候选');
+    var g4 = mkAoeG({ need: '闪', jiangchiNoSlash: true, myHand: [card('闪','a2')] });
+    if(s.buildCandidates(g4, 0).length !== 2) throw new Error('将驰不影响出闪,应2候选');
+  });
+
+  await check('aoeResp无密钥:南蛮有杀→aoeRespond(true);万箭有闪→true;万箭无闪→false', async function(){
+    window.__aoeRespCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g1 = mkAoeG({ need: '杀', myHand: [card('杀','a3')] });
+    await botDecide('aoeResp', g1, 0);
+    if(window.__aoeRespCalls.length !== 1 || window.__aoeRespCalls[0][0] !== true)
+      throw new Error('南蛮有杀应 aoeRespond(true),实际 ' + JSON.stringify(window.__aoeRespCalls));
+    window.__aoeRespCalls = [];
+    var g2 = mkAoeG({ need: '闪', myHand: [card('闪','a4')] });
+    await botDecide('aoeResp', g2, 0);
+    if(window.__aoeRespCalls.length !== 1 || window.__aoeRespCalls[0][0] !== true)
+      throw new Error('万箭有闪应 aoeRespond(true),实际 ' + JSON.stringify(window.__aoeRespCalls));
+    window.__aoeRespCalls = [];
+    var g3 = mkAoeG({ need: '闪', myHand: [] });
+    await botDecide('aoeResp', g3, 0);
+    if(window.__aoeRespCalls.length !== 1 || window.__aoeRespCalls[0][0] !== false)
+      throw new Error('万箭无闪应 aoeRespond(false),实际 ' + JSON.stringify(window.__aoeRespCalls));
+  });
+
+  await check('aoeResp有密钥:mock 出牌(choice0)→aoeRespond(true);userPrompt 不含他人手牌', async function(){
+    window.__aoeRespCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkAoeG({ need: '杀', myHand: [card('杀','a5')], hands: { 1: [card('桃园结义','sec')] } });
+    await botDecide('aoeResp', g, 0);
+    if(window.__mockAiCalls !== 1 || window.__aoeRespCalls.length !== 1 || window.__aoeRespCalls[0][0] !== true)
+      throw new Error('mock 出牌应 aoeRespond(true),实际 ' + JSON.stringify(window.__aoeRespCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
+  });
+
+  await check('接线:runBotDecision dying/duel/aoeResp 各命中一次即调对应服务端,不误调其它响应', async function(){
+    window.__dyingCalls = []; window.__duelCalls = []; window.__aoeRespCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var g1 = mkDyingG({ myHand: [card('桃','w0')] });
+    g1.players[0].role = 'zhong'; g1.players[1].role = 'zhu';
+    await runBotDecision(g1, 0);
+    if(window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== true)
+      throw new Error('dying 接线应 respondDying(true) 恰1次,实际 ' + JSON.stringify(window.__dyingCalls));
+    if(window.__duelCalls.length !== 0 || window.__aoeRespCalls.length !== 0)
+      throw new Error('dying 阶段不应误调其它响应');
+    var g2 = mkDuelG({ myHand: [card('杀','w1')] });
+    await runBotDecision(g2, 0);
+    if(window.__duelCalls.length !== 1 || window.__duelCalls[0][0] !== true)
+      throw new Error('duel 接线应 duelResponse(true) 恰1次,实际 ' + JSON.stringify(window.__duelCalls));
+    var g3 = mkAoeG({ need: '闪', myHand: [card('闪','w2')] });
+    await runBotDecision(g3, 0);
+    if(window.__aoeRespCalls.length !== 1 || window.__aoeRespCalls[0][0] !== true)
+      throw new Error('aoeResp 接线应 aoeRespond(true) 恰1次,实际 ' + JSON.stringify(window.__aoeRespCalls));
+    if(window.__dyingCalls.length !== 1 || window.__duelCalls.length !== 1)
+      throw new Error('aoeResp 阶段不应误调 dying/duel');
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
