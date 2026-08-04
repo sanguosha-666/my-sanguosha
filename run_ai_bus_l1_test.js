@@ -419,6 +419,119 @@ const testCode = String.raw`
     if(c0[1] !== 2) throw new Error('目标应为2,实际 ' + c0[1]);
   });
 
+  // ================= Task G3:分配类纯按钮阶段 L1 覆盖补全验证 =================
+  // G2 已断言 liuli/tianxiang/lirangRecover/zhengyi 有密钥接管(choice 0 侧)与 liuli
+  // 无密钥回退。这里补齐:候选文案镜像、choice 1 侧、其余三阶段无密钥对照、以及
+  // xiaoguo/xiaoguoChoice 的 EXCLUDE 证明(L1 自动覆盖集只有 4 个阶段,骁果不在其中,
+  // 见 bot.js CONTROLS_CHOICE_EXCLUDE 与 BOT_PHASE_ACTOR)。
+
+  // ---- T16:四个被覆盖阶段候选文案 = 真实渲染按钮镜像(collect 直取)----
+  await check('collect:liuli/tianxiang/lirangRecover/zhengyi 候选文案镜像真实按钮', function(){
+    var cases = [
+      { name: 'liuli', g: mkG('liuli', { type: 'liuli', from: 1, to: 0, usedAs: '杀', shaColor: 'red', targets: [2] }, [card('杀')]),
+        expect: ['弃手牌【杀】 → 玩家2', '不发动'] },
+      { name: 'tianxiang', g: mkG('tianxiang', { type: 'tianxiang', seat: 0, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha', targets: [2], resume: { type: 'sha' } }, [card('桃')]),
+        expect: ['弃【桃】 → 玩家2', '不发动'] },
+      { name: 'lirangRecover', g: mkG('lirangRecover', { type: 'lirangRecover', from: 0, to: 1, cards: [card('闪')] }, []),
+        expect: ['获得弃牌', '不获得'] },
+      { name: 'zhengyi', g: mkG('zhengyi', { type: 'zhengyi', asking: 0, seat: 1, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha' }, []),
+        expect: ['发动【争义】', '不发动'] },
+    ];
+    for(var i = 0; i < cases.length; i++){
+      var res = collectControlsCandidates(cases[i].g, 0);
+      try{
+        var labels = res.candidates.map(function(c){ return c.label; });
+        if(labels.length !== cases[i].expect.length) throw new Error(cases[i].name + ' 候选数应=' + cases[i].expect.length + ' 实际 ' + JSON.stringify(labels));
+        for(var j = 0; j < cases[i].expect.length; j++){
+          if(labels[j] !== cases[i].expect[j]) throw new Error(cases[i].name + ' 候选' + j + ' 应「' + cases[i].expect[j] + '」实际「' + labels[j] + '」');
+        }
+      } finally {
+        res.dispose();
+      }
+    }
+  });
+
+  // ---- T17:lirangRecover/zhengyi 有密钥 mock 选第2项(choice 1),补全候选对 ----
+  await check('有密钥:lirangRecover mock 选「不获得」→ respondLiRangRecover(false)', async function(){
+    window.__lirangCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('lirangRecover', { type: 'lirangRecover', from: 0, to: 1, cards: [card('闪')] }, []);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0] !== false) throw new Error('应 respondLiRangRecover(false),实际 ' + JSON.stringify(window.__lirangCalls));
+    var up = window.__mockAiArgs.opts.userPrompt || '';
+    if(up.indexOf('获得弃牌') < 0 || up.indexOf('不获得') < 0) throw new Error('userPrompt 应含「获得弃牌」「不获得」,实际 ' + up);
+  });
+
+  await check('有密钥:zhengyi mock 选「不发动」→ respondZhengyi(false)', async function(){
+    window.__zhengyiCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('zhengyi', { type: 'zhengyi', asking: 0, seat: 1, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha' }, []);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__zhengyiCalls.length !== 1 || window.__zhengyiCalls[0] !== false) throw new Error('应 respondZhengyi(false),实际 ' + JSON.stringify(window.__zhengyiCalls));
+    var up = window.__mockAiArgs.opts.userPrompt || '';
+    if(up.indexOf('发动【争义】') < 0 || up.indexOf('不发动') < 0) throw new Error('userPrompt 应含「发动【争义】」「不发动」,实际 ' + up);
+  });
+
+  // ---- T18:无密钥对照(tianxiang/lirangRecover/zhengyi,补齐 liuli 之外的三个)----
+  // tianxiang/zhengyi 的「不发动」命中 botSafePrompt safe 正则 → 旧路径点它;
+  // lirangRecover 的「获得弃牌/不获得」都不命中 safe/mandatory 正则 → botSafePrompt
+  // 放弃点击(既有盲区,G2 未改此行为,断言"不崩且不误点")。
+  await check('无密钥:tianxiang/lirangRecover/zhengyi botDecide false,runBotDecision 走旧路径不崩', async function(){
+    aiApiKey = '';
+    aiProvider = null;
+    window.__tianxiangCalls = [];
+    window.__lirangCalls = [];
+    window.__zhengyiCalls = [];
+
+    var g1 = mkG('tianxiang', { type: 'tianxiang', seat: 0, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha', targets: [2], resume: { type: 'sha' } }, [card('桃')]);
+    var r1 = await botDecide('controlsChoice', g1, 0);
+    if(r1 !== false) throw new Error('tianxiang 无密钥不应被 L1 接管,实际 ' + r1);
+    await runBotDecision(g1, 0);
+    if(window.__tianxiangCalls.length !== 1) throw new Error('tianxiang 旧路径应点1次,实际 ' + window.__tianxiangCalls.length);
+    var t0 = window.__tianxiangCalls[0];
+    if(t0[0] !== null || t0[1] !== null) throw new Error('tianxiang 旧路径应点「不发动」=respondTianxiang(null,null),实际 ' + JSON.stringify(t0));
+
+    var g2 = mkG('lirangRecover', { type: 'lirangRecover', from: 0, to: 1, cards: [card('闪')] }, []);
+    var r2 = await botDecide('controlsChoice', g2, 0);
+    if(r2 !== false) throw new Error('lirangRecover 无密钥不应被 L1 接管,实际 ' + r2);
+    await runBotDecision(g2, 0);
+    if(window.__lirangCalls.length !== 0) throw new Error('lirangRecover 旧路径应不点任何按钮(盲区不崩),实际 ' + JSON.stringify(window.__lirangCalls));
+
+    var g3 = mkG('zhengyi', { type: 'zhengyi', asking: 0, seat: 1, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha' }, []);
+    var r3 = await botDecide('controlsChoice', g3, 0);
+    if(r3 !== false) throw new Error('zhengyi 无密钥不应被 L1 接管,实际 ' + r3);
+    await runBotDecision(g3, 0);
+    if(window.__zhengyiCalls.length !== 1 || window.__zhengyiCalls[0] !== false) throw new Error('zhengyi 旧路径应点「不发动」=respondZhengyi(false),实际 ' + JSON.stringify(window.__zhengyiCalls));
+
+    if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
+  });
+
+  // ---- T19:EXCLUDE 证明:xiaoguo/xiaoguoChoice 有密钥也不被 L1 接管 ----
+  // 注意:这两个阶段连 BOT_PHASE_ACTOR 都没有登记(botSeatForState 返回 -1),EXCLUDE 是
+  // 双保险;断言锁定的是行为("不被 L1 自动覆盖"),不区分机制。
+  await check('EXCLUDE:有密钥 xiaoguo/xiaoguoChoice 不被接管(不在 L1 自动覆盖集)', async function(){
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var cases = [
+      { phase: 'xiaoguo', pending: { type: 'xiaoguo', from: 1, to: 0, endingSeat: 1 } },
+      { phase: 'xiaoguoChoice', pending: { type: 'xiaoguoChoice', from: 1, to: 0, endingSeat: 1 } },
+    ];
+    for(var i = 0; i < cases.length; i++){
+      var g = mkG(cases[i].phase, cases[i].pending, []);
+      var r = await botDecide('controlsChoice', g, 0);
+      if(r !== false) throw new Error(cases[i].phase + ' 不应被 L1 接管,实际 ' + r);
+    }
+    if(document.body.children.length !== 1) throw new Error('EXCLUDE 阶段不应产生临时 box');
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
