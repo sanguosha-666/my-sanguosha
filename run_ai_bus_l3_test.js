@@ -883,17 +883,17 @@ const testCode = String.raw`
     if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走 runBotActionWindow(等下一调度)');
     if(!botTwoStepA || botTwoStepA.a !== 1) throw new Error('阶段A应挂起 botTwoStepA,实际 ' + JSON.stringify(botTwoStepA));
 
-    // 场景3:手牌无借刀(也无其它多步技能) → 4个决策依次未命中 → 走 runBotActionWindow
+    // 场景3:手牌无借刀(也无其它多步技能) → 4个决策依次未命中+seatPick未命中 → 走 runBotActionWindow
     wired = [];
     window.__windowCalls = 0;
     botTwoStepA = null;
     var g3 = mkSeatG({ myHand: [card('杀','j15')] });
     await runBotDecision(g3, 0);
     if(window.__windowCalls !== 1) throw new Error('jiedaoTwoStep 未命中时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
-      throw new Error('无挂起态时应按序尝试4个决策(第二处接线),实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick')
+      throw new Error('无挂起态时应按序尝试4个决策+seatPick(第二处接线),实际 ' + wired.join(','));
 
-    // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策不命中 → 走窗口不崩
+    // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策+seatPick不命中 → 走窗口不崩
     wired = [];
     window.__windowCalls = 0;
     window.__jiedaoCalls = [];
@@ -902,8 +902,8 @@ const testCode = String.raw`
     g4.players[0].equips.plus1 = { name: '的卢' };
     await runBotDecision(g4, 0);
     if(window.__windowCalls !== 1) throw new Error('阶段B无候选时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
-      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中后放行,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick')
+      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中+seatPick后放行,实际 ' + wired.join(','));
     if(window.__jiedaoCalls.length !== 0) throw new Error('阶段B无候选不应提交 jieDaoShaRen');
 
     botDecide = realBotDecide;
@@ -1238,14 +1238,14 @@ const testCode = String.raw`
     if(botTwoStepA !== null) throw new Error('仁德提交后应重置');
     if(wired.join(',') !== 'rendeTwoStep') throw new Error('挂起期只应尝试 rendeTwoStep,实际 ' + wired.join(','));
 
-    // 场景6:全未命中(无技能无武器) → 只试4个决策各1次后走窗口
+    // 场景6:全未命中(无技能无武器) → 只试4个决策各1次+seatPick后走窗口
     wired = []; window.__windowCalls = 0;
     botTwoStepA = null;
     var g6 = mkSeatG({ myHand: [card('杀','m6')] });
     await runBotDecision(g6, 0);
     if(window.__windowCalls !== 1) throw new Error('全未命中应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
-      throw new Error('全未命中应按序尝试4个决策,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick')
+      throw new Error('全未命中应按序尝试4个决策+seatPick,实际 ' + wired.join(','));
 
     botDecide = realBotDecide;
     runBotActionWindow = realWindow;
@@ -2035,6 +2035,108 @@ const testCode = String.raw`
       throw new Error('respondQiaobianMove 应恰1次(null),实际 ' + JSON.stringify(window.__qiaobianMoveCalls));
     if(window.__enyuanOptionCalls.length !== 1 || window.__enyuanOptionCalls[0][0] !== 'giveCard')
       throw new Error('chooseEnyuanOption 应恰1次(giveCard),实际 ' + JSON.stringify(window.__enyuanOptionCalls));
+  });
+
+  // ================= G1:seatPick 接线修复(runBotDecision 全链路,Task G1) =================
+  // 【背景】BOT_SEAT_PICKS 的 11 个座位技能此前只注册未接线——runBotDecision 从不调用
+  // botDecide('seatPick'),机器人永远不会主动用这些技能(仅靠上面的 botDecide 直接单测,
+  // 证明不了总线真的会走到)。以下测试全部走 runBotDecision(g, 0) 全链,证明 4 处接线
+  // 存在:play 分支 1 处(在所有多步决策之后、runBotActionWindow 之前)+ guhuoTarget/
+  // xuanfengPick/quhuDamageChoice 三个 pending 阶段分支各 1 处。断言两件套:①botDecide
+  // 确实收到 seatPick(接线存在);②对应服务端函数确实收到选择(execute 真的执行)。
+  // 【构造口径】play 阶段用断粮做唯一命中技能(caps0.duanliang+黑基本牌;其余10技能
+  // 各自差一个匹配条件:奇袭/国色/武圣/双雄/挑衅/反间/青囊无 cap、无 pending 阶段),
+  // 候选=距离≤2 的存活非自己;三个 pending 阶段沿用上方 mkGuhuoG/mkXuanfengG/
+  // mkQuhuDamageG(mkXuanfengG 不设 phase,此处补 g.phase='xuanfengPick' 对齐服务端
+  // game.js:5765 的真实阶段名)。
+  function spyBotDecideLog(){
+    window.__G1botDecideCalls = [];
+    var __origBotDecide = botDecide;
+    botDecide = async function(id, gg, ss){
+      window.__G1botDecideCalls.push(id);
+      return __origBotDecide(id, gg, ss);
+    };
+    return function(){ botDecide = __origBotDecide; };
+  }
+
+  await check('G1接线:play阶段有密钥 runBotDecision 全链 → seatPick 被调且断粮选中 → duanLiang(牌idx,目标)', async function(){
+    window.__duanliangCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var restore = spyBotDecideLog();
+    try {
+      var g = mkSeatG({ caps0: { duanliang: true }, myHand: [card('酒','g1','♣')] });
+      await runBotDecision(g, 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
+      throw new Error('runBotDecision play 分支应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__duanliangCalls.length !== 1)
+      throw new Error('断粮应经 seatPick 接线被调用,实际 ' + JSON.stringify(window.__duanliangCalls));
+    if(window.__duanliangCalls[0][0] !== 0 || window.__duanliangCalls[0][1] !== 1)
+      throw new Error('应 duanLiang(0, 座位1),实际 ' + JSON.stringify(window.__duanliangCalls));
+    if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI调用(seatPick选候选),实际 ' + window.__mockAiCalls);
+  });
+
+  await check('G1接线:play阶段无密钥 fallback null → seatPick 被调但不调 duanLiang、不崩', async function(){
+    window.__duanliangCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var restore = spyBotDecideLog();
+    try {
+      var g = mkSeatG({ caps0: { duanliang: true }, myHand: [card('酒','g2','♣')] });
+      await runBotDecision(g, 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
+      throw new Error('runBotDecision play 分支应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__duanliangCalls.length !== 0)
+      throw new Error('无密钥 fallback=null 不应调用 duanLiang,实际 ' + JSON.stringify(window.__duanliangCalls));
+  });
+
+  await check('G1接线:guhuoTarget 阶段 → seatPick 被调且 → guhuoChooseTarget(目标)', async function(){
+    window.__guhuoTargetCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var restore = spyBotDecideLog();
+    try {
+      await runBotDecision(mkGuhuoG({}), 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
+      throw new Error('guhuoTarget 阶段应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__guhuoTargetCalls.length !== 1 || window.__guhuoTargetCalls[0] !== 1)
+      throw new Error('应 guhuoChooseTarget(座位1),实际 ' + JSON.stringify(window.__guhuoTargetCalls));
+  });
+
+  await check('G1接线:xuanfengPick 阶段 → seatPick 被调且 → pickXuanfengTarget(目标)', async function(){
+    window.__xuanfengCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var restore = spyBotDecideLog();
+    try {
+      var g = mkXuanfengG({});
+      g.phase = 'xuanfengPick';
+      await runBotDecision(g, 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
+      throw new Error('xuanfengPick 阶段应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__xuanfengCalls.length !== 1 || window.__xuanfengCalls[0] !== 2)
+      throw new Error('应 pickXuanfengTarget(座位2),实际 ' + JSON.stringify(window.__xuanfengCalls));
+  });
+
+  await check('G1接线:quhuDamageChoice 阶段 → seatPick 被调且 → respondQuhuDamage(目标)', async function(){
+    window.__quhuDamageCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var restore = spyBotDecideLog();
+    try {
+      await runBotDecision(mkQuhuDamageG({}), 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
+      throw new Error('quhuDamageChoice 阶段应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__quhuDamageCalls.length !== 1 || window.__quhuDamageCalls[0][0] !== 2)
+      throw new Error('应 respondQuhuDamage(座位2),实际 ' + JSON.stringify(window.__quhuDamageCalls));
   });
 
   console.log('\n' + '='.repeat(60));

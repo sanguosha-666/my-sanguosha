@@ -2691,6 +2691,12 @@ async function runBotDecision(g,seat){
     if(await botDecide('lijianTwoStep', g, seat)) return;
     if(await botDecide('zhangbaTwoStep', g, seat)) return;
     if(await botDecide('rendeTwoStep', g, seat)) return;
+    // 【L1泛化批次】seatPick 接线修复:11 个座位技能(断粮/奇袭/国色/武圣/双雄/挑衅/
+    // 反间/青囊等)此前只注册未接线,机器人从不主动使用。命中的技能候选(技能→目标)
+    // 合并成一张表 AI 选;未命中返回 false 走 runBotActionWindow(手牌枚举),两者不冲突
+    // (seatPick 技能无 CARD_PLAYS 入口;武圣/双雄的 CARD_PLAYS 路径与 seatPick 的
+    // "技能按钮"路径候选 label 不同,双路径都合法,不排除——测试锁定)。
+    if(await botDecide('seatPick', g, seat)) return;
     await runBotActionWindow(g, seat); return;
   }
   if(g.phase==='discard'&&g.turn===seat){
@@ -2837,6 +2843,18 @@ async function runBotDecision(g,seat){
     // 决策已进 BOT_DECISIONS.qiaobianMove(无密钥回退=不移动,与旧分支逐字一致,见注册表
     // 上方注释)。phase+seat 守卫保留作双保险,命中即 return。
     if(await botDecide('qiaobianMove',g,seat)) return;
+  }
+  // 【G1接线】seatPick 三个 pending 阶段(蛊惑选目标/旋风选目标/驱虎选伤害目标):
+  // 与 play 分支同一套 seatPick 协议(候选合并表+AI 选),此前未接线时这三个阶段对
+  // 机器人是死路径(botSafePrompt 够不到座位卡点击),命中即 return。
+  if(g.phase==='guhuoTarget' && d && d.type==='guhuoTarget' && d.sourceSeat===seat){
+    if(await botDecide('seatPick', g, seat)) return;
+  }
+  if(g.phase==='xuanfengPick' && d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting'){
+    if(await botDecide('seatPick', g, seat)) return;
+  }
+  if(g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice' && d.seat===seat){
+    if(await botDecide('seatPick', g, seat)) return;
   }
   if(botSafePrompt(g,seat)) return;
   console.warn('机器人暂未覆盖阶段',g.phase,d.type,seat);

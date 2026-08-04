@@ -34,7 +34,9 @@ const context = {
     createDocumentFragment: function() { return { appendChild: function() { return {}; }, querySelector: function() { return null; }, querySelectorAll: function() { return []; } }; },
     querySelector: function() { return null; }, querySelectorAll: function() { return []; },
     body: { innerHTML: '', appendChild: function() { return {}; }, removeChild: function() { return {}; }, insertBefore: function() { return {}; } },
-    head: { appendChild: function() { return {}; } }, forms: [], images: [], scripts: []
+    head: { appendChild: function() { return {}; } }, forms: [], images: [], scripts: [],
+    // render.js 顶层注册横屏引导/音频解锁监听需要 document 级 addEventListener
+    addEventListener: function() {}, removeEventListener: function() {}
   },
   window: {
     firebase: null,
@@ -72,8 +74,10 @@ const sandbox = vm.createContext(context, { name: 'sgs-ai-bus-l2-sandbox' });
 console.log('Loading AI 总线 B2 测试环境...\n');
 
 // 加载顺序遵循 index.html:room-lifecycle 必须在 game.js 之前(game.js 顶层
-// onclick 绑定 joinRoom);bot.js 在 game.js 之后、ai-bot.js 最后。
-const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot.js', 'ai-bot.js'];
+// onclick 绑定 joinRoom);bot.js 在 game.js 之后、ai-bot.js 之后殿后加载 render.js
+// (G1 起 runBotDecision play 分支会走 seatPick,其武圣/双雄 match 引用 render.js 的
+// resolveActionId/canShuangxiongDuelCard)。
+const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot.js', 'ai-bot.js', 'render.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');
