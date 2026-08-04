@@ -197,6 +197,7 @@ const testCode = String.raw`
   renDe = spyService('rende');
   playZhangbaSha = spyService('zhangba');
   respondGuanxing = spyService('guanxing');
+  respondYijiAssign = spyService('yijiAssign');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -2158,6 +2159,124 @@ const testCode = String.raw`
       throw new Error('quhuDamageChoice 阶段应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
     if(window.__quhuDamageCalls.length !== 1 || window.__quhuDamageCalls[0][0] !== 2)
       throw new Error('应 respondQuhuDamage(座位2),实际 ' + JSON.stringify(window.__quhuDamageCalls));
+  });
+
+  // ================= G4:yijiAssign(郭嘉遗计分配,跨调度累积) =================
+  // pending 服务端真实结构(skills.js respondYijiAsk):{type:'yijiAssign', seat, cards,
+  // resume};人类交互是"每张牌点一个角色,最后一张点击即提交"(render-controls.js)。
+  // 机器人侧复用 botTwoStepA 跨调度累积:非最后一张的选择存进 {decisionId:'yijiAssign',
+  // picks},下一调度继续选下一张;最后一张选完一次性提交 respondYijiAssign(picks)。
+  // 【改动前行为核对】runBotDecision 无 yijiAssign 分支、BOT_PHASE_ACTOR 无登记 →
+  // botSeatForState 返回 -1 → 走 botFallbackSeats+botSafePrompt;yijiAssign 按钮文案
+  // ("给 自己/给 玩家X"/"上一步(重选)")不命中 safe(/不发动|不出|取消|跳过|放弃|结束/)
+  // 与 mandatory(/选择|交给|弃置|摸牌|回复|打出/)任一正则、按钮数>1 → chosen=null →
+  // botSafePrompt 返回 false 只告警不动作,机器人遗计分配必然卡死(真人局才有真人操作)。
+  // G4 fallback 保守默认"给 自己"让机器人至少能把牌分出去,是明确改进,测试锁定。
+  function mkYijiAssignG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'yijiAssign';
+    g.pending = {
+      type: 'yijiAssign',
+      seat: 0,
+      cards: [card('桃','y0'), card('杀','y1')],
+      resume: { type: 'play', from: 0 }
+    };
+    return g;
+  }
+
+  await check('遗计分配:match=phase/pending.type/pending.seat 三者全等才命中;缺一即 false', function(){
+    var s = BOT_DECISIONS.yijiAssign;
+    if(!s) throw new Error('BOT_DECISIONS.yijiAssign 未注册');
+    var g = mkYijiAssignG({});
+    if(!s.match(g, 0)) throw new Error('完整 yijiAssign pending 应命中');
+    var g2 = mkYijiAssignG({});
+    g2.phase = 'play';
+    if(s.match(g2, 0)) throw new Error('phase 非 yijiAssign 不应命中');
+    var g3 = mkYijiAssignG({});
+    g3.pending.type = 'other';
+    if(s.match(g3, 0)) throw new Error('pending.type 非 yijiAssign 不应命中');
+    var g4 = mkYijiAssignG({});
+    g4.pending.seat = 1;
+    if(s.match(g4, 0)) throw new Error('pending.seat 非本人不应命中');
+    if(!s.match(g4, 1)) throw new Error('pending.seat=1 时应命中座位1');
+  });
+
+  await check('遗计分配候选:无累积时第0张=card0×存活角色(含自己);botTwoStepA 累积后第1张=card1×存活角色;阵亡者不在候选', function(){
+    var s = BOT_DECISIONS.yijiAssign;
+    botTwoStepA = null;
+    var g = mkYijiAssignG({ aliveOf: { 2: false } });
+    var c1 = s.buildCandidates(g, 0);
+    if(c1.length !== 2) throw new Error('存活2人候选应为2项,实际 ' + JSON.stringify(c1));
+    if(c1[0].idx !== 0 || c1[0].targetSeat !== 0 || c1[0].label !== '给 自己 【桃】')
+      throw new Error('候选0应为 自己+桃,实际 ' + JSON.stringify(c1[0]));
+    if(c1[1].idx !== 0 || c1[1].targetSeat !== 1 || c1[1].label !== '给 玩家1 【桃】')
+      throw new Error('候选1应为 玩家1+桃,实际 ' + JSON.stringify(c1[1]));
+    botTwoStepA = { decisionId: 'yijiAssign', picks: [1] };
+    var c2 = s.buildCandidates(g, 0);
+    if(c2.length !== 2) throw new Error('第2张候选应为2项,实际 ' + JSON.stringify(c2));
+    if(c2[0].idx !== 1 || c2[0].targetSeat !== 0 || c2[0].label !== '给 自己 【杀】')
+      throw new Error('第2张候选0应为 自己+杀,实际 ' + JSON.stringify(c2[0]));
+    if(c2[1].idx !== 1 || c2[1].targetSeat !== 1 || c2[1].label !== '给 玩家1 【杀】')
+      throw new Error('第2张候选1应为 玩家1+杀,实际 ' + JSON.stringify(c2[1]));
+    botTwoStepA = null;
+  });
+
+  await check('遗计分配有密钥:调度1 mock 选牌0→座位1 → 累积 botTwoStepA 不提交;调度2 mock 选牌1→座位2 → respondYijiAssign([1,2]) 提交并重置', async function(){
+    window.__yijiAssignCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }, { ok: true, text: '{"choice":2}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkYijiAssignG({});
+    var r1 = await botDecide('yijiAssign', g, 0);
+    if(r1 !== true || !botTwoStepA || botTwoStepA.decisionId !== 'yijiAssign' || botTwoStepA.picks.join(',') !== '1')
+      throw new Error('调度1后应累积 {yijiAssign,picks:[1]},实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__yijiAssignCalls.length !== 0) throw new Error('非最后一张不应提交,实际 ' + JSON.stringify(window.__yijiAssignCalls));
+    var r2 = await botDecide('yijiAssign', g, 0);
+    if(r2 !== true) throw new Error('调度2应返回 true,实际 ' + r2);
+    if(botTwoStepA !== null) throw new Error('调度2提交后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__yijiAssignCalls.length !== 1 || window.__yijiAssignCalls[0][0].join(',') !== '1,2')
+      throw new Error('应 respondYijiAssign([1,2]),实际 ' + JSON.stringify(window.__yijiAssignCalls));
+    if(window.__mockAiCalls !== 2) throw new Error('两调度应各1次AI调用,实际 ' + window.__mockAiCalls);
+    botTwoStepA = null;
+  });
+
+  await check('遗计分配无密钥:两调度 fallback 均给 自己 → respondYijiAssign([0,0]) 提交并重置;无AI调用', async function(){
+    window.__yijiAssignCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = ''; aiProvider = null;
+    var g = mkYijiAssignG({});
+    var r1 = await botDecide('yijiAssign', g, 0);
+    if(r1 !== true || !botTwoStepA || botTwoStepA.decisionId !== 'yijiAssign' || botTwoStepA.picks.join(',') !== '0')
+      throw new Error('调度1 fallback 应给 自己(picks:[0]),实际 ' + JSON.stringify(botTwoStepA));
+    var r2 = await botDecide('yijiAssign', g, 0);
+    if(r2 !== true) throw new Error('调度2应返回 true,实际 ' + r2);
+    if(botTwoStepA !== null) throw new Error('调度2后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__yijiAssignCalls.length !== 1 || window.__yijiAssignCalls[0][0].join(',') !== '0,0')
+      throw new Error('应 respondYijiAssign([0,0]),实际 ' + JSON.stringify(window.__yijiAssignCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+    botTwoStepA = null;
+  });
+
+  await check('遗计分配接线:runBotDecision 全链 → botDecide(yijiAssign) 被调且提交;BOT_PHASE_ACTOR 登记;L1 EXCLUDE 收录防双重接管', async function(){
+    window.__yijiAssignCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    if(BOT_PHASE_ACTOR.yijiAssign !== 'seat')
+      throw new Error('BOT_PHASE_ACTOR 应登记 yijiAssign:seat,实际 ' + BOT_PHASE_ACTOR.yijiAssign);
+    if(!CONTROLS_CHOICE_EXCLUDE.has('yijiAssign'))
+      throw new Error('yijiAssign 渲染 #controls 按钮,必须进 CONTROLS_CHOICE_EXCLUDE 防 L1 双重接管');
+    var restore = spyBotDecideLog();
+    try {
+      // 跨调度累积:调度1 只选第一张(挂起 botTwoStepA),调度2 才提交,两次都走专用分支
+      await runBotDecision(mkYijiAssignG({}), 0);
+      await runBotDecision(mkYijiAssignG({}), 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('yijiAssign') < 0)
+      throw new Error('runBotDecision 应调用 botDecide(yijiAssign),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__G1botDecideCalls.filter(function(id){ return id === 'yijiAssign'; }).length !== 2)
+      throw new Error('两调度都应命中 yijiAssign 分支,实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__yijiAssignCalls.length !== 1 || window.__yijiAssignCalls[0][0].join(',') !== '0,0')
+      throw new Error('应提交 respondYijiAssign([0,0]),实际 ' + JSON.stringify(window.__yijiAssignCalls));
+    botTwoStepA = null;
   });
 
   console.log('\n' + '='.repeat(60));

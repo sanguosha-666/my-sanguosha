@@ -46,6 +46,10 @@ const BOT_PHASE_ACTOR = {
   luoyingAsk:'seat', luoshen:'seat',
   huashenChangeAskStart:'seat', huashenChangeAskEnd:'seat',
   guhuoQuestion:'asking', qiaobianMove:'seat',
+  // 【G4】遗计分配:行动者是 pending.seat 本人,补登记后 botSeatForState 才能解析出
+  // 行动者走 runBotDecision 专用分支;不登记会掉进 botFallbackSeats+botSafePrompt
+  // (按钮文案"给 自己/给 玩家X"不命中任一正则 → 只告警不动作,机器人遗计必然卡死)。
+  yijiAssign:'seat',
   // 【L1 泛化(Task G2)】这四个响应阶段没有 runBotDecision 专用分支(落到 controlsChoice
   // 接线点),此前靠 botFallbackSeats+botSafePrompt 兜底。登记 actor 字段后 botSeatForState
   // 能精确解析行动者,L1(有密钥)接管、无密钥继续走 botSafePrompt(行为不变)。
@@ -636,6 +640,9 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   'huashenChangeAskStart','huashenChangeAskEnd','tieqi','liegong',
   'qilin','hanbing','mengjin','shaOffsetChoice',
   'guhuoTarget','xuanfengPick','quhuDamageChoice',
+  // 【G4】遗计分配有专用注册(BOT_DECISIONS.yijiAssign,跨调度累积),且 render-controls.js
+  // 1977行 会给每张牌渲染"给 自己/给 玩家X"按钮——不排除会被 L1 抢先接管,必须收录。
+  'yijiAssign',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -1939,6 +1946,61 @@ BOT_DECISIONS.rendeTwoStep = {
   },
 };
 
+// ============ 分配类:yijiAssign(郭嘉遗计分配,跨调度累积) ============
+// 【本决策点是什么】遗计判定后摸 2 张牌,依次为每张牌选择接收者(人类是"每张牌点一个
+// 角色,最后一张点击即提交",见 render-controls.js yijiAssign 分支)。机器人侧复用
+// botTwoStepA 跨调度累积:非最后一张的选择存进 {decisionId:'yijiAssign',picks},下一
+// 调度继续选下一张;最后一张选完一次性提交 respondYijiAssign(picks)。
+// 【改动前行为】runBotDecision 无本阶段分支、BOT_PHASE_ACTOR 无登记 → botSafePrompt
+// 兜底;按钮文案"给 自己/给 玩家X"不命中 safe(/不发动|不出|取消|跳过|放弃|结束/)与
+// mandatory(/选择|交给|弃置|摸牌|回复|打出/)任一正则、按钮数>1 → chosen=null → 只
+// 告警不动作,机器人遗计分配卡死。localFallback 保守默认"给 自己"让机器人至少能把牌
+// 分出去,是明确改进(测试锁定),不是回归。
+BOT_DECISIONS.yijiAssign = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='yijiAssign' && d && d.type==='yijiAssign' && d.seat===seat;
+  },
+  buildCandidates: function(g, seat){
+    const d = g.pending;
+    const cards = d.cards || [];
+    const picks = (botTwoStepA && botTwoStepA.decisionId==='yijiAssign') ? botTwoStepA.picks : [];
+    const idx = picks.length; // 当前正在为第几张选接收者
+    const card = cards[idx];
+    if(!card || idx >= cards.length) return [];
+    const out = [];
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive) return;
+      out.push({ idx: idx, targetSeat: i, label: '给 '+(i===seat?'自己':p.name)+' 【'+card.name+'】' });
+    });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    // 保守默认:当前这张牌给 自己(改动前无覆盖;有密钥 AI 失败时也用它)
+    return candidates.find(function(c){ return c.targetSeat===seat; }) || candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    const picks = (botTwoStepA && botTwoStepA.decisionId==='yijiAssign') ? botTwoStepA.picks.slice() : [];
+    picks.push(choice.targetSeat);
+    const cards = (g.pending && g.pending.cards) || [];
+    if(picks.length >= cards.length){
+      // 最后一张:提交并清状态
+      resetBotTwoStep();
+      botInvoke(seat, function(){ respondYijiAssign(picks); });
+    } else {
+      // 非最后一张:累积,等下一调度继续
+      botTwoStepA = { decisionId: 'yijiAssign', picks: picks };
+    }
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。当前是【遗计】分配阶段:候选列表里的每一项'
+      +'是"把当前这张牌交给某名角色"。请结合局面选择每张牌最合适的接收者(自己/队友/'
+      +'敌人按需判断)。只能选列表内选项。只输出 {"choice":数字},不要解释。';
+  },
+  maxTokens: 80,
+};
+
 // ================= AI自维护回合摘要(aiSummary) =================
 // 机器人自己维护的"本局记忆摘要":updateAiSummary(g,seat) 异步调用 callAI,把旧摘要
 // (如有)+最近公开事件压缩成 ≤200字 的新摘要存进模块级 aiSummary;callAiChooseIndex
@@ -2698,6 +2760,14 @@ async function runBotDecision(g,seat){
   if(g.phase==='xunxunPick'&&d.seat===seat){
     const all=(d.cards||[]).map((_,i)=>i),take=d.takeN||2;
     botInvoke(seat,()=>respondXunxun(all.slice(0,take),all.slice(take))); return;
+  }
+  if(g.phase==='yijiAssign' && d && d.type==='yijiAssign' && d.seat===seat){
+    // 决策已进 BOT_DECISIONS.yijiAssign(无密钥回退=给 自己;改动前无覆盖=botSafePrompt
+    // 兜底点不到"给 X"按钮只告警不动作,机器人遗计分配必然卡死,见注册表上方注释)。
+    // phase+type+seat 守卫保留作双保险,命中即 return。跨调度累积:挂起期间本阶段
+    // phase 仍是 yijiAssign、上面 botTwoStepA 的 play 分支(要求 phase==='play')不
+    // 会挡路,下一调度自然回到本分支继续选下一张。
+    if(await botDecide('yijiAssign',g,seat)) return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
   // L3 多步两阶段(借刀/离间/丈八/仁德):阶段A选中后 botTwoStepA 本地挂起,等下一调度走
