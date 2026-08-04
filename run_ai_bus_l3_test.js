@@ -55,7 +55,7 @@ const context = {
   },
   document: {
     getElementById: function(id) { return { onclick: function() {}, innerHTML: '', style: {}, className: '', classList: { add: function() {}, remove: function() {}, toggle: function() {}, contains: function() { return false; } }, appendChild: function() { return {}; }, remove: function() {}, setAttribute: function() {}, getAttribute: function() { return null; }, addEventListener: function() {}, removeEventListener: function() {} }; },
-    createElement: function(tag) { return { src: '', href: '', rel: '', type: '', textContent: '', innerHTML: '', onclick: function() {}, onerror: function() {}, onload: function() {}, className: '', id: '', style: {}, setAttribute: function() {}, getAttribute: function() { return null; }, appendChild: function() { return {}; } }; },
+    createElement: function(tag) { return { src: '', href: '', rel: '', type: '', textContent: '', innerHTML: '', onclick: function() {}, onerror: function() {}, onload: function() {}, className: '', id: '', style: {}, setAttribute: function() {}, getAttribute: function() { return null; }, appendChild: function() { return {}; }, remove: function() {} }; },
     createTextNode: function(t) { return { nodeValue: t, textContent: t }; },
     createDocumentFragment: function() { return { appendChild: function() { return {}; }, querySelector: function() { return null; }, querySelectorAll: function() { return []; } }; },
     querySelector: function() { return null; }, querySelectorAll: function() { return []; },
@@ -883,17 +883,18 @@ const testCode = String.raw`
     if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走 runBotActionWindow(等下一调度)');
     if(!botTwoStepA || botTwoStepA.a !== 1) throw new Error('阶段A应挂起 botTwoStepA,实际 ' + JSON.stringify(botTwoStepA));
 
-    // 场景3:手牌无借刀(也无其它多步技能) → 4个决策依次未命中+seatPick未命中 → 走 runBotActionWindow
+    // 场景3:手牌无借刀(也无其它多步技能) → 4个决策依次未命中(无密钥时 seatPick 不接线)
+    // → 走 runBotActionWindow
     wired = [];
     window.__windowCalls = 0;
     botTwoStepA = null;
     var g3 = mkSeatG({ myHand: [card('杀','j15')] });
     await runBotDecision(g3, 0);
     if(window.__windowCalls !== 1) throw new Error('jiedaoTwoStep 未命中时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick')
-      throw new Error('无挂起态时应按序尝试4个决策+seatPick(第二处接线),实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
+      throw new Error('无挂起态时应按序尝试4个决策(无密钥不接seatPick),实际 ' + wired.join(','));
 
-    // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策+seatPick不命中 → 走窗口不崩
+    // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策不命中 → 走窗口不崩
     wired = [];
     window.__windowCalls = 0;
     window.__jiedaoCalls = [];
@@ -902,8 +903,8 @@ const testCode = String.raw`
     g4.players[0].equips.plus1 = { name: '的卢' };
     await runBotDecision(g4, 0);
     if(window.__windowCalls !== 1) throw new Error('阶段B无候选时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick')
-      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中+seatPick后放行,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
+      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中后放行,实际 ' + wired.join(','));
     if(window.__jiedaoCalls.length !== 0) throw new Error('阶段B无候选不应提交 jieDaoShaRen');
 
     botDecide = realBotDecide;
@@ -2078,18 +2079,23 @@ const testCode = String.raw`
     if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI调用(seatPick选候选),实际 ' + window.__mockAiCalls);
   });
 
-  await check('G1接线:play阶段无密钥 fallback null → seatPick 被调但不调 duanLiang、不崩', async function(){
+  await check('G1接线修复:play阶段无密钥 → seatPick 不接(aiReady守卫)、走 runBotActionWindow 不卡死', async function(){
     window.__duanliangCalls = [];
+    window.__windowCalls = 0;
+    var realWindow = runBotActionWindow;
+    runBotActionWindow = async function(){ window.__windowCalls++; };
     aiApiKey = ''; aiProvider = null;
     var restore = spyBotDecideLog();
     try {
       var g = mkSeatG({ caps0: { duanliang: true }, myHand: [card('酒','g2','♣')] });
       await runBotDecision(g, 0);
-    } finally { restore(); }
-    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
-      throw new Error('runBotDecision play 分支应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    } finally { restore(); runBotActionWindow = realWindow; }
+    if(window.__G1botDecideCalls.indexOf('seatPick') >= 0)
+      throw new Error('无密钥时 seatPick 不应被调(aiReady 守卫),实际 ' + JSON.stringify(window.__G1botDecideCalls));
     if(window.__duanliangCalls.length !== 0)
-      throw new Error('无密钥 fallback=null 不应调用 duanLiang,实际 ' + JSON.stringify(window.__duanliangCalls));
+      throw new Error('无密钥不应调用 duanLiang,实际 ' + JSON.stringify(window.__duanliangCalls));
+    if(window.__windowCalls !== 1)
+      throw new Error('无密钥必须走 runBotActionWindow(回归红线:改动前在此卡死),实际 windowCalls=' + window.__windowCalls);
   });
 
   await check('G1接线:guhuoTarget 阶段 → seatPick 被调且 → guhuoChooseTarget(目标)', async function(){
@@ -2122,6 +2128,21 @@ const testCode = String.raw`
       throw new Error('xuanfengPick 阶段应调用 botDecide(seatPick),实际 ' + JSON.stringify(window.__G1botDecideCalls));
     if(window.__xuanfengCalls.length !== 1 || window.__xuanfengCalls[0] !== 2)
       throw new Error('应 pickXuanfengTarget(座位2),实际 ' + JSON.stringify(window.__xuanfengCalls));
+  });
+
+  await check('G1接线修复:xuanfengPick 阶段无密钥 → seatPick 不接(aiReady守卫)、落回 botSafePrompt 不崩', async function(){
+    window.__xuanfengCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var restore = spyBotDecideLog();
+    try {
+      var g = mkXuanfengG({});
+      g.phase = 'xuanfengPick';
+      await runBotDecision(g, 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('seatPick') >= 0)
+      throw new Error('无密钥时 xuanfengPick 不应调 seatPick,实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__xuanfengCalls.length !== 0)
+      throw new Error('无密钥不应调用 pickXuanfengTarget,实际 ' + JSON.stringify(window.__xuanfengCalls));
   });
 
   await check('G1接线:quhuDamageChoice 阶段 → seatPick 被调且 → respondQuhuDamage(目标)', async function(){

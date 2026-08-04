@@ -2696,7 +2696,10 @@ async function runBotDecision(g,seat){
     // 合并成一张表 AI 选;未命中返回 false 走 runBotActionWindow(手牌枚举),两者不冲突
     // (seatPick 技能无 CARD_PLAYS 入口;武圣/双雄的 CARD_PLAYS 路径与 seatPick 的
     // "技能按钮"路径候选 label 不同,双路径都合法,不排除——测试锁定)。
-    if(await botDecide('seatPick', g, seat)) return;
+    // 【G1修复】seatPick 只在有密钥时接管(无密钥走 runBotActionWindow,与改动前逐字一致;
+    // 否则 fallback null → botDecide true → play 分支 return,机器人整回合卡死)
+    const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
+    if(aiReady && await botDecide('seatPick', g, seat)) return;
     await runBotActionWindow(g, seat); return;
   }
   if(g.phase==='discard'&&g.turn===seat){
@@ -2847,13 +2850,16 @@ async function runBotDecision(g,seat){
   // 【G1接线】seatPick 三个 pending 阶段(蛊惑选目标/旋风选目标/驱虎选伤害目标):
   // 与 play 分支同一套 seatPick 协议(候选合并表+AI 选),此前未接线时这三个阶段对
   // 机器人是死路径(botSafePrompt 够不到座位卡点击),命中即 return。
-  if(g.phase==='guhuoTarget' && d && d.type==='guhuoTarget' && d.sourceSeat===seat){
+  // 【G1修复】与 play 分支同款 aiReady 守卫:无密钥时这三个阶段落回 botSafePrompt,
+  // 与改动前逐字一致(seatPick 是纯 AI 决策层,无密钥 fallback=null 无意义)。
+  const seatPickAiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
+  if(seatPickAiReady && g.phase==='guhuoTarget' && d && d.type==='guhuoTarget' && d.sourceSeat===seat){
     if(await botDecide('seatPick', g, seat)) return;
   }
-  if(g.phase==='xuanfengPick' && d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting'){
+  if(seatPickAiReady && g.phase==='xuanfengPick' && d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting'){
     if(await botDecide('seatPick', g, seat)) return;
   }
-  if(g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice' && d.seat===seat){
+  if(seatPickAiReady && g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice' && d.seat===seat){
     if(await botDecide('seatPick', g, seat)) return;
   }
   if(botSafePrompt(g,seat)) return;
