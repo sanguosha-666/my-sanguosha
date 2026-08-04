@@ -45,7 +45,11 @@ const BOT_PHASE_ACTOR = {
   // botSafePrompt(=修复前的broken路径),新分支永远不会被调用到。
   luoyingAsk:'seat', luoshen:'seat',
   huashenChangeAskStart:'seat', huashenChangeAskEnd:'seat',
-  guhuoQuestion:'asking', qiaobianMove:'seat'
+  guhuoQuestion:'asking', qiaobianMove:'seat',
+  // 【L1 泛化(Task G2)】这四个响应阶段没有 runBotDecision 专用分支(落到 controlsChoice
+  // 接线点),此前靠 botFallbackSeats+botSafePrompt 兜底。登记 actor 字段后 botSeatForState
+  // 能精确解析行动者,L1(有密钥)接管、无密钥继续走 botSafePrompt(行为不变)。
+  liuli:'to', tianxiang:'seat', lirangRecover:'from', zhengyi:'asking'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -614,8 +618,25 @@ const BOT_DECISIONS = Object.create(null);
 //             回退 candidates[0]="发动【洛神】判定" → 等价。✓
 //  铁骑/烈弓刻意不迁移:按钮是[发动X, 不发动],safe 正则第一命中"不发动",而旧分支是
 //  respondTieqi(true)/respondLiegong(true),回退会变行为 → 违反无密钥回归红线。
-// 不在 allowlist 的阶段 match 返回 false,继续走 runBotDecision 既有硬编码分支,零变化。
+// 【L1 泛化(Task G2)】allowlist 之外的所有阶段不再逐阶段等价性论证:有密钥(aiReady)时
+// L1 直接接管镜像按钮(有密钥=AI 决策,行为由 AI 负责);无密钥时 match 返回 false,继续走
+// runBotDecision 既有分支/botSafePrompt,与改动前逐字一致。EXCLUDE 集合收录"已有专用注册
+// 或专用逻辑"的阶段,防 L1 双重接管。
 const CONTROLS_CHOICE_ALLOWLIST = new Set(['wuxie','luoyingAsk','luoshen']);
+// 【L1 泛化】已有专用注册/专用逻辑的阶段,L1 不接管(防止双重接管/绕过专用候选的
+// 隐藏信息处理)。维护纪律:新增专用注册时,把该 phase 同步加进这个集合。
+// 除既定清单外,额外收录 guhuoTarget/xuanfengPick/quhuDamageChoice 三个 seatPick 专用
+// 阶段(接线在 controlsChoice 之后,xuanfengPick/quhuDamageChoice 会渲染 #controls 按钮,
+// 不排除会被 L1 抢先接管;guhuoTarget 不渲染按钮、纯防御性收录)。
+const CONTROLS_CHOICE_EXCLUDE = new Set([
+  'wugu','pick','guicai','ganglieChoice','guhuoQuestion','qiaobianMove',
+  'enyuanChooseOption','enyuanChoose','enyuanGiveCard','jiedaoChoice',
+  'duanbingChoose','huogong','huogongReveal','fanjianSuit','quhuRespond',
+  'tianyiRespond','xiaoguo','xiaoguoChoice','zhijiChoice',
+  'huashenChangeAskStart','huashenChangeAskEnd','tieqi','liegong',
+  'qilin','hanbing','mengjin','shaOffsetChoice',
+  'guhuoTarget','xuanfengPick','quhuDamageChoice',
+]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
 
@@ -654,7 +675,13 @@ function collectControlsCandidates(g, seat){
   };
 }
 function controlsChoiceMatch(g, seat){
-  if(!g || !g.pending || !CONTROLS_CHOICE_ALLOWLIST.has(g.phase)) return false;
+  if(!g || !g.pending) return false;
+  // 【L1 泛化】allowlist 三阶段无密钥也接管(旧分支已删/等价性已论证);其余所有阶段
+  // 仅 aiReady 时接管——无密钥返回 false,runBotDecision 继续走该阶段既有旧分支,
+  // 行为逐字不变(有/无密钥路径解耦,不再需要逐阶段等价性论证)。
+  const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
+  if(!(aiReady || CONTROLS_CHOICE_ALLOWLIST.has(g.phase))) return false;
+  if(CONTROLS_CHOICE_EXCLUDE.has(g.phase)) return false;
   return botSeatForState(g)===seat;
 }
 function controlsChoiceBuildCandidates(g, seat){
@@ -2732,10 +2759,10 @@ async function runBotDecision(g,seat){
     // 与旧分支逐字一致,见注册表上方注释)。
     if(await botDecide('dying',g,seat)) return;
   }
-  // L1 controlsChoice:镜像真实 controls 按钮的响应决策(wuxie/luoyingAsk/luoshen,
-  // allowlist 及逐阶段等价性核对见 BOT_DECISIONS.controlsChoice 上方注释)。命中则整条
-  // 决策链(含无密钥本地回退,与旧硬编码分支动作逐字一致)由总线接管并 return;未命中
-  // (非 allowlist 阶段/没有可点按钮)返回 false,继续走下面既有的硬编码分支,行为零变化。
+  // L1 controlsChoice:镜像真实 controls 按钮的响应决策(wuxie/luoyingAsk/luoshen 无密钥
+  // 也接管 + 有密钥时所有非 EXCLUDE 响应阶段接管,L1 泛化见 BOT_DECISIONS.controlsChoice
+  // 上方注释)。命中则整条决策链由总线接管并 return;未命中(无密钥非 allowlist 阶段/
+  // EXCLUDE 阶段/没有可点按钮)返回 false,继续走下面既有的硬编码分支,行为零变化。
   // 旧的 respondWuxie(false) 硬编码分支已删除:回退顺序 safe 正则第一命中"不出",等价。
   if(await botDecide('controlsChoice', g, seat)) return;
   if(g.phase==='wugu'&&d.type==='wugu'&&Array.isArray(d.order)&&d.order[d.idx||0]===seat&&Array.isArray(d.pool)&&d.pool.length){

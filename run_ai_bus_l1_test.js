@@ -156,6 +156,10 @@ const testCode = String.raw`
   respondWuxie = function(use){ window.__wuxieCalls.push(use); };
   respondLuoying = function(use){ window.__luoyingCalls.push(use); };
   respondLuoshen = function(use){ window.__luoshenCalls.push(use); };
+  respondLiuli = function(choice, newTargetSeat){ window.__liuliCalls.push([choice, newTargetSeat]); };
+  respondTianxiang = function(choice, targetSeat){ window.__tianxiangCalls.push([choice, targetSeat]); };
+  respondLiRangRecover = function(activate){ window.__lirangCalls.push(activate); };
+  respondZhengyi = function(activate){ window.__zhengyiCalls.push(activate); };
   // ---- mock callAI ----
   window.__mockAiCalls = 0;
   window.__mockAiArgs = null;
@@ -263,11 +267,15 @@ const testCode = String.raw`
     if((window.__mockAiArgs.opts.userPrompt || '').indexOf('打出【无懈可击】') < 0) throw new Error('userPrompt 应含按钮文案');
   });
 
-  // ---- T6:非 allowlist 阶段(duel)→ botDecide 返回 false,旧分支继续 ----
-  await check('非allowlist阶段(duel):botDecide 返回 false', async function(){
+  // ---- T6:非 allowlist 阶段(duel)无密钥 → botDecide 返回 false,旧分支继续 ----
+  // 【L1 泛化后语义】无密钥时只有 allowlist 三阶段被接管;非 allowlist 阶段(即使上一条
+  // 测试刚设过密钥)必须显式无密钥才返回 false——有密钥时 duel 这类已登记阶段也归 L1。
+  await check('非allowlist阶段(duel)无密钥:botDecide 返回 false', async function(){
+    aiApiKey = '';
+    aiProvider = null;
     var g = mkG('duel', { type: 'duel', active: 0, from: 0, to: 1 }, [card('杀')]);
     var r = await botDecide('controlsChoice', g, 0);
-    if(r !== false) throw new Error('duel 不应由 controlsChoice 接管,实际 ' + r);
+    if(r !== false) throw new Error('duel 无密钥不应由 controlsChoice 接管,实际 ' + r);
     // 且没有产生 DOM 残留(未触发 collect)
     if(document.body.children.length !== 1) throw new Error('不应产生临时 box');
   });
@@ -292,6 +300,123 @@ const testCode = String.raw`
     var r = await botDecide('controlsChoice', g, 0);
     if(r !== true) throw new Error('应返回 true');
     if(window.__luoshenCalls.length !== 1 || window.__luoshenCalls[0] !== true) throw new Error('应 respondLuoshen(true),实际 ' + JSON.stringify(window.__luoshenCalls));
+  });
+
+  // ================= L1 泛化(Task G2):非 allowlist 阶段有密钥时由 L1 接管 =================
+  // 代表阶段选 liuli/tianxiang/lirangRecover/zhengyi:render-controls.js 里这四个阶段
+  // 的按钮纯由 g/pending 渲染(不需要客户端 mode 状态),且 runBotDecision 没有它们的
+  // 专用分支(落到 2651 之后的 controlsChoice 接线点)。
+
+  // ---- T9:liuli 有密钥 → botDecide 接管,候选=「弃X→目标」组合按钮 ----
+  await check('有密钥:liuli 接管,mock 选「弃手牌→目标」→ respondLiuli({kind:hand,idx:0},2)', async function(){
+    window.__liuliCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('liuli', { type: 'liuli', from: 1, to: 0, usedAs: '杀', shaColor: 'red', targets: [2] }, [card('杀')]);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true(已接管),实际 ' + r);
+    if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
+    if(window.__liuliCalls.length !== 1) throw new Error('respondLiuli 应被调1次,实际 ' + window.__liuliCalls.length);
+    var c0 = window.__liuliCalls[0];
+    if(!c0[0] || c0[0].kind !== 'hand' || c0[0].idx !== 0) throw new Error('应弃手牌idx0,实际 ' + JSON.stringify(c0[0]));
+    if(c0[1] !== 2) throw new Error('目标应为2,实际 ' + c0[1]);
+    if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
+  });
+
+  // ---- T10:tianxiang 有密钥接管(弃红桃手牌转移伤害)----
+  await check('有密钥:tianxiang 接管,mock 选「弃红桃→目标」→ respondTianxiang({idx:0},2)', async function(){
+    window.__tianxiangCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('tianxiang', { type: 'tianxiang', seat: 0, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha', targets: [2], resume: { type: 'sha' } }, [card('桃')]);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__tianxiangCalls.length !== 1) throw new Error('respondTianxiang 应被调1次,实际 ' + window.__tianxiangCalls.length);
+    var c0 = window.__tianxiangCalls[0];
+    if(!c0[0] || c0[0].idx !== 0) throw new Error('应弃idx0,实际 ' + JSON.stringify(c0[0]));
+    if(c0[1] !== 2) throw new Error('目标应为2,实际 ' + c0[1]);
+  });
+
+  // ---- T11:lirangRecover 有密钥接管(获得弃牌)----
+  await check('有密钥:lirangRecover 接管,mock 选「获得弃牌」→ respondLiRangRecover(true)', async function(){
+    window.__lirangCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('lirangRecover', { type: 'lirangRecover', from: 0, to: 1, cards: [card('闪')] }, []);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0] !== true) throw new Error('应 respondLiRangRecover(true),实际 ' + JSON.stringify(window.__lirangCalls));
+  });
+
+  // ---- T12:zhengyi 有密钥接管(发动争义)----
+  await check('有密钥:zhengyi 接管,mock 选「发动【争义】」→ respondZhengyi(true)', async function(){
+    window.__zhengyiCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('zhengyi', { type: 'zhengyi', asking: 0, seat: 1, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha' }, []);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__zhengyiCalls.length !== 1 || window.__zhengyiCalls[0] !== true) throw new Error('应 respondZhengyi(true),实际 ' + JSON.stringify(window.__zhengyiCalls));
+  });
+
+  // ---- T13:同阶段无密钥走旧分支:botDecide false,runBotDecision 落 botSafePrompt ----
+  await check('无密钥:liuli botDecide 返回 false,runBotDecision 经 botSafePrompt 点「不发动」', async function(){
+    window.__liuliCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG('liuli', { type: 'liuli', from: 1, to: 0, usedAs: '杀', shaColor: 'red', targets: [2] }, [card('杀')]);
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== false) throw new Error('无密钥 liuli 不应被 L1 接管,实际 ' + r);
+    if(window.__liuliCalls.length !== 0) throw new Error('botDecide 阶段不应点任何按钮');
+    await runBotDecision(g, 0);
+    if(window.__liuliCalls.length !== 1) throw new Error('runBotDecision 应经旧路径点1次,实际 ' + window.__liuliCalls.length);
+    var c0 = window.__liuliCalls[0];
+    if(c0[0] !== null || c0[1] !== null) throw new Error('旧路径应点「不发动」=respondLiuli(null,null),实际 ' + JSON.stringify(c0));
+    if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
+  });
+
+  // ---- T14:EXCLUDE 阶段不被抢(有密钥也返回 false,不触发 collect)----
+  await check('EXCLUDE:有密钥 wugu/pick/guicai/ganglieChoice/guhuoQuestion/qiaobianMove/qilin 不被接管', async function(){
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var cases = [
+      { phase: 'wugu', pending: { type: 'wugu', order: [0,1,2], idx: 0, pool: [card('桃')] } },
+      { phase: 'pick', pending: { type: 'pick', trick: '顺手牵羊', from: 1, to: 0 } },
+      { phase: 'guicai', pending: { type: 'guicai', asking: 0, judge: { suit: '♠', rank: 7 } } },
+      { phase: 'ganglieChoice', pending: { type: 'ganglieChoice', sourceSeat: 0, damageSeat: 0 } },
+      { phase: 'guhuoQuestion', pending: { type: 'guhuoQuestion', asking: 0, actualCard: card('杀'), claimedCard: card('杀') } },
+      { phase: 'qiaobianMove', pending: { type: 'qiaobianMove', seat: 0 } },
+      { phase: 'qilin', pending: { type: 'qilin', from: 0, to: 1 } },
+    ];
+    for(var i = 0; i < cases.length; i++){
+      var g = mkG(cases[i].phase, cases[i].pending, []);
+      var r = await botDecide('controlsChoice', g, 0);
+      if(r !== false) throw new Error(cases[i].phase + ' 不应被 L1 接管,实际 ' + r);
+    }
+    if(document.body.children.length !== 1) throw new Error('EXCLUDE 阶段不应产生临时 box');
+  });
+
+  // ---- T15:接线端到端:runBotDecision 在 liuli 阶段经 controlsChoice 接管,无双重处理 ----
+  await check('接线:runBotDecision liuli 有密钥 → controlsChoice 接管,respondLiuli 只调1次', async function(){
+    window.__liuliCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG('liuli', { type: 'liuli', from: 1, to: 0, usedAs: '杀', shaColor: 'red', targets: [2] }, [card('杀')]);
+    await runBotDecision(g, 0);
+    if(window.__liuliCalls.length !== 1) throw new Error('respondLiuli 应只被调1次(无双重处理),实际 ' + window.__liuliCalls.length);
+    var c0 = window.__liuliCalls[0];
+    if(!c0[0] || c0[0].kind !== 'hand' || c0[0].idx !== 0) throw new Error('应弃手牌idx0,实际 ' + JSON.stringify(c0[0]));
+    if(c0[1] !== 2) throw new Error('目标应为2,实际 ' + c0[1]);
   });
 
   console.log('\n' + '='.repeat(60));
