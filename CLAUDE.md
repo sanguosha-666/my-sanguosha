@@ -121,6 +121,20 @@
 - 每个浏览器用一个本地标识 `cid` 区分"自己刷新重连"和"别人重名"。
 - **测试多人时必须用不同浏览器**（Chrome/Edge/Firefox 各一个），不能用同一浏览器的多个标签或同一无痕会话的多窗口——它们共享存储、`cid` 相同，会被识别成同一个人挤进一个座位。
 
+### AI 机器人决策总线（机器人决策的统一架构，2026-08 起）
+机器人（`bot.js` 调度 + `ai-bot.js` 密钥/网络）的所有决策收敛为**统一总线**。详细实现与各批次记录在 `docs/progress-log-8.md`，这里只写架构约定与维护纪律。
+
+- **统一入口**：`botDecide(decisionId, g, seat)`——注册表 `BOT_DECISIONS`（match/buildCandidates/localFallback/execute 五段式）+ `callAiChooseIndex`（密钥守卫/思考中UI/超时/解析/越界全部收敛一处）。**AI 只能从候选列表选 index（`{"choice":N}`），不能发明动作**；解析失败/越界/超时一律返回 null → `localFallback`，**不重试、不阻塞**。
+- **无密钥回归红线**：每个注册项的 `localFallback` = 改动前本地逻辑**逐字**（测试锁定）。L1 泛化后尤其注意：**有/无密钥路径解耦**——无密钥时 `controlsChoiceMatch` 返回 false，runBotDecision 走该阶段既有旧分支，行为零变化。
+- **L1 controlsChoice（响应类按钮镜像）**：DOM 隔离渲染 `renderControls(g)` 收集全部 `button:not(:disabled)`，AI 从按钮里选（点击走人类同款 onclick）。**EXCLUDE 集合**（`CONTROLS_CHOICE_EXCLUDE`）防 L1 抢占已有专用注册/专用逻辑的阶段——**新增专用注册时，必须把该 phase 同步加进 EXCLUDE**。allowlist 三阶段（wuxie/luoyingAsk/luoshen）无密钥也由 L1 接管（旧分支已删/等价性已论证）。
+- **L2/L3 结构化候选**：`BOT_SEAT_PICKS`（座位技能注册表：断粮/奇袭/国色/武圣/双雄/挑衅/反间/青囊/蛊惑目标/旋风/驱虎伤害，`seatPick` 动态合并）；多步两阶段（借刀/离间/丈八/仁德 + yijiAssign/lirangAsk，用 `botTwoStepA` 客户端累积、不入 Firebase）；分配类纯按钮阶段（liuli/tianxiang/lirangRecover/zhengyi）由 L1 自动覆盖。
+- **调度前提**：`botSeatForState(g)` 查 `BOT_PHASE_ACTOR` 表解析"该谁行动"——**新增任何阶段分支/注册项，必须同时在这张表登记**（不登记则行动者解析恒 -1，分支永远不会被调用）。
+- **强C（出牌同窗多步）**：`runBotActionWindow` 循环——`tx(fn, onCommitted?)`（game.js，可选第二参数，Firebase transaction resolve 后把新快照交给回调）+ `playCard`/`endPlay` 可选回调透传。有密钥时循环（execute→等提交快照→重枚举→再选，直到结束/8步上限/窗口失效）；**无密钥执行一步即返回（弱C 行为逐字）**。响应类维持单步，不扩展回调。
+- **AI 自维护摘要（跨回合记忆）**：`aiSummary`——回合变化时 `updateAiSummary` 异步总结（旧摘要+recentLog→新摘要，≤200字），`callAiChooseIndex` 注入 systemPrompt。座位绑定（`aiSummarySeat`，切换机器人座位清空）、`phase==='over'` 清空、弹窗「清除AI记忆」按钮主动清空。**真人回合（seat=-1）不清记忆**（守卫 `seat>=0`）。失败沿用旧摘要，不阻塞决策。
+- **隐藏信息红线**：`buildBotVisibleState` 从头只投影该座位合法可见字段（他人手牌只张数、未翻身份 null、蛊惑无 actualCard——结构上不可能引用）；摘要/历史只存该座位自己视角的内容。
+- **token 纪律**：出牌候选按 `localHeuristicScore` 降序截断 Top-25（`AI_PLAY_CANDIDATE_LIMIT`，结束项恒在末尾，无密钥零变化）；recentLog 15 条；desc 全量但按需投影。
+- **测试**：决策接入 = `run_ai_bus_*.js` 套件（vm 沙箱加载真实源码）；`?v=` 同步；改动记录进 progress-log。
+
 ## 三、改动原则（请严格遵守）
 
 1. **一次只改一件事**。不要顺手重构无关代码、不要一次塞多个功能。
