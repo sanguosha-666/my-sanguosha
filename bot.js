@@ -50,6 +50,11 @@ const BOT_PHASE_ACTOR = {
   // 行动者走 runBotDecision 专用分支;不登记会掉进 botFallbackSeats+botSafePrompt
   // (按钮文案"给 自己/给 玩家X"不命中任一正则 → 只告警不动作,机器人遗计必然卡死)。
   yijiAssign:'seat',
+  // 【G5】礼让发动:行动者是 pending.from(孔融本人,服务端 respondLiRang 守卫
+  // g.pending.from!==mySeat)。补登记后 botSeatForState 才能解析出行动者走 runBotDecision
+  // 专用分支;不登记会掉进 botFallbackSeats+botSafePrompt(改动前即如此,靠安全正则点
+  // "不发动"按钮收尾,见 BOT_DECISIONS.lirangAsk 上方注释)。
+  lirangAsk:'from',
   // 【L1 泛化(Task G2)】这四个响应阶段没有 runBotDecision 专用分支(落到 controlsChoice
   // 接线点),此前靠 botFallbackSeats+botSafePrompt 兜底。登记 actor 字段后 botSeatForState
   // 能精确解析行动者,L1(有密钥)接管、无密钥继续走 botSafePrompt(行为不变)。
@@ -643,6 +648,10 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // 【G4】遗计分配有专用注册(BOT_DECISIONS.yijiAssign,跨调度累积),且 render-controls.js
   // 1977行 会给每张牌渲染"给 自己/给 玩家X"按钮——不排除会被 L1 抢先接管,必须收录。
   'yijiAssign',
+  // 【G5】礼让发动有专用注册(BOT_DECISIONS.lirangAsk),且 render-controls.js 2129行
+  // 会给"发动【礼让】/不发动"按钮(发动按钮还依赖客户端 lirangPicks 模式状态)——不排除
+  // 会被 L1 抢先接管(有密钥时 L1 会镜像到"不发动"并点击,绕开专用候选),必须收录。
+  'lirangAsk',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -2001,6 +2010,59 @@ BOT_DECISIONS.yijiAssign = {
   maxTokens: 80,
 };
 
+// ============ 分配类:lirangAsk(孔融礼让发动,单阶段选组合) ============
+// 【本决策点是什么】礼让:摸牌阶段开始时交给目标两张手牌。目标(pending.to)由服务端
+// 算好(render-controls 显示"交给 '目标'"),AI 只需选"哪两张手牌"——候选=2 张手牌
+// 组合(仿 discardSubset 组合生成,默认组合恒在=第一张+第二张),选完即提交
+// respondLiRang(true, picks)。
+// 【改动前行为核对】runBotDecision 无 lirangAsk 分支、BOT_PHASE_ACTOR 无登记 →
+// botSeatForState 返回 -1 → 走 botFallbackSeats+botSafePrompt;lirangAsk 渲染的
+// "发动【礼让】"按钮依赖客户端 lirangPicks 模式状态(机器人从不置位,不渲染)、
+// "不发动"按钮命中 safe 正则第一替代项 → botSafePrompt 点击"不发动" →
+// respondLiRang(false,[]) 收尾推进。即改动前机器人恒不发动、流程正常推进。
+// localFallback=不发动(decline 动作)忠实复刻此行为;刻意不用 null——null=无动作,
+// respondLiRang 不被调用、pending 永不清空,机器人会永久卡死在 lirangAsk
+// (CLAUDE.md 第26条同款卡死模式)。
+BOT_DECISIONS.lirangAsk = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='lirangAsk' && d && d.type==='lirangAsk' && d.from===seat;
+  },
+  buildCandidates: function(g, seat){
+    const me = g.players[seat];
+    const hand = me.hand || [];
+    if(hand.length < 2) return [];
+    const out = [];
+    const seen = new Set();
+    for(let a=0; a<hand.length && out.length<8; a++){
+      for(let b=a+1; b<hand.length && out.length<8; b++){
+        const key = a+','+b;
+        if(seen.has(key)) continue;
+        seen.add(key);
+        out.push({ cardIdxs: [a, b], isDefault: out.length===0, label: '交【'+hand[a].name+'】与【'+hand[b].name+'】' });
+      }
+    }
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    // 不发动(与改动前 botSafePrompt 点击"不发动"按钮逐字等价;见上方改动前行为核对)
+    return { decline: true, label: '不发动' };
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){
+      if(choice.decline){ respondLiRang(false, []); return; }
+      respondLiRang(true, choice.cardIdxs);
+    });
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。当前是【礼让】发动阶段:候选列表每一项是'
+      +'"交给目标的两张手牌"组合。请结合手牌价值选择是否发动、交哪两张(通常交价值低的)。'
+      +'只输出 {"choice":数字},不要解释。';
+  },
+  maxTokens: 80,
+};
+
 // ================= AI自维护回合摘要(aiSummary) =================
 // 机器人自己维护的"本局记忆摘要":updateAiSummary(g,seat) 异步调用 callAI,把旧摘要
 // (如有)+最近公开事件压缩成 ≤200字 的新摘要存进模块级 aiSummary;callAiChooseIndex
@@ -2768,6 +2830,13 @@ async function runBotDecision(g,seat){
     // phase 仍是 yijiAssign、上面 botTwoStepA 的 play 分支(要求 phase==='play')不
     // 会挡路,下一调度自然回到本分支继续选下一张。
     if(await botDecide('yijiAssign',g,seat)) return;
+  }
+  if(g.phase==='lirangAsk' && d && d.type==='lirangAsk' && d.from===seat){
+    // 决策已进 BOT_DECISIONS.lirangAsk(无密钥回退=不发动,与改动前 botSafePrompt 点击
+    // "不发动"按钮逐字等价;有密钥 AI 从 2 张手牌组合里选,选完即提交 respondLiRang)。
+    // phase+type+from 守卫保留作双保险,命中即 return。单阶段决策:目标=pending.to 由
+    // 服务端定,AI 只选组合,一次 botDecide 即完成,无跨调度累积。
+    if(await botDecide('lirangAsk',g,seat)) return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
   // L3 多步两阶段(借刀/离间/丈八/仁德):阶段A选中后 botTwoStepA 本地挂起,等下一调度走

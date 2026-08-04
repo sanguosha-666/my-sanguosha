@@ -198,6 +198,7 @@ const testCode = String.raw`
   playZhangbaSha = spyService('zhangba');
   respondGuanxing = spyService('guanxing');
   respondYijiAssign = spyService('yijiAssign');
+  respondLiRang = spyService('lirang');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -2277,6 +2278,101 @@ const testCode = String.raw`
     if(window.__yijiAssignCalls.length !== 1 || window.__yijiAssignCalls[0][0].join(',') !== '0,0')
       throw new Error('应提交 respondYijiAssign([0,0]),实际 ' + JSON.stringify(window.__yijiAssignCalls));
     botTwoStepA = null;
+  });
+
+  // ================= G5:lirangAsk(孔融礼让发动,单阶段选组合) =================
+  // pending 服务端真实结构(game.js respondLiRang 守卫):{type:'lirangAsk', from, to};
+  // 目标(pending.to)由服务端算好,AI 只选"哪两张手牌"——候选=2 张手牌组合(仿
+  // discardSubset,默认组合恒在=第一张+第二张),选完即提交 respondLiRang(true, picks)。
+  // 【改动前行为核对】runBotDecision 无 lirangAsk 分支、BOT_PHASE_ACTOR 无登记 →
+  // botSeatForState 返回 -1 → 走 botFallbackSeats+botSafePrompt;lirangAsk 渲染的
+  // "发动【礼让】"按钮依赖客户端 lirangPicks 模式状态(机器人从不置位,不渲染)、
+  // "不发动"按钮命中 safe 正则第一替代项 → botSafePrompt 点击"不发动" →
+  // respondLiRang(false,[]) 收尾推进。即改动前机器人恒不发动、流程正常推进。
+  // G5 fallback=不发动(decline 动作)忠实复刻此行为,测试锁定;刻意不用 null(那会让
+  // pending 永不清空、机器人永久卡死,见 bot.js BOT_DECISIONS.lirangAsk 上方注释)。
+  function mkLirangG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'lirangAsk';
+    g.pending = { type: 'lirangAsk', from: 0, to: 1 };
+    return g;
+  }
+
+  await check('礼让发动:match=phase/pending.type/pending.from 三者全等才命中;缺一即 false', function(){
+    var s = BOT_DECISIONS.lirangAsk;
+    if(!s) throw new Error('BOT_DECISIONS.lirangAsk 未注册');
+    var g = mkLirangG({});
+    if(!s.match(g, 0)) throw new Error('完整 lirangAsk pending 应命中');
+    var g2 = mkLirangG({});
+    g2.phase = 'play';
+    if(s.match(g2, 0)) throw new Error('phase 非 lirangAsk 不应命中');
+    var g3 = mkLirangG({});
+    g3.pending.type = 'other';
+    if(s.match(g3, 0)) throw new Error('pending.type 非 lirangAsk 不应命中');
+    var g4 = mkLirangG({});
+    g4.pending.from = 1;
+    if(s.match(g4, 0)) throw new Error('pending.from 非本人不应命中');
+    if(!s.match(g4, 1)) throw new Error('pending.from=1 时应命中座位1');
+  });
+
+  await check('礼让发动候选:4张手牌→6组合(≤8)首项 isDefault 且 label 含牌名;5张→封顶8;手牌<2→空', function(){
+    var s = BOT_DECISIONS.lirangAsk;
+    var g = mkLirangG({ myHand: [card('桃','l0'), card('杀','l1'), card('闪','l2'), card('无中生有','l3')] });
+    var c1 = s.buildCandidates(g, 0);
+    if(c1.length !== 6) throw new Error('4张手牌应为6个组合,实际 ' + c1.length + ' ' + JSON.stringify(c1));
+    if(c1[0].cardIdxs.join(',') !== '0,1' || c1[0].isDefault !== true)
+      throw new Error('默认组合应为第一张+第二张且 isDefault,实际 ' + JSON.stringify(c1[0]));
+    if(c1[0].label !== '交【桃】与【杀】') throw new Error('label 应含牌名,实际 ' + c1[0].label);
+    if(c1[5].cardIdxs.join(',') !== '2,3') throw new Error('第6组合应为2,3,实际 ' + JSON.stringify(c1[5]));
+    var g5 = mkLirangG({ myHand: [card('桃','x0'), card('杀','x1'), card('闪','x2'), card('酒','x3'), card('无中生有','x4')] });
+    var c2 = s.buildCandidates(g5, 0);
+    if(c2.length !== 8) throw new Error('5张手牌 C(5,2)=10 应封顶8,实际 ' + c2.length);
+    var g1 = mkLirangG({ myHand: [card('桃','y0')] });
+    if(s.buildCandidates(g1, 0).length !== 0) throw new Error('1张手牌无组合应返回空');
+  });
+
+  await check('礼让发动有密钥:mock 选组合下标3 → respondLiRang(true,[1,2]) spy 收到精确下标', async function(){
+    window.__lirangCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":3}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkLirangG({ myHand: [card('桃','l0'), card('杀','l1'), card('闪','l2'), card('无中生有','l3')] });
+    var r = await botDecide('lirangAsk', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0][0] !== true || window.__lirangCalls[0][1].join(',') !== '1,2')
+      throw new Error('应 respondLiRang(true,[1,2])(4张牌组合序 0:(0,1) 1:(0,2) 2:(0,3) 3:(1,2)),实际 ' + JSON.stringify(window.__lirangCalls));
+    if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('礼让发动无密钥:fallback=不发动 → respondLiRang(false,[]) 提交推进;无AI调用不卡死', async function(){
+    window.__lirangCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = ''; aiProvider = null;
+    var g = mkLirangG({ myHand: [card('桃','l0'), card('杀','l1'), card('闪','l2')] });
+    var r = await botDecide('lirangAsk', g, 0);
+    if(r !== true) throw new Error('应返回 true(不发动视为已处理),实际 ' + r);
+    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0][0] !== false || window.__lirangCalls[0][1].length !== 0)
+      throw new Error('应 respondLiRang(false,[]) 收尾推进(与改动前 botSafePrompt 点击"不发动"等价),实际 ' + JSON.stringify(window.__lirangCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('礼让发动接线:runBotDecision 全链 → botDecide(lirangAsk) 被调且提交不发动;BOT_PHASE_ACTOR 登记;L1 EXCLUDE 收录防双重接管', async function(){
+    window.__lirangCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    if(BOT_PHASE_ACTOR.lirangAsk !== 'from')
+      throw new Error('BOT_PHASE_ACTOR 应登记 lirangAsk:from,实际 ' + BOT_PHASE_ACTOR.lirangAsk);
+    if(!CONTROLS_CHOICE_EXCLUDE.has('lirangAsk'))
+      throw new Error('lirangAsk 渲染 #controls 按钮,必须进 CONTROLS_CHOICE_EXCLUDE 防 L1 双重接管');
+    var restore = spyBotDecideLog();
+    try {
+      await runBotDecision(mkLirangG({ myHand: [card('桃','l0'), card('杀','l1')] }), 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('lirangAsk') < 0)
+      throw new Error('runBotDecision 应调用 botDecide(lirangAsk),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__G1botDecideCalls.indexOf('controlsChoice') >= 0)
+      throw new Error('lirangAsk 已被 EXCLUDE,L1 controlsChoice 不应被调,实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0][0] !== false || window.__lirangCalls[0][1].length !== 0)
+      throw new Error('无密钥全链应提交 respondLiRang(false,[]),实际 ' + JSON.stringify(window.__lirangCalls));
   });
 
   console.log('\n' + '='.repeat(60));
