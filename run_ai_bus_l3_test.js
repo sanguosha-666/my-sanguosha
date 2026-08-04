@@ -199,6 +199,7 @@ const testCode = String.raw`
   respondGuanxing = spyService('guanxing');
   respondYijiAssign = spyService('yijiAssign');
   respondLiRang = spyService('lirang');
+  respondXiaoguo = spyService('xiaoguo');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -2373,6 +2374,110 @@ const testCode = String.raw`
       throw new Error('lirangAsk 已被 EXCLUDE,L1 controlsChoice 不应被调,实际 ' + JSON.stringify(window.__G1botDecideCalls));
     if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0][0] !== false || window.__lirangCalls[0][1].length !== 0)
       throw new Error('无密钥全链应提交 respondLiRang(false,[]),实际 ' + JSON.stringify(window.__lirangCalls));
+  });
+
+  // ================= A1:xiaoguo(乐进骁果,路径A专用注册) =================
+  // pending 服务端真实结构(skills.js respondXiaoguo 守卫):{type:'xiaoguo', asking,
+  // endingSeat, from};行动者=pending.asking。候选=每张基本牌(弃之发动)+ 恒有「不发动」。
+  // 【改动前行为核对】runBotDecision 无 xiaoguo 分支、BOT_PHASE_ACTOR 无登记、且
+  // CONTROLS_CHOICE_EXCLUDE 收录 xiaoguo → botSeatForState -1 → botFallbackSeats+
+  // botSafePrompt 兜底:xiaoguo 渲染"发动【骁果】(依赖客户端 xiaoguoMode 模式状态,机器人
+  // 从不置位)/不发动"→ safe 正则第一命中"不发动" → respondXiaoguo(false) →
+  // advanceXiaoguo 推进。即改动前机器人恒不发动、流程正常推进。A1 localFallback=不发动
+  // 忠实复刻此行为(测试锁定);刻意不用 null(那会让 pending 永不清空、机器人永久卡死)。
+  // A1 之后 xiaoguo 从 EXCLUDE 移除、改由专用注册+接线(在 controlsChoice 之前)保护,
+  // 有密钥 AI 选基本牌发动、无密钥仍恒不发动。
+  function mkXiaoguoG(opt){
+    opt = opt || {};
+    var g = mkSeatG(opt);
+    g.phase = 'xiaoguo';
+    g.pending = { type: 'xiaoguo', from: 1, to: 0, endingSeat: opt.endingSeat !== undefined ? opt.endingSeat : 1, asking: 0 };
+    return g;
+  }
+
+  await check('骁果路径A:match=phase/pending.type/pending.asking 三者全等才命中;缺一即 false', function(){
+    var s = BOT_DECISIONS.xiaoguo;
+    if(!s) throw new Error('BOT_DECISIONS.xiaoguo 未注册');
+    var g = mkXiaoguoG({ myHand: [card('杀','x0')] });
+    if(!s.match(g, 0)) throw new Error('完整 xiaoguo pending 应命中');
+    var g2 = mkXiaoguoG({});
+    g2.phase = 'play';
+    if(s.match(g2, 0)) throw new Error('phase 非 xiaoguo 不应命中');
+    var g3 = mkXiaoguoG({});
+    g3.pending.type = 'other';
+    if(s.match(g3, 0)) throw new Error('pending.type 非 xiaoguo 不应命中');
+    var g4 = mkXiaoguoG({});
+    g4.pending.asking = 1;
+    if(s.match(g4, 0)) throw new Error('pending.asking 非本人不应命中');
+    if(!s.match(g4, 1)) throw new Error('pending.asking=1 时应命中座位1');
+  });
+
+  await check('骁果路径A候选:手牌[杀,闪,桃,无中生有]→3项基本牌(杀/闪/桃,label含牌名)+恒有不发动;无基本牌→仅不发动', function(){
+    var s = BOT_DECISIONS.xiaoguo;
+    var g = mkXiaoguoG({ myHand: [card('杀','x0'), card('闪','x1'), card('桃','x2'), card('无中生有','x3')] });
+    var c1 = s.buildCandidates(g, 0);
+    if(c1.length !== 4) throw new Error('应为4候选(3基本牌+不发动),实际 ' + c1.length + ' ' + JSON.stringify(c1));
+    if(c1[0].label !== '弃【杀】发动' || c1[0].activate !== true || c1[0].cardIdx !== 0)
+      throw new Error('候选0应为弃杀发动(cardIdx0),实际 ' + JSON.stringify(c1[0]));
+    if(c1[1].label !== '弃【闪】发动' || c1[1].cardIdx !== 1) throw new Error('候选1应为弃闪发动,实际 ' + JSON.stringify(c1[1]));
+    if(c1[2].label !== '弃【桃】发动' || c1[2].cardIdx !== 2) throw new Error('候选2应为弃桃发动,实际 ' + JSON.stringify(c1[2]));
+    if(c1[3].label !== '不发动' || c1[3].activate !== false || c1[3].cardIdx !== null)
+      throw new Error('末项应恒为不发动,实际 ' + JSON.stringify(c1[3]));
+    var g2 = mkXiaoguoG({ myHand: [card('无中生有','x4'), card('丈八蛇矛','x5')] });
+    var c2 = s.buildCandidates(g2, 0);
+    if(c2.length !== 1 || c2[0].activate !== false)
+      throw new Error('无基本牌应只1项不发动,实际 ' + JSON.stringify(c2));
+  });
+
+  await check('骁果路径A有密钥:mock 选弃杀(choice0)→ respondXiaoguo(true,杀下标0);mock 选不发动(choice3)→ respondXiaoguo(false,null)', async function(){
+    window.__xiaoguoCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkXiaoguoG({ myHand: [card('杀','x0'), card('闪','x1'), card('桃','x2'), card('无中生有','x3')] });
+    var r = await botDecide('xiaoguo', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
+    if(window.__xiaoguoCalls.length !== 1 || window.__xiaoguoCalls[0][0] !== true || window.__xiaoguoCalls[0][1] !== 0)
+      throw new Error('应 respondXiaoguo(true,0)(杀下标),实际 ' + JSON.stringify(window.__xiaoguoCalls));
+    window.__xiaoguoCalls = []; window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":3}' }];
+    await botDecide('xiaoguo', g, 0);
+    if(window.__xiaoguoCalls.length !== 1 || window.__xiaoguoCalls[0][0] !== false || window.__xiaoguoCalls[0][1] !== null)
+      throw new Error('mock 选不发动应 respondXiaoguo(false,null),实际 ' + JSON.stringify(window.__xiaoguoCalls));
+  });
+
+  await check('骁果路径A无密钥:fallback=不发动 → respondXiaoguo(false,null)(advanceXiaoguo 推进不卡死);无AI调用', async function(){
+    window.__xiaoguoCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = ''; aiProvider = null;
+    var g = mkXiaoguoG({ myHand: [card('杀','x0'), card('闪','x1'), card('桃','x2')] });
+    var r = await botDecide('xiaoguo', g, 0);
+    if(r !== true) throw new Error('应返回 true(不发动视为已处理),实际 ' + r);
+    if(window.__xiaoguoCalls.length !== 1 || window.__xiaoguoCalls[0][0] !== false || window.__xiaoguoCalls[0][1] !== null)
+      throw new Error('无密钥应 respondXiaoguo(false,null)(与改动前 botSafePrompt 点击"不发动"等价),实际 ' + JSON.stringify(window.__xiaoguoCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('骁果路径A接线:runBotDecision 全链 → botDecide(xiaoguo) 被调且提交;controlsChoice 不被调(接线先于L1);BOT_PHASE_ACTOR 登记 xiaoguo:asking;EXCLUDE 已移除 xiaoguo', async function(){
+    window.__xiaoguoCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    if(BOT_PHASE_ACTOR.xiaoguo !== 'asking')
+      throw new Error('BOT_PHASE_ACTOR 应登记 xiaoguo:asking,实际 ' + BOT_PHASE_ACTOR.xiaoguo);
+    if(CONTROLS_CHOICE_EXCLUDE.has('xiaoguo'))
+      throw new Error('xiaoguo 已有专用注册+接线,必须从 CONTROLS_CHOICE_EXCLUDE 移除(否则 L1 永远够不到,专用注册白做)');
+    var restore = spyBotDecideLog();
+    try {
+      await runBotDecision(mkXiaoguoG({ myHand: [card('杀','x0')] }), 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.indexOf('xiaoguo') < 0)
+      throw new Error('runBotDecision 应调用 botDecide(xiaoguo),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__G1botDecideCalls.indexOf('controlsChoice') >= 0)
+      throw new Error('xiaoguo 专用接线应在 controlsChoice 之前,controlsChoice 不应被调,实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__xiaoguoCalls.length !== 1 || window.__xiaoguoCalls[0][0] !== true || window.__xiaoguoCalls[0][1] !== 0)
+      throw new Error('有密钥全链应提交 respondXiaoguo(true,0),实际 ' + JSON.stringify(window.__xiaoguoCalls));
   });
 
   console.log('\n' + '='.repeat(60));

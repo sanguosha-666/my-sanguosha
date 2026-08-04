@@ -58,7 +58,15 @@ const BOT_PHASE_ACTOR = {
   // 【L1 泛化(Task G2)】这四个响应阶段没有 runBotDecision 专用分支(落到 controlsChoice
   // 接线点),此前靠 botFallbackSeats+botSafePrompt 兜底。登记 actor 字段后 botSeatForState
   // 能精确解析行动者,L1(有密钥)接管、无密钥继续走 botSafePrompt(行为不变)。
-  liuli:'to', tianxiang:'seat', lirangRecover:'from', zhengyi:'asking'
+  liuli:'to', tianxiang:'seat', lirangRecover:'from', zhengyi:'asking',
+  // 【A1】骁果:行动者是 pending.asking(乐进,服务端 respondXiaoguo 守卫
+  // g.pending.asking!==mySeat)。登记后 botSeatForState 才能解析出行动者走 runBotDecision
+  // 专用分支(botDecide('xiaoguo'));不登记会掉进 botFallbackSeats+botSafePrompt。
+  xiaoguo:'asking',
+  // 【A1】骁果询问目标的二选一(弃装备/受伤害):行动者是 pending.to(服务端
+  // respondXiaoguoChoice 守卫 g.pending.to!==mySeat)。登记后 L1(有密钥)才能解析出
+  // 行动者镜像"弃置X【装备】/受到1点伤害"按钮;不登记 botSeatForState -1,L1 够不到。
+  xiaoguoChoice:'to'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -637,11 +645,14 @@ const CONTROLS_CHOICE_ALLOWLIST = new Set(['wuxie','luoyingAsk','luoshen']);
 // 除既定清单外,额外收录 guhuoTarget/xuanfengPick/quhuDamageChoice 三个 seatPick 专用
 // 阶段(接线在 controlsChoice 之后,xuanfengPick/quhuDamageChoice 会渲染 #controls 按钮,
 // 不排除会被 L1 抢先接管;guhuoTarget 不渲染按钮、纯防御性收录)。
+// 【A1 移除】xiaoguo 已有专用注册(BOT_DECISIONS.xiaoguo)+接线在 controlsChoice 之前,
+// 留在 EXCLUDE 会让 L1 永远够不到、专用注册白做;xiaoguoChoice 按钮纯由 pending 渲染
+// (弃置X【装备】/受到1点伤害,单步可提交 respondXiaoguoChoice),改由 L1(有密钥)接管。
 const CONTROLS_CHOICE_EXCLUDE = new Set([
   'wugu','pick','guicai','ganglieChoice','guhuoQuestion','qiaobianMove',
   'enyuanChooseOption','enyuanChoose','enyuanGiveCard','jiedaoChoice',
   'duanbingChoose','huogong','huogongReveal','fanjianSuit','quhuRespond',
-  'tianyiRespond','xiaoguo','xiaoguoChoice','zhijiChoice',
+  'tianyiRespond','zhijiChoice',
   'huashenChangeAskStart','huashenChangeAskEnd','tieqi','liegong',
   'qilin','hanbing','mengjin','shaOffsetChoice',
   'guhuoTarget','xuanfengPick','quhuDamageChoice',
@@ -2063,6 +2074,48 @@ BOT_DECISIONS.lirangAsk = {
   maxTokens: 80,
 };
 
+// ============ A类补角:xiaoguo(乐进骁果,路径A) ============
+// 【本决策点是什么】骁果:回合结束阶段被问"是否弃一张基本牌发动【骁果】"——候选=手里
+// 每张基本牌(弃之发动,单步可提交 respondXiaoguo(true, cardIdx)) + 恒有「不发动」
+// (respondXiaoguo(false) → advanceXiaoguo 推进到下一个候选人)。服务端守卫
+// (skills.js respondXiaoguo):phase/pending.type/pending.asking!==mySeat;发动时校验
+// hand[cardIdx] 是 BASIC_CARDS 成员,否则原地拒绝。
+// 【改动前行为核对】runBotDecision 无 xiaoguo 分支、BOT_PHASE_ACTOR 无登记、EXCLUDE
+// 收录 xiaoguo → botSeatForState -1 → botFallbackSeats+botSafePrompt 兜底:xiaoguo
+// 渲染"发动【骁果】/不发动",发动按钮依赖客户端 xiaoguoMode 模式状态(机器人从不置位)、
+// "不发动"命中 safe 正则第一替代项 → botSafePrompt 点击"不发动" → respondXiaoguo(false)
+// → advanceXiaoguo 推进。即改动前机器人恒不发动、流程正常推进。localFallback=不发动
+// 忠实复刻此行为;刻意不用 null(null=无动作,respondXiaoguo 不被调用、pending 永不清空,
+// 机器人永久卡死,CLAUDE.md 第26条同款卡死模式)。
+BOT_DECISIONS.xiaoguo = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='xiaoguo' && d && d.type==='xiaoguo' && d.asking===seat;
+  },
+  buildCandidates: function(g, seat){
+    const me = g.players[seat];
+    const out = [];
+    (me.hand||[]).forEach(function(c, i){
+      if(BASIC_CARDS.includes(c.name)) out.push({ cardIdx: i, activate: true, label: '弃【'+c.name+'】发动' });
+    });
+    out.push({ cardIdx: null, activate: false, label: '不发动' });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    // 不发动(与 EXCLUDE 时行为一致:机器人不发动,advanceXiaoguo 推进)
+    return candidates.find(function(c){ return !c.activate; }) || candidates[candidates.length-1];
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){ respondXiaoguo(!!choice.activate, choice.cardIdx); });
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。当前是【骁果】发动询问:候选列表每一项是'
+      +'"弃一张基本牌发动"或"不发动"。请结合局面决定是否发动。只输出 {"choice":数字},不要解释。';
+  },
+  maxTokens: 60,
+};
+
 // ================= AI自维护回合摘要(aiSummary) =================
 // 机器人自己维护的"本局记忆摘要":updateAiSummary(g,seat) 异步调用 callAI,把旧摘要
 // (如有)+最近公开事件压缩成 ≤200字 的新摘要存进模块级 aiSummary;callAiChooseIndex
@@ -2837,6 +2890,15 @@ async function runBotDecision(g,seat){
     // phase+type+from 守卫保留作双保险,命中即 return。单阶段决策:目标=pending.to 由
     // 服务端定,AI 只选组合,一次 botDecide 即完成,无跨调度累积。
     if(await botDecide('lirangAsk',g,seat)) return;
+  }
+  if(g.phase==='xiaoguo' && d && d.type==='xiaoguo' && d.asking===seat){
+    // 【A1】决策已进 BOT_DECISIONS.xiaoguo(无密钥回退=不发动,与改动前 botSafePrompt 点击
+    // "不发动"按钮逐字等价;有密钥 AI 从基本牌候选里选,选完即提交 respondXiaoguo)。
+    // phase+type+asking 守卫保留作双保险,命中即 return。位置刻意在 controlsChoice(L1)
+    // 之前:xiaoguo 已从 EXCLUDE 移除,若接在 L1 后面,有密钥时 L1 会抢先镜像"发动【骁果】"
+    // 按钮——那个按钮是客户端 xiaoguoMode 模式状态的第一步(点了只改 mode 不提交服务端),
+    // 机器人会卡死;专用分支必须先于 L1 命中。
+    if(await botDecide('xiaoguo',g,seat)) return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
   // L3 多步两阶段(借刀/离间/丈八/仁德):阶段A选中后 botTwoStepA 本地挂起,等下一调度走

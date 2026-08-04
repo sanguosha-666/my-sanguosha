@@ -160,6 +160,7 @@ const testCode = String.raw`
   respondTianxiang = function(choice, targetSeat){ window.__tianxiangCalls.push([choice, targetSeat]); };
   respondLiRangRecover = function(activate){ window.__lirangCalls.push(activate); };
   respondZhengyi = function(activate){ window.__zhengyiCalls.push(activate); };
+  respondXiaoguoChoice = function(choice){ window.__xiaoguoChoiceCalls.push(choice); };
   // ---- mock callAI ----
   window.__mockAiCalls = 0;
   window.__mockAiArgs = null;
@@ -514,22 +515,30 @@ const testCode = String.raw`
     if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
   });
 
-  // ---- T19:EXCLUDE 证明:xiaoguo/xiaoguoChoice 有密钥也不被 L1 接管 ----
-  // 注意:这两个阶段连 BOT_PHASE_ACTOR 都没有登记(botSeatForState 返回 -1),EXCLUDE 是
-  // 双保险;断言锁定的是行为("不被 L1 自动覆盖"),不区分机制。
-  await check('EXCLUDE:有密钥 xiaoguo/xiaoguoChoice 不被接管(不在 L1 自动覆盖集)', async function(){
+  // ---- T19:A1 后 EXCLUDE 调整锁定:xiaoguo 已移除(专用注册+接线先于 L1 保护,
+  // 见 l3 接线测试);xiaoguoChoice 已移除(L1 可镜像其纯 pending 渲染按钮,见 T20) ----
+  await check('EXCLUDE调整:xiaoguo/xiaoguoChoice 已从 CONTROLS_CHOICE_EXCLUDE 移除', async function(){
+    if(CONTROLS_CHOICE_EXCLUDE.has('xiaoguo'))
+      throw new Error('xiaoguo 有专用注册+接线(先于 controlsChoice),不应留在 EXCLUDE');
+    if(CONTROLS_CHOICE_EXCLUDE.has('xiaoguoChoice'))
+      throw new Error('xiaoguoChoice 按钮纯由 pending 渲染(弃置X【装备】/受到1点伤害),应由 L1 接管,不应留在 EXCLUDE');
+  });
+
+  // ---- T20:xiaoguoChoice 有密钥由 L1 接管(镜像「弃置X【装备】/受到1点伤害」按钮) ----
+  await check('有密钥:xiaoguoChoice 由 L1 接管,mock 选「弃置武器」→ respondXiaoguoChoice(weapon)', async function(){
+    window.__xiaoguoChoiceCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
     aiApiKey = 'test-key';
     aiProvider = 'claude';
-    var cases = [
-      { phase: 'xiaoguo', pending: { type: 'xiaoguo', from: 1, to: 0, endingSeat: 1 } },
-      { phase: 'xiaoguoChoice', pending: { type: 'xiaoguoChoice', from: 1, to: 0, endingSeat: 1 } },
-    ];
-    for(var i = 0; i < cases.length; i++){
-      var g = mkG(cases[i].phase, cases[i].pending, []);
-      var r = await botDecide('controlsChoice', g, 0);
-      if(r !== false) throw new Error(cases[i].phase + ' 不应被 L1 接管,实际 ' + r);
-    }
-    if(document.body.children.length !== 1) throw new Error('EXCLUDE 阶段不应产生临时 box');
+    var g = mkG('xiaoguoChoice', { type: 'xiaoguoChoice', from: 1, to: 0, endingSeat: 1 }, []);
+    g.players[0].equips.weapon = card('青釭剑');
+    var r = await botDecide('controlsChoice', g, 0);
+    if(r !== true) throw new Error('应返回 true(已接管),实际 ' + r);
+    if(window.__mockAiCalls !== 1) throw new Error('应有1次AI调用,实际 ' + window.__mockAiCalls);
+    if(window.__xiaoguoChoiceCalls.length !== 1 || window.__xiaoguoChoiceCalls[0] !== 'weapon')
+      throw new Error('应 respondXiaoguoChoice(weapon),实际 ' + JSON.stringify(window.__xiaoguoChoiceCalls));
+    if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
   });
 
   console.log('\n' + '='.repeat(60));
