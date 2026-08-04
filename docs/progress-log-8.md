@@ -177,3 +177,12 @@
 - **测试（`run_ai_bus_c_window_test.js` 25→29 项）**：T23 构造 6 人局 + 5 杀(连弩无限杀×相邻2目标=10条) + 5 过河拆桥(×5目标=25条) = 35 条原始 → 断言恰返回 26 条(25+结束)、结束项只在末尾；T24 加桃(100 分) → 桃是唯一最高分、截断后仍在且为最高分；T25 `localFallbackPlayWindow` 在截断后列表上选桃(100>25)，与未截断一致；T26 3 人局 10 条原始(<26) → 不截断、11 条全部保留+结束项。
 - **l2 测试 1 处适配**：铁索连环测试的 mock choice 0→1——T2 排序后候选顺序变化（最高分在前，铁索→自己 20 分排 0 位），测试意图(铁索目标为他人)不变，非回归。
 - **改动范围**：`bot.js`（`AI_PLAY_CANDIDATE_LIMIT` + 排序截断）、`run_ai_bus_c_window_test.js`(+4 项)、`run_ai_bus_l2_test.js`(1 处 choice 适配)、`index.html`(`?v=` 285→286 ×13)。回归全绿：c_window 29、l2 23、l3 93、summary 13、core 7。
+
+## L1 泛化批次（G1-G5，SDD 计划「2026-08-03-l1-generalization」）
+
+- **G1 seatPick 接线修复（bug）**：`BOT_SEAT_PICKS` 注册了 11 个座位技能（蛊惑目标/旋风/断粮/奇袭/国色/武圣/双雄/挑衅/反间/青囊/驱虎伤害）但 runBotDecision 从未调用 `botDecide('seatPick')`——第一批 T1-T3 的测试全是直接调 botDecide 的单元测试，从未测过全链路，机器人从不主动使用这些技能。修复：play 分支（四个多步之后、runBotActionWindow 之前）+ guhuoTarget/xuanfengPick/quhuDamageChoice 三个 pending 阶段各加一处接线。**关键修复轮**：接线加 `aiReady` 守卫——否则无密钥时 seatPick fallback null → botDecide true → play 分支 return → runBotActionWindow 不执行 → 机器人整回合卡死（违反无密钥回归红线）。修复后无密钥一律走旧路径（runBotActionWindow/botSafePrompt），与改动前逐字一致。
+- **G2 L1 泛化（响应类有密钥自动 AI 化）**：`controlsChoiceMatch` 从 allowlist-only（wuxie/luoyingAsk/luoshen）放宽为 `(aiReady || allowlist) && !EXCLUDE && botSeatForState===seat`——有/无密钥路径解耦取代逐阶段等价性论证（无密钥 match false 走旧分支，红线守住）。新增 `CONTROLS_CHOICE_EXCLUDE` 集合（27 条 brief 清单 + 补 guhuoTarget/xuanfengPick/quhuDamageChoice 共 30 条，防 L1 抢占 seatPick 专用接线）。**必要补充**：`BOT_PHASE_ACTOR` 补 liuli:'to'/tianxiang:'seat'/lirangRecover:'from'/zhengyi:'asking' 四条（否则 botSeatForState 恒 -1，泛化整体 no-op）。
+- **G3 分配类纯按钮阶段验证（纯测试）**：L1 自动覆盖集确认为 4 个阶段（liuli/tianxiang/lirangRecover/zhengyi——xiaoguo/xiaoguoChoice 在 EXCLUDE 双重排除），补缺口测试（候选文案镜像/choice-1 侧/无密钥对照/EXCLUDE 断言），mutation 验证鉴别力。
+- **G4 yijiAssign 遗计分配专用注册**：跨调度累积（复用 botTwoStepA，非最后一张累积 picks、最后一张 `respondYijiAssign(picks)` 一次性提交）；`BOT_PHASE_ACTOR` 登记 yijiAssign:'seat'（调度前提）；EXCLUDE 收录 yijiAssign（L1 冲突确认：renderControls 渲染"给 X"按钮）；无密钥 fallback=给 自己（改动前 botSafePrompt 点不到按钮卡死，是改进非回归）。
+- **G5 lirangAsk 礼让发动专用注册**：单阶段选 2 张手牌组合（≤8，默认组合恒在），目标 pending.to 服务端已定；`BOT_PHASE_ACTOR` 登记 lirangAsk:'from'；EXCLUDE 收录（L1 冲突确认）。**关键偏差修正**：brief 的 null fallback 前提有误——「不发动」命中 botSafePrompt safe 正则，改动前是"拒绝并推进"非 no-action；用 null 会让机器人永久卡死（规则 26），改为 decline 动作 `respondLiRang(false, [])`，与 brief 自身测试规格一致，测试锁定。xiaoguo 走路径 B（已在 EXCLUDE，机器人不发动、advanceXiaoguo 推进，留后续独立任务）。
+- **测试计数**：l3 93→109（G1 +5/G4 +5/G5 +5 及既有更新）、l1 8→20、c_window 29、l2 23、summary 13、core 7；`?v=` 287→290。全量回归绿。
