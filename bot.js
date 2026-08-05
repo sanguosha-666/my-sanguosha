@@ -1988,6 +1988,54 @@ BOT_DECISIONS.zhangbaTwoStep = {
   },
 };
 
+function botFangtianTargets(g, seat){
+  const me=g.players[seat], out=[];
+  if(!me) return out;
+  g.players.forEach(function(p, i){
+    if(!p || !p.alive || i===seat) return;
+    if(!(me.jiangchiNoDistance && g.turn===seat) && !canReachSha(g, seat, i)) return;
+    if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
+    out.push(i);
+  });
+  return out;
+}
+function botFangtianCombinations(g, seat){
+  const targets=botFangtianTargets(g, seat), out=[];
+  const add=function(combo){ if(out.length<10) out.push(combo); };
+  for(let i=0;i<targets.length;i++) add([targets[i]]);
+  for(let i=0;i<targets.length;i++) for(let j=i+1;j<targets.length;j++) add([targets[i],targets[j]]);
+  for(let i=0;i<targets.length;i++) for(let j=i+1;j<targets.length;j++) for(let k=j+1;k<targets.length;k++) add([targets[i],targets[j],targets[k]]);
+  return out;
+}
+BOT_DECISIONS.fangtian = {
+  match: function(g, seat){
+    if(g.phase!=='play' || g.turn!==seat || botTwoStepA) return false;
+    const me=g.players[seat], card=me && (me.hand||[])[0];
+    if(!me || !me.alive || !hasCap(me,'fangtian') || (me.hand||[]).length!==1) return false;
+    if(!card || !canUseAs(me, card, '杀') || me.jiangchiNoSlash) return false;
+    if(g.shaUsed && !hasCap(me,'unlimitedSha') && !(g.jiangchiExtraShaLeft>0)) return false;
+    return botFangtianCombinations(g, seat).length>0;
+  },
+  buildCandidates: function(g, seat){
+    const cardIdx=0;
+    return botFangtianCombinations(g, seat).map(function(targets){
+      return {
+        target:targets.slice(), targets:targets.slice(), cardIdx:cardIdx,
+        label:'方天画戟：'+targets.map(function(i){ return g.players[i].name; }).join('、')
+      };
+    });
+  },
+  localFallback: function(g, seat, candidates){ return candidates[0]; },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    const targets=choice.targets || choice.target;
+    botInvoke(seat, function(){ playShaFangtian(choice.cardIdx, targets); });
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。请选择一个合法的方天画戟目标组合。候选项的 targets 是完整目标座位数组，只能选择列表内组合。只输出 {"choice":数字}，不要解释。';
+  },
+};
+
 // ================= L3: 仁德(rendeTwoStep,两阶段) =================
 // 入口=render.js 1401-1410(选中任意手牌后目标座位出现"仁德:交给此人"按钮):hasCap(rende)+
 // 手牌非空+存活非自己目标;服务端 renDe 无本回合次数限制(renDeCount 只用于第2张后的回复),
@@ -2255,7 +2303,8 @@ function buildBotDefaultUserPrompt(state, candidates){
   return '当前局面:\n'+JSON.stringify(state)
     +'\n\n合法候选(index从0开始):\n'+JSON.stringify(candidates.map(c=>({
       index:c.index, label:c.label, action:c.action, card:c.card, seat:c.seat,
-      handIndex:c.handIndex, pickKey:c.pickKey, discardIndices:c.discardIndices
+      handIndex:c.handIndex, cardIdx:c.cardIdx, target:c.target, targets:c.targets,
+      pickKey:c.pickKey, discardIndices:c.discardIndices
     })))
     +'\n\n只返回 {"choice":数字}';
 }
@@ -2993,6 +3042,7 @@ async function runBotDecision(g,seat){
     // 否则 fallback null → botDecide true → play 分支 return,机器人整回合卡死)
     const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
     if(aiReady && await botDecide('seatPick', g, seat)) return;
+    if(await botDecide('fangtian', g, seat)) return;
     await runBotActionWindow(g, seat); return;
   }
   if(g.phase==='discard'&&g.turn===seat){

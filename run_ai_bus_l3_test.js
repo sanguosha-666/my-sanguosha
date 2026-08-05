@@ -188,6 +188,7 @@ const testCode = String.raw`
   qiXi = spyService('qixi');
   guoSe = spyService('guose');
   playCard = spyService('playCard');
+  playShaFangtian = spyService('fangtian');
   respondTiaoxin = spyService('tiaoxin');
   fanJian = spyService('fanjian');
   qingNang = spyService('qingnang');
@@ -896,8 +897,8 @@ const testCode = String.raw`
     var g3 = mkSeatG({ myHand: [card('杀','j15')] });
     await runBotDecision(g3, 0);
     if(window.__windowCalls !== 1) throw new Error('jiedaoTwoStep 未命中时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
-      throw new Error('无挂起态时应按序尝试4个决策(无密钥不接seatPick),实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,fangtian')
+      throw new Error('无挂起态时应按序尝试4个多步决策+fangtian,实际 ' + wired.join(','));
 
     // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策不命中 → 走窗口不崩
     wired = [];
@@ -908,8 +909,8 @@ const testCode = String.raw`
     g4.players[0].equips.plus1 = { name: '的卢' };
     await runBotDecision(g4, 0);
     if(window.__windowCalls !== 1) throw new Error('阶段B无候选时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep')
-      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中后放行,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,fangtian')
+      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中+fangtian后放行,实际 ' + wired.join(','));
     if(window.__jiedaoCalls.length !== 0) throw new Error('阶段B无候选不应提交 jieDaoShaRen');
 
     botDecide = realBotDecide;
@@ -1017,6 +1018,7 @@ const testCode = String.raw`
   //   服务端 renDe 无本回合次数限制(renDeCount 只用于第2张后的回复),match 不加次数守卫。
 
   await check('离间:match=出牌阶段+自己回合+hasCap+未用+手牌≥1+男性≥2;阶段A候选=存活男性(含自己)', function(){
+    botTwoStepA = null;
     var s = BOT_DECISIONS.lijianTwoStep;
     if(!s) throw new Error('BOT_DECISIONS.lijianTwoStep 未注册');
     var g1 = mkSeatG({ myHand: [card('杀','l0')] });
@@ -1341,8 +1343,8 @@ const testCode = String.raw`
     var g6 = mkSeatG({ myHand: [card('杀','m6')] });
     await runBotDecision(g6, 0);
     if(window.__windowCalls !== 1) throw new Error('全未命中应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick')
-      throw new Error('全未命中应按序尝试4个决策+seatPick,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick,fangtian')
+      throw new Error('全未命中应按序尝试4个多步决策+seatPick+fangtian,实际 ' + wired.join(','));
 
     botDecide = realBotDecide;
     runBotActionWindow = realWindow;
@@ -2650,6 +2652,112 @@ const testCode = String.raw`
       throw new Error('xiaoguo 专用接线应在 controlsChoice 之前,controlsChoice 不应被调,实际 ' + JSON.stringify(window.__G1botDecideCalls));
     if(window.__xiaoguoCalls.length !== 1 || window.__xiaoguoCalls[0][0] !== true || window.__xiaoguoCalls[0][1] !== 0)
       throw new Error('有密钥全链应提交 respondXiaoguo(true,0),实际 ' + JSON.stringify(window.__xiaoguoCalls));
+  });
+
+  function mkFangtianG(opt){
+    var g = mkSeatG(opt);
+    g.players[0].equips.weapon = { name: '方天画戟' };
+    return g;
+  }
+
+  await check('方天match:未装备/非最后一张/无目标/将驰禁杀/杀次数已用均 false;最后一张且有合法目标 true', function(){
+    var s = BOT_DECISIONS.fangtian;
+    if(!s) throw new Error('BOT_DECISIONS.fangtian 未注册');
+    var base = mkSeatG({ myHand: [card('杀', 'ft0')] });
+    if(s.match(base, 0)) throw new Error('未装备方天不应命中');
+    var g1 = mkFangtianG({ myHand: [card('杀', 'ft1'), card('闪', 'ft2')] });
+    if(s.match(g1, 0)) throw new Error('手牌不为1张不应命中');
+    var g2 = mkFangtianG({ myHand: [card('杀', 'ft3')], aliveOf: { 1: false, 2: false } });
+    if(s.match(g2, 0)) throw new Error('无合法目标不应命中');
+    var g3 = mkFangtianG({ myHand: [card('杀', 'ft4')], jiangchiNoSlash: true });
+    if(s.match(g3, 0)) throw new Error('将驰禁杀不应命中');
+    var g4 = mkFangtianG({ myHand: [card('杀', 'ft5')], shaUsed: true });
+    if(s.match(g4, 0)) throw new Error('出杀次数已用不应命中');
+    var g5 = mkFangtianG({ myHand: [card('杀', 'ft6')] });
+    if(!s.match(g5, 0)) throw new Error('最后一张手牌+方天+合法目标应命中');
+  });
+
+  await check('方天buildCandidates:target/targets均为1-3项数组;组合去重;label含目标;候选≤10', function(){
+    var s = BOT_DECISIONS.fangtian;
+    var g = mkFangtianG({ myHand: [card('杀', 'ft7')] });
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 3 || c.length > 10) throw new Error('3人局方天应有3个候选,实际 ' + c.length);
+    var seen = {};
+    c.forEach(function(x){
+      if(!Array.isArray(x.target) || !Array.isArray(x.targets)) throw new Error('target/targets 必须为数组');
+      if(x.target.length < 1 || x.target.length > 3 || x.targets.length !== x.target.length)
+        throw new Error('目标数组长度应为1-3,实际 ' + JSON.stringify(x));
+      var key = x.targets.join(',');
+      if(seen[key]) throw new Error('目标组合重复,实际 ' + key);
+      seen[key] = true;
+      x.targets.forEach(function(i){
+        if(x.label.indexOf(g.players[i].name) < 0) throw new Error('label 缺少目标名,实际 ' + x.label);
+      });
+    });
+  });
+
+  await check('方天有密钥:mock选组合 → playShaFangtian(cardIdx, targets) 收到数组', async function(){
+    window.__fangtianCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":2}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkFangtianG({ myHand: [card('杀', 'ft8')] });
+    var r = await botDecide('fangtian', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI调用异常,实际 r=' + r + ',calls=' + window.__mockAiCalls);
+    if(window.__fangtianCalls.length !== 1) throw new Error('playShaFangtian 应调用1次,实际 ' + window.__fangtianCalls.length);
+    var call = window.__fangtianCalls[0];
+    if(call[0] !== 0 || !Array.isArray(call[1]) || call[1].join(',') !== '1,2')
+      throw new Error('应 playShaFangtian(0,[1,2]),实际 ' + JSON.stringify(call));
+  });
+
+  await check('方天无密钥:fallback执行首个合法组合;无合法目标不调用', async function(){
+    window.__fangtianCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = ''; aiProvider = null;
+    var g = mkFangtianG({ myHand: [card('杀', 'ft9')] });
+    var r = await botDecide('fangtian', g, 0);
+    if(r !== true) throw new Error('首个合法组合应执行,实际 ' + r);
+    if(window.__fangtianCalls.length !== 1 || window.__fangtianCalls[0][0] !== 0 || window.__fangtianCalls[0][1].join(',') !== '1')
+      throw new Error('应 fallback 执行 playShaFangtian(0,[1]),实际 ' + JSON.stringify(window.__fangtianCalls));
+    window.__fangtianCalls = [];
+    var empty = mkFangtianG({ myHand: [card('杀', 'fta')], aliveOf: { 1: false, 2: false } });
+    var emptyResult = await botDecide('fangtian', empty, 0);
+    if(emptyResult !== false) throw new Error('无合法目标应返回false,实际 ' + emptyResult);
+    if(window.__fangtianCalls.length !== 0) throw new Error('无合法目标不应调用 playShaFangtian');
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应调用AI,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('方天目标过滤:空城/距离外目标排除', function(){
+    var s = BOT_DECISIONS.fangtian;
+    var kongcheng = mkFangtianG({ myHand: [card('杀', 'ftb')] });
+    kongcheng.players[1].general = 'zhuge';
+    kongcheng.players[1].hand = [];
+    var c1 = s.buildCandidates(kongcheng, 0);
+    if(c1.some(function(x){ return x.targets.indexOf(1) >= 0; })) throw new Error('空城目标不应出现,实际 ' + JSON.stringify(c1));
+    var distant = mkFangtianG({ n: 10, myHand: [card('杀', 'ftc')] });
+    var targets = botFangtianTargets(distant, 0);
+    if(targets.indexOf(5) >= 0) throw new Error('距离外座位5不应出现,实际 ' + JSON.stringify(targets));
+    if(targets.indexOf(4) < 0) throw new Error('距离内座位4应保留,实际 ' + JSON.stringify(targets));
+  });
+
+  await check('方天接线:runBotDecision play调用fangtian后不再走runBotActionWindow', async function(){
+    window.__fangtianCalls = [];
+    window.__windowCalls = 0;
+    botTwoStepA = null;
+    aiApiKey = ''; aiProvider = null;
+    var realWindow = runBotActionWindow;
+    var restore = spyBotDecideLog();
+    runBotActionWindow = async function(){ window.__windowCalls++; };
+    try {
+      await runBotDecision(mkFangtianG({ myHand: [card('杀', 'ftd')] }), 0);
+    } finally {
+      restore();
+      runBotActionWindow = realWindow;
+    }
+    if(window.__G1botDecideCalls.indexOf('fangtian') < 0)
+      throw new Error('runBotDecision 应调用 botDecide(fangtian),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__fangtianCalls.length !== 1) throw new Error('fangtian 应调用1次,实际 ' + window.__fangtianCalls.length);
+    if(window.__windowCalls !== 0) throw new Error('fangtian执行后不应再走 runBotActionWindow,实际 ' + window.__windowCalls);
   });
 
   console.log('\n' + '='.repeat(60));

@@ -214,3 +214,11 @@
 - **AI 投影**：`buildBotVisibleState` 提供最近10条 `recentSuspicionEvents`，只含公开行动字段，不含手牌/隐藏身份。
 - **测试**：info 测试新增事件写入、救援写入、20条上限、normalize 清洗、最近10条投影、FFA不写入、隐藏字段检查；info 16/0，l3 125/0，l1 21/0，l2 23/0，c_window 34/0，bot/game 语法通过。
 - **改动范围**：`bot.js`、`game.js`、`run_ai_bus_info_test.js`、`index.html`（`?v=294→295` ×13）。
+
+## A3 方天画戟多目标
+
+- **探索结论**：方天画戟入口要求出牌阶段最后一张手牌能当杀且存在合法目标；真人最终调用 `playShaFangtian(cardIdx, targets)`，服务端允许1-3个目标并复核距离/空城/出杀次数。
+- **实现**：新增 `BOT_DECISIONS.fangtian`，生成1/2/3目标组合（最多10项），AI 选择完整目标数组；`runBotDecision` 在 seatPick 后、普通出牌窗口前接管；execute 复用 `playShaFangtian`，不改 game.js。
+- **无密钥回退**：选择首个合法单目标组合，保证机器人不会因方天模式直接卡住；这是原机器人未覆盖能力的新增合法行为。
+- **测试**：l3 新增 match 门槛、组合形状、AI/无密钥执行、空城/距离过滤、接线断言；l3 131/0、c_window 34/0，`node --check bot.js` 通过。旧接线断言同步加入 fangtian 优先级并清理测试状态。
+- **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=295→296` ×13）。
