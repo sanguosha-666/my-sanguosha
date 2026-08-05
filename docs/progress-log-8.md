@@ -186,3 +186,10 @@
 - **G4 yijiAssign 遗计分配专用注册**：跨调度累积（复用 botTwoStepA，非最后一张累积 picks、最后一张 `respondYijiAssign(picks)` 一次性提交）；`BOT_PHASE_ACTOR` 登记 yijiAssign:'seat'（调度前提）；EXCLUDE 收录 yijiAssign（L1 冲突确认：renderControls 渲染"给 X"按钮）；无密钥 fallback=给 自己（改动前 botSafePrompt 点不到按钮卡死，是改进非回归）。
 - **G5 lirangAsk 礼让发动专用注册**：单阶段选 2 张手牌组合（≤8，默认组合恒在），目标 pending.to 服务端已定；`BOT_PHASE_ACTOR` 登记 lirangAsk:'from'；EXCLUDE 收录（L1 冲突确认）。**关键偏差修正**：brief 的 null fallback 前提有误——「不发动」命中 botSafePrompt safe 正则，改动前是"拒绝并推进"非 no-action；用 null 会让机器人永久卡死（规则 26），改为 decline 动作 `respondLiRang(false, [])`，与 brief 自身测试规格一致，测试锁定。xiaoguo 走路径 B（已在 EXCLUDE，机器人不发动、advanceXiaoguo 推进，留后续独立任务）。
 - **测试计数**：l3 93→109（G1 +5/G4 +5/G5 +5 及既有更新）、l1 8→20、c_window 29、l2 23、summary 13、core 7；`?v=` 287→290。全量回归绿。
+
+## A2 铁索连环双目标候选
+
+- **实现**：`enumerateAllLegalOneStepActions` 对铁索连环生成合法单目标与双目标组合候选；双目标按两目标分数之和降序，最多保留 10 组；数组目标原样交给既有 `playCard`/`startTieSuoTargets` 路径。全局 Top-K=25 与「结束出牌阶段」末项规则保持不变。
+- **无密钥行为**：最高分候选恒在截断结果中；fallback 仍选最高分合法项。铁索双目标属于新增合法能力，测试锁定数字目标与数组目标两种执行形状。
+- **测试**：`run_ai_bus_c_window_test.js` 新增 4 项：3 合法目标时验证 3 单目标+3 双目标；有密钥选择 `[1,2]`；无密钥单目标/组合 fallback；6 个合法目标时双目标组合由 15 组截到 10 组。最终 c_window 34/0、l2 23/0、l3 114/0，`node --check bot.js` 通过。
+- **改动范围**：`bot.js`、`run_ai_bus_c_window_test.js`、`index.html`（`?v=291→292` ×13）。

@@ -3139,7 +3139,29 @@ function enumerateAllLegalOneStepActions(g, seat){
       if(!spec.canPlay(g, me, card)) return;
       if(me.role==='zhong' && (action==='南蛮入侵'||action==='万箭齐发')) return;
       if(action==='桃' && me.hp>=me.maxHp) return;
-      if(spec.target){
+      if(spec.target && action==='铁索连环'){
+        const targets = [];
+        g.players.forEach((p,i)=>{
+          if(!p || !p.alive || i===seat) return;
+          if(spec.canTarget && !spec.canTarget(g, me, card, i)) return;
+          targets.push(i);
+        });
+        if(spec.allowSelf && spec.canTarget && spec.canTarget(g, me, card, seat)) targets.push(seat);
+        targets.forEach(t=>{
+          out.push({ label: '出【'+action+'】→'+g.players[t].name, action, card: botCardBrief(card), handIndex: idx, seat: t, target: t, localHeuristicScore: botCardPriority(action) + (t!==seat ? botTargetScore(g, seat, t, action) : 0) });
+        });
+        const pairs = [];
+        for(let a=0; a<targets.length; a++){
+          for(let b=a+1; b<targets.length; b++){
+            const score = botTargetScore(g, seat, targets[a], action) + botTargetScore(g, seat, targets[b], action);
+            pairs.push({ t1: targets[a], t2: targets[b], score });
+          }
+        }
+        pairs.sort((x,y)=>y.score-x.score);
+        pairs.slice(0,10).forEach(pair=>{
+          out.push({ label: '出【'+action+'】→'+g.players[pair.t1].name+'+'+g.players[pair.t2].name, action, card: botCardBrief(card), handIndex: idx, seat: pair.t1, target: [pair.t1,pair.t2], localHeuristicScore: botCardPriority(action) + pair.score });
+        });
+      } else if(spec.target){
         // 展开:每个合法目标一条候选(合法性判定与 botBestTarget 同一道 canTarget)
         g.players.forEach((p,i)=>{
           if(!p || !p.alive || i===seat) return;

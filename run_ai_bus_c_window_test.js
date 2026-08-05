@@ -642,6 +642,110 @@ const testCode = String.raw`
     if(!end.isEndPlay || end.action !== '结束出牌阶段') throw new Error('最后一条应为结束出牌阶段,实际 ' + JSON.stringify(end));
   });
 
+  // ================= A2:铁索连环双目标候选 =================
+  // 铁索连环(target:true/allowSelf:true)在枚举里特判:单目标项(含自己)+ 双目标组合项
+  // (C(n,2),按两目标分数之和降序截断到10),playCard 对数组目标走 game.js 的
+  // Array.isArray(targetSeat) 分支——execute 零改动。
+  // ---- A2-T1:枚举结构(3人局:他人1/2+自己=3合法目标) ----
+  await check('A2枚举:铁索在手+3合法目标 → 3单目标+3组合+结束项', function(){
+    var g = mkG([card('铁索连环')]);
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    var ts = list.filter(function(c){ return c.action === '铁索连环'; });
+    var singles = ts.filter(function(c){ return typeof c.target === 'number'; });
+    var pairs = ts.filter(function(c){ return Array.isArray(c.target); });
+    if(singles.length !== 3) throw new Error('单目标应3条(1/2/自己),实际 ' + singles.length + ' ' + JSON.stringify(singles));
+    if(singles.map(function(c){ return c.target; }).sort().join(',') !== '0,1,2')
+      throw new Error('单目标应为0/1/2,实际 ' + singles.map(function(c){ return c.target; }).sort().join(','));
+    if(pairs.length !== 3) throw new Error('双目标组合应3条(C(3,2)),实际 ' + pairs.length + ' ' + JSON.stringify(pairs));
+    pairs.forEach(function(c){
+      if(c.target.length !== 2) throw new Error('组合应恰2目标,实际 ' + JSON.stringify(c.target));
+      if(c.handIndex !== 0) throw new Error('组合 handIndex 应为0,实际 ' + c.handIndex);
+      if(c.card === null || c.card.name !== '铁索连环') throw new Error('组合应带牌面,实际 ' + JSON.stringify(c.card));
+    });
+    var end = list[list.length - 1];
+    if(!end.isEndPlay || end.action !== '结束出牌阶段') throw new Error('最后一条应为结束项,实际 ' + JSON.stringify(end));
+  });
+
+  // ---- A2-T2:有密钥 mock 选双目标组合 → playCard 收到数组 [1,2] ----
+  await check('A2有密钥:mock 选双目标组合 → playCard 收到 (0,铁索连环,[1,2]) 数组', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    window.__mockAiCalls = 0;
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkG([card('铁索连环')]);
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    var pairIdx = -1;
+    list.forEach(function(c, i){
+      if(pairIdx < 0 && c.action === '铁索连环' && Array.isArray(c.target) && c.target.join(',') === '1,2') pairIdx = i;
+    });
+    if(pairIdx < 0) throw new Error('候选里应有 [1,2] 组合项,实际 ' + JSON.stringify(list));
+    window.__mockAiResults = [ { ok: true, text: '{"choice":' + pairIdx + '}' } ];
+    await runBotActionWindow(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('应恰1次 playCard,实际 ' + window.__playCalls.length + ' ' + JSON.stringify(window.__playCalls));
+    var call = window.__playCalls[0];
+    if(call.action !== '铁索连环') throw new Error('应出铁索连环,实际 ' + call.action);
+    if(!Array.isArray(call.target) || call.target.join(',') !== '1,2')
+      throw new Error('应收到目标数组[1,2],实际 ' + JSON.stringify(call.target));
+    if(call.cardIdx !== 0) throw new Error('handIndex 应为0,实际 ' + call.cardIdx);
+    if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI询问,实际 ' + window.__mockAiCalls);
+  });
+
+  // ---- A2-T3:无密钥 fallback(零变化原则:仍选最高分项;铁索新增组合项=合法新行为) ----
+  // 3a:唯一最高分是单目标(组合全是 -Infinity 沉底)→ playCard 收到数字目标。
+  // 座位1=主公(nei 对主公 hp>2 时 -60 但有限),座位2 手牌2张=10分,座位3/4/5 压到 hp=2
+  // → nei 保守 -Infinity。单目标2=30>25,所有组合≤-20,fallback 必选单目标。
+  await check('A2无密钥:单目标最高分 → fallback 选单目标,playCard 收到数字', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG6([card('铁索连环')], { roleOf: { 0: 'nei', 1: 'zhu', 2: 'zhu', 3: 'zhu', 4: 'zhu', 5: 'zhu' } });
+    g.players[2].hand = [card('杀'), card('闪')];
+    g.players[3].hp = 2; g.players[4].hp = 2; g.players[5].hp = 2;
+    await runBotActionWindow(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('应恰1次 playCard,实际 ' + window.__playCalls.length);
+    var call = window.__playCalls[0];
+    if(call.action !== '铁索连环') throw new Error('应出铁索连环,实际 ' + call.action);
+    if(typeof call.target !== 'number' || call.target !== 2)
+      throw new Error('fallback 应选单目标2(数字),实际 ' + JSON.stringify(call.target));
+    if(window.__endPlayCalls !== 0) throw new Error('不应 endPlay');
+  });
+
+  // 3b:组合分最高(两目标分数之和=17>单目标10)→ fallback 选组合,playCard 收到数组。
+  // 座位2 手牌2张=10分,座位3 手牌1张=7分 → 组合(2,3)=17 → 37分 > 单目标30/27。
+  await check('A2无密钥:组合分最高 → fallback 选组合,playCard 收到数组(合法新行为)', async function(){
+    window.__playCalls = [];
+    window.__endPlayCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkG6([card('铁索连环')], { roleOf: { 0: 'nei', 1: 'zhu', 2: 'zhu', 3: 'zhu', 4: 'zhu', 5: 'zhu' } });
+    g.players[2].hand = [card('杀'), card('闪')];
+    g.players[3].hand = [card('杀')];
+    g.players[4].hp = 2; g.players[5].hp = 2;
+    await runBotActionWindow(g, 0);
+    if(window.__playCalls.length !== 1) throw new Error('应恰1次 playCard,实际 ' + window.__playCalls.length);
+    var call = window.__playCalls[0];
+    if(call.action !== '铁索连环') throw new Error('应出铁索连环,实际 ' + call.action);
+    if(!Array.isArray(call.target) || call.target.join(',') !== '2,3')
+      throw new Error('fallback 应选组合[2,3],实际 ' + JSON.stringify(call.target));
+    if(window.__endPlayCalls !== 0) throw new Error('不应 endPlay');
+  });
+
+  // ---- A2-T4:组合数上限(6人局:5他人+自己=6合法目标 → C(6,2)=15 → 截断到10) ----
+  await check('A2上限:6合法目标 → 组合截断到≤10(15→10),单目标6条,总条数17', function(){
+    var g = mkG6([card('铁索连环')]);
+    var list = enumerateAllLegalOneStepActions(g, 0);
+    var ts = list.filter(function(c){ return c.action === '铁索连环'; });
+    var singles = ts.filter(function(c){ return typeof c.target === 'number'; });
+    var pairs = ts.filter(function(c){ return Array.isArray(c.target); });
+    if(singles.length !== 6) throw new Error('单目标应6条(自己+5他人),实际 ' + singles.length);
+    if(pairs.length !== 10) throw new Error('组合应截断到10条(C(6,2)=15→10),实际 ' + pairs.length);
+    if(list.length !== 17) throw new Error('总条数应为17(6单+10组+结束),实际 ' + list.length);
+    var end = list[list.length - 1];
+    if(!end.isEndPlay) throw new Error('最后一条应为结束项,实际 ' + JSON.stringify(end));
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
