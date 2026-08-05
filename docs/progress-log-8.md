@@ -200,3 +200,10 @@
 - **无密钥回退**：完全复用旧分支 `canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0`；有杀出杀，将驰禁杀或无杀时弃武器。`jiedaoChoice` 保留 EXCLUDE，避免 L1 抢占专用响应。
 - **测试**：`run_ai_bus_l3_test.js` 新增借刀响应候选、出杀/弃武器、将驰禁杀、无密钥回退、runBotDecision 接线与 `BOT_PHASE_ACTOR`/EXCLUDE 断言；l3 共 120 项通过，l1 21、l2 23、c_window 34、summary 13 全绿。
 - **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=292→293` ×13）。
+
+## A4 恩怨选牌维度
+
+- **实现**：新增 `BOT_DECISIONS.enyuanGiveCard`，在 `enyuanGiveCard` 阶段把当前座位手里的每张红桃作为一个候选，AI 可选择具体哪张红桃交给法正；`giveEnyuanCard(cardIdx)` 继续由服务端校验红桃与下标。
+- **无密钥回退**：候选首项=旧逻辑第一张红桃；无红桃时保持无动作防御。`BOT_PHASE_ACTOR` 已有 `enyuanGiveCard:'damagerSeat'`，专用分支替换旧硬编码调用，避免双执行。
+- **测试**：l3 新增 match/红桃过滤/AI 选择非首张/无密钥首张/全链路与隐藏信息断言；l3 125/0、l1 21/0、l2 23/0、c_window 34/0、summary 13/0。
+- **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=293→294` ×13）。

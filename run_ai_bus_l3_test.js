@@ -201,6 +201,7 @@ const testCode = String.raw`
   respondLiRang = spyService('lirang');
   respondXiaoguo = spyService('xiaoguo');
   respondJiedao = spyService('jiedaoResponse');
+  giveEnyuanCard = spyService('enyuanGiveCard');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -2059,6 +2060,13 @@ const testCode = String.raw`
     return g;
   }
 
+  function mkEnyuanGiveCardG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'enyuanGiveCard';
+    g.pending = { type: 'enyuanGiveCard', damagerSeat: 0, sourceSeat: 1 };
+    return g;
+  }
+
   await check('enyuanOption:注册存在;match=恩怨选项+damager本人;错阶段/错座位 false', function(){
     var s = BOT_DECISIONS.enyuanOption;
     if(!s) throw new Error('BOT_DECISIONS.enyuanOption 未注册');
@@ -2103,6 +2111,78 @@ const testCode = String.raw`
     if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
     if(window.__enyuanOptionCalls.length !== 1 || window.__enyuanOptionCalls[0][0] !== 'loseHp')
       throw new Error('mock 选第2项应 chooseEnyuanOption(loseHp),实际 ' + JSON.stringify(window.__enyuanOptionCalls));
+  });
+
+  await check('A4 enyuanGiveCard:match=阶段/类型/damagerSeat 全对才命中;错阶段/错座位 false', function(){
+    var s = BOT_DECISIONS.enyuanGiveCard;
+    if(!s) throw new Error('BOT_DECISIONS.enyuanGiveCard 未注册');
+    var g = mkEnyuanGiveCardG({});
+    if(!s.match(g, 0)) throw new Error('完整 enyuanGiveCard 应命中');
+    var g1 = mkEnyuanGiveCardG({}); g1.phase = 'enyuanChooseOption';
+    if(s.match(g1, 0)) throw new Error('错阶段不应命中');
+    var g2 = mkEnyuanGiveCardG({}); g2.pending.type = 'other';
+    if(s.match(g2, 0)) throw new Error('错 pending 类型不应命中');
+    var g3 = mkEnyuanGiveCardG({}); g3.pending.damagerSeat = 1;
+    if(s.match(g3, 0)) throw new Error('错 damagerSeat 不应命中');
+    if(!s.match(g3, 1)) throw new Error('damagerSeat=1 应命中座位1');
+  });
+
+  await check('A4 enyuanGiveCard:只为每张红桃生成候选;下标与label含牌名', function(){
+    var s = BOT_DECISIONS.enyuanGiveCard;
+    var g = mkEnyuanGiveCardG({ myHand: [card('杀', 'a40', '♠'), card('桃', 'a41', '♥'), card('无中生有', 'a42', '♥'), card('闪', 'a43', '♦')] });
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 2) throw new Error('应只生成2张红桃候选,实际 ' + JSON.stringify(c));
+    if(c[0].cardIdx !== 1 || c[1].cardIdx !== 2) throw new Error('候选下标应为1,2,实际 ' + JSON.stringify(c));
+    if(c[0].label.indexOf('桃') < 0 || c[1].label.indexOf('无中生有') < 0)
+      throw new Error('候选label应含牌名,实际 ' + JSON.stringify(c));
+  });
+
+  await check('A4 enyuanGiveCard有密钥:mock选第二张红桃 → giveEnyuanCard(正确物理下标);userPrompt不含他人手牌', async function(){
+    window.__enyuanGiveCardCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    var g = mkEnyuanGiveCardG({
+      myHand: [card('杀', 'a44', '♠'), card('桃', 'a45', '♥'), card('无中生有', 'a46', '♥'), card('闪', 'a47', '♦')],
+      hands: { 1: [card('桃园结义', 'hidden-a4', '♠')] }
+    });
+    var r = await botDecide('enyuanGiveCard', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI调用异常,实际 r=' + r + ',calls=' + window.__mockAiCalls);
+    if(window.__enyuanGiveCardCalls.length !== 1 || window.__enyuanGiveCardCalls[0][0] !== 2)
+      throw new Error('应提交第二张红桃物理下标2,实际 ' + JSON.stringify(window.__enyuanGiveCardCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt泄露他人手牌,实际 ' + up);
+  });
+
+  await check('A4 enyuanGiveCard无密钥:回退第一张红桃;无红桃候选空且不调用服务端', async function(){
+    window.__enyuanGiveCardCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = ''; aiProvider = null;
+    var g = mkEnyuanGiveCardG({ myHand: [card('杀', 'a48', '♠'), card('桃', 'a49', '♥'), card('闪', 'a50', '♦'), card('无中生有', 'a51', '♥')] });
+    var r = await botDecide('enyuanGiveCard', g, 0);
+    if(r !== true) throw new Error('有红桃回退应返回true,实际 ' + r);
+    if(window.__enyuanGiveCardCalls.length !== 1 || window.__enyuanGiveCardCalls[0][0] !== 1)
+      throw new Error('回退应提交第一张红桃物理下标1,实际 ' + JSON.stringify(window.__enyuanGiveCardCalls));
+    var empty = mkEnyuanGiveCardG({ myHand: [card('杀', 'a52', '♠'), card('闪', 'a53', '♦')] });
+    var emptyResult = await botDecide('enyuanGiveCard', empty, 0);
+    if(emptyResult !== false) throw new Error('无红桃应返回false,实际 ' + emptyResult);
+    if(window.__enyuanGiveCardCalls.length !== 1) throw new Error('无红桃不应调用服务端,实际 ' + JSON.stringify(window.__enyuanGiveCardCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应调用AI,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('A4 enyuanGiveCard接线:runBotDecision调用botDecide恰1次并提交一次', async function(){
+    window.__enyuanGiveCardCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    if(BOT_PHASE_ACTOR.enyuanGiveCard !== 'damagerSeat')
+      throw new Error('BOT_PHASE_ACTOR应登记enyuanGiveCard:damagerSeat,实际 ' + BOT_PHASE_ACTOR.enyuanGiveCard);
+    var restore = spyBotDecideLog();
+    try {
+      await runBotDecision(mkEnyuanGiveCardG({ myHand: [card('杀', 'a54', '♠'), card('桃', 'a55', '♥')] }), 0);
+    } finally { restore(); }
+    if(window.__G1botDecideCalls.filter(function(id){ return id === 'enyuanGiveCard'; }).length !== 1)
+      throw new Error('runBotDecision应恰调用一次botDecide(enyuanGiveCard),实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__enyuanGiveCardCalls.length !== 1 || window.__enyuanGiveCardCalls[0][0] !== 1)
+      throw new Error('服务端应只提交一次giveEnyuanCard(1),实际 ' + JSON.stringify(window.__enyuanGiveCardCalls));
   });
 
   await check('接线:runBotDecision 5 个阶段各命中 botDecide 恰1次且服务端只调1次(旧分支已删)', async function(){

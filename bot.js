@@ -1372,6 +1372,32 @@ BOT_DECISIONS.enyuanOption = {
     botInvoke(seat, function(){ chooseEnyuanOption(choice && choice.option || 'loseHp'); });
   },
 };
+BOT_DECISIONS.enyuanGiveCard = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='enyuanGiveCard' && d && d.type==='enyuanGiveCard' && d.damagerSeat===seat;
+  },
+  buildCandidates: function(g, seat){
+    const me = g.players[seat];
+    const out = [];
+    (me.hand||[]).forEach(function(c, i){
+      if(c && c.suit==='♥') out.push({ cardIdx: i, label: '给【'+c.name+'】' });
+    });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    return candidates[0] || null;
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){ giveEnyuanCard(choice.cardIdx); });
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。请选择一张红桃手牌交给法正。'
+      +'只输出 {"choice":数字},不要解释。';
+  },
+  maxTokens: 60,
+};
 
 // ================= L3: seatPick 通用座位协议(第一批扩展,Task L3-T1) =================
 // 【本协议是什么】把"从合法座位里选一个"这一大类交互收敛成通用协议:BOT_SEAT_PICKS
@@ -3064,8 +3090,7 @@ async function runBotDecision(g,seat){
     if(await botDecide('enyuanOption',g,seat)) return;
   }
   if(g.phase==='enyuanGiveCard'&&d.damagerSeat===seat){
-    const heart=(p.hand||[]).findIndex(c=>c.suit==='♥');
-    botInvoke(seat,()=>giveEnyuanCard(heart)); return;
+    if(await botDecide('enyuanGiveCard',g,seat)) return;
   }
   if(g.phase==='ganglieChoice'&&d.sourceSeat===seat){
     // 夏侯惇【刚烈】弃牌/受伤决策由总线接管(无密钥回退=手牌够2张弃牌、否则受伤,与旧
