@@ -252,6 +252,9 @@ function recordBotDamageEvidence(g,sourceSeat,targetSeat,amount,srcType){
   else if(target.roleRevealed && target.role==='fan') delta=-28*amount;
   else if(target.roleRevealed && target.role==='zhong') delta=24*amount;
   if(delta) g.aiRebelSuspicion[sourceSeat]=Math.max(-100,Math.min(100,botSuspicion(g,sourceSeat)+delta));
+  if(!Array.isArray(g.aiSuspicionEvents)) g.aiSuspicionEvents=[];
+  g.aiSuspicionEvents.push({round:g.roundNum,source:sourceSeat,target:targetSeat,amount:amount,kind:'damage'});
+  if(g.aiSuspicionEvents.length>20) g.aiSuspicionEvents=g.aiSuspicionEvents.slice(-20);
 }
 function recordBotRescueEvidence(g,rescuerSeat,dyingSeat){
   if(g.gameMode!=='identity'||!Number.isInteger(rescuerSeat)) return;
@@ -262,6 +265,9 @@ function recordBotRescueEvidence(g,rescuerSeat,dyingSeat){
   if(dying.role==='zhu') delta=-50;
   else if(dying.roleRevealed&&dying.role==='fan') delta=25;
   if(delta) g.aiRebelSuspicion[rescuerSeat]=Math.max(-100,Math.min(100,botSuspicion(g,rescuerSeat)+delta));
+  if(!Array.isArray(g.aiSuspicionEvents)) g.aiSuspicionEvents=[];
+  g.aiSuspicionEvents.push({round:g.roundNum,source:rescuerSeat,target:dyingSeat,amount:1,kind:'rescue'});
+  if(g.aiSuspicionEvents.length>20) g.aiSuspicionEvents=g.aiSuspicionEvents.slice(-20);
 }
 function botTargetScore(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
@@ -425,6 +431,9 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     seat,
     gameMode: g.gameMode || 'ffa',
     round: g.roundNum || 1,
+    recentSuspicionEvents: (g.aiSuspicionEvents||[]).slice(-10).map(e=>({
+      round:e.round, source:e.source, target:e.target, amount:e.amount, kind:e.kind
+    })),
     phase: g.phase || '', // 当前游戏阶段
     nextPlayer: calculateNextPlayer(), // 下一个行动的玩家座位
     // 自己的手牌/身份完全可见——这是这个座位本来就该看到的东西,不是特权。

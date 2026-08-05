@@ -207,3 +207,10 @@
 - **无密钥回退**：候选首项=旧逻辑第一张红桃；无红桃时保持无动作防御。`BOT_PHASE_ACTOR` 已有 `enyuanGiveCard:'damagerSeat'`，专用分支替换旧硬编码调用，避免双执行。
 - **测试**：l3 新增 match/红桃过滤/AI 选择非首张/无密钥首张/全链路与隐藏信息断言；l3 125/0、l1 21/0、l2 23/0、c_window 34/0、summary 13/0。
 - **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=293→294` ×13）。
+
+## A7 嫌疑事件流
+
+- **实现**：身份局有效伤害/救援证据写入 `g.aiSuspicionEvents`，事件统一为 `{round,source,target,amount,kind}`，kind 为 `damage`/`rescue`，最多保留20条；`normalize` 清洗非法数组/字段，符合 Firebase 新数组字段防御纪律。
+- **AI 投影**：`buildBotVisibleState` 提供最近10条 `recentSuspicionEvents`，只含公开行动字段，不含手牌/隐藏身份。
+- **测试**：info 测试新增事件写入、救援写入、20条上限、normalize 清洗、最近10条投影、FFA不写入、隐藏字段检查；info 16/0，l3 125/0，l1 21/0，l2 23/0，c_window 34/0，bot/game 语法通过。
+- **改动范围**：`bot.js`、`game.js`、`run_ai_bus_info_test.js`、`index.html`（`?v=294→295` ×13）。

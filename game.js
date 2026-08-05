@@ -60,6 +60,12 @@ function normalize(g){
   // 轮次计数:数字/数组防御,Firebase 吞空数组、旧存档可能没有这两个字段
   if(!Number.isInteger(g.roundNum)) g.roundNum=1;
   if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
+  // 身份局公开嫌疑事件:只保留结构化的伤害/救援公开事件,最多20条。
+  // Firebase 吞空数组,消费端统一回退为空数组。
+  if(!Array.isArray(g.aiSuspicionEvents)) g.aiSuspicionEvents=[];
+  g.aiSuspicionEvents=g.aiSuspicionEvents.filter(e=>e && typeof e==='object'
+    && Number.isInteger(e.round) && Number.isInteger(e.source) && Number.isInteger(e.target)
+    && Number.isInteger(e.amount) && (e.kind==='damage'||e.kind==='rescue')).slice(-20);
   // 出牌语音事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次出牌语音事件")
   if(g.lastCardSound===undefined) g.lastCardSound=null;
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];

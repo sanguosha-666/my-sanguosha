@@ -90,6 +90,18 @@ files.forEach(function(file){
     process.exit(1);
   }
 });
+try {
+  const gameCode = fs.readFileSync('game.js', 'utf8');
+  const normalizeStart = gameCode.indexOf('function normalize(g){');
+  const normalizeEnd = gameCode.indexOf('\nfunction logEvent(', normalizeStart);
+  if(normalizeStart < 0 || normalizeEnd < 0) throw new Error('无法定位 normalize');
+  vm.runInContext(gameCode.slice(normalizeStart, normalizeEnd), sandbox, { filename: 'game.js:normalize' });
+  console.log('  OK game.js:normalize');
+} catch (e) {
+  console.log('  FAIL game.js:normalize: ' + e.message);
+  if (e.stack) console.log('     ' + e.stack.split('\n').slice(1, 3).join('\n     '));
+  process.exit(1);
+}
 
 console.log('\n' + '='.repeat(60));
 console.log('  AI 总线信息层测试');
@@ -118,6 +130,17 @@ const testCode = String.raw`
       });
     }
     return { players: players, gameMode: 'ffa', roundNum: 1, phase: 'play', turn: 0 };
+  }
+
+  function mkIdentityG(){
+    var g = mkG();
+    g.gameMode = 'identity';
+    g.players.push({
+      name: '玩家2', alive: true, hp: 4, maxHp: 4,
+      hand: [], equips: null, delays: [], role: 'fan',
+      faceup: true, general: 'guojia', roleRevealed: false
+    });
+    return g;
   }
 
   // 1. generalSkill/generalDesc 常开:已知武将 id 下非空字符串,desc 为全量原文
@@ -226,6 +249,82 @@ const testCode = String.raw`
     var g2 = mkG();
     var s2 = buildBotVisibleState(g2, 0);
     if(s2.myAttackRange !== 1) throw new Error('无武器期望1,实际 ' + s2.myAttackRange);
+  });
+
+  await check('身份局记录伤害证据事件', function(){
+    var g = mkIdentityG();
+    recordBotDamageEvidence(g, 1, 0, 2, 'sha');
+    var last = g.aiSuspicionEvents[g.aiSuspicionEvents.length - 1];
+    var expected = { round: 1, source: 1, target: 0, amount: 2, kind: 'damage' };
+    if(JSON.stringify(last) !== JSON.stringify(expected)) throw new Error('伤害事件不匹配: ' + JSON.stringify(last));
+  });
+
+  await check('身份局记录救援证据事件', function(){
+    var g = mkIdentityG();
+    recordBotRescueEvidence(g, 2, 0);
+    var last = g.aiSuspicionEvents[g.aiSuspicionEvents.length - 1];
+    var expected = { round: 1, source: 2, target: 0, amount: 1, kind: 'rescue' };
+    if(JSON.stringify(last) !== JSON.stringify(expected)) throw new Error('救援事件不匹配: ' + JSON.stringify(last));
+  });
+
+  await check('证据事件最多保留20条且裁掉最早项', function(){
+    var g = mkIdentityG();
+    for(var i = 1; i <= 21; i++){
+      g.roundNum = i;
+      recordBotDamageEvidence(g, 1, 0, 1, 'sha');
+    }
+    if(g.aiSuspicionEvents.length !== 20) throw new Error('期望20条,实际 ' + g.aiSuspicionEvents.length);
+    if(g.aiSuspicionEvents[0].round !== 2) throw new Error('最早事件应被裁掉,实际 round=' + g.aiSuspicionEvents[0].round);
+    if(g.aiSuspicionEvents[19].round !== 21) throw new Error('末项应为 round=21,实际 ' + g.aiSuspicionEvents[19].round);
+  });
+
+  await check('normalize 只保留合法伤害/救援事件', function(){
+    var g = mkIdentityG();
+    g.aiSuspicionEvents = 'not-array';
+    normalize(g);
+    if(!Array.isArray(g.aiSuspicionEvents) || g.aiSuspicionEvents.length !== 0){
+      throw new Error('非数组字段应归一为空数组: ' + JSON.stringify(g.aiSuspicionEvents));
+    }
+    var damage = { round: 3, source: 1, target: 0, amount: 2, kind: 'damage' };
+    var rescue = { round: 4, source: 2, target: 0, amount: 1, kind: 'rescue' };
+    g.aiSuspicionEvents = [damage, null, { round: 1, source: 1, target: 0, amount: 1, kind: 'other' },
+      { round: 'bad', source: 1, target: 0, amount: 1, kind: 'damage' }, rescue];
+    normalize(g);
+    if(JSON.stringify(g.aiSuspicionEvents) !== JSON.stringify([damage, rescue])){
+      throw new Error('脏事件未过滤: ' + JSON.stringify(g.aiSuspicionEvents));
+    }
+  });
+
+  await check('recentSuspicionEvents 最多10条且末项对齐', function(){
+    var g = mkIdentityG();
+    g.aiSuspicionEvents = [];
+    for(var i = 1; i <= 15; i++){
+      g.aiSuspicionEvents.push({ round: i, source: 1, target: 0, amount: 1, kind: 'damage' });
+    }
+    var s = buildBotVisibleState(g, 0);
+    if(!Array.isArray(s.recentSuspicionEvents) || s.recentSuspicionEvents.length !== 10){
+      throw new Error('期望最多10条,实际 ' + (s.recentSuspicionEvents && s.recentSuspicionEvents.length));
+    }
+    if(s.recentSuspicionEvents[0].round !== 6) throw new Error('首项应为 round=6,实际 ' + s.recentSuspicionEvents[0].round);
+    if(s.recentSuspicionEvents[9].round !== 15) throw new Error('末项应为 round=15,实际 ' + s.recentSuspicionEvents[9].round);
+  });
+
+  await check('FFA 不写证据事件', function(){
+    var g = mkG();
+    g.aiSuspicionEvents = [];
+    recordBotDamageEvidence(g, 1, 0, 2, 'sha');
+    recordBotRescueEvidence(g, 1, 0);
+    if(g.aiSuspicionEvents.length !== 0) throw new Error('FFA 不应写事件: ' + JSON.stringify(g.aiSuspicionEvents));
+  });
+
+  await check('证据事件 JSON 不含手牌/牌面字段', function(){
+    var g = mkIdentityG();
+    recordBotDamageEvidence(g, 1, 0, 2, 'sha');
+    recordBotRescueEvidence(g, 2, 0);
+    var json = JSON.stringify(g.aiSuspicionEvents);
+    ['hand', 'card', 'cardName', 'name', 'suit', 'rank'].forEach(function(key){
+      if(json.indexOf('"' + key + '"') !== -1) throw new Error('事件 JSON 含字段 ' + key + ': ' + json);
+    });
   });
 
   console.log('\n' + '='.repeat(60));
