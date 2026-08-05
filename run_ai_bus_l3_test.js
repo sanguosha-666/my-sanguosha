@@ -200,6 +200,7 @@ const testCode = String.raw`
   respondYijiAssign = spyService('yijiAssign');
   respondLiRang = spyService('lirang');
   respondXiaoguo = spyService('xiaoguo');
+  respondJiedao = spyService('jiedaoResponse');
 
   // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
   // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
@@ -913,6 +914,97 @@ const testCode = String.raw`
     botDecide = realBotDecide;
     runBotActionWindow = realWindow;
     botTwoStepA = null;
+  });
+
+  function mkJiedaoResponseG(opt){
+    var g = mkSeatG(opt);
+    g.phase = 'jiedaoChoice';
+    g.pending = { type: 'jiedaoChoice', from: 1, to: 0, seatA: 0, seatB: 2 };
+    return g;
+  }
+
+  await check('A5借刀响应:match 仅 phase/type/seatA 全正确时命中', function(){
+    var s = BOT_DECISIONS.jiedaoResponse;
+    if(!s) throw new Error('BOT_DECISIONS.jiedaoResponse 未注册');
+    var g = mkJiedaoResponseG({});
+    if(!s.match(g, 0)) throw new Error('完整 jiedaoChoice pending 应命中');
+    if(s.match(g, 1)) throw new Error('seatA 非本人不应命中');
+    var g2 = mkJiedaoResponseG({});
+    g2.phase = 'play';
+    if(s.match(g2, 0)) throw new Error('错 phase 不应命中');
+    var g3 = mkJiedaoResponseG({});
+    g3.pending.type = 'other';
+    if(s.match(g3, 0)) throw new Error('错 pending.type 不应命中');
+  });
+
+  await check('A5借刀响应候选:有杀含出杀+弃武器;将驰禁杀/无杀仅弃武器', function(){
+    var s = BOT_DECISIONS.jiedaoResponse;
+    var g1 = mkJiedaoResponseG({ myHand: [card('桃', 'a50'), card('杀', 'a51')] });
+    var c1 = s.buildCandidates(g1, 0);
+    if(c1.length !== 2 || c1[0].play !== true || c1[0].cardIdx !== 1 || c1[1].play !== false)
+      throw new Error('有杀候选应为出杀(idx1)+弃武器,实际 ' + JSON.stringify(c1));
+    var g2 = mkJiedaoResponseG({ jiangchiNoSlash: true, myHand: [card('杀', 'a52')] });
+    var c2 = s.buildCandidates(g2, 0);
+    if(c2.length !== 1 || c2[0].play !== false)
+      throw new Error('将驰禁杀应仅弃武器,实际 ' + JSON.stringify(c2));
+    var g3 = mkJiedaoResponseG({ myHand: [card('桃', 'a53')] });
+    var c3 = s.buildCandidates(g3, 0);
+    if(c3.length !== 1 || c3[0].play !== false)
+      throw new Error('无杀应仅弃武器,实际 ' + JSON.stringify(c3));
+  });
+
+  await check('A5借刀响应有密钥:mock 选出杀/弃武器分别提交精确参数', async function(){
+    window.__jiedaoResponseCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = 'test-key'; aiProvider = 'claude';
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    var g = mkJiedaoResponseG({ myHand: [card('桃', 'a54'), card('杀', 'a55')] });
+    var r1 = await botDecide('jiedaoResponse', g, 0);
+    if(r1 !== true || window.__mockAiCalls !== 1) throw new Error('mock 出杀 AI 调用异常,实际 r=' + r1);
+    if(window.__jiedaoResponseCalls.length !== 1 || window.__jiedaoResponseCalls[0][0] !== true || window.__jiedaoResponseCalls[0][1] !== 1)
+      throw new Error('应 respondJiedao(true,1),实际 ' + JSON.stringify(window.__jiedaoResponseCalls));
+    window.__jiedaoResponseCalls = [];
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    var r2 = await botDecide('jiedaoResponse', g, 0);
+    if(r2 !== true || window.__mockAiCalls !== 2) throw new Error('mock 弃武器 AI 调用异常,实际 r=' + r2);
+    if(window.__jiedaoResponseCalls.length !== 1 || window.__jiedaoResponseCalls[0][0] !== false || window.__jiedaoResponseCalls[0][1] !== null)
+      throw new Error('应 respondJiedao(false,null),实际 ' + JSON.stringify(window.__jiedaoResponseCalls));
+  });
+
+  await check('A5借刀响应无密钥 fallback:普通有杀出杀;jiangchiNoSlash=true 即使有杀也弃武器', async function(){
+    window.__jiedaoResponseCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = ''; aiProvider = null;
+    var g1 = mkJiedaoResponseG({ myHand: [card('杀', 'a56')] });
+    var r1 = await botDecide('jiedaoResponse', g1, 0);
+    if(r1 !== true || window.__jiedaoResponseCalls.length !== 1 || window.__jiedaoResponseCalls[0][0] !== true || window.__jiedaoResponseCalls[0][1] !== 0)
+      throw new Error('普通有杀应 respondJiedao(true,0),实际 ' + JSON.stringify(window.__jiedaoResponseCalls));
+    window.__jiedaoResponseCalls = [];
+    var g2 = mkJiedaoResponseG({ jiangchiNoSlash: true, myHand: [card('杀', 'a57')] });
+    var r2 = await botDecide('jiedaoResponse', g2, 0);
+    if(r2 !== true || window.__jiedaoResponseCalls.length !== 1 || window.__jiedaoResponseCalls[0][0] !== false || window.__jiedaoResponseCalls[0][1] !== null)
+      throw new Error('将驰禁杀应 respondJiedao(false,null),实际 ' + JSON.stringify(window.__jiedaoResponseCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应调用 AI,实际 ' + window.__mockAiCalls);
+  });
+
+  await check('A5借刀响应接线:runBotDecision 命中 jiedaoResponse 一次且服务函数调用一次', async function(){
+    window.__jiedaoResponseCalls = [];
+    aiApiKey = ''; aiProvider = null;
+    var ids = [];
+    var original = botDecide;
+    botDecide = async function(id, gg, ss){ ids.push(id); return original(id, gg, ss); };
+    try {
+      await runBotDecision(mkJiedaoResponseG({ myHand: [card('杀', 'a58')] }), 0);
+    } finally { botDecide = original; }
+    if(ids.filter(function(id){ return id === 'jiedaoResponse'; }).length !== 1)
+      throw new Error('jiedaoResponse 应恰调用一次,实际 ' + JSON.stringify(ids));
+    if(window.__jiedaoResponseCalls.length !== 1 || window.__jiedaoResponseCalls[0][0] !== true || window.__jiedaoResponseCalls[0][1] !== 0)
+      throw new Error('服务函数应调用一次 respondJiedao(true,0),实际 ' + JSON.stringify(window.__jiedaoResponseCalls));
+  });
+
+  await check('A5借刀响应调度登记:EXCLUDE 含 jiedaoChoice;BOT_PHASE_ACTOR.jiedaoChoice=seatA', function(){
+    if(!CONTROLS_CHOICE_EXCLUDE.has('jiedaoChoice')) throw new Error('CONTROLS_CHOICE_EXCLUDE 缺少 jiedaoChoice');
+    if(BOT_PHASE_ACTOR.jiedaoChoice !== 'seatA') throw new Error('BOT_PHASE_ACTOR.jiedaoChoice 应为 seatA,实际 ' + BOT_PHASE_ACTOR.jiedaoChoice);
   });
 
   // ================= T5:多步两阶段扩展(离间/丈八/仁德) =================

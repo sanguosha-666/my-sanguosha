@@ -193,3 +193,10 @@
 - **无密钥行为**：最高分候选恒在截断结果中；fallback 仍选最高分合法项。铁索双目标属于新增合法能力，测试锁定数字目标与数组目标两种执行形状。
 - **测试**：`run_ai_bus_c_window_test.js` 新增 4 项：3 合法目标时验证 3 单目标+3 双目标；有密钥选择 `[1,2]`；无密钥单目标/组合 fallback；6 个合法目标时双目标组合由 15 组截到 10 组。最终 c_window 34/0、l2 23/0、l3 114/0，`node --check bot.js` 通过。
 - **改动范围**：`bot.js`、`run_ai_bus_c_window_test.js`、`index.html`（`?v=291→292` ×13）。
+
+## A5 借刀响应侧专用注册
+
+- **实现**：新增 `BOT_DECISIONS.jiedaoResponse`，在 `jiedaoChoice` 阶段为借刀目标角色生成「打出【杀】」/「弃置武器」候选；有可用杀时携带具体 `cardIdx`，执行调用 `respondJiedao(useSha, cardIdx)`，服务端继续复核牌面与将驰禁杀。
+- **无密钥回退**：完全复用旧分支 `canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0`；有杀出杀，将驰禁杀或无杀时弃武器。`jiedaoChoice` 保留 EXCLUDE，避免 L1 抢占专用响应。
+- **测试**：`run_ai_bus_l3_test.js` 新增借刀响应候选、出杀/弃武器、将驰禁杀、无密钥回退、runBotDecision 接线与 `BOT_PHASE_ACTOR`/EXCLUDE 断言；l3 共 120 项通过，l1 21、l2 23、c_window 34、summary 13 全绿。
+- **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=292→293` ×13）。

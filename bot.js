@@ -1095,6 +1095,36 @@ BOT_DECISIONS.aoeResp = {
   maxTokens: 80,
 };
 
+BOT_DECISIONS.jiedaoResponse = {
+  match: function(g, seat){
+    const d = g.pending;
+    return g.phase==='jiedaoChoice' && d && d.type==='jiedaoChoice' && d.seatA===seat;
+  },
+  buildCandidates: function(g, seat){
+    const p = g.players[seat];
+    const cardIdx = findUsableAs(p.hand, p, '杀');
+    const canSha = canBotPlaySha(p) && cardIdx >= 0;
+    const out = [];
+    if(canSha) out.push({ play:true, cardIdx, label:'打出【杀】' });
+    out.push({ play:false, cardIdx:null, label:'弃置武器' });
+    return out;
+  },
+  localFallback: function(g, seat, candidates){
+    const p = g.players[seat];
+    const play = canBotPlaySha(p) && findUsableAs(p.hand, p, '杀') >= 0;
+    return candidates.find(function(c){ return c.play === play; }) || candidates[candidates.length-1];
+  },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){ respondJiedao(!!choice.play, choice.cardIdx); });
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。你被【借刀杀人】要求对目标使用【杀】:候选为'
+      +'"打出【杀】"或"弃置武器"。请结合局面决定。只输出 {"choice":数字},不要解释。';
+  },
+  maxTokens: 60,
+};
+
 // ================= L3:wugu挑牌 + pickGeneral(选将,含主公)进总线(Task T7) =================
 // 【本批是什么】五谷丰登"从公共池挑一张"和开局选将两个决策点,从 runBotDecision 硬编码
 // 分支收敛进 BOT_DECISIONS 注册表。两条 localFallback 与改动前分支逐字一致(wugu=池首张、
@@ -3007,9 +3037,8 @@ async function runBotDecision(g,seat){
   if(g.phase==='shaOffsetChoice'&&d.from===seat){
     botInvoke(seat,()=>respondShaOffsetChoice((d.available||[])[0]||null)); return;
   }
-  if(g.phase==='jiedaoChoice'&&d.seatA===seat){
-    // 同上:【将驰】期间不能出杀,只能选"交出武器"。答 false 会走弃武器分支,流程正常收尾。
-    botInvoke(seat,()=>respondJiedao(canBotPlaySha(p) && findUsableAs(p.hand,p,'杀')>=0)); return;
+  if(g.phase==='jiedaoChoice'&&d && d.type==='jiedaoChoice'&&d.seatA===seat){
+    if(await botDecide('jiedaoResponse',g,seat)) return;
   }
   if(g.phase==='guicai'&&d.asking===seat){
     // 郭嘉【鬼才】改判决策由总线接管(候选=不发动+每张手牌;无密钥回退=respondGuicai(false),
