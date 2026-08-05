@@ -898,7 +898,7 @@ const testCode = String.raw`
     await runBotDecision(g3, 0);
     if(window.__windowCalls !== 1) throw new Error('jiedaoTwoStep 未命中时应走 runBotActionWindow,实际 ' + window.__windowCalls);
     if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,fangtian')
-      throw new Error('无挂起态时应按序尝试4个多步决策+fangtian,实际 ' + wired.join(','));
+      throw new Error('无挂起态时应按序尝试4个多步+fangtian,实际 ' + wired.join(','));
 
     // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策不命中 → 走窗口不崩
     wired = [];
@@ -910,7 +910,7 @@ const testCode = String.raw`
     await runBotDecision(g4, 0);
     if(window.__windowCalls !== 1) throw new Error('阶段B无候选时应走 runBotActionWindow,实际 ' + window.__windowCalls);
     if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,fangtian')
-      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中+fangtian后放行,实际 ' + wired.join(','));
+      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中后放行,实际 ' + wired.join(','));
     if(window.__jiedaoCalls.length !== 0) throw new Error('阶段B无候选不应提交 jieDaoShaRen');
 
     botDecide = realBotDecide;
@@ -1018,7 +1018,6 @@ const testCode = String.raw`
   //   服务端 renDe 无本回合次数限制(renDeCount 只用于第2张后的回复),match 不加次数守卫。
 
   await check('离间:match=出牌阶段+自己回合+hasCap+未用+手牌≥1+男性≥2;阶段A候选=存活男性(含自己)', function(){
-    botTwoStepA = null;
     var s = BOT_DECISIONS.lijianTwoStep;
     if(!s) throw new Error('BOT_DECISIONS.lijianTwoStep 未注册');
     var g1 = mkSeatG({ myHand: [card('杀','l0')] });
@@ -1344,7 +1343,7 @@ const testCode = String.raw`
     await runBotDecision(g6, 0);
     if(window.__windowCalls !== 1) throw new Error('全未命中应走 runBotActionWindow,实际 ' + window.__windowCalls);
     if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick,fangtian')
-      throw new Error('全未命中应按序尝试4个多步决策+seatPick+fangtian,实际 ' + wired.join(','));
+      throw new Error('全未命中应按序尝试4个多步+seatPick+fangtian,实际 ' + wired.join(','));
 
     botDecide = realBotDecide;
     runBotActionWindow = realWindow;
