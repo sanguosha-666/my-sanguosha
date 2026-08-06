@@ -75,9 +75,9 @@ function renderHand(g){
   // 响应阶段"多候选可选"判断:这一轮渲染需要的角色(role)和候选数量在循环外算一次,不必每张
   // 手牌各自重算一遍。只有候选>1(真实牌+龙胆/武圣/倾国转化)才需要玩家先点选具体一张;候选
   // <=1时维持原有"手牌不可点、按钮直接生效"的简化体验,不强迫多点一步。
-  // 五个响应场景共用这同一套状态(selectedResponseCardIdx)和交互,不各自另起一套:
+  // 七个响应场景共用这同一套状态(selectedResponseCardIdx)和交互,不各自另起一套:
   // respond(出闪)/aoeResp(南蛮万箭)/duel(决斗出杀)/jiedaoChoice(借刀杀人A出杀)/
-  // tiaoxinChoice(挑衅目标出杀)。
+  // tiaoxinChoice(挑衅目标出杀)/jijiangAsk(激将替杀)/hujiaAsk(护驾替闪)。
   let respondRole = null, respondCandidateCount = 0;
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
     respondRole = '闪';
@@ -96,6 +96,10 @@ function renderHand(g){
     // 挑衅:够不到挑衅者时这张杀根本用不出去(服务端同样要求 canReachSha),不给点选
     respondRole = '杀';
     respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,'杀')).length;
+  } else if((g.phase==='jijiangAsk'||g.phase==='hujiaAsk') && g.pending && g.pending.asking===mySeat && !(g.pending.need==='杀' && me.jiangchiNoSlash)){
+    // 主公技求助(激将/护驾):被求助者多候选选牌,和响应阶段同一套交互(将驰禁杀时不给点选)
+    respondRole = g.pending.need;
+    respondCandidateCount = (me.hand||[]).filter(c=>canUseAs(me,c,respondRole)).length;
   }
   (me.hand||[]).forEach((card,idx)=>{
     const el=document.createElement('div');

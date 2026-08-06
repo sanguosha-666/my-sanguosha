@@ -229,6 +229,8 @@ function autoRespondAction(g){
   if(type==='fanjianSuit') return function(){ respondFanjianSuit(SUITS[Math.floor(Math.random()*SUITS.length)]); }; // 反间:随机花色
   if(type==='huogong') return function(){ respondHuogong(false); };             // 火攻:不弃牌
   if(type==='huogongReveal') return function(){ respondHuogongReveal(0); };     // 火攻亮牌:亮第0张
+  if(type==='jijiangAsk') return function(){ respondJijiangAsk(false); };       // 激将求助:不出
+  if(type==='hujiaAsk') return function(){ respondHujiaAsk(false); };           // 护驾求助:不出
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且

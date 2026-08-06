@@ -3027,6 +3027,36 @@ function renderControls(g){
     setBanner('【'+escapeHtml(g.aoe?g.aoe.trick:'')+'】要求 '+escapeHtml(to)+' 打出【'+escapeHtml(g.pending.need)+'】…');
     return;
   }
+  if((g.phase==='jijiangAsk'||g.phase==='hujiaAsk') && g.pending && g.pending.asking===mySeat){
+    // 主公技求助:被求助者选择是否替主公打出【杀/闪】(候选>1 时先在手牌区点选,同响应阶段)
+    const need=g.pending.need;
+    const lordName=g.players[g.pending.lordSeat]?g.players[g.pending.lordSeat].name:'?';
+    const skillName=need==='杀'?'激将':'护驾';
+    const candidates=me.hand.filter(card=>canUseAs(me,card,need));
+    const hasCard = !(need==='杀' && me.jiangchiNoSlash) && candidates.length>0;
+    const needsPick = hasCard && candidates.length>1;
+    if(hasCard && (!needsPick || selectedResponseCardIdx!==null)){
+      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
+      const b1=document.createElement('button'); b1.className='primary';
+      b1.textContent='替主公打出【'+need+'】';
+      b1.onclick = needsPick
+        ? (()=>{ resetSelectedResponseCard(); (need==='杀'?respondJijiangAsk:respondHujiaAsk)(true, chosenIdx); })
+        : (()=> (need==='杀'?respondJijiangAsk:respondHujiaAsk)(true));
+      c.appendChild(b1);
+    }
+    const b2=document.createElement('button');
+    b2.textContent='不出'; b2.onclick=()=> (need==='杀'?respondJijiangAsk:respondHujiaAsk)(false);
+    c.appendChild(b2);
+    const pickHint=(needsPick && selectedResponseCardIdx===null)?'你有多张牌可以当【'+escapeHtml(need)+'】使用,请先在手牌区选择一张。':'';
+    setBanner(escapeHtml(lordName)+' 发动【'+skillName+'】,是否替主公打出【'+escapeHtml(need)+'】?'+(pickHint||(hasCard?'':'（你没有【'+escapeHtml(need)+'】,只能不出）')));
+    return;
+  }
+  if((g.phase==='jijiangAsk'||g.phase==='hujiaAsk') && g.pending){
+    const lordName=g.players[g.pending.lordSeat]?g.players[g.pending.lordSeat].name:'?';
+    const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
+    setBanner(escapeHtml(lordName)+' 发动【'+(g.pending.need==='杀'?'激将':'护驾')+'】,正在询问 '+escapeHtml(asking)+' 是否替主公打出【'+escapeHtml(g.pending.need)+'】…');
+    return;
+  }
   if(g.phase==='pick' && g.pending && g.pending.from===mySeat){
     const tgt=g.players[g.pending.to];
     const verb = g.pending.trick==='顺手牵羊' ? '拿' : '拆';

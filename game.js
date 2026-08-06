@@ -26,7 +26,8 @@ const RESPONSE_TIMEOUT_MS = 30000;
 const RESPONSE_PENDING_TYPES = new Set([
   'wuxie', 'guicai', 'jiedaoChoice', 'ganglieChoice', 'guhuoQuestion', 'xiaoguo',
   'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
-  'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick'
+  'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick',
+  'jijiangAsk', 'hujiaAsk'
 ]);
 // setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
 // 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
@@ -511,6 +512,16 @@ function normalize(g){
   if(g.pending && g.pending.type==='xiaoguoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.endingSeat!=='number' || typeof g.pending.to!=='number')){
     g.pending=null; g.phase='play';
   }
+  // 主公技求助阶段(激将/护驾):lordSeat/asking 应是数字座位号、need 应是字符串、
+  // resume 是原 pending 快照(结构非法=这条求助链无法继续);不对就整体判无效。
+  // asking 在创建/切换点恒有值,不存在"还没轮到"的合法中间态,按结构校验不误伤。
+  if(g.pending && (g.pending.type==='jijiangAsk'||g.pending.type==='hujiaAsk') &&
+     (typeof g.pending.lordSeat!=='number' || typeof g.pending.asking!=='number' ||
+      typeof g.pending.need!=='string' || !g.pending.resume ||
+      typeof g.pending.resume!=='object' || typeof g.pending.resume.phase!=='string' ||
+      !g.pending.resume.pending)){
+    g.pending=null; g.phase='play';
+  }
   // 借刀杀人选择阶段:from/seatA/seatB 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
     g.pending=null; g.phase='play';
@@ -728,6 +739,9 @@ function normalize(g){
   if(typeof g.tiaoxinUsed!=='boolean') g.tiaoxinUsed=false;
   // 孙权【制衡】:出牌阶段限一次的标志位,和 g.duanliangUsed 同款防御
   if(typeof g.zhihengUsed!=='boolean') g.zhihengUsed=false;
+  // 刘备【激将】/曹操【护驾】:主公技每回合限一次的标志位,和 g.duanliangUsed 同款防御
+  if(typeof g.jijiangUsed!=='boolean') g.jijiangUsed=false;
+  if(typeof g.hujiaUsed!=='boolean') g.hujiaUsed=false;
   // 刘备【仁德】:统计当前出牌阶段已交出的牌数,到第2张时强制回复一次
   if(!Number.isInteger(g.renDeCount)) g.renDeCount=0;
   // 华佗【青囊】:出牌阶段限一次
@@ -4663,6 +4677,11 @@ function duelResponse(useSha, cardIdx){
       return g;
     }
     // 认输：受伤
+    // 刘备【激将】:主公需出杀且未用过主公技 → 先进入求助流程;无人替出则回原响应
+    if(canTriggerLordAsk(g, mySeat, 'jijiang')){
+      startLordAsk(g, mySeat, '杀', 'jijiang');
+      return g;
+    }
     // sourceSeat 传 opp(决斗中的对方),不能传 g.pending.from——认输的可能是发起者本人,
     // 那种情况下 sourceSeat 必须是对手而不是受害者自己,否则司马懿【反馈】等依赖伤害来源的技能会出错。
     const dying = dealDamage(g, mySeat, damageAmount(g, opp, 1, 'duel'), opp, '不出【杀】', 'duel', g.pending.sourceCard);
@@ -5253,6 +5272,12 @@ function aoeRespond(useCard, cardIdx){
       return g;
     }
     // 不出:受到1点伤害
+    // 主公技:需出杀(南蛮)→激将,需出闪(万箭)→护驾;先进入求助流程,无人替出则回原响应
+    const lordCap = need==='杀' ? 'jijiang' : 'hujia';
+    if(canTriggerLordAsk(g, mySeat, lordCap)){
+      startLordAsk(g, mySeat, need, lordCap);
+      return g;
+    }
     let actualSourceSeat = g.pending.from;
     
     // 祸首：若锦囊是南蛮入侵且场上有孟获（非当前目标），则孟获成为伤害来源
@@ -5271,6 +5296,131 @@ function aoeRespond(useCard, cardIdx){
     return g;
   });
 }
+
+// ===== 主公技求助(刘备【激将】/曹操【护驾】) =====
+// 触发点:respondShan/duelResponse/aoeRespond 的"不出/不闪"分支,若主公(身份局 role==='zhu'
+// + 拥有对应 caps + 本回合未用过 + 场上还有其它存活角色)选择不自己出牌,先进入求助流程
+// (jijiangAsk/hujiaAsk),从主公下家按 nextAskee 逐个问其他角色是否替出;有人替出则视为
+// 主公已出(完成原响应),无人替出则恢复原 pending,主公回到正常响应继续(可再自己出牌或
+// 不出——后一次不出因 used 已真直接走受伤/认输)。
+// 守卫刻意用 hasCap(武将能力声明) + p.role==='zhu'(身份) 双条件,不硬编码武将名。
+function canTriggerLordAsk(g, seat, cap){
+  const p=g.players[seat];
+  if(!p || !p.alive) return false;
+  if(g.gameMode!=='identity') return false; // 主公技仅身份局
+  if(p.role!=='zhu') return false;          // 仅主公身份可发动
+  if(!hasCap(p,cap)) return false;          // 能力声明在 GENERALS.caps,业务点查表
+  if(cap==='jijiang' && g.jijiangUsed) return false;
+  if(cap==='hujia' && g.hujiaUsed) return false;
+  return aliveCount(g)>1;                    // 场上还有其它存活角色可求助
+}
+function startLordAsk(g, lordSeat, need, cap){
+  const first=nextAskee(g, lordSeat, lordSeat);
+  if(first===null) return; // 无人可求助(守卫已排除,这里兜底)
+  const resume={phase:g.phase, pending:g.pending};
+  if(cap==='jijiang') g.jijiangUsed=true; else g.hujiaUsed=true;
+  const type=cap==='jijiang'?'jijiangAsk':'hujiaAsk';
+  g.pending=setResponseAskedAt({type, lordSeat, need, asking:first, resume});
+  g.phase=type;
+  g.log=pushLog(g.log, g.players[lordSeat].name+' 发动【'+(cap==='jijiang'?'激将':'护驾')+'】,向其他角色求助打出【'+need+'】…');
+}
+// 无人替出 → 恢复原 pending,主公回到正常响应
+function restoreLordAsk(g, ask){
+  g.pending=ask.resume.pending;
+  g.phase=ask.resume.phase;
+  if(g.pending && typeof g.pending.askedAt==='number') g.pending.askedAt=Date.now(); // 重新计时
+  g.log=pushLog(g.log, g.players[ask.lordSeat].name+'【'+(ask.need==='杀'?'激将':'护驾')+'】无人响应,回到主公正常响应');
+}
+// 有人替出 → 恢复原 pending 后,按原场景完成"已出"语义(镜像于吉【蛊惑】的
+// resolveGuhuoResponseShan/Sha/Aoe 同一套写法:换牌者只是物理出牌人,响应方仍是主公)。
+function completeLordAsk(g, ask, card){
+  const lordSeat=ask.lordSeat, helper=ask.helperSeat;
+  const lord=g.players[lordSeat];
+  g.pending=ask.resume.pending;
+  g.phase=ask.resume.phase;
+  if(g.pending && typeof g.pending.askedAt==='number') g.pending.askedAt=Date.now();
+  if(ask.need==='闪'){
+    if(g.phase==='respond' && g.pending && g.pending.to===lordSeat){
+      // 单体杀响应:与 respondShan 出闪分支同款收尾(含吕布【无双】计数/杀被抵消后的武器特效)
+      const attacker=g.players[g.pending.from];
+      const needed=hasCap(attacker,'wushuang') ? 2 : 1;
+      const played=(g.pending.shanCount||0)+1;
+      g.discard.push(card);
+      g.log=pushLog(g.log, lord.name+' 发动【护驾】,'+g.players[helper].name+' 替其打出【闪】'+(needed>1?('（'+played+'/'+needed+'）'):'抵消'));
+      markCardSound(g, '闪', lordSeat, card);
+      if(played<needed){ g.pending.shanCount=played; return; }
+      if(maybeStartShaOffsetEffects(g, g.pending.from, lordSeat, g.pending.sourceCard)) return;
+      g.pending=null;
+      finishSingleShaTarget(g);
+      return;
+    }
+    if(g.phase==='aoeResp' && g.pending && g.pending.to===lordSeat && g.pending.need==='闪'){
+      // 万箭齐发响应:与 aoeRespond 出牌分支同款推进
+      g.discard.push(card);
+      g.log=pushLog(g.log, lord.name+' 发动【护驾】,'+g.players[helper].name+' 替其打出【闪】,抵消【'+g.aoe.trick+'】');
+      markCardSound(g, '闪', lordSeat, card);
+      aoeAdvance(g, lordSeat);
+      return;
+    }
+  }
+  if(ask.need==='杀'){
+    if(g.phase==='duel' && g.pending && g.pending.active===lordSeat){
+      // 决斗响应:与 duelResponse 出杀分支同款换人
+      const opp=(lordSeat===g.pending.from)?g.pending.to:g.pending.from;
+      const needed=(!hasCap(lord,'wushuang') && hasCap(g.players[opp],'wushuang')) ? 2 : 1;
+      const played=(g.pending.shaCount||0)+1;
+      g.discard.push(card);
+      g.log=pushLog(g.log, lord.name+' 发动【激将】,'+g.players[helper].name+' 替其打出【杀】响应【决斗】'+(needed>1?('（'+played+'/'+needed+'）'):''));
+      markCardSound(g, '杀', lordSeat, card, opp);
+      if(lordSeat===g.turn) g.shaPlayedInDuel=true;
+      if(played<needed){ g.pending.shaCount=played; return; }
+      g.pending.active=(lordSeat===g.pending.from)?g.pending.to:g.pending.from;
+      g.pending.shaCount=0;
+      return;
+    }
+    if(g.phase==='aoeResp' && g.pending && g.pending.to===lordSeat && g.pending.need==='杀'){
+      // 南蛮入侵响应:与 aoeRespond 出牌分支同款推进
+      g.discard.push(card);
+      g.log=pushLog(g.log, lord.name+' 发动【激将】,'+g.players[helper].name+' 替其打出【杀】,抵消【'+g.aoe.trick+'】');
+      markCardSound(g, '杀', lordSeat, card);
+      aoeAdvance(g, lordSeat);
+      return;
+    }
+  }
+}
+// respondJijiangAsk/respondHujiaAsk:被求助者(asking===mySeat)响应。出牌=替主公认出这张
+// 牌并完成原响应;不出=按 nextAskee 问下一个人,问完一圈无人 → 恢复原 pending。
+// 曹彰【将驰】禁杀同样约束替出(服务端与机器人两侧都要判,规则26)。
+function respondLordAskCore(useCard, cardIdx){
+  tx(g=>{
+    if(!g.pending || (g.pending.type!=='jijiangAsk' && g.pending.type!=='hujiaAsk')) return g;
+    if(g.phase!=='jijiangAsk' && g.phase!=='hujiaAsk') return g;
+    if(g.pending.asking!==mySeat) return g;
+    const ask=g.pending;
+    const need=ask.need;
+    const me=g.players[mySeat];
+    if(useCard){
+      if(need==='杀' && me.jiangchiNoSlash) return g;
+      const specifiedCard=(typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
+      const idx=(specifiedCard && canUseAs(me,specifiedCard,need)) ? cardIdx : findUsableAs(me.hand,me,need);
+      if(idx<0) return g; // 没牌:界面按钮保留,等其改点"不出"
+      const card=me.hand.splice(idx,1)[0];
+      ask.helperSeat=mySeat;
+      completeLordAsk(g, ask, card);
+      return g;
+    }
+    const nxt=nextAskee(g, ask.lordSeat, mySeat);
+    if(nxt===null){
+      restoreLordAsk(g, ask);
+      return g;
+    }
+    ask.asking=nxt;
+    g.pending.askedAt=Date.now(); // 轮到下一位被求助者重新计时
+    return g;
+  });
+}
+function respondJijiangAsk(useCard, cardIdx){ respondLordAskCore(useCard, cardIdx); }
+function respondHujiaAsk(useCard, cardIdx){ respondLordAskCore(useCard, cardIdx); }
 
 // respondShan: 出闪响应。吕布【无双】(锁定技):攻击者是吕布时,needed=2——打出一张闪不够,
 // g.pending.shanCount 记差几张,留在 respond 阶段原样再问一次(按钮/阶段都不变,只是 hint
@@ -5310,6 +5460,12 @@ function respondShan(useShan, cardIdx){
       // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
       if(maybeStartShaOffsetEffects(g, g.pending.from, mySeat, g.pending.sourceCard)) return g;
     } else {
+      // 曹操【护驾】:主公需出闪且未用过主公技 → 先进入求助流程;无人替出则回原响应
+      // (铁骑判红的杀不可被闪抵消,连求助也不给——服务端兜底,UI 本就不渲染该按钮)
+      if(!g.pending.noShan && canTriggerLordAsk(g, mySeat, 'hujia')){
+        startLordAsk(g, mySeat, '闪', 'hujia');
+        return g;
+      }
       const shaFrom = g.pending.from;
       const shaSourceCard = g.pending.sourceCard;
       const shaColor = g.pending.shaColor;
@@ -5855,7 +6011,7 @@ function startTurn(g, seat){
     return;
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0; g.jijiangUsed=false; g.hujiaUsed=false;
   
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];

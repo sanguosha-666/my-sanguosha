@@ -66,7 +66,13 @@ const BOT_PHASE_ACTOR = {
   // 【A1】骁果询问目标的二选一(弃装备/受伤害):行动者是 pending.to(服务端
   // respondXiaoguoChoice 守卫 g.pending.to!==mySeat)。登记后 L1(有密钥)才能解析出
   // 行动者镜像"弃置X【装备】/受到1点伤害"按钮;不登记 botSeatForState -1,L1 够不到。
-  xiaoguoChoice:'to'
+  xiaoguoChoice:'to',
+  // 【B2a】主公技求助(激将/护驾):行动者是 pending.asking(被求助者,服务端
+  // respondLordAskCore 守卫 g.pending.asking!==mySeat)。登记后 botSeatForState 才能
+  // 解析出行动者走 runBotDecision 专用分支(botDecide('jijiangAsk'/'hujiaAsk'));
+  // 不登记会掉进 botFallbackSeats+botSafePrompt(按钮文案"替主公打出【X】/不出"不命中
+  // 任一正则 → 只告警不动作,机器人求助必然卡死)。
+  jijiangAsk:'asking', hujiaAsk:'asking'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -641,6 +647,10 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // 会给"发动【礼让】/不发动"按钮(发动按钮还依赖客户端 lirangPicks 模式状态)——不排除
   // 会被 L1 抢先接管(有密钥时 L1 会镜像到"不发动"并点击,绕开专用候选),必须收录。
   'lirangAsk',
+  // 【B2a】主公技求助有专用注册(BOT_DECISIONS.jijiangAsk/hujiaAsk,接线在 controlsChoice
+  // 之前),且 render-controls.js 会给"替主公打出【X】/不出"按钮——不排除会被 L1 抢先
+  // 接管(有密钥时 L1 会镜像按钮并点击,绕开专用候选),必须收录。
+  'jijiangAsk','hujiaAsk',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -1071,6 +1081,61 @@ BOT_DECISIONS.aoeResp = {
   execute: aoeRespExecute,
   buildSystemPrompt: aoeRespSystemPrompt,
   maxTokens: 80,
+};
+
+// ================= B2a 主公技求助(激将/护驾) =================
+// 服务端 respondLordAskCore 统一处理两种求助(need 由 pending 决定)。机器人被求助时
+// 引导性决策:有能当 need 的牌就替出、没有就不出。无密钥 localFallback 同样"有牌就出"——
+// 与改动前行为的关系:改动前机器人从不参与主公技求助,该阶段走 botSafePrompt 兜底点
+// "不出"(安全正则命中),无牌时行为一致;有牌时"替出"是新能力(主公技本身是本次新功能,
+// 不属于"无密钥零变化"承诺范围——零变化承诺只针对非身份局/非主公路径,见测试 F 组)。
+// 将驰禁杀同时约束替出杀(服务端 respondLordAskCore 同样拒绝,规则26:先探测服务端)。
+function lordAskMatch(type){
+  return function(g, seat){
+    const d=g.pending;
+    return g.phase===type && d && d.type===type && d.asking===seat;
+  };
+}
+function lordAskBuildCandidates(g, seat, need){
+  const p=g.players[seat];
+  const canResp = !(need==='杀' && p.jiangchiNoSlash) && findUsableAs(p.hand, p, need) >= 0;
+  const out=[];
+  if(canResp) out.push({ action:'替主公打出【'+need+'】', play:true });
+  out.push({ action:'不出', play:false });
+  return out;
+}
+function lordAskLocalFallback(g, seat, candidates, need){
+  const p=g.players[seat];
+  const play = !(need==='杀' && p.jiangchiNoSlash) && findUsableAs(p.hand, p, need) >= 0;
+  return candidates.find(function(c){ return c.play === play; }) || candidates[candidates.length-1];
+}
+BOT_DECISIONS.jijiangAsk = {
+  match: lordAskMatch('jijiangAsk'),
+  buildCandidates: function(g, seat){ return lordAskBuildCandidates(g, seat, '杀'); },
+  localFallback: function(g, seat, candidates){ return lordAskLocalFallback(g, seat, candidates, '杀'); },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){ respondJijiangAsk(!!(choice && choice.play)); });
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。主公刘备发动【激将】,向你求助一张【杀】:候选为'
+      +'"替主公打出【杀】"或"不出"。请结合局面决定。只输出 {"choice":数字},不要解释。';
+  },
+  maxTokens: 60,
+};
+BOT_DECISIONS.hujiaAsk = {
+  match: lordAskMatch('hujiaAsk'),
+  buildCandidates: function(g, seat){ return lordAskBuildCandidates(g, seat, '闪'); },
+  localFallback: function(g, seat, candidates){ return lordAskLocalFallback(g, seat, candidates, '闪'); },
+  execute: function(g, seat, choice){
+    if(!choice) return;
+    botInvoke(seat, function(){ respondHujiaAsk(!!(choice && choice.play)); });
+  },
+  buildSystemPrompt: function(){
+    return '你在扮演网页版三国杀的AI机器人。主公曹操发动【护驾】,向你求助一张【闪】:候选为'
+      +'"替主公打出【闪】"或"不出"。请结合局面决定。只输出 {"choice":数字},不要解释。';
+  },
+  maxTokens: 60,
 };
 
 BOT_DECISIONS.jiedaoResponse = {
@@ -2851,6 +2916,16 @@ async function runBotDecision(g,seat){
     // 按钮——那个按钮是客户端 xiaoguoMode 模式状态的第一步(点了只改 mode 不提交服务端),
     // 机器人会卡死;专用分支必须先于 L1 命中。
     if(await botDecide('xiaoguo',g,seat)) return;
+  }
+  if(g.phase==='jijiangAsk' && d && d.type==='jijiangAsk' && d.asking===seat){
+    // 【B2a】激将求助:决策已进 BOT_DECISIONS.jijiangAsk(无密钥回退=有杀就替出,没有就
+    // 不出)。phase+type+asking 守卫保留作双保险,命中即 return。位置刻意在 L1 之前 +
+    // EXCLUDE 收录,双保险防 L1 镜像"替主公打出【杀】"按钮抢先。
+    if(await botDecide('jijiangAsk',g,seat)) return;
+  }
+  if(g.phase==='hujiaAsk' && d && d.type==='hujiaAsk' && d.asking===seat){
+    // 【B2a】护驾求助:同 jijiangAsk 一套接线,need='闪'。
+    if(await botDecide('hujiaAsk',g,seat)) return;
   }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
   // L3 多步两阶段(借刀/离间/丈八/仁德):阶段A选中后 botTwoStepA 本地挂起,等下一调度走

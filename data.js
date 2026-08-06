@@ -293,11 +293,12 @@ const GENERALS = {
   huatuo:        { id:'huatuo',        name:'华佗',   gender:'male', faction:'qun', maxHp:3, skill:'青囊/急救',
     desc:'青囊:出牌阶段限一次,你可以弃置一张手牌,令一名已受伤的角色回复1点体力。急救:你的回合外,你可以将一张红色牌当【桃】使用。',
     caps:{ qingnang:true, jijiu:true } },
-  liubei:        { id:'liubei',        name:'刘备',   gender:'male', faction:'shu', maxHp:4, skill:'仁德',
-    desc:'出牌阶段,你可以将任意数量的手牌交给其他角色,若本阶段内给出的牌达到2张或以上,你回复1点体力。激将为主公技,当前无身份局系统,暂不实现。',
-    caps:{ rende:true } },
-  caocao:        { id:'caocao',        name:'曹操',   gender:'male', faction:'wei', maxHp:4, skill:'奸雄',
-    desc:'当你受到伤害后,你可以获得对你造成伤害的牌。护驾为主公技,当前无身份局系统,暂不实现。',
+  liubei:        { id:'liubei',        name:'刘备',   gender:'male', faction:'shu', maxHp:4, skill:'仁德/激将',
+    desc:'仁德:出牌阶段,你可以将任意数量的手牌交给其他角色,若本阶段内给出的牌达到2张或以上,你回复1点体力。激将:主公技,当需要使用或打出一张【杀】时,可令其他角色替出。',
+    caps:{ rende:true, jijiang:true } },
+  caocao:        { id:'caocao',        name:'曹操',   gender:'male', faction:'wei', maxHp:4, skill:'奸雄/护驾',
+    desc:'奸雄:当你受到伤害后,你可以获得对你造成伤害的牌。护驾:主公技,当需要使用或打出一张【闪】时,可令其他角色替出。',
+    caps:{ hujia:true },
     hooks:{
       onDamaged(g, seat, ctx){
         const p=g.players[seat];
