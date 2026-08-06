@@ -13,3 +13,6 @@ Desktop.ini
 # Logs
 *.log
 .claude/
+
+# SDD 内部跟踪文件(进度/审查/任务简报/报告)——不入库
+.superpowers/
