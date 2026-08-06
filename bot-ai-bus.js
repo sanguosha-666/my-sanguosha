@@ -231,6 +231,7 @@ function autoRespondAction(g){
   if(type==='huogongReveal') return function(){ respondHuogongReveal(0); };     // 火攻亮牌:亮第0张
   if(type==='jijiangAsk') return function(){ respondJijiangAsk(false); };       // 激将求助:不出
   if(type==='hujiaAsk') return function(){ respondHujiaAsk(false); };           // 护驾求助:不出
+  if(type==='zhibaAsk') return function(){ respondZhiba(0); };                  // 制霸拼点:出第0张
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且

@@ -1,5 +1,6 @@
 /**
- * B2a 主公技(激将/护驾)测试 — 服务端流程 + 守卫 + normalize + 机器人登记 + 超时保守表 + UI。
+ * B2a/B2b 主公技测试 — 服务端流程 + 守卫 + normalize + 机器人登记 + 超时保守表 + UI。
+ * B2a:刘备【激将】/曹操【护驾】;B2b:孙策【制霸】/袁术【妄尊】。
  *
  * 加载真实完整链路(config/data/room-lifecycle/game/weapons/skills/bot-ai-bus/bot/
  * ai-bot/render/render-controls)进共享 vm 沙箱(与 run_identity_mode_test.js 同一套
@@ -145,12 +146,14 @@ function mkG(opt){
   });
   const g = {
     players: players, gameMode: opt.mode || 'identity',
-    roundNum: 1, phase: opt.phase || 'duel', turn: 1,
+    roundNum: 1, phase: opt.phase || 'duel', turn: (typeof opt.turn==='number' ? opt.turn : 1),
     log: [], deck: [], discard: [], exchangeCards: [],
     pending: opt.pending || null, started: true
   };
   if(opt.jijiangUsed) g.jijiangUsed = true;
   if(opt.hujiaUsed) g.hujiaUsed = true;
+  if(opt.zhibaUsed) g.zhibaUsed = true;
+  if(opt.lordHandCap) g.lordHandCap = opt.lordHandCap;
   if(opt.aoe) g.aoe = opt.aoe;
   return g;
 }
@@ -511,6 +514,264 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     const calls = R('window.__hjCalls');
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0][0], true);
+  });
+
+  // ===== H. 制霸(孙策,出牌阶段限一次拼点) =====
+
+  await check('H1 制霸触发:孙策(role zhu)play 选目标 → zhibaAsk pending,zhibaUsed 置真,孙策第一张手牌进弃牌堆', function(){
+    const g = mkG({ phase:'play', turn:0, generals:{0:'sunce'},
+      hands:{0:[S,{id:'s2',name:'杀',suit:'♠',rank:7}], 1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
+    setG(g); seat(0);
+    R('startZhiba(1)');
+    const gg = getG();
+    assert.strictEqual(gg.phase, 'zhibaAsk');
+    assert.strictEqual(gg.pending.type, 'zhibaAsk');
+    assert.strictEqual(gg.pending.lordSeat, 0);
+    assert.strictEqual(gg.pending.targetSeat, 1);
+    assert.strictEqual(gg.pending.selfCard.id, 's1'); // 自动出第一张手牌
+    assert.strictEqual(gg.zhibaUsed, true);
+    assert.strictEqual(gg.players[0].hand.length, 1);
+    assert.ok(gg.discard.some(function(c){ return c.id === 's1'; }));
+    assert.ok(gg.log.some(function(e){ return e.text.indexOf('制霸') >= 0; }));
+  });
+
+  await check('H2 制霸响应:目标出牌 → 双方各弃一张、比点日志、回 play', function(){
+    const g = mkG({ phase:'zhibaAsk', turn:0, generals:{0:'sunce'},
+      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
+      hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
+    setG(g); seat(1);
+    R('respondZhiba(0)');
+    const gg = getG();
+    assert.strictEqual(gg.phase, 'play');
+    assert.strictEqual(gg.pending, null);
+    assert.strictEqual(gg.players[1].hand.length, 0);
+    assert.ok(gg.discard.some(function(c){ return c.id === 'f2'; }));
+    assert.ok(gg.log.some(function(e){ return e.text.indexOf('拼点') >= 0; }));
+  });
+
+  await check('H3 守卫:zhibaUsed 已真不再发动;非主公(role zhong)不可发动;ffa 不触发', function(){
+    const g1 = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH]}, zhibaUsed:true });
+    setG(g1); seat(0);
+    R('startZhiba(1)');
+    let gg = getG();
+    assert.strictEqual(gg.phase, 'play');
+    assert.ok(!gg.pending);
+    const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce',1:'caocao'}, roles:{0:'zhong',1:'zhu',2:'fan'}, hands:{0:[S],1:[SH]} });
+    setG(g2); seat(0);
+    R('startZhiba(1)');
+    gg = getG();
+    assert.strictEqual(gg.phase, 'play');
+    assert.ok(!gg.pending);
+    const g3 = mkG({ mode:'ffa', phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH]} });
+    setG(g3); seat(0);
+    R('startZhiba(1)');
+    gg = getG();
+    assert.strictEqual(gg.phase, 'play');
+    assert.ok(!gg.pending);
+  });
+
+  await check('H4 守卫:孙策无手牌 / 目标无手牌 不可发动', function(){
+    const g1 = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{1:[SH]} });
+    setG(g1); seat(0);
+    R('startZhiba(1)');
+    let gg = getG();
+    assert.strictEqual(gg.phase, 'play');
+    assert.ok(!gg.pending);
+    const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S]} });
+    setG(g2); seat(0);
+    R('startZhiba(1)');
+    gg = getG();
+    assert.strictEqual(gg.phase, 'play');
+    assert.ok(!gg.pending);
+  });
+
+  await check('H5 normalize:zhibaUsed/lordHandCap 防御 + zhibaAsk 结构校验;startTurn 重置', function(){
+    const g1 = R('normalize({players:[], log:[], deck:[], discard:[]})');
+    assert.strictEqual(g1.zhibaUsed, false);
+    assert.strictEqual(g1.lordHandCap, 0);
+    const g1b = R('normalize({players:[], log:[], deck:[], discard:[], zhibaUsed:"x", lordHandCap:"y"})');
+    assert.strictEqual(g1b.zhibaUsed, false);
+    assert.strictEqual(g1b.lordHandCap, 0);
+    const bad = R('normalize({players:[{name:"a",alive:true},{name:"b",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"zhibaAsk", pending:{type:"zhibaAsk", lordSeat:"x", targetSeat:1}})');
+    assert.strictEqual(bad.pending, null);
+    assert.strictEqual(bad.phase, 'play');
+    const good = R('normalize({players:[{name:"a",alive:true},{name:"b",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"zhibaAsk", pending:{type:"zhibaAsk", lordSeat:0, targetSeat:1, selfCard:{id:"s1"}, resume:{phase:"play", pending:null}}})');
+    assert.ok(good.pending && good.pending.type === 'zhibaAsk');
+    const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce'} });
+    g2.zhibaUsed = true; g2.lordHandCap = 1;
+    setG(g2);
+    R('startTurn(_g, 0)');
+    const gg = getG();
+    assert.strictEqual(gg.zhibaUsed, false);
+    assert.strictEqual(gg.lordHandCap, 0);
+  });
+
+  // ===== I. 妄尊(袁术,主公准备阶段) =====
+
+  await check('I1 妄尊:主公(role zhu)startTurn 且有存活袁术 → 袁术摸一张、lordHandCap=1', function(){
+    const g = mkG({ phase:'play', turn:0, generals:{0:'caocao',1:'yuanshu'}, hands:{1:[S]} });
+    g.deck = [{id:'d1',name:'无中生有',suit:'♥',rank:7}];
+    setG(g);
+    R('startTurn(_g, 0)');
+    const gg = getG();
+    assert.strictEqual(gg.lordHandCap, 1);
+    assert.strictEqual(gg.players[1].hand.length, 2);
+    assert.strictEqual(gg.players[1].hand[1].id, 'd1');
+    assert.ok(gg.log.some(function(e){ return e.text.indexOf('妄尊') >= 0; }));
+  });
+
+  await check('I2 妄尊:主公弃牌阶段手牌上限 = hp-1(discardCard/discardCards/endTurn 三处生效)', function(){
+    // 主公 hp=4,手牌5,上限3 → 需弃2张
+    const g = mkG({ phase:'discard', turn:0, generals:{0:'caocao',1:'yuanshu'},
+      hands:{0:[S,SH,{id:'t1',name:'桃',suit:'♥',rank:3},{id:'w1',name:'无中生有',suit:'♥',rank:7},{id:'e1',name:'决斗',suit:'♠',rank:2}]} });
+    g.lordHandCap = 1;
+    setG(g); seat(0);
+    R('endTurn()'); // 手牌5 > 上限3 → 拒绝结束
+    let gg = getG();
+    assert.strictEqual(gg.phase, 'discard');
+    R('discardCard(0)'); // 弃1张 → 4 仍 > 3
+    gg = getG();
+    assert.strictEqual(gg.phase, 'discard');
+    assert.strictEqual(gg.players[0].hand.length, 4);
+    R('discardCards([0,1])'); // 弃2张 → 2 <= 3
+    gg = getG();
+    assert.strictEqual(gg.players[0].hand.length, 2);
+    R('endTurn()'); // 不再超上限 → 正常结束
+    gg = getG();
+    assert.notStrictEqual(gg.phase, 'discard');
+  });
+
+  await check('I3 守卫:ffa / 当前回合玩家非主公 / 袁术死亡 → 妄尊不触发', function(){
+    const g1 = mkG({ mode:'ffa', phase:'play', turn:0, generals:{0:'caocao',1:'yuanshu'}, hands:{1:[S]} });
+    g1.deck = [{id:'d1',name:'无中生有',suit:'♥',rank:7}];
+    setG(g1);
+    R('startTurn(_g, 0)');
+    let gg = getG();
+    assert.strictEqual(gg.lordHandCap, 0); // startTurn 重置为 0,妄尊未触发
+    assert.strictEqual(gg.players[1].hand.length, 1);
+    // 非主公的回合(袁术自己是回合玩家,不能对自己触发妄尊)
+    const g2 = mkG({ phase:'play', turn:1, generals:{0:'caocao',1:'yuanshu'}, hands:{1:[S]} });
+    g2.deck = [{id:'d1',name:'无中生有',suit:'♥',rank:7}];
+    setG(g2);
+    R('startTurn(_g, 1)');
+    gg = getG();
+    assert.strictEqual(gg.lordHandCap, 0);
+    assert.strictEqual(gg.players[1].hand.length, 1);
+    // 袁术死亡
+    const g3 = mkG({ phase:'play', turn:0, generals:{0:'caocao',1:'yuanshu'}, hands:{1:[S]}, aliveOf:{1:false} });
+    g3.deck = [{id:'d1',name:'无中生有',suit:'♥',rank:7}];
+    setG(g3);
+    R('startTurn(_g, 0)');
+    gg = getG();
+    assert.strictEqual(gg.lordHandCap, 0);
+  });
+
+  // ===== J. 机器人 =====
+
+  await check('J1 BOT_PHASE_ACTOR 登记 zhibaAsk=targetSeat', function(){
+    assert.strictEqual(R('BOT_PHASE_ACTOR.zhibaAsk'), 'targetSeat');
+  });
+
+  await check('J2 BOT_DECISIONS.zhibaAsk 注册形状完整;botDecide 无密钥选点数最大的手牌', async function(){
+    const s = R('BOT_DECISIONS.zhibaAsk');
+    assert.ok(s && typeof s.match === 'function' && typeof s.buildCandidates === 'function'
+      && typeof s.localFallback === 'function' && typeof s.execute === 'function');
+    R('aiApiKey = ""; aiProvider = null;');
+    R('window.__zbCalls = []; respondZhiba = function(cardIdx){ window.__zbCalls.push(cardIdx); };');
+    const g = mkG({ phase:'zhibaAsk', turn:0,
+      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
+      hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:3},{id:'f3',name:'闪',suit:'♦',rank:11}]} });
+    setG(g);
+    const r = await R('(async function(){ return await botDecide("zhibaAsk", _g, 1); })()');
+    assert.strictEqual(r, true);
+    assert.strictEqual(R('window.__zbCalls').length, 1);
+    assert.strictEqual(R('window.__zbCalls')[0], 1); // 点数大的下标
+  });
+
+  await check('J3 runBotDecision 接线:zhibaAsk 阶段命中专用决策', async function(){
+    R('aiApiKey = ""; aiProvider = null;');
+    R('window.__zbCalls = []; respondZhiba = function(cardIdx){ window.__zbCalls.push(cardIdx); };');
+    const g = mkG({ phase:'zhibaAsk', turn:0, generals:{0:'sunce'},
+      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
+      botOf:{1:true}, hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
+    setG(g);
+    await R('(async function(){ await runBotDecision(_g, 1); return true; })()');
+    assert.strictEqual(R('window.__zbCalls').length, 1);
+  });
+
+  await check('J4 CONTROLS_CHOICE_EXCLUDE 收录 zhibaAsk(防 L1 双重接管)', function(){
+    assert.strictEqual(R('CONTROLS_CHOICE_EXCLUDE.has("zhibaAsk")'), true);
+  });
+
+  await check('J5 BOT_SEAT_PICKS.zhiba 注册:主公孙策 play 阶段制霸目标选择;非主公不命中', function(){
+    const s = R('BOT_SEAT_PICKS.zhiba');
+    assert.ok(s && typeof s.match === 'function' && typeof s.buildSeatCandidates === 'function'
+      && typeof s.execute === 'function');
+    const g = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH],2:[{id:'f4',name:'闪',suit:'♥',rank:5}]} });
+    setG(g);
+    assert.strictEqual(R('BOT_SEAT_PICKS.zhiba.match(_g, 0)'), true);
+    const cands = R('BOT_SEAT_PICKS.zhiba.buildSeatCandidates(_g, 0)');
+    assert.strictEqual(cands.length, 2);
+    const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce',1:'caocao'}, roles:{0:'zhong',1:'zhu',2:'fan'}, hands:{0:[S],1:[SH]} });
+    setG(g2);
+    assert.strictEqual(R('BOT_SEAT_PICKS.zhiba.match(_g, 0)'), false);
+  });
+
+  await check('J6 A1 超时保守动作表:zhibaAsk → respondZhiba(0)', function(){
+    R('window.__zbCalls = []; respondZhiba = function(cardIdx){ window.__zbCalls.push(cardIdx); };');
+    const a = R('autoRespondAction({phase:"zhibaAsk", pending:{type:"zhibaAsk", askedAt:1}})');
+    assert.ok(a, 'zhibaAsk 应有保守动作');
+    a();
+    assert.strictEqual(R('window.__zbCalls').length, 1);
+    assert.strictEqual(R('window.__zbCalls')[0], 0);
+  });
+
+  // ===== K. UI =====
+
+  await check('K1 UI:zhibaAsk 目标渲染拼点按钮,点击走 respondZhiba', function(){
+    R('window.__zbCalls = []; respondZhiba = function(cardIdx){ window.__zbCalls.push(cardIdx); };');
+    const g = mkG({ phase:'zhibaAsk', turn:0, generals:{0:'sunce'},
+      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
+      hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
+    setG(g); seat(1);
+    __controlsEl = makeEl();
+    context.window.__controlsEl = __controlsEl;
+    R('renderControls(_g)');
+    const labels = R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
+    assert.ok(labels.some(function(l){ return l.indexOf('拼点') >= 0; }), '应有拼点按钮,实际 ' + JSON.stringify(labels));
+    R('(function(){ var kids = window.__controlsEl.children; for(var i=0;i<kids.length;i++){ if(kids[i].textContent.indexOf("拼点") >= 0){ kids[i].onclick(); return; } } })()');
+    assert.strictEqual(R('window.__zbCalls').length, 1);
+    assert.strictEqual(R('window.__zbCalls')[0], 0);
+  });
+
+  await check('K2 UI:play 阶段孙策主公渲染「发动【制霸】」按钮;ffa/非主公不渲染', function(){
+    const g = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH]} });
+    setG(g); seat(0);
+    __controlsEl = makeEl();
+    context.window.__controlsEl = __controlsEl;
+    R('renderControls(_g)');
+    let labels = R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
+    assert.ok(labels.indexOf('发动【制霸】') >= 0, '应有制霸按钮,实际 ' + JSON.stringify(labels));
+    const g2 = mkG({ mode:'ffa', phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH]} });
+    setG(g2); seat(0);
+    __controlsEl = makeEl();
+    context.window.__controlsEl = __controlsEl;
+    R('renderControls(_g)');
+    labels = R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
+    assert.ok(labels.indexOf('发动【制霸】') < 0, 'ffa 不应有制霸按钮');
+  });
+
+  // ===== L. 无密钥零变化 =====
+
+  await check('L1 无密钥零变化:ffa 主公弃牌阶段不受脏 lordHandCap 影响(上限仍=hp)', function(){
+    // ffa 下 role 本应被 normalize 清空;这里不跑 normalize,靠 handCapLimit 自身 gameMode 守卫
+    const g = mkG({ mode:'ffa', phase:'discard', turn:0, generals:{0:'caocao',1:'yuanshu'},
+      hands:{0:[S,SH,{id:'t1',name:'桃',suit:'♥',rank:3},{id:'w1',name:'无中生有',suit:'♥',rank:7}]} }); // 手牌4=hp4
+    g.lordHandCap = 1; // 脏数据模拟
+    setG(g); seat(0);
+    R('endTurn()');
+    const gg = getG();
+    assert.notStrictEqual(gg.phase, 'discard'); // 没被脏 lordHandCap 拦下
   });
 
   console.log('\n' + '='.repeat(60));

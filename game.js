@@ -27,7 +27,7 @@ const RESPONSE_PENDING_TYPES = new Set([
   'wuxie', 'guicai', 'jiedaoChoice', 'ganglieChoice', 'guhuoQuestion', 'xiaoguo',
   'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
   'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick',
-  'jijiangAsk', 'hujiaAsk'
+  'jijiangAsk', 'hujiaAsk', 'zhibaAsk'
 ]);
 // setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
 // 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
@@ -522,6 +522,14 @@ function normalize(g){
       !g.pending.resume.pending)){
     g.pending=null; g.phase='play';
   }
+  // 孙策【制霸】拼点阶段:lordSeat/targetSeat 应是数字座位号、selfCard 是孙策已出的拼点牌、
+  // resume 是进入前的快照(play 阶段 pending 恒为 null,不要求 resume.pending 有值)。
+  if(g.pending && g.pending.type==='zhibaAsk' &&
+     (typeof g.pending.lordSeat!=='number' || typeof g.pending.targetSeat!=='number' ||
+      !g.pending.selfCard || !g.pending.resume ||
+      typeof g.pending.resume!=='object' || typeof g.pending.resume.phase!=='string')){
+    g.pending=null; g.phase='play';
+  }
   // 借刀杀人选择阶段:from/seatA/seatB 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
     g.pending=null; g.phase='play';
@@ -742,6 +750,9 @@ function normalize(g){
   // 刘备【激将】/曹操【护驾】:主公技每回合限一次的标志位,和 g.duanliangUsed 同款防御
   if(typeof g.jijiangUsed!=='boolean') g.jijiangUsed=false;
   if(typeof g.hujiaUsed!=='boolean') g.hujiaUsed=false;
+  // 孙策【制霸】:主公技出牌阶段限一次的标志位;袁术【妄尊】:主公本回合手牌上限-1(0=无修正)
+  if(typeof g.zhibaUsed!=='boolean') g.zhibaUsed=false;
+  if(!Number.isInteger(g.lordHandCap)) g.lordHandCap=0;
   // 刘备【仁德】:统计当前出牌阶段已交出的牌数,到第2张时强制回复一次
   if(!Number.isInteger(g.renDeCount)) g.renDeCount=0;
   // 华佗【青囊】:出牌阶段限一次
@@ -5422,6 +5433,59 @@ function respondLordAskCore(useCard, cardIdx){
 function respondJijiangAsk(useCard, cardIdx){ respondLordAskCore(useCard, cardIdx); }
 function respondHujiaAsk(useCard, cardIdx){ respondLordAskCore(useCard, cardIdx); }
 
+// ===== 孙策【制霸】:出牌阶段限一次,与一名其他角色拼点(仅身份局主公) =====
+// 简化版:孙策选目标 → 孙策自动出第一张手牌 → 目标出一张手牌 → 比点,输赢均无额外
+// 效果,双方各弃一张,孙策记录 g.zhibaUsed(每回合限一次,startTurn 重置)。
+// 守卫用 hasCap(能力声明) + role==='zhu' + gameMode==='identity' 三重条件,不硬编码武将名。
+function canTriggerZhiba(g, seat){
+  const p=g.players[seat];
+  if(!p || !p.alive) return false;
+  if(g.phase!=='play' || g.turn!==seat) return false; // 仅自己的出牌阶段可发动
+  if(g.gameMode!=='identity') return false;
+  if(p.role!=='zhu') return false;
+  if(!hasCap(p,'zhiba')) return false;
+  if(g.zhibaUsed) return false;
+  if((p.hand||[]).length===0) return false;
+  return g.players.some((q,i)=>i!==seat && q && q.alive && (q.hand||[]).length>0);
+}
+// startZhiba(targetSeat):play 阶段入口,孙策点选目标后提交。
+function startZhiba(targetSeat){
+  tx(g=>{
+    if(!canTriggerZhiba(g, mySeat)) return g;
+    const me=g.players[mySeat], target=g.players[targetSeat];
+    if(!target || !target.alive || targetSeat===mySeat) return g;
+    if((target.hand||[]).length===0) return g;
+    // 孙策自动出第一张手牌(简化版,不做选牌阶段)
+    const card=me.hand.splice(0,1)[0];
+    g.discard.push(card);
+    g.zhibaUsed=true;
+    g.pending=setResponseAskedAt({type:'zhibaAsk', lordSeat:mySeat, targetSeat, selfCard:card, resume:{phase:'play', pending:null}});
+    g.phase='zhibaAsk';
+    g.log=pushLog(g.log, me.name+' 发动【制霸】,与 '+target.name+' 拼点');
+    markSkillSound(g, '制霸');
+    return g;
+  });
+}
+// respondZhiba(cardIdx):目标出一张手牌拼点,比点后回 play(输赢无额外效果)。
+function respondZhiba(cardIdx){
+  tx(g=>{
+    if(g.phase!=='zhibaAsk' || !g.pending || g.pending.type!=='zhibaAsk') return g;
+    if(g.pending.targetSeat!==mySeat) return g;
+    const target=g.players[mySeat];
+    const card=(target.hand||[])[cardIdx];
+    if(!card) return g;
+    target.hand.splice(cardIdx,1);
+    g.discard.push(card);
+    const lord=g.players[g.pending.lordSeat];
+    const selfCard=g.pending.selfCard;
+    const win=(selfCard.rank||0)>(card.rank||0);
+    g.log=pushLog(g.log, lord.name+' 出 '+pointText(selfCard)+', '+target.name+' 出 '+pointText(card)+', 拼点'+(win?lord.name+'赢':target.name+'赢'));
+    g.pending=null;
+    g.phase='play';
+    return g;
+  });
+}
+
 // respondShan: 出闪响应。吕布【无双】(锁定技):攻击者是吕布时,needed=2——打出一张闪不够,
 // g.pending.shanCount 记差几张,留在 respond 阶段原样再问一次(按钮/阶段都不变,只是 hint
 // 文案会提示"还差几张");不选择继续出闪就按原逻辑直接受伤,已打出的闪不退回、只扣1点血。
@@ -5509,11 +5573,22 @@ function endPlay(onCommitted){
     return g;
   }, onCommitted);
 }
+// 弃牌阶段手牌上限:基础 = 体力值。袁术【妄尊】令主公本回合上限 -1(仅身份局主公生效,
+// gameMode 守卫防脏数据;lordHandCap 只在主公 startTurn 时由妄尊置 1、每次 startTurn 重置)。
+function handCapLimit(g, seat){
+  const p=g.players[seat];
+  if(!p) return 0;
+  let cap=p.hp;
+  if(g.gameMode==='identity' && p.role==='zhu' && Number.isInteger(g.lordHandCap) && g.lordHandCap>0){
+    cap-=g.lordHandCap;
+  }
+  return Math.max(cap,0);
+}
 function discardCard(cardIdx){
   tx(g=>{
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
-    if(me.hand.length<=me.hp) return g;
+    if(me.hand.length<=handCapLimit(g, mySeat)) return g;
     const card=me.hand.splice(cardIdx,1)[0]; g.discard.push(card);
     if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
       g.liRangRecord.discarded = g.liRangRecord.discarded || [];
@@ -5537,7 +5612,7 @@ function discardCards(cardIdxList){
     const uniqueIdx = [...new Set(cardIdxList)];
     if(uniqueIdx.length!==cardIdxList.length) return g;
     if(!uniqueIdx.every(i=>Number.isInteger(i) && i>=0 && i<me.hand.length)) return g;
-    const need = me.hand.length - me.hp;
+    const need = me.hand.length - handCapLimit(g, mySeat);
     if(need<=0) return g; // 没有超出上限,不需要弃牌
     if(cardIdxList.length < need) return g; // 弃的不够,拒绝(必须一次性弃够,不允许弃少了留着下次再弃)
     // 按下标从大到小依次splice,避免删除时下标错位
@@ -5564,7 +5639,7 @@ function endTurn(){
   tx(g=>{
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
-    if(me.hand.length>me.hp && !canSkipDiscard(g, mySeat)) return g; // 手牌超上限必须先弃;克己满足则放行
+    if(me.hand.length>handCapLimit(g, mySeat) && !canSkipDiscard(g, mySeat)) return g; // 手牌超上限必须先弃;克己满足则放行
     if(maybeStartLiRangRecover(g, mySeat)) return g;
     // 贾诩完杀：回合结束时清理状态
     g.wanshaActive = false; g.wanshaDyingSeat = null;
@@ -6011,7 +6086,7 @@ function startTurn(g, seat){
     return;
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0; g.jijiangUsed=false; g.hujiaUsed=false;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0; g.jijiangUsed=false; g.hujiaUsed=false; g.zhibaUsed=false; g.lordHandCap=0;
   
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];
@@ -6033,6 +6108,22 @@ function startTurn(g, seat){
   g.shensuUsed1 = false; g.shensuUsed2 = false; g.shensuSkipJudgingAndDraw = false; g.shensuSkipPlay = false; g.shensuShaRemaining = 0;
   g.qiaobianSkipJudge = false;
   g.log=pushLog(g.log, '轮到 '+g.players[seat].name);
+  // 袁术【妄尊】:主公的准备阶段,若场上存在存活且拥有 wangzun 的非主公角色(袁术),
+  // 袁术摸一张牌、主公本回合手牌上限-1(简版:自动触发不询问,只对身份局主公回合生效)。
+  if(g.gameMode==='identity' && p && p.alive && p.role==='zhu'){
+    for(let i=0;i<g.players.length;i++){
+      if(i===seat) continue;
+      const ys=g.players[i];
+      if(ys && ys.alive && hasCap(ys,'wangzun')){
+        ensureDeck(g);
+        drawN(g, i, 1);
+        g.lordHandCap=1;
+        g.log=pushLog(g.log, ys.name+' 发动【妄尊】,摸一张牌,主公本回合手牌上限-1');
+        markSkillSound(g, '妄尊');
+        break;
+      }
+    }
+  }
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌(走 cap,不硬编码武将 id)
   if(p && p.alive && hasCap(p,'zhiji') && (p.hand||[]).length===0 && !p.zhijiAwakened){
     p.zhijiAwakened = true;

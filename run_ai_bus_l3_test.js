@@ -259,13 +259,13 @@ const testCode = String.raw`
   respondJiedao = spyService('jiedaoResponse');
   giveEnyuanCard = spyService('enyuanGiveCard');
 
-  // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 7 个技能(蛊惑/旋风 +
-  // 断粮/奇袭/国色/武圣/双雄);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
-  await check('BOT_SEAT_PICKS 存在且恰含 11 个技能;无命中时 botDecide 返回 false', async function(){
+  // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 12 个技能(蛊惑/旋风 +
+  // 断粮/奇袭/国色/武圣/双雄/制霸);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
+  await check('BOT_SEAT_PICKS 存在且恰含 12 个技能;无命中时 botDecide 返回 false', async function(){
     if(typeof BOT_SEAT_PICKS === 'undefined') throw new Error('BOT_SEAT_PICKS 未定义');
     var keys = Object.keys(BOT_SEAT_PICKS).sort().join(',');
-    if(keys !== 'duanliang,fanjian,guhuoTarget,guose,qingnang,qixi,quhuDamage,shuangxiong,tiaoxin,wusheng,xuanfeng')
-      throw new Error('注册表应恰为 11 项,实际 ' + keys);
+    if(keys !== 'duanliang,fanjian,guhuoTarget,guose,qingnang,qixi,quhuDamage,shuangxiong,tiaoxin,wusheng,xuanfeng,zhiba')
+      throw new Error('注册表应恰为 12 项,实际 ' + keys);
     var g = mkSeatG({});
     var r = await botDecide('seatPick', g, 0);
     if(r !== false) throw new Error('无技能命中应返回 false(走旧分支),实际 ' + r);

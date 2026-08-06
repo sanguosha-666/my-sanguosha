@@ -568,7 +568,7 @@ function showConfirm(message, onOk, onCancel){
 // 纯提取重构,行为零变化,只是让 confirmOwnOrSha(按原效果用/当杀 二选一弹窗)也能调用同一份
 // "清空全部客户端选牌/选目标状态"逻辑,不用另外复制一份 reset* 列表。
 function resetSelectionState(){
-  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); resetSanyao();
+  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); resetSanyao(); resetZhiba();
 }
 // confirmAndPlay: 出牌四类触发点(选目标/不选目标/丈八两张当杀)统一委托的包装——
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
@@ -1082,6 +1082,8 @@ function render(g){
   // 散谣全程停在 g.phase='play',没有独立的服务端 pending 可判——判据和 zhihengMode 同款,
   // 只要不在"自己的出牌阶段"就退出本地发动流程。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetSanyao();
+  // 同款兜底:一旦不在「自己的出牌阶段」,就退出制霸选目标模式。
+  if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhiba();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetTiaoxin();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQingnang();
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetQuhu();
@@ -1557,7 +1559,7 @@ function render(g){
   // 必须挪到 updateDesktopSeatHeights() 之后调用,不能留在这里。
 
   // phase pill + deck info
-  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',shaOffsetChoice:'杀被抵消后的效果选择',mengjin:'猛进选择',zhijiChoice:'志继选择',tiaoxinChoice:'挑衅选择',tiaoxinDiscard:'挑衅弃牌',xunxunPick:'恂恂选择',wangxiAsk:'忘隙询问',jijiangAsk:'激将求助',hujiaAsk:'护驾求助',over:'游戏结束'}[g.phase]||g.phase;
+  const phaseName={lobby:'等待开始',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段',respond:'响应阶段',duel:'决斗中',wuxie:'无懈响应',aoeResp:'群体响应',pick:'选牌',qilin:'弃坐骑',dying:'濒死求桃',guicai:'鬼才改判',tieqi:'铁骑判定',liegong:'烈弓',luoshen:'洛神判定',shuangxiongAsk:'双雄询问',xiaoguo:'骁果',xiaoguoChoice:'骁果选择',jiedaoChoice:'借刀杀人选择',wugu:'五谷丰登',qiaobianTurnStart:'巧变询问',qiaobianMove:'巧变移动',qinglong:'青龙偃月刀',hanbingAsk:'寒冰剑询问',hanbing:'寒冰剑弃牌',guanshi:'贯石斧',yijiAsk:'遗计询问',yijiAssign:'遗计分配',ganglieAsk:'刚烈询问',ganglieChoice:'刚烈惩罚',luoyiAsk:'裸衣询问',lirangAsk:'礼让询问',lirangRecover:'礼让回收',zhengyi:'争义询问',quhuRespond:'驱虎拼点',quhuDamageChoice:'驱虎伤害',fanjianSuit:'反间选花色',jiemingAsk:'节命询问',liuli:'流离询问',tianxiang:'天香询问',biyue:'闭月询问',pickingGeneral:'选将阶段',guanxingReview:'观星',shaOffsetChoice:'杀被抵消后的效果选择',mengjin:'猛进选择',zhijiChoice:'志继选择',tiaoxinChoice:'挑衅选择',tiaoxinDiscard:'挑衅弃牌',xunxunPick:'恂恂选择',wangxiAsk:'忘隙询问',jijiangAsk:'激将求助',hujiaAsk:'护驾求助',zhibaAsk:'制霸拼点',over:'游戏结束'}[g.phase]||g.phase;
   document.getElementById('phasePill').textContent=phaseName;
   document.getElementById('deckInfo').textContent = g.started ? ('第'+(g.roundNum||1)+'轮 · 牌堆 '+g.deck.length+' · 弃牌堆 '+g.discard.length) : '';
 

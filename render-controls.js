@@ -148,6 +148,9 @@ let tianyiMode = false;
 let tianyiCardIdx = null;
 let tianyiTargetSeat = null;
 function resetTianyi(){ tianyiMode=false; tianyiCardIdx=null; tianyiTargetSeat=null; }
+// 孙策【制霸】:出牌阶段限一次,选目标后拼点(客户端本地模式,仿 tianyiMode 一套)
+let zhibaMode = false;
+function resetZhiba(){ zhibaMode=false; }
 let lijianMode = false;
 let lijianCardIdx = null;
 let lijianFromSeat = null;
@@ -2217,6 +2220,23 @@ function renderControls(g){
     setBanner(escapeHtml(source?source.name:'太史慈')+' 发动【天义】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
     return;
   }
+  // 孙策【制霸】拼点响应(镜像天义同款:目标逐张列手牌按钮)
+  if(g.phase==='zhibaAsk' && g.pending && g.pending.type==='zhibaAsk' && g.pending.targetSeat===mySeat){
+    const lord = g.players[g.pending.lordSeat];
+    (me.hand||[]).forEach((card, idx)=>{
+      const b=document.createElement('button');
+      b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);
+      b.onclick=()=>respondZhiba(idx);
+      c.appendChild(b);
+    });
+    setBanner(escapeHtml(lord?lord.name:'孙策')+' 对你发动【制霸】,选择一张手牌拼点。');
+    return;
+  }
+  if(g.phase==='zhibaAsk' && g.pending && g.pending.type==='zhibaAsk'){
+    const lord = g.players[g.pending.lordSeat], target = g.players[g.pending.targetSeat];
+    setBanner(escapeHtml(lord?lord.name:'孙策')+' 发动【制霸】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
+    return;
+  }
   if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice' && g.pending.seat===mySeat){
     const source=g.players[g.pending.targetSeat];
     (g.pending.targets||[]).forEach(seat=>{
@@ -3504,6 +3524,18 @@ function renderControls(g){
       }
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetTianyi(); render(g); }; c.appendChild(cb);
+    } else if(zhibaMode){
+      // 孙策【制霸】:出牌阶段限一次,点一名有手牌的其他角色拼点(孙策自动出第一张手牌)
+      setBanner('【制霸】选择一名有手牌的其他角色拼点。');
+      g.players.forEach((p,i)=>{
+        if(!p || !p.alive || i===mySeat || (p.hand||[]).length===0) return;
+        const b=document.createElement('button');
+        b.textContent='与 '+p.name+' 拼点';
+        b.onclick=()=>{ resetZhiba(); startZhiba(i); };
+        c.appendChild(b);
+      });
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetZhiba(); render(g); }; c.appendChild(cb);
     } else if(fangtianMode){
       // 方天画戟选目标模式:点上方存活+范围内的其他玩家(见 seat 循环里的分支),不强制选满,选够1个即可确认。
       setBanner('【方天画戟】选择至多3个目标(已选 '+fangtianPicks.length+'/3，攻击距离 '+attackRange(g,mySeat)+')。');
@@ -3715,7 +3747,7 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode && !sanyaoMode;
+    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode && !sanyaoMode && !zhibaMode;
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'kurou')){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
@@ -3804,6 +3836,12 @@ function renderControls(g){
       const tb=document.createElement('button'); tb.className='ghost';
       tb.textContent='发动【天义】'; tb.onclick=()=>{ selectedCardIdx=null; tianyiMode=true; tianyiCardIdx=null; tianyiTargetSeat=null; render(g); }; c.appendChild(tb);
     }
+    // 孙策【制霸】:主公技,出牌阶段限一次,选择一名其他角色拼点(仅身份局主公)
+    const hasZhibaTarget = g.players.some((p,i)=>p && p.alive && i!==mySeat && (p.hand||[]).length>=1);
+    if(noLocalMode && selectedCardIdx===null && g.gameMode==='identity' && me.role==='zhu' && hasCap(me,'zhiba') && !g.zhibaUsed && (me.hand||[]).length>=1 && hasZhibaTarget){
+      const zbb=document.createElement('button'); zbb.className='ghost';
+      zbb.textContent='发动【制霸】'; zbb.onclick=()=>{ selectedCardIdx=null; zhibaMode=true; render(g); }; c.appendChild(zbb);
+    }
     // 典韦【强袭】:出牌阶段限一次
     const canPayHp = me && me.alive && me.hp > 1;
     const canPayWeapon = hasWeaponToDiscard(me);
@@ -3864,7 +3902,7 @@ function renderControls(g){
     }
     
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetZhiba();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
     
     // 丁奉【奋迅】:弃牌选择阶段
     if(g.pending && g.pending.type==='fenxunDiscard' && g.pending.seat===mySeat) {
@@ -3944,7 +3982,7 @@ function renderControls(g){
     }
     
   } else if(g.phase==='discard'){
-    const over = me.hand.length - me.hp;
+    const over = me.hand.length - handCapLimit(g, mySeat);
     const keji = canSkipDiscard(g, mySeat); // 吕蒙【克己】满足:可跳过弃牌
     if(over>0) setBanner(keji
       ? '克己:本回合未出杀,可不弃牌直接结束回合(也可勾选手牌后点确认弃牌)。'
