@@ -299,3 +299,11 @@
 - **过程坑**：edit 工具误匹配吞掉既有测试 7 的 `async` 关键字（`await check(... async function(){...})` 变 `function(){...}` → `SyntaxError: await is only valid in async functions`），跑测试立刻暴露，补回 `async` 后恢复——RED 步骤顺带把预存测试环境也验证了一遍。
 - **回归**：core 10/0、l3 138/0、l1 21/0；`node --check bot-ai-bus.js` 通过；`?v=304→305` 替换前/后各 14 处（脚本校验）。
 - **改动范围**：`bot-ai-bus.js`、`run_ai_bus_core_test.js`、`index.html`（`?v=304→305` ×14）、`TASKS.md`。commit `feat(ai): 提示词G1通用策略+G3score语义` → HTTPS push `wenwen_dev`（ac3212e..5620ea5）。
+
+## 提示词增强批次（P1-P3，G4 已取消）
+
+- **P1 G1 通用策略 + G3 score 语义**：默认 system prompt 追加价值框架（1血≈2牌、留关键防御牌、别裸拼）；userPrompt 候选含 localHeuristicScore 时追加"参考分,非最优"说明（条件拼接，响应类无 score 不带）。
+- **P2 G5 决策思考链**：dying/duel/aoeResp/discardSubset/pickSlot/L1 controlsChoice 六处 prompt 追加 1-2 句思考引导（敌我判断/胜负预期/血量宽裕/保留优先/目标价值/值不值得）。
+- **P3 G2 响应类身份引导**：新增 `botPromptWithIdentity(base,g,seat)` helper（拼接 `botIdentityGuidance`）；dying/duel/aoeResp/jiedaoResponse/xiaoguo/enyuanGiveCard/guhuo/ganglie/controlsChoice 九处 buildSystemPrompt 改有参 (g,seat) 包 identity。仅身份局生效（ffa 空串）。无参 buildSystemPrompt 改有参后 `botDecide` 传参兼容，既有测试回归绿。
+- **G4 记牌感知已取消**（用户确认不做，维持删除弃牌堆统计）。
+- **测试**：core 10（+3）、l3 149（+6 P2 +5 P3）；AI-bus 10 套件 336 项全绿；14 文件 `node --check` 全过；`?v=304→307`。
