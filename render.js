@@ -677,7 +677,12 @@ function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COL
 // 每个分支把"谁对谁/发生了什么"和"你该做什么(含没有可用牌等兜底提示)"合并成一句话。
 // style 可选,仅 game-over 播报胜利时需要金色特殊样式。
 function setBanner(html, style){
-  document.getElementById('banner').innerHTML = html ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+html+'</div>' : '';
+  // A1 响应超时托管:询问型 pending 时在 banner 末尾拼"⏱ Ns 后自动…"倒计时
+  // (renderResponseCountdown 定义在 bot-ai-bus.js,加载早于本文件;currentG 是本文件
+  // render() 每次更新的快照)。html 为空(重置清空)时不拼,避免空 banner 只挂一个倒计时。
+  const cd = html ? renderResponseCountdown(currentG) : null;
+  const content = cd ? html + ' <span class="resp-countdown">' + cd + '</span>' : html;
+  document.getElementById('banner').innerHTML = content ? '<div class="banner"'+(style?' style="'+style+'"':'')+'>'+content+'</div>' : '';
 }
 
 // 座位卡装备行的单字缩写——刻意和 render-controls.js 的 EQUIP_SLOT_LABEL(完整词:
@@ -1003,6 +1008,9 @@ function renderSeatCard(g, seat, isSelf){
 // ---------- render ----------
 function render(g){
   currentG = g; // 供确认弹窗的取消回调异步刷新界面用(回调触发时早已不在 render 的调用栈里)
+  // A1 响应超时托管:确保 1s 检测器已启动(任意客户端;提交幂等,谁先到谁生效)。
+  // startAutoRespondTimer 内部有全局标志位,反复 render 只会启动一次。
+  if(typeof startAutoRespondTimer==='function') startAutoRespondTimer();
   if(!g){
     // room was deleted by someone (or doesn't exist) while we're in-game -> return to lobby
     if(!document.getElementById('game').classList.contains('hidden')){

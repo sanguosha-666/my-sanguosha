@@ -18,6 +18,23 @@ document.getElementById('joinBtn').onclick = joinRoom;
 
 // ---------- helpers ----------
 // Firebase drops empty arrays/objects -> they come back undefined. Restore defaults.
+// A1 响应超时托管:询问型 pending 的超时阈值(30s)。检测器(bot-ai-bus.js)按它判定超时
+// 提交保守动作,render.js 按它显示"⏱ Ns 后自动…"倒计时。
+const RESPONSE_TIMEOUT_MS = 30000;
+// 询问型 pending 的 type 集合(保守动作表 spec §2.2 + pick 选牌子阶段)。normalize 用它兜底
+// 补 askedAt;bot-ai-bus.js 的保守动作表与检测器复用同一份判定(有响应者字段的询问才计时)。
+const RESPONSE_PENDING_TYPES = new Set([
+  'wuxie', 'guicai', 'jiedaoChoice', 'ganglieChoice', 'guhuoQuestion', 'xiaoguo',
+  'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
+  'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick'
+]);
+// setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
+// 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
+// 每次 tx/render 都会把倒计时重置回 30s,永远等不到超时。
+function setResponseAskedAt(pending){
+  pending.askedAt = Date.now();
+  return pending;
+}
 function normalize(g){
   if(!g) return g;
   g.deck = g.deck || [];
@@ -1226,6 +1243,17 @@ function normalize(g){
     }
   }
 
+  // A1 响应超时托管:对"询问型"pending 兜底补 askedAt(缺失时=首次读到,视为刚被询问)。
+  // normalize 在 tx 写路径和 render 读路径都跑,老存档/创建处漏打的 pending 在这里补齐;
+  // 创建处/asking 切换处已用 setResponseAskedAt 打过,这里绝不覆盖原值(覆盖=倒计时重置,
+  // 永远等不到超时)。判断依据 = pending.type 在保守动作表集合里,或 respond 阶段(无 type)。
+  if(g.pending && typeof g.pending.askedAt !== 'number'){
+    const pt = g.pending.type;
+    const isAskPending = (typeof pt === 'string' && RESPONSE_PENDING_TYPES.has(pt))
+      || (pt === undefined && g.phase === 'respond');
+    if(isAskPending) g.pending.askedAt = Date.now();
+  }
+
   return g;
 }
 // logEvent: 追加一条结构化日志事件。ev = {text, kind?, actor?, targets?}:
@@ -1758,7 +1786,7 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
       if(red){
         if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard)) finishSingleShaTarget(g);
       } else {
-        g.pending={from:resume.from, to:resume.to};
+        g.pending=setResponseAskedAt({from:resume.from, to:resume.to});
         if(resume.sourceCard!==undefined) g.pending.sourceCard=resume.sourceCard;
         if(resume.shaInfo && resume.shaInfo.jiuBonus) g.pending.jiuBonus=true;
         g.phase='respond';
@@ -1768,7 +1796,7 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
         g.log=pushLog(g.log, g.players[resume.target].name+' 以【八卦阵】抵消【'+g.aoe.trick+'】');
         aoeAdvance(g, resume.target);
       } else {
-        g.pending={type:'aoeResp', from:g.aoe.from, to:resume.target, need:g.aoe.need};
+        g.pending=setResponseAskedAt({type:'aoeResp', from:g.aoe.from, to:resume.target, need:g.aoe.need});
         if(g.aoe.sourceCard!==undefined) g.pending.sourceCard=g.aoe.sourceCard;
         g.phase='aoeResp';
         g.log=pushLog(g.log, '要求 '+g.players[resume.target].name+' 打出【'+g.aoe.need+'】');
@@ -1856,7 +1884,7 @@ function maybeGuicai(g, judgedSeat, card, resume){
   
   const asker=firstGuicaiAsker(g, judgedSeat);
   if(asker===null) return;
-  g.pending={type:'guicai', seat:judgedSeat, asking:asker, judgeCard:card, resume};
+  g.pending=setResponseAskedAt({type:'guicai', seat:judgedSeat, asking:asker, judgeCard:card, resume});
   g.phase='guicai';
   g.log=pushLog(g.log, g.players[judgedSeat].name+' 判定得到 '+card.suit+rankText(card.rank)+',询问 '+g.players[asker].name+' 是否发动【鬼才】替换判定牌…');
   return 'pending';
@@ -1883,6 +1911,7 @@ function respondGuicai(useReplace, cardIdx){
     const nxt=nextGuicaiAsker(g, g.pending.seat, mySeat);
     if(nxt===null){ finishGuicai(g, g.pending.judgeCard); return g; }
     g.pending.asking=nxt;
+    setResponseAskedAt(g.pending); // A1:切换被问者即重新计时
     g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否发动【鬼才】替换判定牌…');
     return g;
   });
@@ -1978,7 +2007,7 @@ function finishGuicai(g, finalCard){
       if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard)) finishSingleShaTarget(g);
     }
     else {
-      g.pending={from:resume.from, to:resume.to};
+      g.pending=setResponseAskedAt({from:resume.from, to:resume.to});
       if(resume.sourceCard!==undefined) g.pending.sourceCard=resume.sourceCard;
       if(resume.shaInfo && resume.shaInfo.jiuBonus) g.pending.jiuBonus=true;
       g.phase='respond';
@@ -1988,7 +2017,7 @@ function finishGuicai(g, finalCard){
       g.log=pushLog(g.log, g.players[resume.target].name+' 以【八卦阵】抵消【'+g.aoe.trick+'】');
       aoeAdvance(g, resume.target);
     } else {
-      g.pending={type:'aoeResp', from:g.aoe.from, to:resume.target, need:g.aoe.need};
+      g.pending=setResponseAskedAt({type:'aoeResp', from:g.aoe.from, to:resume.target, need:g.aoe.need});
       if(g.aoe.sourceCard!==undefined) g.pending.sourceCard=g.aoe.sourceCard;
       g.phase='aoeResp';
       g.log=pushLog(g.log, '要求 '+g.players[resume.target].name+' 打出【'+g.aoe.need+'】');
@@ -3003,7 +3032,7 @@ function respondJiedao(useSha, cardIdx){
 // 这里只管接回流程,不重复归因到某个具体技能。
 function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInfo){
   const me=g.players[from];
-  g.pending={from, to, noShan, shaColor};
+  g.pending=setResponseAskedAt({from, to, noShan, shaColor});
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
   if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
   if(noShan){
@@ -3392,7 +3421,7 @@ function maybeStartLiuli(g, from, to, usedAs, shaColor, sourceCard){
   if(liuliDiscardOptions(target).length===0) return false;
   const targets=liuliTargets(g, from, to);
   if(targets.length===0) return false;
-  g.pending={type:'liuli', from, to, usedAs, shaColor, targets};
+  g.pending=setResponseAskedAt({type:'liuli', from, to, usedAs, shaColor, targets});
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
   g.phase='liuli';
   g.log=pushLog(g.log, target.name+' 是否发动【流离】,弃一张牌转移此【杀】…');
@@ -3866,7 +3895,7 @@ function startDying(g, seat, resumeType, sourceSeat, amount){
     markSkillSound(g, '完杀');
   }
   
-  g.pending={type:'dying', seat, asking:seat, resume};
+  g.pending=setResponseAskedAt({type:'dying', seat, asking:seat, resume});
   g.phase='dying';
   g.log=pushLog(g.log, p.name+' 濒死！询问 '+p.name+' 是否使用【桃】自救…');
 }
@@ -3974,6 +4003,7 @@ function respondDying(useTao, jijiuChoice){
     const nxt=nextAskee(g, g.pending.seat, mySeat);
     if(nxt===null){ finishDying(g, true); return g; }
     g.pending.asking=nxt;
+    setResponseAskedAt(g.pending); // A1:切换被问者即重新计时
     g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否对 '+dyingP.name+' 使用【桃】…');
     return g;
   });
@@ -4400,7 +4430,7 @@ function finishGanglieJudge(g, card, seat, sourceSeat, resume){
     dealGanglieDamage(g, seat, sourceSeat, resume);
     return;
   }
-  g.pending={type:'ganglieChoice', seat, sourceSeat, resume};
+  g.pending=setResponseAskedAt({type:'ganglieChoice', seat, sourceSeat, resume});
   g.phase='ganglieChoice';
   g.log=pushLog(g.log, source.name+' 需选择弃置2张手牌或受到1点【刚烈】伤害');
 }
@@ -4684,7 +4714,7 @@ function startTrick(g, info){
   // 放置/五谷丰登——所有经过 startTrick 的锦囊——第一次使用就被 Firebase 拒绝,界面上表现为
   // "点确定没反应",且这类 bug 只有真连 Firebase 才会触发,本地 stub 测试完全测不出来)。
   // 只在真的有值时才把这个 key 放进对象(而不是塞一个 undefined 值)。
-  g.pending={type:'wuxie', trick:info.trick, from:info.from, to:info.to, exclude:info.from, depth:0};
+  g.pending=setResponseAskedAt({type:'wuxie', trick:info.trick, from:info.from, to:info.to, exclude:info.from, depth:0});
   // 初始无懈窗口允许所有持有无懈的存活角色响应（包括锦囊使用者本人），并记录本层已问座位。
   // 桃园/五谷原先单独打开 askAll，而其它锦囊走另一套遍历，容易出现范围不一致；现在统一。
   g.pending.askAll=true;
@@ -4707,6 +4737,7 @@ function openWuxieRound(g){
   const asking=nextWuxieAskee(g, g.pending);
   if(asking===null){ finishWuxieRound(g); return; }
   g.pending.asking=asking;
+  setResponseAskedAt(g.pending); // A1:每次轮到下一位无懈候选人即重新计时
   markWuxieAsked(g);
   const verb = g.pending.depth>0 ? '反制' : '使用';
   g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
@@ -4799,7 +4830,7 @@ function startTaoyuanWuxie(g, from, order, idx){
     return;
   }
   const to=order[idx];
-  g.pending={type:'wuxie', ctx:'taoyuan', trick:'桃园结义', from, to, exclude:from, depth:0, order, idx};
+  g.pending=setResponseAskedAt({type:'wuxie', ctx:'taoyuan', trick:'桃园结义', from, to, exclude:from, depth:0, order, idx});
   g.pending.askAll=true;
   g.pending.askStart=from;
   g.pending.asked=[];
@@ -4844,7 +4875,7 @@ function startWuguWuxie(g, from, pool, order, idx){
     return;
   }
   const to=order[idx];
-  g.pending={type:'wuxie', ctx:'wugu', trick:'五谷丰登', from, to, exclude:from, depth:0, pool, order, idx};
+  g.pending=setResponseAskedAt({type:'wuxie', ctx:'wugu', trick:'五谷丰登', from, to, exclude:from, depth:0, pool, order, idx});
   g.pending.askAll=true;
   g.pending.askStart=from;
   g.pending.asked=[];
@@ -4871,7 +4902,7 @@ function finishWuguTargetWuxie(g, info, blocked){
 function resolveTrick(g, info){
   const tgt=g.players[info.to];
   if(info.trick==='决斗'){
-    g.pending={type:'duel', from:info.from, to:info.to, active:info.to};
+    g.pending=setResponseAskedAt({type:'duel', from:info.from, to:info.to, active:info.to});
     if(info.sourceCard!==undefined) g.pending.sourceCard=info.sourceCard;
     g.phase='duel';
     // 决斗发起牌本身不需要在这里手动补插:markCardSound 现在无条件 push(不再按阶段枚举
@@ -4915,7 +4946,7 @@ function resolveTrick(g, info){
       g.log=pushLog(g.log, '【火攻】目标没有手牌,无效果');
       return;
     }
-    g.pending={type:'huogongReveal', from:info.from, to:info.to, sourceCard:info.sourceCard};
+    g.pending=setResponseAskedAt({type:'huogongReveal', from:info.from, to:info.to, sourceCard:info.sourceCard});
     g.phase='huogongReveal';
     g.log=pushLog(g.log, '等待 '+tgt.name+' 为【火攻】展示一张手牌…');
     return;
@@ -4942,7 +4973,7 @@ function resolveTrick(g, info){
       g.log=pushLog(g.log, '【借刀杀人】目标已失效,无事发生');
       return;
     }
-    g.pending={type:'jiedaoChoice', from:info.from, seatA:info.to, seatB:info.seatB};
+    g.pending=setResponseAskedAt({type:'jiedaoChoice', from:info.from, seatA:info.to, seatB:info.seatB});
     g.phase='jiedaoChoice';
     g.log=pushLog(g.log, A.name+' 请选择:对 '+B.name+' 使用【杀】,或弃置武器【'+A.equips.weapon.name+'】…');
     return;
@@ -4982,7 +5013,7 @@ function resolveTrick(g, info){
     return;
   }
   // 多个可选:开使用者选牌子阶段(只有 from 能操作)
-  g.pending={type:'pick', trick:info.trick, from:info.from, to:info.to};
+  g.pending=setResponseAskedAt({type:'pick', trick:info.trick, from:info.from, to:info.to});
   g.phase='pick';
   g.log=pushLog(g.log, '等待 '+g.players[info.from].name+' 选择对 '+tgt.name+' 拿/拆哪张牌…');
 }
@@ -5076,6 +5107,7 @@ function respondWuxie(useWuxie){
       finishWuxieRound(g);
     } else {
       g.pending.asking=nxt;
+      setResponseAskedAt(g.pending); // A1:切换被问者即重新计时
       markWuxieAsked(g);
       const verb = g.pending.depth>0 ? '反制' : '使用';
       g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否'+verb+'【无懈可击】…');
@@ -5153,7 +5185,7 @@ function aoeAdvance(g, prevSeat){
     return;
   }
   // 对该目标开启无懈询问子阶段(exclude/depth 初始化,交给 openWuxieRound 统一处理)
-  g.pending={type:'wuxie', ctx:'aoe', trick:g.aoe.trick, from, to:next, exclude:from, depth:0};
+  g.pending=setResponseAskedAt({type:'wuxie', ctx:'aoe', trick:g.aoe.trick, from, to:next, exclude:from, depth:0});
   g.pending.askAll=true;
   g.pending.askStart=from;
   g.pending.asked=[];
@@ -5174,7 +5206,7 @@ function startAoeRespond(g, target){
       return;
     }
   }
-  g.pending={type:'aoeResp', from:g.aoe.from, to:target, need:g.aoe.need};
+  g.pending=setResponseAskedAt({type:'aoeResp', from:g.aoe.from, to:target, need:g.aoe.need});
   if(g.aoe.sourceCard!==undefined) g.pending.sourceCard=g.aoe.sourceCard;
   g.phase='aoeResp';
   g.log=pushLog(g.log, '要求 '+g.players[target].name+' 打出【'+g.aoe.need+'】');
@@ -5389,7 +5421,7 @@ function endTurn(){
     {
       const xiaoguoAsker = nextXiaoguoAsker(g, mySeat, mySeat);
       if(xiaoguoAsker !== null){
-        g.pending={type:'xiaoguo', endingSeat:mySeat, asking:xiaoguoAsker};
+        g.pending=setResponseAskedAt({type:'xiaoguo', endingSeat:mySeat, asking:xiaoguoAsker});
         g.phase='xiaoguo';
         g.log=pushLog(g.log, '结束阶段:询问 '+g.players[xiaoguoAsker].name+' 是否发动【骁果】…');
         return g;
@@ -5739,7 +5771,7 @@ function advanceXiaoguo(g, endingSeat, current){
   // continueEndPhaseAfterXiaoguo(g,mySeat);return g;（其后没有多余的 finishTurn）是同一条链、
   // 同一个约定,两处调用方式必须一致。
   if(asker===null){ g.pending=null; continueEndPhaseAfterXiaoguo(g, endingSeat); return; }
-  g.pending={type:'xiaoguo', endingSeat, asking:asker};
+  g.pending=setResponseAskedAt({type:'xiaoguo', endingSeat, asking:asker});
   g.phase='xiaoguo';
   g.log=pushLog(g.log, '结束阶段:询问 '+g.players[asker].name+' 是否发动【骁果】…');
 }
@@ -5897,7 +5929,7 @@ function enterDrawPhase(g){
   } else {
     const lirangSeat=eligibleLiRangSeat(g, g.turn);
     if(lirangSeat!==null){
-      g.pending={type:'lirangAsk', from:lirangSeat, to:g.turn};
+      g.pending=setResponseAskedAt({type:'lirangAsk', from:lirangSeat, to:g.turn});
       g.phase='lirangAsk';
       g.log=pushLog(g.log, g.players[g.turn].name+' 的摸牌阶段开始,询问 '+g.players[lirangSeat].name+' 是否发动【礼让】…');
       return;

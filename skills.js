@@ -212,7 +212,7 @@ function fanJian(targetSeat){
     if(!me || !target || !me.alive || !target.alive || targetSeat===mySeat) return g;
     if(!hasCap(me,'fanjian') || g.fanJianUsed || (me.hand||[]).length===0) return g;
     g.fanJianUsed=true;
-    g.pending={type:'fanjianSuit', seat:mySeat, targetSeat};
+    g.pending=setResponseAskedAt({type:'fanjianSuit', seat:mySeat, targetSeat});
     g.phase='fanjianSuit';
     g.log=pushLog(g.log, me.name+' 对 '+target.name+' 发动【反间】,令其选择一种花色');
     markSkillSound(g, '反间');
@@ -541,7 +541,7 @@ function startGuhuo(cardIdx, claimedName){
     if(!guhuoHasLegalTarget(g, mySeat, claimed, spec)) return g;
     me.hand.splice(cardIdx,1);
     g.guhuoUsed=true;
-    g.pending={ type:'guhuoQuestion', sourceSeat:mySeat, actualCard:actual, claimedCard:claimed, questioners:[], answered:[] };
+    g.pending=setResponseAskedAt({ type:'guhuoQuestion', sourceSeat:mySeat, actualCard:actual, claimedCard:claimed, questioners:[], answered:[] });
     g.log=pushLog(g.log, me.name+' 扣置一张手牌发动【蛊惑】,声明为【'+claimedName+'】');
     markSkillSound(g, '蛊惑');
     const asker=nextGuhuoAsker(g, mySeat);
@@ -568,7 +568,7 @@ function startGuhuoResponse(cardIdx, claimedName){
     g.guhuoUsed=true;
     const oldPhase=g.phase;
     const oldPending=g.pending;
-    g.pending={
+    g.pending=setResponseAskedAt({
       type:'guhuoQuestion',
       sourceSeat:mySeat,
       actualCard:actual,
@@ -576,7 +576,7 @@ function startGuhuoResponse(cardIdx, claimedName){
       questioners:[],
       answered:[],
       response:{ phase:oldPhase, pending:oldPending }
-    };
+    });
     g.log=pushLog(g.log, me.name+' 扣置一张手牌发动【蛊惑】,声明为【'+claimedName+'】');
     markSkillSound(g, '蛊惑');
     const asker=nextGuhuoAsker(g, mySeat);
@@ -613,6 +613,7 @@ function respondGuhuoQuestion(question){
       resolveGuhuoAfterQuestion(g);
     } else {
       g.pending.asking=asker;
+      setResponseAskedAt(g.pending); // A1:切换下一位质疑候选人即重新计时
       g.log=pushLog(g.log, g.players[asker].name+' 是否质疑【蛊惑】?');
     }
     return g;
@@ -864,7 +865,7 @@ function maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourc
   const hearts=tianxiangHeartOptions(p);
   const targets=tianxiangTargets(g, seat);
   if(hearts.length===0 || targets.length===0) return false;
-  g.pending={type:'tianxiang', seat, amount, sourceSeat, reason, srcType, targets, resume:{type:srcType}};
+  g.pending=setResponseAskedAt({type:'tianxiang', seat, amount, sourceSeat, reason, srcType, targets, resume:{type:srcType}});
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
   g.phase='tianxiang';
   g.log=pushLog(g.log, p.name+' 是否发动【天香】,弃置一张红桃手牌转移此次伤害…');
@@ -887,7 +888,7 @@ function maybeStartZhengyi(g, seat, amount, sourceSeat, reason, srcType, sourceC
   const asking=zhengyiRecipient(g, seat);
   if(asking===null) return false;
   p.zhengyiTurn=g.turn;
-  g.pending={type:'zhengyi', seat, asking, amount, sourceSeat, reason, srcType, resume:{type:srcType}};
+  g.pending=setResponseAskedAt({type:'zhengyi', seat, asking, amount, sourceSeat, reason, srcType, resume:{type:srcType}});
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
   g.phase='zhengyi';
   g.log=pushLog(g.log, p.name+' 本回合首次受到伤害,询问 '+g.players[asking].name+' 是否发动【争义】替其承受…');
@@ -1052,7 +1053,7 @@ function quHu(cardIdx, targetSeat){
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
     g.quHuUsed=true;
-    g.pending={type:'quhuRespond', seat:mySeat, targetSeat, selfCard:card};
+    g.pending=setResponseAskedAt({type:'quhuRespond', seat:mySeat, targetSeat, selfCard:card});
     g.phase='quhuRespond';
     g.log=pushLog(g.log, me.name+' 发动【驱虎】,与 '+target.name+' 拼点');
     markSkillSound(g, '驱虎');
@@ -1411,7 +1412,7 @@ function respondHuogongReveal(cardIdx){
       g.log=pushLog(g.log, user.name+' 没有同花色手牌,【火攻】不造成伤害');
       return g;
     }
-    g.pending={type:'huogong', from:d.from, to:mySeat, suit, sourceCard:d.sourceCard};
+    g.pending=setResponseAskedAt({type:'huogong', from:d.from, to:mySeat, suit, sourceCard:d.sourceCard});
     g.phase='huogong';
     g.log=pushLog(g.log, user.name+' 可弃置一张'+suit+'手牌,令 '+target.name+' 受到1点火属性伤害');
     return g;
@@ -1590,7 +1591,7 @@ function maybeStartLiRangRecover(g, endingSeat){
   if(!kong || !kong.alive || !hasCap(kong,'lirang')) return false;
   const cards=liRangDiscardCardsInPile(g, r.discarded);
   if(cards.length===0) return false;
-  g.pending={type:'lirangRecover', from:r.from, to:endingSeat, cards};
+  g.pending=setResponseAskedAt({type:'lirangRecover', from:r.from, to:endingSeat, cards});
   g.phase='lirangRecover';
   g.log=pushLog(g.log, kong.name+' 是否发动【礼让】,获得 '+g.players[endingSeat].name+' 本弃牌阶段弃置的牌…');
   return true;
@@ -1671,7 +1672,7 @@ function respondXiaoguo(activate, cardIdx){
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 弃置一张【'+card.name+'】,发动【骁果】,询问 '+g.players[endingSeat].name+' 弃装备或受到1点伤害…');
-    g.pending={type:'xiaoguoChoice', from:mySeat, endingSeat, to:endingSeat};
+    g.pending=setResponseAskedAt({type:'xiaoguoChoice', from:mySeat, endingSeat, to:endingSeat});
     g.phase='xiaoguoChoice';
     return g;
   });

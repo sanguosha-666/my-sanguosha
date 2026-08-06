@@ -189,3 +189,89 @@ async function botDecide(decisionId, g, seat){
   spec.execute(g, seat, choice);
   return true;
 }
+
+// ================= A1 响应超时托管(30s+倒数+保守提交) =================
+// 【本段是什么】询问型 pending 超时(askedAt + RESPONSE_TIMEOUT_MS)自动提交"保守动作",
+// 画面显示"⏱ Ns 后自动…"倒计时,避免有人挂机/关页面整局卡死。服务端在每次询问
+// (pending 创建/asking 切换)用 setResponseAskedAt 打戳,normalize 对遗漏的询问型 pending
+// 兜底补戳;这里提供检测器与展示计算。任意客户端都可提交,幂等——服务端响应函数自带
+// 守卫(asking/to/from===mySeat 等),提交时阶段已变则守卫拦截、原地 return,无副作用。
+// 【无密钥零变化】检测器只在超时时提交保守动作,不调用 callAI/不碰任何 AI 决策路径;
+// 无密钥对局的正常响应流程与改动前逐字一致。
+function renderResponseCountdown(g){
+  if(!g || !g.pending || typeof g.pending.askedAt !== 'number') return null;
+  const remain = Math.ceil((g.pending.askedAt + RESPONSE_TIMEOUT_MS - Date.now()) / 1000);
+  return '⏱ ' + Math.max(remain, 0) + 's 后自动…';
+}
+// autoRespondAction: 保守动作表(spec §2.2 逐条)。返回"该阶段超时该提交的动作闭包",
+// 非保守表阶段返回 null(只计时不自动提交)。闭包体内引用响应函数标识符是运行时查找,
+// 测试可直接把响应函数替换成 spy 验证"被调"。
+function autoRespondAction(g){
+  const phase = g.phase;
+  const type = (g.pending && g.pending.type) || '';
+  if(phase==='respond') return function(){ respondShan(false); };               // 出闪:不出
+  if(phase==='aoeResp') return function(){ aoeRespond(false); };                // AOE:不出
+  if(phase==='duel') return function(){ duelResponse(false); };                 // 决斗:不出杀
+  if(phase==='dying') return function(){ respondDying(false); };                // 求桃:不救
+  if(type==='wuxie') return function(){ respondWuxie(false); };                 // 无懈:不出
+  if(type==='guicai') return function(){ respondGuicai(false); };               // 鬼才:不发动
+  if(type==='jiedaoChoice') return function(){ respondJiedao(false); };         // 借刀:弃武器
+  if(type==='ganglieChoice') return function(){ respondGanglieChoice('damage',[]); }; // 刚烈:受伤
+  if(type==='guhuoQuestion') return function(){ respondGuhuoQuestion(false); }; // 蛊惑:不质疑
+  if(type==='xiaoguo') return function(){ respondXiaoguo(false); };             // 骁果:不发动
+  if(type==='xiaoguoChoice') return function(){ respondXiaoguoChoice('damage'); }; // 骁果目标:受伤害
+  if(type==='lirangAsk') return function(){ respondLiRang(false,[]); };         // 礼让:不发动
+  if(type==='lirangRecover') return function(){ respondLiRangRecover(false); }; // 礼让回收:不获得
+  if(type==='zhengyi') return function(){ respondZhengyi(false); };             // 争义:不发动
+  if(type==='tianxiang') return function(){ respondTianxiang(null,null); };     // 天香:不发动
+  if(type==='liuli') return function(){ respondLiuli(null,null); };             // 流离:不发动
+  if(type==='quhuRespond') return function(){ respondQuhu(0); };                // 驱虎拼点:出第0张
+  if(type==='fanjianSuit') return function(){ respondFanjianSuit(SUITS[Math.floor(Math.random()*SUITS.length)]); }; // 反间:随机花色
+  if(type==='huogong') return function(){ respondHuogong(false); };             // 火攻:不弃牌
+  if(type==='huogongReveal') return function(){ respondHuogongReveal(0); };     // 火攻亮牌:亮第0张
+  return null;
+}
+// maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且
+// 该阶段有保守动作,则 botInvoke 到被问者座位提交。幂等:服务端守卫通过才生效。
+// 返回 true 表示本次提交了动作(供测试断言用),未提交返回 false。
+function maybeAutoRespondTimeout(g){
+  if(!g || !g.pending || typeof g.pending.askedAt !== 'number') return false;
+  if(Date.now() - g.pending.askedAt < RESPONSE_TIMEOUT_MS) return false;
+  const act = autoRespondAction(g);
+  if(!act) return false;
+  const actorField = (typeof BOT_PHASE_ACTOR!=='undefined' && BOT_PHASE_ACTOR) ? BOT_PHASE_ACTOR[g.phase] : undefined;
+  const actor = actorField!==undefined ? g.pending[actorField] : null;
+  if(typeof actor!=='number' || !g.players || !g.players[actor]) return false;
+  if(typeof botInvoke==='function'){
+    botInvoke(actor, act);
+  } else {
+    act();
+  }
+  return true;
+}
+// refreshCountdownSpans: 每秒把页面上所有 .resp-countdown 文本刷成最新剩余秒数
+// (倒计时数字不随状态变化自动走,必须靠检测器的 tick 主动刷新;测试环境 querySelectorAll
+// 返回空数组,天然 no-op)。
+function refreshCountdownSpans(){
+  if(typeof document==='undefined' || typeof document.querySelectorAll!=='function') return;
+  const spans = document.querySelectorAll('.resp-countdown');
+  const cd = (typeof currentG!=='undefined' && currentG) ? renderResponseCountdown(currentG) : null;
+  for(let i=0;i<spans.length;i++){
+    spans[i].textContent = cd || '';
+  }
+}
+// startAutoRespondTimer: 启动 1s 检测器。任意客户端都可启动(提交幂等);用标志位保证
+// 全局只启动一个实例。render() 每次渲染时调用它确保已启动(浏览器环境);vm 测试沙箱
+// 没有 setInterval/不需要启动,直接调 maybeAutoRespondTimeout 单步验证。
+let __autoRespondTimerStarted = false;
+function startAutoRespondTimer(){
+  if(__autoRespondTimerStarted) return;
+  if(typeof setInterval==='undefined') return;
+  __autoRespondTimerStarted = true;
+  setInterval(function(){
+    if(typeof currentG!=='undefined' && currentG){
+      maybeAutoRespondTimeout(currentG);
+      refreshCountdownSpans();
+    }
+  }, 1000);
+}
