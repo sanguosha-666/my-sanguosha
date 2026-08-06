@@ -84,6 +84,14 @@ function normalize(g){
   g.aiSuspicionEvents=g.aiSuspicionEvents.filter(e=>e && typeof e==='object'
     && Number.isInteger(e.round) && Number.isInteger(e.source) && Number.isInteger(e.target)
     && Number.isInteger(e.amount) && (e.kind==='damage'||e.kind==='rescue')).slice(-20);
+  // 按座位累计的嫌疑分缓存(bot.js botSuspicion 写入):Firebase 吞空对象,回退容器为{};
+  // 键值防御非数字/超范围(读取端本身也有 Math.max(-100,Math.min(100,...)) 约束写入,
+  // 这里是双重保险,防止旧存档或手工构造的脏数据带进不合法值)。
+  if(!g.aiRebelSuspicion || typeof g.aiRebelSuspicion!=='object' || Array.isArray(g.aiRebelSuspicion)) g.aiRebelSuspicion={};
+  Object.keys(g.aiRebelSuspicion).forEach(k=>{
+    const v=g.aiRebelSuspicion[k];
+    if(typeof v!=='number' || !isFinite(v)) delete g.aiRebelSuspicion[k];
+  });
   // 出牌语音事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次出牌语音事件")
   if(g.lastCardSound===undefined) g.lastCardSound=null;
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
