@@ -283,3 +283,9 @@
 - **扫描**：`BOT_PHASE_ACTOR` 44 个 phase 逐一对照 `BOT_DECISIONS` 注册（31 项）+ `CONTROLS_CHOICE_EXCLUDE`（33 项）+ L1 allowlist + 旧分支。
 - **结论（零代码改动）**：12 个"已登记 actor 但未注册未 EXCLUDE"阶段均有明确覆盖路径——①allowlist 三阶段（wuxie/luoyingAsk/luoshen）由 L1 接管（无密钥也接管）；②liuli/tianxiang/lirangRecover/zhengyi/xiaoguoChoice 为 G2/A1 已确认的 L1 覆盖阶段（有密钥 AI 接管，无密钥走旧分支/botSafePrompt，A8 已修正则盲区）；③guanxing/huashenSkill 有专用注册（grep 名不同）；④xunxunPick/respond 走本地旧分支（逻辑正确）。无新增盲区。
 - **改动范围**：仅 progress-log 记录，无业务代码改动。
+
+## 大批次总收尾（D2/D3/A1/A2/B2/D4）
+
+- **交付**：D2 `bot-ai-bus.js` 拆分（总线核心独立，加载顺序 bot-ai-bus 在 bot 前）；D3 `AI_DEFAULT_MODEL` 单源（`PROVIDER_ADAPTERS[x].defaultModel`）；A1 响应超时托管（30s + 画面倒数 + 20 阶段保守动作表 + 幂等提交 + `RESPONSE_TIMEOUT_MS=30000`）；A2 断线重连验证（客户端态天然重置，零业务改动）；B2 四主公技（激将/护驾/制霸/妄尊，仅 `role==='zhu'` 守卫，新 pending 均登记 BOT_PHASE_ACTOR + BOT_DECISIONS + 超时保守表 + EXCLUDE）；D4 响应阶段 UI 回归扫描（无盲区，零代码改动）。
+- **测试**：AI-bus 10 套件 322 项全绿（timeout 8/lordskill 45/summary 13/core 7/info 16/l1 21/l2 23/c_window 34/l3 138/model_picker 17）；仓库 identity 35/lidian 3/qinggangjian 7/xuanfeng 6 全过，fazheng 8/3（既有眩惑基线）、cixiong 17/3（既有基线）；14 文件 `node --check` 全过。
+- **待办**：D1 真机验证（用户实操多浏览器联机，验证清单已交付）。
