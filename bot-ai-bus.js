@@ -97,16 +97,21 @@ async function updateAiSummary(g, seat){
 
 function buildBotDefaultSystemPrompt(/* g, seat, ctx */){
   return '你在扮演网页版三国杀的AI机器人。根据局面与武将技能说明，从候选列表选一个index。'
-    +'只能选列表内选项。只输出 {"choice":数字}，不要解释。';
+    +'只能选列表内选项。只输出 {"choice":数字}，不要解释。'
+    +'决策参考(是判断优先级的参考,不是必须遵守的硬规则):1点体力大致相当于2张手牌的价值;'
+    +'关键防御牌(无懈/闪/桃)要留到关键时刻,别为试探而消耗;手牌耗尽裸拼往往替别人火中取栗;'
+    +'多数决策宁可保守不出,也不要打空自己。';
 }
 
 function buildBotDefaultUserPrompt(state, candidates){
+  const hasScore = (candidates||[]).some(function(c){ return typeof c.localHeuristicScore === 'number'; });
   return '当前局面:\n'+JSON.stringify(state)
     +'\n\n合法候选(index从0开始):\n'+JSON.stringify(candidates.map(c=>({
       index:c.index, label:c.label, action:c.action, card:c.card, seat:c.seat,
       handIndex:c.handIndex, cardIdx:c.cardIdx, target:c.target, targets:c.targets,
       pickKey:c.pickKey, discardIndices:c.discardIndices
     })))
+    +(hasScore ? '\n\n说明:localHeuristicScore是本地算法的参考分,只是排序参考,不代表最优解;请结合局面与你的判断选择,不一定要选分数最高的。' : '')
     +'\n\n只返回 {"choice":数字}';
 }
 

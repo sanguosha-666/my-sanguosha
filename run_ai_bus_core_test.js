@@ -161,6 +161,24 @@ const testCode = String.raw`
     if(r !== false) throw new Error('期望 false,实际 ' + r);
   });
 
+  // 8. buildBotDefaultSystemPrompt:含通用策略(G1)
+  await check('buildBotDefaultSystemPrompt() 含"1点体力"', function(){
+    var p = buildBotDefaultSystemPrompt();
+    if(p.indexOf('1点体力') < 0) throw new Error('系统提示应含通用策略,实际: ' + p);
+  });
+
+  // 9. buildBotDefaultUserPrompt:候选含 localHeuristicScore 时附 score 语义说明(G3)
+  await check('buildBotDefaultUserPrompt 有 score 时含"参考分"', function(){
+    var u = buildBotDefaultUserPrompt({ phase: 'play' }, [{ localHeuristicScore: 50 }]);
+    if(u.indexOf('参考分') < 0) throw new Error('应有 score 语义说明,实际: ' + u);
+  });
+
+  // 10. buildBotDefaultUserPrompt:候选无 score 时不含"参考分"(条件拼接)
+  await check('buildBotDefaultUserPrompt 无 score 时不含"参考分"', function(){
+    var u = buildBotDefaultUserPrompt({ phase: 'play' }, [{ action: '出', label: 'x' }]);
+    if(u.indexOf('参考分') >= 0) throw new Error('不应有 score 语义说明,实际: ' + u);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
