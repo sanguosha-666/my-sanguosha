@@ -222,3 +222,11 @@
 - **无密钥回退**：选择首个合法单目标组合，保证机器人不会因方天模式直接卡住；这是原机器人未覆盖能力的新增合法行为。
 - **测试**：l3 新增 match 门槛、组合形状、AI/无密钥执行、空城/距离过滤、接线断言；l3 131/0、c_window 34/0，`node --check bot.js` 通过。旧接线断言同步加入 fangtian 优先级并清理测试状态。
 - **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=295→296` ×13）。
+
+## A6 多张仁德（继续给/停止）
+
+- **实现**：`BOT_DECISIONS.rendeTwoStep` 阶段B 提交一张后，若 `renDeCount<2` 且手牌还有牌，设 `botTwoStepA={decisionId:'rendeTwoStep', a:目标, continue:true}` 继续给下一张；continue 态候选=剩余手牌+「停止给牌」项；选停止即 reset。目标字段沿用既有 `a`。
+- **无密钥零变化**：`localFallback` 返回带 `stopAfter` 标记的候选，execute 提交一张后直接 reset、不设 continue——改动前只给1张的行为逐字保留。
+- **边界**：continue 态手牌空时 match 放行一次（候选只剩「停止」可清挂起），避免挂起残留。
+- **测试**：l3 新增仁德 continue 链 7 条（选目标/阶段B候选/提交后设 continue/停止/reset/无密钥一张即停/手牌空只剩停止）；l3 138/0、c_window 34/0，`node --check bot.js` 通过。
+- **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=296→297` ×13）。

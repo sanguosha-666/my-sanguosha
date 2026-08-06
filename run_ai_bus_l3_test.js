@@ -1272,6 +1272,152 @@ const testCode = String.raw`
     botTwoStepA = null;
   });
 
+  // ================= A6:仁德 continue 逐张给牌链 =================
+  // bot.js A6:阶段B提交一张后 renDeCount<2 且手牌剩牌 → botTwoStepA={...,continue:true},
+  // 下一调度候选=剩余手牌+「停止给牌」;选停止/renDeCount>=2/手牌空 → reset 不再给。
+  // 无密钥 localFallback 带 stopAfter → 只给一张即停(改动前行为),不设 continue。
+  await check('仁德A6-1 阶段A有密钥:mock 选目标 → botTwoStepA={rendeTwoStep,a:目标};userPrompt 候选=存活非自己', async function(){
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r10'), card('桃','r11')] });
+    g.renDeCount = 0;
+    var r = await botDecide('rendeTwoStep', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'rendeTwoStep' || botTwoStepA.a !== 2)
+      throw new Error('阶段A mock选2后应挂起 {rendeTwoStep,a:2},实际 ' + JSON.stringify(botTwoStepA));
+    if(botTwoStepA.continue) throw new Error('阶段A不应带 continue,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__rendeCalls.length !== 0) throw new Error('阶段A不应提交 renDe,实际 ' + JSON.stringify(window.__rendeCalls));
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('玩家2') < 0) throw new Error('userPrompt 候选应含玩家2(存活非自己),实际 ' + up);
+    var candPart = up.slice(up.indexOf('合法候选'));
+    if(candPart.indexOf('机器人0') >= 0) throw new Error('候选列表不应含自己,实际 ' + candPart);
+    botTwoStepA = null;
+  });
+
+  await check('仁德A6-2 阶段B非continue:候选=每张手牌一项,无停止项;非continue空手牌 match false', function(){
+    var s = BOT_DECISIONS.rendeTwoStep;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r20'), card('桃','r21'), card('闪','r22')] });
+    g.renDeCount = 0;
+    botTwoStepA = { decisionId: 'rendeTwoStep', a: 1 };
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 3) throw new Error('非continue阶段B候选应为手牌每张一项(3),实际 ' + c.length);
+    if(c.some(function(x){ return x.stop; })) throw new Error('非continue阶段B不应有停止项,实际 ' + JSON.stringify(c));
+    if(c.some(function(x){ return x.step !== 'B'; })) throw new Error('全部候选应为 step:B,实际 ' + JSON.stringify(c));
+    if(c.map(function(x){ return x.cardIdx; }).join(',') !== '0,1,2')
+      throw new Error('cardIdx 应为 0,1,2,实际 ' + c.map(function(x){ return x.cardIdx; }).join(','));
+    var g2 = mkSeatG({ caps0: { rende: true }, myHand: [] });
+    if(s.match(g2, 0)) throw new Error('非continue空手牌不应命中');
+    botTwoStepA = null;
+  });
+
+  await check('仁德A6-3 阶段B提交一张后 renDeCount<2 且手牌剩牌 → botTwoStepA 设 continue:true', async function(){
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r30'), card('桃','r31')] });
+    g.renDeCount = 0;
+    botTwoStepA = { decisionId: 'rendeTwoStep', a: 1 };
+    var r = await botDecide('rendeTwoStep', g, 0);
+    if(r !== true) throw new Error('调度应返回 true,实际 ' + r);
+    if(window.__rendeCalls.length !== 1 || window.__rendeCalls[0][0] !== 0 || window.__rendeCalls[0][1] !== 1)
+      throw new Error('应 renDe(0,1),实际 ' + JSON.stringify(window.__rendeCalls));
+    if(!botTwoStepA || botTwoStepA.decisionId !== 'rendeTwoStep' || botTwoStepA.a !== 1 || !botTwoStepA.continue)
+      throw new Error('提交后应挂起 {rendeTwoStep,a:1,continue:true},实际 ' + JSON.stringify(botTwoStepA));
+    botTwoStepA = null;
+  });
+
+  await check('仁德A6-4 continue态候选=剩余手牌+停止给牌;mock 选停止 → reset 不再给', async function(){
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":2}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r40'), card('桃','r41')] });
+    g.renDeCount = 1;
+    botTwoStepA = { decisionId: 'rendeTwoStep', a: 1, continue: true };
+    var r = await botDecide('rendeTwoStep', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('停止给牌') < 0) throw new Error('continue态 userPrompt 应含停止给牌,实际 ' + up);
+    if(up.indexOf('杀') < 0 || up.indexOf('桃') < 0) throw new Error('continue态候选应含剩余手牌,实际 ' + up);
+    // mock 选 choice:2 = 停止项(2手牌+1停止,停止在末尾)
+    if(botTwoStepA !== null) throw new Error('选停止后应 reset,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__rendeCalls.length !== 0) throw new Error('选停止不应再给牌,实际 ' + JSON.stringify(window.__rendeCalls));
+    botTwoStepA = null;
+  });
+
+  await check('仁德A6-5 无密钥 fallback:调度1挂起阶段A;调度2只给一张即停(stopAfter 生效),不设 continue,与改动前一致', async function(){
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r50'), card('桃','r51')] });
+    g.renDeCount = 0;
+    var r1 = await botDecide('rendeTwoStep', g, 0);
+    if(r1 !== true || !botTwoStepA || botTwoStepA.a !== 1)
+      throw new Error('调度1应挂起 {rendeTwoStep,a:1},实际 ' + JSON.stringify(botTwoStepA));
+    var r2 = await botDecide('rendeTwoStep', g, 0);
+    if(r2 !== true) throw new Error('调度2应返回 true,实际 ' + r2);
+    if(window.__rendeCalls.length !== 1 || window.__rendeCalls[0][0] !== 0 || window.__rendeCalls[0][1] !== 1)
+      throw new Error('只应给一张 renDe(0,1),实际 ' + JSON.stringify(window.__rendeCalls));
+    if(botTwoStepA !== null) throw new Error('一张即停后应 reset 且不设 continue,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+    var r3 = await botDecide('rendeTwoStep', g, 0);
+    if(r3 !== true || !botTwoStepA || botTwoStepA.continue || botTwoStepA.a !== 1)
+      throw new Error('调度3应重新从阶段A挂起(未设continue),实际 ' + JSON.stringify(botTwoStepA));
+    botTwoStepA = null;
+  });
+
+  await check('仁德A6-6 renDeCount>=2 或手牌空 → 提交后 reset,不设 continue', async function(){
+    // 分支1:renDeCount=2(本回合已给两张,第三张即收尾)
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r60'), card('桃','r61')] });
+    g.renDeCount = 2;
+    botTwoStepA = { decisionId: 'rendeTwoStep', a: 1 };
+    var r = await botDecide('rendeTwoStep', g, 0);
+    if(r !== true || window.__rendeCalls.length !== 1)
+      throw new Error('renDeCount=2 应提交一张,实际 ' + JSON.stringify(window.__rendeCalls));
+    if(botTwoStepA !== null) throw new Error('renDeCount>=2 提交后应 reset,实际 ' + JSON.stringify(botTwoStepA));
+    // 分支2:手牌空(最后一张已给完) → execute 提交后 reset
+    var g2 = mkSeatG({ caps0: { rende: true }, myHand: [] });
+    g2.renDeCount = 0;
+    BOT_DECISIONS.rendeTwoStep.execute(g2, 0, { step: 'B', cardIdx: 0, targetSeat: 1 });
+    if(botTwoStepA !== null) throw new Error('手牌空提交后应 reset 不设 continue,实际 ' + JSON.stringify(botTwoStepA));
+    botTwoStepA = null;
+  });
+
+  await check('仁德A6-7 continue态手牌空:match 命中,候选只剩停止,无密钥选停止 → reset 清挂起', async function(){
+    window.__rendeCalls = [];
+    window.__mockAiCalls = 0;
+    aiApiKey = '';
+    aiProvider = null;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [] });
+    g.renDeCount = 0;
+    botTwoStepA = { decisionId: 'rendeTwoStep', a: 1, continue: true };
+    var s = BOT_DECISIONS.rendeTwoStep;
+    if(!s.match(g, 0)) throw new Error('continue态空手牌应命中 match');
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 1 || !c[0].stop || c[0].step !== 'B')
+      throw new Error('候选应只剩停止项,实际 ' + JSON.stringify(c));
+    var r = await botDecide('rendeTwoStep', g, 0);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(botTwoStepA !== null) throw new Error('选停止后应 reset 清挂起,实际 ' + JSON.stringify(botTwoStepA));
+    if(window.__rendeCalls.length !== 0) throw new Error('不应再给牌,实际 ' + JSON.stringify(window.__rendeCalls));
+    if(window.__mockAiCalls !== 0) throw new Error('单候选不应有AI调用,实际 ' + window.__mockAiCalls);
+    botTwoStepA = null;
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+  });
+
   await check('多步接线:优先级 借刀>离间>丈八>仁德;挂起期只处理挂起的那一个决策;阶段B提交后不再走 runBotActionWindow;未命中才走窗口', async function(){
     var realBotDecide = botDecide;
     var realWindow = runBotActionWindow;

@@ -2046,7 +2046,12 @@ BOT_DECISIONS.rendeTwoStep = {
     if(botTwoStepA && botTwoStepA.decisionId!=='rendeTwoStep') return false;
     const me = g.players[seat];
     if(!me || !me.alive || !hasCap(me,'rende')) return false;
-    if((me.hand||[]).length < 1) return false;
+    if((me.hand||[]).length < 1){
+      // A6:continue 态手牌已空仍需调度一次,让 AI 选「停止」清掉挂起(候选只剩停止);
+      // 非 continue 态空手牌照旧不命中。
+      if(botTwoStepA && botTwoStepA.decisionId==='rendeTwoStep' && botTwoStepA.continue) return true;
+      return false;
+    }
     return true;
   },
   buildCandidates: function(g, seat){
@@ -2054,9 +2059,12 @@ BOT_DECISIONS.rendeTwoStep = {
     const out = [];
     if(botTwoStepA && botTwoStepA.decisionId==='rendeTwoStep'){
       const targetSeat = botTwoStepA.a;
+      const cont = !!botTwoStepA.continue;
       (me.hand||[]).forEach(function(c, i){
         out.push({ index: 0, label: '仁德:交给 '+g.players[targetSeat].name+' '+c.name, step:'B', cardIdx: i, targetSeat: targetSeat });
       });
+      // A6:continue 态追加「停止给牌」选项;手牌空时候选只剩它。
+      if(cont) out.push({ index: 0, label: '仁德:停止给牌', step:'B', stop: true });
       return out;
     }
     g.players.forEach(function(p, i){
@@ -2066,7 +2074,9 @@ BOT_DECISIONS.rendeTwoStep = {
     return out;
   },
   localFallback: function(g, seat, candidates){
-    return candidates.length ? candidates[0] : null;
+    if(!candidates.length) return null;
+    // A6:无密钥只给一张即停(改动前行为)。stopAfter 让 execute 提交后不设 continue。
+    return Object.assign({}, candidates[0], { stopAfter: true });
   },
   execute: function(g, seat, choice){
     if(!choice) return;
@@ -2074,8 +2084,16 @@ BOT_DECISIONS.rendeTwoStep = {
       botTwoStepA = { decisionId: 'rendeTwoStep', a: choice.a };
       return; // 等下一调度走阶段 B
     }
-    resetBotTwoStep();
+    const me = g.players[seat];
+    if(choice.stop){ resetBotTwoStep(); return; } // A6:选停止→不再给
     botInvoke(seat, function(){ renDe(choice.cardIdx, choice.targetSeat); });
+    if(choice.stopAfter){ resetBotTwoStep(); return; } // A6:无密钥一张即停,不设 continue
+    // A6:逐张给牌——renDeCount<2 且手牌还有牌就继续(下一调度给下一张或停止),否则收尾。
+    if(g.renDeCount < 2 && (me.hand||[]).length > 0){
+      botTwoStepA = { decisionId: 'rendeTwoStep', a: choice.targetSeat, continue: true };
+    } else {
+      resetBotTwoStep();
+    }
   },
 };
 
