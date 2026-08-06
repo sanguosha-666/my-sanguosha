@@ -212,14 +212,13 @@
 - **左慈【新生】会阻塞 `dealDamage` 中排在它之后的其它 `onDamaged` 判断（已验证影响酒诗/称象/悲歌，可能还有其它未测到的同类判断）**——触发条件是"受伤的角色恰好是左慈本人"，和"谁借用了新生/谁拥有该能力"无关（用蔡文姬本人受伤作为对照组验证过，蔡文姬悲歌正常触发；把受伤对象换成左慈，悲歌即失效）。这意味着只要对局中存在左慈这名角色，左慈受伤这个事件会让原本无关的其它玩家的技能（只要恰好也挂在 `onDamaged`、且判断顺序排在新生之后）失效，影响面不局限于左慈自身或借用者。需要重新设计 `dealDamage`/`triggerHook` 对多个 `onDamaged` 判断的调度顺序/隔离方式，不在本次左慈化身借用改动范围内处理。已用回归测试锁定当前的真实行为（`run_huashen_generalhascap_test.js` 场景11/12/13/13b），后续排期修复时可以直接参考这份测试里已经验证过的复现步骤。
 - **左慈【新生】和法正【恩怨】(enyuan) 存在互斥冲突**：若左慈本人受伤时借用的技能是恩怨，`dealDamage` 中 `enyuanChoose` 的判断位置严格早于 `triggerHook(onDamaged)`，其响应链（`triggerEnyuan`→`chooseEnyuanOption`→可能的 `giveEnyuanCard`）走完直接 `resumeAfterInterrupt` 回到 `play`，新生的 `onDamaged` 永远不会被触发到——不同于第一步已解决的"两个 `onDamaged` 互相覆盖"这类问题，这次的根源是 enyuan 判断的代码位置本身就在 `onDamaged` 分发之前，不属于同一调度点，队列机制无法覆盖这种情况。是"左慈新生阻塞其它 `onDamaged` 判断"那条已知问题的镜像版本（这次反过来是恩怨挡住新生），在本次测试修复过程中发现，暂不处理，需要专门排查 `dealDamage` 内各判断点相对 `triggerHook(onDamaged)` 的调度顺序。
 - **【历史记录，已被整体替换】马谡【散谣】`respondSanyao`/`respondSanyaoTarget` 曾经补过身份守卫，这两个函数连同它们所在的两阶段服务端 pending 架构（`sanyao`/`sanyaoChooseTarget`）已在"服务端核心逻辑"那次任务里整体作废删除**，改成新的原子函数 `sanyao(costKey, targetSeat)`（见 `docs/progress-log-*.md`）。**这不代表当初补身份守卫那次修复是白做的**：那次的目标本来就是"死代码也要有正确的卫生习惯，不该在一段代码还活着的任何时刻缺少调用者身份校验"，不是承诺"这段具体代码会被长期保留"——事后设计重构决定放弃两阶段 pending 架构（改用巧变已经确立的"单人无需响应、客户端本地累积选择、一次性原子提交"模式），是架构层面的独立判断，和当初那次身份守卫修复的正确性无关。
-- **机器人"点座位卡类交互"结构性盲区（`guhuoTarget`，于吉【蛊惑】质疑失败/未被质疑后由发起者自己选目标）——排查过 `botSafePrompt` 够不到它的根本原因，刻意不在本次修复范围内处理，留作独立任务**。这是修「机器人兜底词汇盲区（`luoyingAsk`/`luoshen`/`huashenChangeAskStart`/`huashenChangeAskEnd`/`guhuoQuestion`/`qiaobianMove`）」那次任务时顺带发现的姊妹问题，和词汇盲区不是同一类缺陷——`guhuoTarget` 阶段在 `renderControls` 里**从头到尾只有 `setBanner`，不渲染任何 `#controls` 按钮**（真实点击目标是靠 `render.js` 里座位卡片自己的 `onclick=()=>guhuoChooseTarget(i)`，见约975行），`botSafePrompt` 的实现原理是渲染 `#controls` 再扫描其中的 `<button>` 元素，这个阶段渲染出来的 `#controls` 里本来就是空的——不是"按钮文案不匹配正则"，是"这个交互载体（座位卡点击）压根不在 `botSafePrompt` 能扫描到的范围内"，属于结构性盲区，扩大正则表也救不回来。**当前不是活跃的卡死风险**：`botPlay`（机器人主动出牌逻辑）从不调用 `startGuhuo`，`runBotDecision` 的 `respond`/`aoeResp`/`duel`/`dying` 各分支也都是直接调服务端函数（`respondShan`/`aoeRespond`/`duelResponse`/`respondDying`），从不触发 UI 上那个"扣置手牌当基本牌使用发动【蛊惑】"的按钮（`startGuhuoResponse`，render-controls.js 约344行）——也就是说机器人目前**从不会主动发起蛊惑**，`guhuoTarget` 的 `sourceSeat` 永远不可能是机器人自己，这条盲区目前是死代码路径，不会被触发。**排查过全项目"点座位卡驱动技能结算"这个模式的分布，确认这不是孤例**：`render.js` 里至少还有 `playZhangbaSha`（990行,丈八蛇矛）、`respondTiaoxin`（1005行,挑衅）、`duanLiang`（1043行,断粮）、`qiXi`（1056行,奇袭）、`guoSe`（1070行,国色）、`respondQuhuDamage`（1103行,驱虎选伤害目标）、`liJian`（1117行,离间）、`fanJian`（1131行,反间）、`qingNang`（1139行,青囊）、借刀杀人选座位（1219/1226行）等十余处同类交互——**这次没有逐一排查这些是否也存在机器人可达的同类盲区**（超出这次"词汇表覆盖"任务的范围），**建议以后如果要修 `guhuoTarget`，应该先对"点座位卡"这整类交互做一次系统排查**（哪些机器人当前决策逻辑真的会触达、哪些和 `guhuoTarget` 一样目前只是理论风险），而不是只给这一处打补丁——这条本身也正是「三、改动原则」第26条"先探测服务端/UI实际能不能走通，再决定怎么修"的应用：guhuoTarget 目前"探测"下来发现机器人根本走不到这条路径，所以不必现在就修。
 
 
 ## 五、可能的下一步（待定）
 
-- 响应超时/托管（修挂机卡死隐患）。
+- ~~响应超时/托管~~（**已实现**：询问型 pending 30s 超时自动保守提交+画面倒数，见 progress-log-8）
+- ~~主公技（激将/护驾/制霸/妄尊）~~（**已实现**：仅 `role==='zhu'` 可发动，见 progress-log-8）
 - 装备系统后续，可解锁更多武将和锦囊。
-- 主公技（激将/护驾/制霸/妄尊等）——身份骨架已就绪，可按 `p.role==='zhu'` 接入。
 - 身份 DB 真隐藏（Firebase 读权限）；当前与手牌同为朋友局界面隐藏、库可读。
 - 更多武将。
 
