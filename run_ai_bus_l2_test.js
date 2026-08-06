@@ -179,6 +179,16 @@ const testCode = String.raw`
     if(end.label !== '结束出牌阶段') throw new Error('结束项 label 应为 结束出牌阶段,实际 ' + end.label);
   });
 
+  // ---- T1b:token 优化:候选 label 不含"本地分"冗余(score 字段已单独给出) ----
+  await check('出牌候选 label 不含"本地分"字样,score 字段保留', function(){
+    var g = mkG([card('桃')], { myHp: 2 });
+    var list = buildBotPlayCandidates(g, [{ idx: 0, action: '桃', target: null, value: 100 }]);
+    var e0 = list[0];
+    if(e0.label.indexOf('本地分') !== -1) throw new Error('label 不应含"本地分"冗余: ' + e0.label);
+    if(e0.localHeuristicScore !== 100) throw new Error('localHeuristicScore 字段应保留,实际 ' + e0.localHeuristicScore);
+    if(e0.label.indexOf('桃') === -1) throw new Error('label 应含动作名,实际 ' + e0.label);
+  });
+
   // ---- T2:无密钥,手里有可用的桃(hp<maxHp)→ 本地兜底直接 playCard(桃) ----
   await check('无密钥:有桃且缺体力 → playCard 出桃', async function(){
     window.__playCalls = [];

@@ -172,6 +172,35 @@ const testCode = String.raw`
     }
   });
 
+  // 1c. token 优化:7人局 desc 按需截断——自己(i===seat)全量,他人 slice(0,60)
+  await check('7人局:自己 generalDesc 全量,他人≤60字', function(){
+    var g = mkG();
+    while(g.players.length < 7){
+      g.players.push({
+        name: '玩家' + g.players.length, alive: true, hp: 4, maxHp: 4,
+        hand: [], equips: null, delays: [], role: 'zhu',
+        faceup: true, general: 'guojia'
+      });
+    }
+    // mkG 的座位1是 simayi,统一改成 guojia,让 7 人共用同一个被覆盖的 desc
+    for(var pi = 0; pi < g.players.length; pi++){ g.players[pi].general = 'guojia'; }
+    var longDesc = '决断与谋略并重,行险而不失其正,料敌机先,善守善攻,临危不乱,静待时机,一击必中。'.repeat(3);
+    if(longDesc.length <= 60) throw new Error('测试构造失败:长desc应>60字,实际 ' + longDesc.length);
+    var orig = GENERALS['guojia'].desc;
+    try {
+      GENERALS['guojia'].desc = longDesc;
+      var s = buildBotVisibleState(g, 0);
+      var self = s.players[0].generalDesc;
+      if(self !== longDesc) throw new Error('自己 desc 应全量 ' + longDesc.length + ' 字,实际 ' + (self ? self.length : String(self)));
+      for(var i = 1; i < 7; i++){
+        var gd = s.players[i].generalDesc;
+        if(gd !== longDesc.slice(0, 60)) throw new Error('玩家' + i + ' desc 应截断为前60字,实际 ' + (gd ? gd.length : String(gd)));
+      }
+    } finally {
+      GENERALS['guojia'].desc = orig;
+    }
+  });
+
   // 2. 不传第三参(或显式 false)也有 skill —— 证明不依赖 isFirstTurn
   await check('不传第三参 generalSkill 仍存在(isFirstTurn 无关)', function(){
     var g = mkG();

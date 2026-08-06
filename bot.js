@@ -464,7 +464,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
         deadRole: !p.alive && g.gameMode==='identity' ? knownRole : undefined, // 已死玩家的身份
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
         generalSkill: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].skill||'') : undefined, // 武将技能常开(公开信息)
-        generalDesc: (p.general && typeof GENERALS!=='undefined' && GENERALS[p.general]) ? String(GENERALS[p.general].desc||'') : undefined, // 武将描述常开,全量不截断
+        generalDesc: (p.general && typeof GENERALS!=='undefined' && GENERALS[p.general]) ? String(GENERALS[p.general].desc||'').slice(0, i===seat ? 9999 : 60) : undefined, // 武将描述常开;自己全量,他人截断60字(token优化)
         distance: i !== seat ? distance(g, seat, i) : 0, // 与自己的距离
         suspicionHint: botSuspicionHint(g, i), // 身份局限定,undefined 时 JSON 里不出现这个键
         // 特殊状态信息
@@ -503,7 +503,7 @@ function botPlayCandidateEntry(g, opt, index){
   const parts = ['出【'+opt.action+'】'];
   if(card && card.name!==opt.action) parts.push('实际牌【'+card.name+'】');
   if(targetInfo) parts.push('目标:'+targetInfo.name);
-  parts.push('本地分'+Math.round(opt.value));
+  // 不拼"本地分N":localHeuristicScore 字段已单独给出,label 重复拼浪费 token(token优化)
   return {
     index, action: opt.action, target: targetInfo, localHeuristicScore: Math.round(opt.value),
     label: parts.join(' '), card, handIndex: (opt.idx!=null ? opt.idx : null)
