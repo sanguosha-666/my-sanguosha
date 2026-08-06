@@ -353,8 +353,14 @@ const testCode = String.raw`
     return g;
   }
 
-  await check('旋风目标:候选=存活非自己(死者排除)', function(){
-    var g = mkXuanfengG({ aliveOf: { 2: false } });
+  // 【调度盲区收尾时更新】buildSeatCandidates 补了"目标确实还有牌可弃"这层过滤(镜像
+  // render-controls.js 选目标按钮的 available>0 判断,并额外扣掉本轮已经从该目标身上选
+  // 走的牌数,防止一个已经被弃完的目标反复留在候选里造成死循环)——所有候选目标现在必须
+  // 带至少1张可弃的牌(手牌/装备/判定区任一),否则会被正确排除,不再是"存活非自己"这么
+  // 简单。以下测试补上 hands 让存活的非自己目标确实有牌可弃,契约变严格是这次收尾任务
+  // 主动发现并修的一个真实边界(死代码接线之前从未暴露),不是回归。
+  await check('旋风目标:候选=存活非自己且确实有牌可弃(死者/无牌目标排除)', function(){
+    var g = mkXuanfengG({ aliveOf: { 2: false }, hands: { 1: [card('杀')], 2: [card('闪')] } });
     var spec = BOT_SEAT_PICKS.xuanfeng;
     if(!spec) throw new Error('BOT_SEAT_PICKS.xuanfeng 未注册');
     if(!spec.match(g, 0)) throw new Error('from 本人 match 应命中');
@@ -365,11 +371,19 @@ const testCode = String.raw`
     if(cands[0].label.indexOf('旋风') < 0) throw new Error('label 应含 旋风 前缀,实际 ' + cands[0].label);
   });
 
+  await check('旋风目标:候选排除"确实没有牌可弃"的存活目标', function(){
+    var g = mkXuanfengG({ hands: { 1: [card('杀')] } }); // 座位2 无手牌/装备/判定区,应被排除
+    var spec = BOT_SEAT_PICKS.xuanfeng;
+    var cands = spec.buildSeatCandidates(g, 0);
+    if(cands.length !== 1) throw new Error('座位2无牌可弃,应只剩1个候选,实际 ' + cands.length + ' ' + JSON.stringify(cands));
+    if(cands[0].seat !== 1) throw new Error('应只剩座位1,实际 ' + cands[0].seat);
+  });
+
   await check('旋风目标无密钥:fallback=null → botDecide 返回 true 且不调 pickXuanfengTarget', async function(){
     window.__xuanfengCalls = [];
     aiApiKey = '';
     aiProvider = null;
-    var g = mkXuanfengG({});
+    var g = mkXuanfengG({ hands: { 1: [card('杀')], 2: [card('闪')] } });
     var r = await botDecide('seatPick', g, 0);
     if(r !== true) throw new Error('fallback=null 应返回 true,实际 ' + r);
     if(window.__xuanfengCalls.length !== 0) throw new Error('不应调用 pickXuanfengTarget,实际 ' + window.__xuanfengCalls.length);
@@ -381,7 +395,7 @@ const testCode = String.raw`
     window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
     aiApiKey = 'test-key';
     aiProvider = 'claude';
-    var g = mkXuanfengG({});
+    var g = mkXuanfengG({ hands: { 1: [card('杀')], 2: [card('闪')] } });
     var r = await botDecide('seatPick', g, 0);
     if(r !== true) throw new Error('应返回 true,实际 ' + r);
     if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI调用,实际 ' + window.__mockAiCalls);
@@ -2497,7 +2511,7 @@ const testCode = String.raw`
     aiApiKey = 'test-key'; aiProvider = 'claude';
     var restore = spyBotDecideLog();
     try {
-      var g = mkXuanfengG({});
+      var g = mkXuanfengG({ hands: { 1: [card('杀')], 2: [card('闪')] } });
       g.phase = 'xuanfengPick';
       await runBotDecision(g, 0);
     } finally { restore(); }

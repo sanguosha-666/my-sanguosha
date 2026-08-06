@@ -76,7 +76,32 @@ const BOT_PHASE_ACTOR = {
   // 【B2b】制霸拼点:行动者是 pending.targetSeat(目标,服务端 respondZhiba 守卫
   // g.pending.targetSeat!==mySeat)。登记后 botSeatForState 才能解析出行动者走
   // runBotDecision 专用分支(botDecide('zhibaAsk'))。
-  zhibaAsk:'targetSeat'
+  zhibaAsk:'targetSeat',
+  // 【调度盲区收尾】蔡文姬【悲歌】三段(是否发动/选弃置的牌/进行判定),行动者始终是
+  // pending.sourceSeat(悲歌发动者本人,服务端 triggerBeige/beigeDiscard/doBeigeJudge
+  // 三个函数守卫都是 pending.sourceSeat!==mySeat)。此前三个 phase 都不在这张表里,
+  // botSeatForState 恒返回 -1,调度请求走 botFallbackSeats+botSafePrompt 兜底——
+  // 兜底能点掉"不发动"（安全正则命中），但即便配置了AI密钥也永远碰不到 runBotDecision，
+  // 更碰不到 L1 的 AI 判断入口(真实dump用mock callAI验证过:决策请求根本没有转发到
+  // runBotDecision，callAI 从未被调用)。登记后 BOT_DECISIONS.beigeChoose 才能被
+  // botDecide 调用到，无密钥回退＝不发动(与改动前逐字一致)，有密钥时才能真正问AI。
+  beigeChoose:'sourceSeat', beigeDiscard:'sourceSeat', beigeJudge:'sourceSeat',
+  // 【调度盲区收尾】贾诩【乱武】:行动者是 pending.currentSeat(被依次询问的角色本人,
+  // 服务端 chooseLuanwuOption 守卫 g.pending.currentSeat!==mySeat)。同上，此前不在表里，
+  // 机器人永远只能被 botSafePrompt 兜底，而兜底的正则够不到"对X使用【杀】"/"失去1点体力"
+  // 这两个自定义文案按钮——两个按钮同时存在时(可以出杀的情况)botSafePrompt 连"只有一个
+  // 按钮就点它"这条最后兜底都用不上，真正点不到任何按钮、卡死；只有不能出杀只剩一个按钮
+  // 时才侥幸能靠"唯一按钮"兜底走通。登记后这条彻底走 runBotDecision 专用分支，不再依赖
+  // 这种侥幸。
+  luanwuChoose:'currentSeat',
+  // 【调度盲区收尾】凌统【旋风】:行动者是 pending.from(旋风发动者本人，服务端
+  // pickXuanfengTarget/pickXuanfengCard/finishXuanfengSelection/cancelXuanfeng 四个函数
+  // 守卫都是 pending.from!==mySeat)。BOT_SEAT_PICKS.xuanfeng(本文件更下方，seatPick
+  // 协议里"旋风目标"这一项)其实早就写好了 match/buildSeatCandidates/fallbackSeat/execute
+  // 四件套、且已经在 runBotDecision 里接了线(g.phase==='xuanfengPick'&&...stage==='selecting'
+  // 分支)——但这条接线全程都是死代码，因为 xuanfengPick 没登记进这张表，调度请求根本
+  // 到不了 runBotDecision。登记后这套已经写好的 AI 接入立刻生效，不需要再补新代码。
+  xuanfengPick:'from'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -666,6 +691,18 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // 【B2b】制霸拼点有专用注册(BOT_DECISIONS.zhibaAsk,接线在 controlsChoice 之前),且
   // render-controls.js 会给"拼点【X】"按钮——不排除会被 L1 抢先接管,必须收录。
   'zhibaAsk',
+  // 【调度盲区收尾】蔡文姬【悲歌】三段有专用注册/分支(BOT_DECISIONS.beigeChoose +
+  // beigeDiscard/beigeJudge 的确定性分支,接线在 controlsChoice 之前),且
+  // render-controls.js 会渲染真实按钮("发动"/"不发动"、逐张选牌、"进行判定")——
+  // 不排除会被 L1 抢先接管:L1 按钮扫描顺序(DOM渲染顺序)和 BOT_DECISIONS.beigeChoose
+  // 自己的候选顺序(不发动=index0/发动=index1)刚好相反，真实踩过这个坑——L1 抢先接管后
+  // AI 选的 index 会按 L1 自己的按钮顺序执行，和专用注册的语义错位，表现为"AI明明选了
+  // '发动'却执行成了'不发动'"，必须收录排除,让专用分支先接管。
+  'beigeChoose','beigeDiscard','beigeJudge',
+  // 【调度盲区收尾】贾诩【乱武】有专用注册(BOT_DECISIONS.luanwuChoice,接线在
+  // controlsChoice 之前),且 render-controls.js 会渲染"对X使用【杀】"/"失去1点体力"
+  // 真实按钮——同上，不排除会被 L1 抢先接管、候选顺序错位,必须收录。
+  'luanwuChoose',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -948,6 +985,125 @@ BOT_DECISIONS.ganglieChoice = {
   execute: ganglieChoiceExecute,
   extraState: buildBotGanglieVisibleState,
   buildSystemPrompt: buildBotGanglieSystemPrompt,
+  maxTokens: 80,
+};
+
+// ================= 调度盲区收尾:蔡文姬【悲歌】是否发动(Task 遗留清理) =================
+// 【本条是什么】beigeChoose 此前不在 BOT_PHASE_ACTOR 里，调度请求走 botFallbackSeats+
+// botSafePrompt 兜底——兜底能点掉"不发动"（安全正则命中"不发动"两个字），但即便配置了
+// AI 密钥也永远碰不到这里，真实dump用mock callAI验证过：决策请求根本没有转发到
+// runBotDecision。BOT_PHASE_ACTOR 补登记后（见上方注册表），这条注册才会真正被调用到。
+// 【无密钥回归红线】localFallback 恒选"不发动"，与改动前 botSafePrompt 点击"不发动"逐字
+// 一致——这不是偷懒，是这次收尾任务明确认可的默认("哪怕只是保守默认不发动")。
+function beigeChoiceMatch(g, seat){
+  return g.phase==='beigeChoose' && g.pending && g.pending.type==='beigeChoose' && g.pending.sourceSeat===seat;
+}
+function beigeChoiceBuildCandidates(g, seat){
+  // 候选顺序:index0=不发动，index1=发动——与 triggerBeige(doTrigger) 的布尔参数直接对应。
+  // 发动选项只在"确实有牌可弃"时才提供(镜像 triggerBeige 自己的 canDiscard 判断，避免
+  // AI 选一个必被服务端拒绝/静默回退的选项)。
+  const me = g.players[seat];
+  const canDiscard = !!((me.hand||[]).length>0
+    || (me.equips && Object.values(me.equips).some(Boolean)));
+  const out = [{ action:'不发动', trigger:false }];
+  if(canDiscard) out.push({ action:'发动【悲歌】', trigger:true });
+  return out;
+}
+function beigeChoiceLocalFallback(g, seat, candidates){
+  return candidates.find(c=>!c.trigger) || candidates[0];
+}
+function beigeChoiceExecute(g, seat, choice){
+  botInvoke(seat, ()=>triggerBeige(choice.trigger));
+}
+function buildBotBeigeVisibleState(g, seat){
+  const d = g.pending || {};
+  const damaged = g.players[d.damagedSeat], source = g.players[d.damageSource];
+  return {
+    beige: {
+      damagedSeatIsSelf: d.damagedSeat===seat,
+      damagedSeatName: damaged ? damaged.name : null,
+      damageSourceIsSelf: d.damageSource===seat,
+      damageSourceName: source ? source.name : null,
+    }
+  };
+}
+function buildBotBeigeSystemPrompt(g, seat){
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。你拥有蔡文姬'
+  +'【悲歌】技能，场上刚有一名角色受到【杀】造成的伤害，你可以选择弃置一张牌（手牌或'
+  +'装备）令其进行判定：判定为红桃回复1体力，方块摸2张牌，梅花令造成伤害的那个人弃置'
+  +'2张牌，黑桃令造成伤害的那个人翻面。局面数据里 beige 字段说明了受伤角色'
+  +'(damagedSeatIsSelf/damagedSeatName)和伤害来源(damageSourceIsSelf/damageSourceName)'
+  +'是否是你自己——判断值不值得牺牲一张牌去发动，取决于判定结果对你有利还是有害。'
+  +'请只输出一个严格的JSON对象，格式固定为 {"choice": 数字}，不要输出任何解释文字、'
+  +'代码块标记或多余字段。', g, seat);
+}
+BOT_DECISIONS.beigeChoose = {
+  match: beigeChoiceMatch,
+  buildCandidates: beigeChoiceBuildCandidates,
+  localFallback: beigeChoiceLocalFallback,
+  execute: beigeChoiceExecute,
+  extraState: buildBotBeigeVisibleState,
+  buildSystemPrompt: buildBotBeigeSystemPrompt,
+  maxTokens: 80,
+};
+
+// ================= 调度盲区收尾:贾诩【乱武】使用杀/失去体力(Task 遗留清理) =================
+// 【本条是什么】luanwuChoose 此前不在 BOT_PHASE_ACTOR 里，"对X使用【杀】"/"失去1点体力"
+// 两个自定义文案按钮都不命中 botSafePrompt 的安全/必选正则——两个按钮同时存在时(可以出杀)
+// 连"唯一按钮"兜底都用不上，真正卡死；只有不能出杀只剩一个按钮时才侥幸走通。登记后彻底
+// 改走这条专用注册。
+// 【本地默认】镜像 render-controls.js 的 shaAvailable 判断(hasShaCard+canReachSha+目标存活)；
+// 无密钥默认"能出杀就出杀，否则失去体力"——这是个强制二选一(不是"要不要发动")，选进攻
+// 默认符合"多做损人利己的事"这条既有策略基调,不是新发明的判断。
+function luanwuChoiceMatch(g, seat){
+  return g.phase==='luanwuChoose' && g.pending && g.pending.type==='luanwuChoose' && g.pending.currentSeat===seat;
+}
+function luanwuChoiceBuildCandidates(g, seat){
+  const d = g.pending || {};
+  const map = d.targetMap || {};
+  const nearestSeat = map[seat];
+  const nearestPlayer = (typeof nearestSeat==='number' && nearestSeat!==seat) ? g.players[nearestSeat] : null;
+  const shaAvailable = !!(nearestPlayer && nearestPlayer.alive
+    && hasShaCard(g, seat) && canReachSha(g, seat, nearestSeat));
+  const out = [{ action:'失去1点体力', option:'hp' }];
+  if(shaAvailable) out.push({ action:'对'+nearestPlayer.name+'使用【杀】', option:'sha' });
+  return out;
+}
+function luanwuChoiceLocalFallback(g, seat, candidates){
+  return candidates.find(c=>c.option==='sha') || candidates.find(c=>c.option==='hp') || candidates[0];
+}
+function luanwuChoiceExecute(g, seat, choice){
+  botInvoke(seat, ()=>chooseLuanwuOption(choice.option));
+}
+function buildBotLuanwuVisibleState(g, seat){
+  const d = g.pending || {};
+  const map = d.targetMap || {};
+  const nearestSeat = map[seat];
+  const nearestPlayer = (typeof nearestSeat==='number' && nearestSeat!==seat) ? g.players[nearestSeat] : null;
+  const source = g.players[d.sourceSeat];
+  return {
+    luanwu: {
+      sourceName: source ? source.name : null,
+      nearestTargetName: nearestPlayer ? nearestPlayer.name : null,
+      nearestTargetIsSelf: nearestSeat===seat,
+    }
+  };
+}
+function buildBotLuanwuSystemPrompt(g, seat){
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。场上一名角色'
+  +'(贾诩)发动了【乱武】，轮到你选择:对局面数据 luanwu.nearestTargetName 标注的最近'
+  +'角色使用一张【杀】(若该选项存在于候选列表)，或者失去1点体力——这是强制二选一，'
+  +'不选也必须承担其中一个后果。请结合你与最近角色的敌我关系判断是否值得消耗一张杀。'
+  +'请只输出一个严格的JSON对象，格式固定为 {"choice": 数字}，不要输出任何解释文字、'
+  +'代码块标记或多余字段。', g, seat);
+}
+BOT_DECISIONS.luanwuChoice = {
+  match: luanwuChoiceMatch,
+  buildCandidates: luanwuChoiceBuildCandidates,
+  localFallback: luanwuChoiceLocalFallback,
+  execute: luanwuChoiceExecute,
+  extraState: buildBotLuanwuVisibleState,
+  buildSystemPrompt: buildBotLuanwuSystemPrompt,
   maxTokens: 80,
 };
 
@@ -1622,9 +1778,27 @@ BOT_SEAT_PICKS.xuanfeng = {
     return !!(d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting');
   },
   buildSeatCandidates: function(g, seat){
+    // 【调度盲区收尾接线时发现并修的一个真实边界】必须把"这个目标已经被选过多少张"
+    // (pending.selections)从其原始牌数里扣掉再判断是否还有余量——否则一个已经被弃完的
+    // 目标会一直留在候选表里,AI(或本地兜底)反复选中它又被 pickXuanfengTarget 自己的
+    // available<=0 守卫静默拒绝(不改变任何状态),造成"选目标→选牌阶段发现没牌可选→退回
+    // 选目标→又选中同一个已耗尽的目标"的死循环，真实dump用mock AI固定选同一index复现过。
+    // render-controls.js 715行左右人类UI按钮的可见性判断同样是"原始牌数>0"（不扣除已选
+    // 数量），这是既有UI本身的次要瑕疵（人类点了也只会看到一个空的选牌页面，靠"返回选择
+    // 目标"退出，不会死循环——机器人没有这种"看一眼发现没得选就不选"的能力，必须在候选
+    // 层面就排除掉）。
+    const d = g.pending || {};
+    const selected = d.selections || [];
+    const takenOf = function(targetSeat, kind){
+      return selected.filter(function(s){ return s.targetSeat===targetSeat && s.kind===kind; }).length;
+    };
     const out = [];
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
+      const remainingHand = (p.hand||[]).length - takenOf(i,'hand');
+      const remainingEquip = EQUIP_SLOTS.filter(function(slot){ return p.equips && p.equips[slot]; }).length - takenOf(i,'equip');
+      const remainingDelay = (p.delays||[]).length - takenOf(i,'delay');
+      if(remainingHand + remainingEquip + remainingDelay <= 0) return;
       out.push({ seat: i, label: '旋风→'+p.name });
     });
     return out;
@@ -3157,6 +3331,62 @@ async function runBotDecision(g,seat){
     // 夏侯惇【刚烈】弃牌/受伤决策由总线接管(无密钥回退=手牌够2张弃牌、否则受伤,与旧
     // 分支逐字一致)。guard 与 ganglieChoiceMatch 同一道,保留作双保险。
     if(await botDecide('ganglieChoice', g, seat)) return;
+  }
+  // 【调度盲区收尾】蔡文姬【悲歌】是否发动:决策已进 BOT_DECISIONS.beigeChoose(无密钥
+  // 回退=不发动,与改动前 botSafePrompt 点击"不发动"逐字一致)。guard 与 beigeChoiceMatch
+  // 同一道,保留作双保险。
+  if(g.phase==='beigeChoose'&&d.type==='beigeChoose'&&d.sourceSeat===seat){
+    if(await botDecide('beigeChoose', g, seat)) return;
+  }
+  // 【调度盲区收尾】蔡文姬【悲歌】选弃置哪张牌:这一步已经决定"发动"，只是选具体弃哪张，
+  // 没有真正的策略含量(类似断粮/奇袭"牌维度不交AI"的既有惯例)——手牌优先(不暴露隐藏
+  // 信息给选择本身,反正只弃1张不需要挑),没手牌则弃第一个非空装备槽。
+  if(g.phase==='beigeDiscard'&&d.type==='beigeDiscard'&&d.sourceSeat===seat){
+    const me=g.players[seat];
+    if((me.hand||[]).length>0) botInvoke(seat,()=>beigeDiscard(0,false,null));
+    else {
+      const slot=EQUIP_SLOTS.find(s=>me.equips&&me.equips[s]);
+      if(slot) botInvoke(seat,()=>beigeDiscard(null,true,slot));
+    }
+    return;
+  }
+  // 【调度盲区收尾】蔡文姬【悲歌】进行判定:纯确认点击,没有选择,直接触发。
+  if(g.phase==='beigeJudge'&&d.type==='beigeJudge'&&d.sourceSeat===seat){
+    botInvoke(seat,doBeigeJudge); return;
+  }
+  // 【调度盲区收尾】贾诩【乱武】使用杀/失去体力:决策已进 BOT_DECISIONS.luanwuChoice
+  // (无密钥回退=能出杀就出杀、否则失去体力,镜像 render-controls.js 的 shaAvailable 判断)。
+  // guard 与 luanwuChoiceMatch 同一道,保留作双保险。
+  if(g.phase==='luanwuChoose'&&d.type==='luanwuChoose'&&d.currentSeat===seat){
+    if(await botDecide('luanwuChoice', g, seat)) return;
+  }
+  // 【调度盲区收尾】凌统【旋风】选具体弃哪张牌(chooseCard阶段):这一步已经在'selecting'
+  // 阶段由 BOT_SEAT_PICKS.xuanfeng(AI/本地兜底,见其注册处)选定了目标座位，这里只是
+  // 选"从这个已选目标身上弃哪张牌"——同样是"牌维度不交AI"的既有惯例(断粮/奇袭同款)。
+  // 优先弃装备/判定区(公开信息，不需要猜)，都没有才弃一张随机手牌；若目标已经没有任何
+  // 可弃的牌(理论上不会发生，selecting阶段选目标时已经校验过available>0，这里仍双重
+  // 保险)则退回选择目标阶段，不留死循环隐患。
+  if(g.phase==='xuanfengPick'&&d.type==='xuanfengPick'&&d.from===seat&&d.stage==='chooseCard'){
+    const targetSeat=d.currentTargetSeat;
+    const target=g.players[targetSeat];
+    const selected=d.selections||[];
+    const pickedEquipSlot=target&&EQUIP_SLOTS.find(s=>target.equips&&target.equips[s]
+      &&!selected.some(x=>x.targetSeat===targetSeat&&x.kind==='equip'&&x.value===s));
+    const pickedDelayIdx=target?(target.delays||[]).findIndex((c,idx)=>
+      !selected.some(x=>x.targetSeat===targetSeat&&x.kind==='delay'&&x.value===idx)):-1;
+    const selectedHands=selected.filter(x=>x.targetSeat===targetSeat&&x.kind==='hand').length;
+    if(pickedEquipSlot) botInvoke(seat,()=>pickXuanfengCard('equip',pickedEquipSlot));
+    else if(pickedDelayIdx>=0) botInvoke(seat,()=>pickXuanfengCard('delay',pickedDelayIdx));
+    else if(target&&(target.hand||[]).length>selectedHands) botInvoke(seat,()=>pickXuanfengCard('hand'));
+    else botInvoke(seat,()=>{
+      tx(g2=>{
+        if(g2.pending&&g2.pending.type==='xuanfengPick'&&g2.pending.from===mySeat){
+          g2.pending.stage='selecting'; g2.pending.currentTargetSeat=null;
+        }
+        return g2;
+      });
+    });
+    return;
   }
   // ---- 机器人兜底词汇盲区修复(问题3+4):以下几个phase的按钮文案够不到botSafePrompt的
   // 正则,分两类处理——纯流程性的(选哪个都不影响游戏走向)给合理默认;guhuoQuestion真的
