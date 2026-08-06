@@ -112,10 +112,11 @@ function detectAiProvider(key){
 const PROVIDER_ADAPTERS = {
   claude: {
     label: 'Claude',
+    defaultModel: 'claude-haiku-4-5-20251001',
     endpoint: 'https://api.anthropic.com/v1/messages',
     buildRequest(apiKey, opts){
       const body = {
-        model: opts.model || 'claude-haiku-4-5-20251001',
+        model: opts.model || this.defaultModel,
         max_tokens: opts.maxTokens || 512,
         messages: [{ role:'user', content: opts.userPrompt }],
       };
@@ -141,6 +142,7 @@ const PROVIDER_ADAPTERS = {
   },
   openrouter: {
     label: 'OpenRouter(GPT/多模型)',
+    defaultModel: 'openai/gpt-4o-mini',
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     buildRequest(apiKey, opts){
       const messages = [];
@@ -153,7 +155,7 @@ const PROVIDER_ADAPTERS = {
           'authorization': 'Bearer '+apiKey,
         },
         body: JSON.stringify({
-          model: opts.model || 'openai/gpt-4o-mini',
+          model: opts.model || this.defaultModel,
           max_tokens: opts.maxTokens || 512,
           messages,
         }),
@@ -170,6 +172,7 @@ const PROVIDER_ADAPTERS = {
     // endpoint/默认模型不同)——已用真实网络请求验证过支持浏览器直连 CORS,见文件头部
     // 【Groq 正式加入为第三个 provider】那段说明,不是没测过就先加进来。
     label: 'Groq(极速推理)',
+    defaultModel: 'llama-3.3-70b-versatile',
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
     buildRequest(apiKey, opts){
       const messages = [];
@@ -182,7 +185,7 @@ const PROVIDER_ADAPTERS = {
           'authorization': 'Bearer '+apiKey,
         },
         body: JSON.stringify({
-          model: opts.model || 'llama-3.3-70b-versatile',
+          model: opts.model || this.defaultModel,
           max_tokens: opts.maxTokens || 512,
           messages,
         }),
@@ -287,12 +290,13 @@ function callAI(provider, apiKey, opts){
 // JSON 结构不符 / 超时一律 resolve null,由 renderModelPicker 回退到静态表
 // AI_MODEL_OPTIONS(那张候选表保留作离线兜底,见其顶部注释)。
 const AI_DEFAULT_MODEL = {
-  // 各 provider 内置默认档位——必须和 PROVIDER_ADAPTERS 对应 buildRequest 里
-  // opts.model || 'xxx' 的硬编码保持同步;动态列表里匹配该项的模型追加「(默认)」,
-  // aiApiModel 为空时视觉预选它。测试用例钉死了这三个 id,改这里记得同步改测试。
-  claude: 'claude-haiku-4-5-20251001',
-  openrouter: 'openai/gpt-4o-mini',
-  groq: 'llama-3.3-70b-versatile',
+  // 单一来源=PROVIDER_ADAPTERS[x].defaultModel:默认档位只在各 adapter 的 defaultModel
+  // 字段里维护(buildRequest 的 opts.model || this.defaultModel 同源读取),这里派生,
+  // 不再双处写死;动态列表里匹配该项的模型追加「(默认)」,aiApiModel 为空时视觉预选它。
+  // 测试用例钉死了三个 id,改 adapter 的 defaultModel 记得同步改测试。
+  claude: PROVIDER_ADAPTERS.claude.defaultModel,
+  openrouter: PROVIDER_ADAPTERS.openrouter.defaultModel,
+  groq: PROVIDER_ADAPTERS.groq.defaultModel,
 };
 const MODEL_LIST_API = {
   claude: {

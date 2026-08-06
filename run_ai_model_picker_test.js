@@ -360,6 +360,38 @@ const testCode = String.raw`
     if(aiApiModel !== '') throw new Error('默认高亮不应写入 aiApiModel,实际 ' + JSON.stringify(aiApiModel));
   });
 
+  // ---- D3:AI_DEFAULT_MODEL 单源 —— defaultModel 字段 + buildRequest 缺省用 defaultModel ----
+  await check('D3-1. 三家 PROVIDER_ADAPTERS.defaultModel 与既有默认档位一致', async function(){
+    if(PROVIDER_ADAPTERS.claude.defaultModel !== 'claude-haiku-4-5-20251001') throw new Error('claude.defaultModel 应为 claude-haiku-4-5-20251001,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.claude.defaultModel));
+    if(PROVIDER_ADAPTERS.openrouter.defaultModel !== 'openai/gpt-4o-mini') throw new Error('openrouter.defaultModel 应为 openai/gpt-4o-mini,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.openrouter.defaultModel));
+    if(PROVIDER_ADAPTERS.groq.defaultModel !== 'llama-3.3-70b-versatile') throw new Error('groq.defaultModel 应为 llama-3.3-70b-versatile,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.groq.defaultModel));
+  });
+
+  // D3-2. AI_DEFAULT_MODEL 派生自 adapters(单源,不再各自写死)
+  await check('D3-2. AI_DEFAULT_MODEL 三家均派生自 PROVIDER_ADAPTERS.defaultModel', async function(){
+    ['claude','openrouter','groq'].forEach(function(p){
+      if(AI_DEFAULT_MODEL[p] !== PROVIDER_ADAPTERS[p].defaultModel) throw new Error('AI_DEFAULT_MODEL.'+p+' 应等于 PROVIDER_ADAPTERS.'+p+'.defaultModel,实际 ' + JSON.stringify(AI_DEFAULT_MODEL[p]) + ' vs ' + JSON.stringify(PROVIDER_ADAPTERS[p].defaultModel));
+    });
+  });
+
+  // D3-3. buildRequest 缺省 model 时 body.model === defaultModel(行为与旧硬编码等价)
+  await check('D3-3. buildRequest 无 opts.model 时 body.model === defaultModel', async function(){
+    ['claude','openrouter','groq'].forEach(function(p){
+      var req = PROVIDER_ADAPTERS[p].buildRequest('k', { userPrompt:'hi' });
+      var body = JSON.parse(req.body);
+      if(body.model !== PROVIDER_ADAPTERS[p].defaultModel) throw new Error(p+' 缺省 model 应为 '+PROVIDER_ADAPTERS[p].defaultModel+',实际 ' + JSON.stringify(body.model));
+    });
+  });
+
+  // D3-4. 显式 opts.model 仍优先(回归:行为不变)
+  await check('D3-4. buildRequest 显式 opts.model 优先于 defaultModel', async function(){
+    ['claude','openrouter','groq'].forEach(function(p){
+      var req = PROVIDER_ADAPTERS[p].buildRequest('k', { userPrompt:'hi', model:'custom/x' });
+      var body = JSON.parse(req.body);
+      if(body.model !== 'custom/x') throw new Error(p+' 显式 model 应为 custom/x,实际 ' + JSON.stringify(body.model));
+    });
+  });
+
   // 回归余项(第13条):node --check + 既有 run_ai_bus_* 套件在宿主机执行,见测试文件尾部注释
 
   console.log('\n' + '='.repeat(60));
