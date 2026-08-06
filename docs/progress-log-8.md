@@ -277,3 +277,9 @@
 - **测试**（扩展 `run_ai_lordskill_test.js` 至 45 项）：H 制霸（触发建 pending+自动出第一张+used 置真/响应比点各弃一张/used 已真、role zhong、ffa、无手牌守卫/normalize+startTurn 重置）；I 妄尊（主公 startTurn 袁术摸一张+lordHandCap=1/弃牌阶段三处上限=hp-1 生效/ffa、非主公回合、袁术死亡不触发）；J 机器人（BOT_PHASE_ACTOR/BOT_DECISIONS 形状+无密钥选最大点/runBotDecision 接线/EXCLUDE/BOT_SEAT_PICKS.zhiba/超时保守表）；K UI（zhibaAsk 拼点按钮点击走 respondZhiba/play 阶段制霸按钮渲染、ffa 不渲染）；L 无密钥零变化（ffa 弃牌阶段不受脏 lordHandCap 影响）。**TDD**：先写 16 项 FAIL（startZhiba/respondZhiba 未定义、normalize 无字段等，29 PASS 为既有 28 项+零变化基线）→ 实现 → 45/45 GREEN。**测试踩坑**：①`mkG` 的 `turn: opt.turn || 1` 把 `turn:0` 当 falsy 变成 1——连带暴露 `canTriggerZhiba` 缺 phase/turn 服务端守卫（当时测试靠"无守卫"才通过），修复 = mkG 改 `typeof opt.turn==='number'` 判定 + `canTriggerZhiba` 补 `g.phase!=='play'||g.turn!==seat` 守卫（防出牌阶段外被直接调）；②startTurn 无条件重置 lordHandCap=0，妄尊守卫测试断言 undefined 是错的（应断言 0 + 袁术手牌数不变，后者的"袁术没摸牌"才是真正的零变化信号）。**既有测试更新**：`run_ai_bus_l3_test.js` T1 注册表计数断言 11→12（新增 zhiba，预期内的表驱动断言更新）。
 - **回归**：lordskill 45/0、core 7/0、l3 138/0（更新后）、l1 21/0、l2 23/0、c_window 34/0、info 16/0、model_picker 17/0、summary 13/0、timeout 8/0、identity 35/0、qinggangjian 6/0、lidian ALL PASSED、xuanfeng 5/0、fazheng 8/11（3 失败为既有眩惑损坏，stash 对比确认非本次回归）、cixiong 17/20（既有失败，非本次回归）；`node --check` data/game/render/render-hand/render-controls/bot/bot-ai-bus/skills 全过。
 - **改动范围**：`data.js`、`game.js`、`render.js`、`render-controls.js`、`bot.js`、`bot-ai-bus.js`、`run_ai_lordskill_test.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=303→304` ×14）。commit `feat: B2b主公技(制霸/妄尊)`。
+
+## D4 响应阶段 UI 回归扫描（大批次）
+
+- **扫描**：`BOT_PHASE_ACTOR` 44 个 phase 逐一对照 `BOT_DECISIONS` 注册（31 项）+ `CONTROLS_CHOICE_EXCLUDE`（33 项）+ L1 allowlist + 旧分支。
+- **结论（零代码改动）**：12 个"已登记 actor 但未注册未 EXCLUDE"阶段均有明确覆盖路径——①allowlist 三阶段（wuxie/luoyingAsk/luoshen）由 L1 接管（无密钥也接管）；②liuli/tianxiang/lirangRecover/zhengyi/xiaoguoChoice 为 G2/A1 已确认的 L1 覆盖阶段（有密钥 AI 接管，无密钥走旧分支/botSafePrompt，A8 已修正则盲区）；③guanxing/huashenSkill 有专用注册（grep 名不同）；④xunxunPick/respond 走本地旧分支（逻辑正确）。无新增盲区。
+- **改动范围**：仅 progress-log 记录，无业务代码改动。
