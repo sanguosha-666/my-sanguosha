@@ -78,7 +78,7 @@ console.log('Loading AI 总线信息层测试环境...\n');
 
 // 加载真实源文件:data.js(GENERALS 武将表)必须排在 bot.js 之前,
 // bot.js 的 buildBotVisibleState 在运行时查 GENERALS。
-const files = ['data.js', 'ai-bot.js', 'bot.js'];
+const files = ['data.js', 'ai-bot.js', 'bot-ai-bus.js', 'bot.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

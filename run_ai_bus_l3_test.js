@@ -96,8 +96,9 @@ const sandbox = vm.createContext(context, { name: 'sgs-ai-bus-l3-sandbox' });
 console.log('Loading AI 总线 L3 测试环境...\n');
 
 // 加载顺序遵循 index.html:room-lifecycle 必须在 game.js 之前(game.js 顶层
-// onclick 绑定 joinRoom);bot.js 在 game.js 之后、ai-bot.js 最后、render.js 殿后。
-const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot.js', 'ai-bot.js', 'render.js'];
+// onclick 绑定 joinRoom);bot-ai-bus.js 在 bot.js 之前(TDZ:const BOT_DECISIONS
+// 必须先于注册项);ai-bot.js 最后、render.js 殿后。
+const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');
