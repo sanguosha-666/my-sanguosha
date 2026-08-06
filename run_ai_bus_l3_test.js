@@ -3004,6 +3004,54 @@ const testCode = String.raw`
     if(t.indexOf('值不值得') < 0) throw new Error('prompt 应含"值不值得",实际 ' + t);
   });
 
+  // ================= P3: G2 响应类身份引导(buildSystemPrompt 接 botIdentityGuidance) =================
+  // 断言:统一 helper botPromptWithIdentity(base,g,seat) 与各响应类注册项 buildSystemPrompt
+  // 在身份局(g.gameMode==='identity' 且角色已知)拼入"你当前的身份是X"引导;ffa 局
+  // botIdentityGuidance 返回空串、原文不受影响。只影响 AI prompt,无密钥路径不涉及。
+  // TDD 红先行:botPromptWithIdentity 尚未定义(ReferenceError)、buildSystemPrompt 尚未
+  // 接身份引导("你当前的身份是"子串缺失)——这两类失败在实现前必须各自看到。
+  await check('P3 G2:botPromptWithIdentity 身份局主公含"你当前的身份是主公"', function(){
+    if(typeof botPromptWithIdentity !== 'function') throw new Error('botPromptWithIdentity 未定义');
+    var g = { gameMode:'identity', players: [ { role:'zhu' }, { role:'zhong' } ] };
+    var t = botPromptWithIdentity('base', g, 0);
+    if(t.indexOf('base') !== 0) throw new Error('应保留原文前缀,实际 ' + t);
+    if(t.indexOf('你当前的身份是主公') < 0) throw new Error('身份局应含身份引导,实际 ' + t);
+  });
+
+  await check('P3 G2:botPromptWithIdentity ffa 局不含身份引导、原文原样', function(){
+    if(typeof botPromptWithIdentity !== 'function') throw new Error('botPromptWithIdentity 未定义');
+    var g = { gameMode:'ffa', players: [ { role:'zhu' }, { role:'zhong' } ] };
+    var t = botPromptWithIdentity('base', g, 0);
+    if(t !== 'base') throw new Error('ffa 应原样返回 base,实际 ' + t);
+    if(t.indexOf('你当前的身份是') >= 0) throw new Error('ffa 不应含身份引导,实际 ' + t);
+  });
+
+  await check('P3 G2:dying.buildSystemPrompt 身份局含身份引导', function(){
+    var s = BOT_DECISIONS.dying;
+    var g = { gameMode:'identity', players: [ { role:'fan' }, { role:'zhu' } ] };
+    var t = s.buildSystemPrompt(g, 0);
+    if(t.indexOf('你当前的身份是反贼') < 0) throw new Error('身份局应含身份引导,实际 ' + t);
+  });
+
+  await check('P3 G2:dying.buildSystemPrompt ffa 局不含身份引导', function(){
+    var s = BOT_DECISIONS.dying;
+    var g = { gameMode:'ffa', players: [ { role:'zhu' }, { role:'zhong' } ] };
+    var t = s.buildSystemPrompt(g, 0);
+    if(t.indexOf('你当前的身份是') >= 0) throw new Error('ffa 不应含身份引导,实际 ' + t);
+  });
+
+  await check('P3 G2:duel/aoeResp/controlsChoice 身份局含、ffa 不含身份引导', function(){
+    var identityG = { gameMode:'identity', players: [ { role:'nei' }, { role:'zhu' } ] };
+    var ffaG = { gameMode:'ffa', players: [ { role:'zhu' } ] };
+    [BOT_DECISIONS.duel, BOT_DECISIONS.aoeResp, BOT_DECISIONS.controlsChoice].forEach(function(s){
+      if(!s || typeof s.buildSystemPrompt !== 'function') throw new Error('注册项 buildSystemPrompt 缺失');
+      var ti = s.buildSystemPrompt(identityG, 0);
+      if(ti.indexOf('你当前的身份是内奸') < 0) throw new Error('身份局应含"你当前的身份是内奸",实际 ' + ti);
+      var tf = s.buildSystemPrompt(ffaG, 0);
+      if(tf.indexOf('你当前的身份是') >= 0) throw new Error('ffa 不应含身份引导,实际 ' + tf);
+    });
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

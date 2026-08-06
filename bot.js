@@ -582,6 +582,14 @@ function botIdentityGuidance(g, seat){
   return '这局是身份局,你当前的身份是'+BOT_IDENTITY_ROLE_LABEL[role]+':'+content;
 }
 
+// 【提示词增强 G2 统一拼接】响应类注册项的 buildSystemPrompt 都要带身份引导
+// (botIdentityGuidance 对 ffa/无 role 返回空串,不影响原文)——统一走这个 helper,
+// 避免逐处复制拼接逻辑。调用方统一传 (g, seat),无参调用(如早期测试直接调
+// buildSystemPrompt())时 g 为 undefined,由 botIdentityGuidance 的 !g 守卫安全放行。
+function botPromptWithIdentity(base, g, seat){
+  return base + botIdentityGuidance(g, seat);
+}
+
 function buildBotPlaySystemPrompt(g, seat){
   return '你在扮演一款网页版三国杀里的AI机器人玩家,当前轮到你的出牌阶段。你会收到:'
   +'①你视角下真实合法可见的局面(自己的手牌与身份完全可见;其他角色只有公开信息——'
@@ -736,13 +744,13 @@ function controlsChoiceExecute(g, seat, choice){
   }
 }
 function buildControlsChoiceSystemPrompt(g, seat, ctx){
-  return '你在扮演一款网页版三国杀里的AI机器人玩家。当前阶段,游戏界面为你渲染了一组'
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。当前阶段,游戏界面为你渲染了一组'
     +'可点击的按钮(候选列表里的每一项对应一个按钮),每个按钮是一个合法动作。请结合当前'
     +'局面(你视角下真实合法可见的信息)与按钮文案,选出你认为最合适的动作。只能选择候选'
     +'列表里的按钮,不能发明列表之外的选项。'
     +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},不要输出任何解释文字、'
     +'代码块标记或多余字段。'
-    +'多数情况先判断值不值得,再点。';
+    +'多数情况先判断值不值得,再点。', g, seat);
 }
 BOT_DECISIONS.controlsChoice = {
   match: controlsChoiceMatch,
@@ -1008,11 +1016,11 @@ function dyingLocalFallback(g, seat, candidates){
 function dyingExecute(g, seat, choice){
   botInvoke(seat, function(){ respondDying(!!(choice && choice.save)); });
 }
-function dyingSystemPrompt(){
-  return '你在扮演一款网页版三国杀里的AI机器人玩家。现在轮到你对濒死角色决定是否打出【桃】救援。'
+function dyingSystemPrompt(g, seat){
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。现在轮到你对濒死角色决定是否打出【桃】救援。'
     +'参考自己的身份、已知身份信息与当前手牌,权衡救与不救的利弊。'
     +'只有列表内选项。只输出 {"choice":数字}，不要解释。'
-    +'先判断濒死者是敌是友、值不值得救,再选。';
+    +'先判断濒死者是敌是友、值不值得救,再选。', g, seat);
 }
 BOT_DECISIONS.dying = {
   match: dyingMatch,
@@ -1044,11 +1052,11 @@ function duelLocalFallback(g, seat, candidates){
 function duelExecute(g, seat, choice){
   botInvoke(seat, function(){ duelResponse(!!(choice && choice.play)); });
 }
-function duelSystemPrompt(){
-  return '你在扮演一款网页版三国杀里的AI机器人玩家。决斗中轮到你是否打出【杀】应战。'
+function duelSystemPrompt(g, seat){
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。决斗中轮到你是否打出【杀】应战。'
     +'参考双方体力、手牌与已知身份信息判断优劣——注意当前是否受【将驰】等限制不能使用或打出杀。'
     +'只有列表内选项。只输出 {"choice":数字}，不要解释。'
-    +'先判断这轮决斗的胜负预期,再决定出不出杀。';
+    +'先判断这轮决斗的胜负预期,再决定出不出杀。', g, seat);
 }
 BOT_DECISIONS.duel = {
   match: duelMatch,
@@ -1081,11 +1089,11 @@ function aoeRespLocalFallback(g, seat, candidates){
 function aoeRespExecute(g, seat, choice){
   botInvoke(seat, function(){ aoeRespond(!!(choice && choice.play)); });
 }
-function aoeRespSystemPrompt(){
-  return '你在扮演一款网页版三国杀里的AI机器人玩家。南蛮入侵/万箭齐发轮到你响应,决定是否打出要求的牌。'
+function aoeRespSystemPrompt(g, seat){
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。南蛮入侵/万箭齐发轮到你响应,决定是否打出要求的牌。'
     +'参考自己当前手牌与体力判断——注意当前是否受【将驰】等限制不能使用或打出杀。'
     +'只有列表内选项。只输出 {"choice":数字}，不要解释。'
-    +'先判断自己血量与手牌是否宽裕,再决定出不出。';
+    +'先判断自己血量与手牌是否宽裕,再决定出不出。', g, seat);
 }
 BOT_DECISIONS.aoeResp = {
   match: aoeRespMatch,
@@ -1207,9 +1215,9 @@ BOT_DECISIONS.jiedaoResponse = {
     if(!choice) return;
     botInvoke(seat, function(){ respondJiedao(!!choice.play, choice.cardIdx); });
   },
-  buildSystemPrompt: function(){
-    return '你在扮演网页版三国杀的AI机器人。你被【借刀杀人】要求对目标使用【杀】:候选为'
-      +'"打出【杀】"或"弃置武器"。请结合局面决定。只输出 {"choice":数字},不要解释。';
+  buildSystemPrompt: function(g, seat){
+    return botPromptWithIdentity('你在扮演网页版三国杀的AI机器人。你被【借刀杀人】要求对目标使用【杀】:候选为'
+      +'"打出【杀】"或"弃置武器"。请结合局面决定。只输出 {"choice":数字},不要解释。', g, seat);
   },
   maxTokens: 60,
 };
@@ -1481,9 +1489,9 @@ BOT_DECISIONS.enyuanGiveCard = {
     if(!choice) return;
     botInvoke(seat, function(){ giveEnyuanCard(choice.cardIdx); });
   },
-  buildSystemPrompt: function(){
-    return '你在扮演网页版三国杀的AI机器人。请选择一张红桃手牌交给法正。'
-      +'只输出 {"choice":数字},不要解释。';
+  buildSystemPrompt: function(g, seat){
+    return botPromptWithIdentity('你在扮演网页版三国杀的AI机器人。请选择一张红桃手牌交给法正。'
+      +'只输出 {"choice":数字},不要解释。', g, seat);
   },
   maxTokens: 60,
 };
@@ -2348,9 +2356,9 @@ BOT_DECISIONS.xiaoguo = {
     if(!choice) return;
     botInvoke(seat, function(){ respondXiaoguo(!!choice.activate, choice.cardIdx); });
   },
-  buildSystemPrompt: function(){
-    return '你在扮演网页版三国杀的AI机器人。当前是【骁果】发动询问:候选列表每一项是'
-      +'"弃一张基本牌发动"或"不发动"。请结合局面决定是否发动。只输出 {"choice":数字},不要解释。';
+  buildSystemPrompt: function(g, seat){
+    return botPromptWithIdentity('你在扮演网页版三国杀的AI机器人。当前是【骁果】发动询问:候选列表每一项是'
+      +'"弃一张基本牌发动"或"不发动"。请结合局面决定是否发动。只输出 {"choice":数字},不要解释。', g, seat);
   },
   maxTokens: 60,
 };
@@ -2509,20 +2517,21 @@ function buildBotGuhuoVisibleState(g, seat){
 }
 
 // buildBotGuhuoSystemPrompt:独立的、比 BOT_PLAY_SYSTEM_PROMPT 更短的专用 system
-// prompt——这是一道二选一的判断题,不需要候选动作列表描述,也不接入身份局四阵营指导
-// (纯粹是"这张声明牌可信度"的判断,和阵营博弈无关,按第四阶段设计报告的结论刻意不接)。
+// prompt——这是一道二选一的判断题,不需要候选动作列表描述。第四阶段设计报告曾结论
+// "不接身份局四阵营指导"(纯粹是"这张声明牌可信度"的判断),提示词增强批次 G2 按
+// spec §2.2 决定改为接入(质疑与不质疑同样受敌我立场影响),统一走 botPromptWithIdentity。
 // choice 的语义在这里显式约定:choice=1 表示"质疑"(question=true),choice=0 表示
 // "不质疑"(question=false)——和 respondGuhuoQuestion(question) 的参数语义直接对应,
 // 不需要额外的映射表。
-function buildBotGuhuoSystemPrompt(){
-  return '你在扮演一款网页版三国杀里的AI机器人玩家。场上一名角色(于吉)刚扣置一张手牌,'
+function buildBotGuhuoSystemPrompt(g, seat){
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。场上一名角色(于吉)刚扣置一张手牌,'
   +'声明它是某张具体的牌,并表示要当那张牌使用——你现在需要判断要不要质疑这个声明。'
   +'若你选择质疑:声明为真,你会获得一个负面效果(【缠怨】,此后永远不能再质疑于吉的'
   +'蛊惑);声明为假,这张牌会直接作废、不产生任何效果。若你选择不质疑:声明为真则'
   +'照常生效,声明为假也没有任何影响。你完全不知道这张牌真实是什么,只能根据这名角色'
   +'的行为倾向、场上局势等信息合理推断这次声明的可信度做出判断。'
   +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},其中 1 表示质疑、'
-  +'0 表示不质疑,不要输出任何解释文字、代码块标记或多余字段。';
+  +'0 表示不质疑,不要输出任何解释文字、代码块标记或多余字段。', g, seat);
 }
 function buildBotGuhuoUserPrompt(state){
   return '当前局面:\n'+JSON.stringify(state)
@@ -2586,8 +2595,8 @@ function buildBotGanglieVisibleState(g, seat){
 // 场景,不需要另起一套框架),再补一句提醒AI同时评估"这两张即将被弃掉的牌具体值不值得
 // 留"和"当前体力安全边际"——这两个维度是本地固定启发式(总是选弃牌,只要手牌够两张)
 // 完全没有考虑的,正是调研阶段指出的、AI能比机械规则做得更好的地方。
-function buildBotGanglieSystemPrompt(){
-  return '你在扮演一款网页版三国杀里的AI机器人玩家。你(被夏侯惇【刚烈】判定命中后需要'
+function buildBotGanglieSystemPrompt(g, seat){
+  return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。你(被夏侯惇【刚烈】判定命中后需要'
   +'做选择的伤害来源)现在需要在两个选项里选一个:弃置手牌中两张具体的牌(不能挑,固定'
   +'弃掉局面里 myHand 数组下标0和1对应的那两张,已在局面数据的 ganglie.discardIndices'
   +'里标出),或者受到1点伤害。判断依据可以参考:1点体力大致相当于2张手牌的价值,可以据此'
@@ -2596,7 +2605,7 @@ function buildBotGanglieSystemPrompt(){
   +'边际(血量已经很低、手里又缺桃这类救命牌时,即使多花两张牌也应该优先保留体力;血量'
   +'充裕、这两张牌明显有用时,选择受伤反而更划算)。'
   +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},其中 1 表示弃牌、'
-  +'0 表示受到伤害,不要输出任何解释文字、代码块标记或多余字段。';
+  +'0 表示受到伤害,不要输出任何解释文字、代码块标记或多余字段。', g, seat);
 }
 function buildBotGanglieUserPrompt(state){
   return '当前局面:\n'+JSON.stringify(state)
