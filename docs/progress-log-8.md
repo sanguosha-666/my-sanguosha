@@ -289,3 +289,13 @@
 - **交付**：D2 `bot-ai-bus.js` 拆分（总线核心独立，加载顺序 bot-ai-bus 在 bot 前）；D3 `AI_DEFAULT_MODEL` 单源（`PROVIDER_ADAPTERS[x].defaultModel`）；A1 响应超时托管（30s + 画面倒数 + 20 阶段保守动作表 + 幂等提交 + `RESPONSE_TIMEOUT_MS=30000`）；A2 断线重连验证（客户端态天然重置，零业务改动）；B2 四主公技（激将/护驾/制霸/妄尊，仅 `role==='zhu'` 守卫，新 pending 均登记 BOT_PHASE_ACTOR + BOT_DECISIONS + 超时保守表 + EXCLUDE）；D4 响应阶段 UI 回归扫描（无盲区，零代码改动）。
 - **测试**：AI-bus 10 套件 322 项全绿（timeout 8/lordskill 45/summary 13/core 7/info 16/l1 21/l2 23/c_window 34/l3 138/model_picker 17）；仓库 identity 35/lidian 3/qinggangjian 7/xuanfeng 6 全过，fazheng 8/3（既有眩惑基线）、cixiong 17/3（既有基线）；14 文件 `node --check` 全过。
 - **待办**：D1 真机验证（用户实操多浏览器联机，验证清单已交付）。
+
+## P1 提示词增强(G1 通用策略 + G3 score 语义，提示词增强批次)
+
+- **目标**：默认 system/user prompt 从"极简模板"增强为带决策启发式与 score 语义说明，提高 AI 选 index 的局面对话质量。spec：`docs/superpowers/specs/2026-08-03-prompt-enhance-design.md` §2.1/§2.3。**纯提示词文本改动，零逻辑变化**。
+- **G1 通用策略（`buildBotDefaultSystemPrompt`，bot-ai-bus.js）**：在原有"根据局面与武将技能说明，从候选列表选一个index/只能选列表内选项/只输出 {"choice":数字}"后追加一段：`决策参考(是判断优先级的参考,不是必须遵守的硬规则):1点体力大致相当于2张手牌的价值;关键防御牌(无懈/闪/桃)要留到关键时刻,别为试探而消耗;手牌耗尽裸拼往往替别人火中取栗;多数决策宁可保守不出,也不要打空自己。`——显式声明"参考非硬规则"，防模型把启发式当约束拒绝合法选项。
+- **G3 score 语义（`buildBotDefaultUserPrompt`）**：候选白名单序列化字段与改动前**逐字一致**（index/label/action/card/seat/handIndex/cardIdx/target/targets/pickKey/discardIndices，`localHeuristicScore` 本身仍不进 JSON、不泄露内部计算），其后追加条件段：`hasScore = (candidates||[]).some(c => typeof c.localHeuristicScore === 'number')`，仅候选含数字 score 时拼接 `\n\n说明:localHeuristicScore是本地算法的参考分,只是排序参考,不代表最优解;请结合局面与你的判断选择,不一定要选分数最高的。`——防止模型机械选最高分；无 score 时不加说明（省 token、无噪声）。`buildBotDefaultUserPrompt(state, candidates)` 形参列表不变，`callAiChooseIndex`/`botDecide`/`bot.js` 调用点零改动。
+- **测试（`run_ai_bus_core_test.js` 追加 3 项，core 7→10）**：①`buildBotDefaultSystemPrompt()` 含"1点体力"；②`buildBotDefaultUserPrompt({phase:'play'}, [{localHeuristicScore:50}])` 含"参考分"；③无 score 候选（`[{action:'出',label:'x'}]`）**不含**"参考分"（条件拼接守卫）。**TDD**：RED=8/2（新断言 8/9 失败、10 因现状"无 score 无说明"天然通过——该断言是防"条件拼接漏判/无条件全加"的回归守卫，无法先红属预期，符合 brief 指定的断言形态）→ 实现 → 10/10 GREEN。
+- **过程坑**：edit 工具误匹配吞掉既有测试 7 的 `async` 关键字（`await check(... async function(){...})` 变 `function(){...}` → `SyntaxError: await is only valid in async functions`），跑测试立刻暴露，补回 `async` 后恢复——RED 步骤顺带把预存测试环境也验证了一遍。
+- **回归**：core 10/0、l3 138/0、l1 21/0；`node --check bot-ai-bus.js` 通过；`?v=304→305` 替换前/后各 14 处（脚本校验）。
+- **改动范围**：`bot-ai-bus.js`、`run_ai_bus_core_test.js`、`index.html`（`?v=304→305` ×14）、`TASKS.md`。commit `feat(ai): 提示词G1通用策略+G3score语义` → HTTPS push `wenwen_dev`（ac3212e..5620ea5）。

@@ -14,7 +14,7 @@
 
 ## Phase 4/4 — 提示词增强 P1（G1 通用策略 + G3 score 语义）
 
-- [ ] P1：`buildBotDefaultSystemPrompt` 追加通用策略（体力/手牌价值、防御牌留关键、不裸拼）、`buildBotDefaultUserPrompt` 条件拼接 score 语义说明——core 测试 +3 项（10 全绿），`?v=305`
+- [x] P1：`buildBotDefaultSystemPrompt` 追加通用策略（体力/手牌价值、防御牌留关键、不裸拼）、`buildBotDefaultUserPrompt` 条件拼接 score 语义说明——core 测试 +3 项（10 全绿），`?v=305`，已 push（wenwen_dev）
 
 ## 下一步（待定）
 
