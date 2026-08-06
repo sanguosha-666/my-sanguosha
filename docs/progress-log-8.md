@@ -307,3 +307,10 @@
 - **P3 G2 响应类身份引导**：新增 `botPromptWithIdentity(base,g,seat)` helper（拼接 `botIdentityGuidance`）；dying/duel/aoeResp/jiedaoResponse/xiaoguo/enyuanGiveCard/guhuo/ganglie/controlsChoice 九处 buildSystemPrompt 改有参 (g,seat) 包 identity。仅身份局生效（ffa 空串）。无参 buildSystemPrompt 改有参后 `botDecide` 传参兼容，既有测试回归绿。
 - **G4 记牌感知已取消**（用户确认不做，维持删除弃牌堆统计）。
 - **测试**：core 10（+3）、l3 149（+6 P2 +5 P3）；AI-bus 10 套件 336 项全绿；14 文件 `node --check` 全过；`?v=304→307`。
+
+## token 优化二轮：desc 按需截断 + 候选去冗余
+
+- **实测基准**（7 人身份局出牌）：单次决策 userPrompt ≈6900 字符 ≈1800-2000 tokens（局面投影 ~57% + 候选 ~43%）。
+- **改动**：①`buildBotVisibleState` generalDesc **自己全量、他人截断 60 字**（他人技能名+短描述足够判断威胁，省 ~480 字/次）；②候选 label 去掉冗余"本地分N"（`localHeuristicScore` 字段已有、hasScore 说明已解释"参考分"，label 不重复）。
+- **测试**：info +1（7 人局 desc 截断断言）、l2 +1（label 无"本地分"断言）；info 17/l2 24/core 10/l3 149/c_window 34 全绿。
+- **改动范围**：`bot.js`、`run_ai_bus_info_test.js`、`run_ai_bus_l2_test.js`、`index.html`（`?v=307→308` ×14）。
