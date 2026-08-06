@@ -87,11 +87,62 @@ const context = {
   RegExp: RegExp
 };
 
-context.window.firebase = context.firebase;
-context.window.document = context.document;
-context.global = context;
+// 【A2】断线重连测试需要"第二个沙箱=页面刷新"来验证模块级 let 状态回退,故把沙箱
+// 构建/加载抽成可复用函数:buildSandbox() 每次产出全新 JS 作用域(模拟刷新后 JS 全量
+// 重载),loadAll(sb) 按 index.html 顺序加载全部脚本。storage stub 每次新建(浏览器刷新
+// 时 sessionStorage/localStorage 实际保留,但本测试锁定的契约是"游戏态不靠 storage
+// 恢复",见 A2 验证块注释)。
+function buildSandbox(){
+  const context = {
+    gameRef: {
+      transaction: function(fn) {
+        return fn(context.g || {});
+      }
+    },
+    firebase: {
+      initializeApp: function() { return { database: function() { return { ref: function() { return { on: function() {}, once: function() {}, push: function() { return { set: function() {}, key: 'mock_key' }; }, transaction: function(fn) { var cb = fn(function() {}); if (cb) cb(); return {}; }, set: function() {}, update: function() {}, child: function() { return {}; }, remove: function() {}, get: function() { return { val: function() { return null; } }; } }; } }; } }; },
+      database: function() { return { ref: function() { return { on: function() {}, once: function() {}, push: function() { return { set: function() {}, key: 'mock_key' }; }, transaction: function() { return {}; }, set: function() {}, child: function() { return {}; }, remove: function() {}, get: function() { return { val: function() { return null; } }; } }; } }; }
+    },
+    document: {
+      getElementById: function(id) { return { onclick: function() {}, innerHTML: '', style: {}, className: '', classList: { add: function() {}, remove: function() {}, toggle: function() {}, contains: function() { return false; } }, appendChild: function() { return {}; }, remove: function() {}, setAttribute: function() {}, getAttribute: function() { return null; }, addEventListener: function() {}, removeEventListener: function() {} }; },
+      createElement: function(tag) { return { src: '', href: '', rel: '', type: '', textContent: '', innerHTML: '', onclick: function() {}, onerror: function() {}, onload: function() {}, className: '', id: '', style: {}, setAttribute: function() {}, getAttribute: function() { return null; }, appendChild: function() { return {}; }, remove: function() {} }; },
+      createTextNode: function(t) { return { nodeValue: t, textContent: t }; },
+      createDocumentFragment: function() { return { appendChild: function() { return {}; }, querySelector: function() { return null; }, querySelectorAll: function() { return []; } }; },
+      querySelector: function() { return null; }, querySelectorAll: function() { return []; },
+      body: { innerHTML: '', appendChild: function() { return {}; }, removeChild: function() { return {}; }, insertBefore: function() { return {}; } },
+      head: { appendChild: function() { return {}; } }, forms: [], images: [], scripts: [],
+      // render.js 顶层注册横屏引导/音频解锁监听需要 document 级 addEventListener
+      addEventListener: function() {}, removeEventListener: function() {}
+    },
+    window: {
+      firebase: null,
+      location: { search: '', href: 'http://localhost', reload: function() {} },
+      localStorage: { getItem: function() { return null; }, setItem: function() {}, removeItem: function() {}, clear: function() {} },
+      sessionStorage: { getItem: function() { return null; }, setItem: function() {} },
+      addEventListener: function() {}, removeEventListener: function() {},
+      setTimeout: function(f, t) { return setTimeout(f, t); }, clearTimeout: function(t) { return clearTimeout(t); },
+      setInterval: function(f, t) { return setInterval(f, t); }, clearInterval: function(t) { return clearInterval(t); },
+      alert: function() {}, confirm: function() { return true; }, prompt: function() { return null; },
+      open: function() { return null; }, close: function() {},
+      history: { pushState: function() {}, replaceState: function() {} },
+      navigator: { userAgent: 'Mozilla/5.0', platform: 'Win32', language: 'zh-CN', onLine: true }
+    },
+    joinRoom: function() {},
+    mySeat: 0,
+    pushLog: function(log, text) { log.push({seq: log.length, text: text}); return log; },
+    console: console,
+    Math: Math,
+    Date: Date,
+    JSON: JSON,
+    RegExp: RegExp
+  };
+  context.window.firebase = context.firebase;
+  context.window.document = context.document;
+  context.global = context;
+  return vm.createContext(context, { name: 'sgs-ai-bus-l3-sandbox' });
+}
 
-const sandbox = vm.createContext(context, { name: 'sgs-ai-bus-l3-sandbox' });
+const sandbox = buildSandbox();
 
 console.log('Loading AI 总线 L3 测试环境...\n');
 
@@ -99,22 +150,25 @@ console.log('Loading AI 总线 L3 测试环境...\n');
 // onclick 绑定 joinRoom);bot-ai-bus.js 在 bot.js 之前(TDZ:const BOT_DECISIONS
 // 必须先于注册项);ai-bot.js 最后、render.js 殿后。
 const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
-files.forEach(function(file){
-  try {
-    const code = fs.readFileSync(file, 'utf8');
-    vm.runInContext(code, sandbox, { filename: file });
-    console.log('  OK ' + file);
-    if (file === 'game.js') {
-      vm.runInContext('tx = function(fn) { return fn(typeof _g !== "undefined" ? _g : {}); };', sandbox);
-      vm.runInContext('gameRef = { transaction: function(fn) { return tx(fn); } };', sandbox);
-      vm.runInContext('mySeat = 0;', sandbox);
+function loadAll(sb){
+  files.forEach(function(file){
+    try {
+      const code = fs.readFileSync(file, 'utf8');
+      vm.runInContext(code, sb, { filename: file });
+      console.log('  OK ' + file);
+      if (file === 'game.js') {
+        vm.runInContext('tx = function(fn) { return fn(typeof _g !== "undefined" ? _g : {}); };', sb);
+        vm.runInContext('gameRef = { transaction: function(fn) { return tx(fn); } };', sb);
+        vm.runInContext('mySeat = 0;', sb);
+      }
+    } catch (e) {
+      console.log('  FAIL ' + file + ': ' + e.message);
+      if (e.stack) console.log('     ' + e.stack.split('\n').slice(1, 3).join('\n     '));
+      process.exit(1);
     }
-  } catch (e) {
-    console.log('  FAIL ' + file + ': ' + e.message);
-    if (e.stack) console.log('     ' + e.stack.split('\n').slice(1, 3).join('\n     '));
-    process.exit(1);
-  }
-});
+  });
+}
+loadAll(sandbox);
 
 console.log('\n' + '='.repeat(60));
 console.log('  AI 总线 L3 测试(seatPick 通用座位协议)');
@@ -2923,6 +2977,54 @@ vm.runInContext(testCode, sandbox);
 (async function(){
   while (sandbox.__testDone !== true) {
     await new Promise(function(r){ setTimeout(r, 10); });
+  }
+  // ============ 【A2】断线重连状态回退验证(宿主侧) ============
+  // 契约:botTwoStepA(bot.js)/aiSummary/aiSummarySeat/aiSummaryRound/aiSummaryTurn
+  // (bot-ai-bus.js)全是模块级 let,浏览器刷新 → JS 全量重载 → 天然回初始值。
+  // 全项目 grep 已确认 sessionStorage/localStorage 从不恢复这些状态:ai-bot.js 只存
+  // sgsAiKey/sgsAiProvider/sgsAiPromptDismissed/sgsAiModel 四个密钥配置键(刷新后应
+  // 保留),game.js 只存 sgsClientId(重连身份),botTwoStepA/aiSummary 无任何 storage
+  // 读写。这里用"第二个全新沙箱=刷新后的新 JS 作用域"把这条契约钉死,防将来有人
+  // 手滑给这些状态加 storage 恢复。
+  console.log('\n' + '='.repeat(60));
+  console.log('  A2 断线重连状态回退验证');
+  console.log('='.repeat(60));
+  try {
+    // 1. 制造重连前的残留客户端态:决策中途(botTwoStepA 挂起)+ AI 跨回合记忆(aiSummary)
+    vm.runInContext(
+      'botTwoStepA = { decisionId: "jiedaoTwoStep", a: 1 };'
+      + ' aiSummary = "残留摘要"; aiSummarySeat = 1; aiSummaryRound = 3; aiSummaryTurn = 2;',
+      sandbox);
+    // 2. "刷新页面" = 全新 vm 沙箱重载全部脚本(JS 作用域全新,storage 语义上保留但无恢复)
+    const fresh = buildSandbox();
+    loadAll(fresh);
+    // 3. 断言模块级状态回到初始值,不残留
+    const v = JSON.parse(vm.runInContext(
+      'JSON.stringify([botTwoStepA, aiSummary, aiSummarySeat, aiSummaryRound, aiSummaryTurn])',
+      fresh));
+    if(v[0] !== null) throw new Error('重连后 botTwoStepA 应回退 null,实际 ' + JSON.stringify(v[0]));
+    if(v[1] !== '') throw new Error('重连后 aiSummary 应为空字符串,实际 ' + JSON.stringify(v[1]));
+    if(v[2] !== null || v[3] !== 0 || v[4] !== -1)
+      throw new Error('重连后 aiSummarySeat/Round/Turn 应回初始值(null/0/-1),实际 ' + JSON.stringify(v.slice(2)));
+    // 4. 重连后遇残留 pending 不报错:服务端 pending(如 jiedaoChoice)刷新后仍在 Firebase,
+    //    客户端记忆(botTwoStepA)已丢,调度入口须照常解析行动者并走完决策(不卡死)
+    const r = await vm.runInContext(
+      'respondJiedao = function(){ window.__rjCalls = (window.__rjCalls||0) + 1; };'
+      + '(async function(){'
+      + '  var ps=[]; for(var i=0;i<3;i++){ ps.push({ name:"p"+i, alive:true, hp:4, maxHp:4,'
+      + '    hand: i===0 ? [{id:"jd0",name:"杀",suit:"♠",rank:5}] : [], equips: emptyEquips(),'
+      + '    delays: [], isBot: i===0, role:"zhu", general:"yuJi" }); }'
+      + '  var g = { players: ps, gameMode:"ffa", roundNum:1, phase:"jiedaoChoice", turn:1,'
+      + '    log: [], pending:{ type:"jiedaoChoice", seatA:0 }, started:true };'
+      + '  try { await runBotDecision(g, 0); return "ok:" + (window.__rjCalls||0); }'
+      + '  catch(e){ return "err:" + e.message; }'
+      + '})()', fresh);
+    if(typeof r !== 'string' || r.indexOf('ok:1') !== 0)
+      throw new Error('重连后残留 pending(jiedaoChoice)应正常决策并提交 respondJiedao,实际 ' + JSON.stringify(r));
+    console.log('  PASS A2重连:botTwoStepA/aiSummary 刷新即回初始值,残留 pending 不报错');
+  } catch (e) {
+    sandbox.__testFail = true;
+    console.log('  FAIL A2重连: ' + (e && e.message || e));
   }
   process.exit(sandbox.__testFail ? 1 : 0);
 })().catch(function(e){
