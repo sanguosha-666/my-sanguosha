@@ -2963,7 +2963,7 @@ function botSafePrompt(g,seat){
   try{
     renderControls(g);
     const buttons=[...box.querySelectorAll('button:not(:disabled)')];
-    const safe=buttons.find(b=>/不发动|不使用|不出|取消|跳过|放弃|结束/.test(b.textContent||''));
+    const safe=buttons.find(b=>/不发动|不使用|不出|不获得|取消|跳过|放弃|结束/.test(b.textContent||''));
     const mandatory=buttons.find(b=>!/发动/.test(b.textContent||'')&&/选择|交给|弃置|摸牌|回复|打出/.test(b.textContent||''));
     const chosen=safe||mandatory||(buttons.length===1?buttons[0]:null);
     if(chosen){ chosen.click(); return true; }

@@ -230,3 +230,10 @@
 - **边界**：continue 态手牌空时 match 放行一次（候选只剩「停止」可清挂起），避免挂起残留。
 - **测试**：l3 新增仁德 continue 链 7 条（选目标/阶段B候选/提交后设 continue/停止/reset/无密钥一张即停/手牌空只剩停止）；l3 138/0、c_window 34/0，`node --check bot.js` 通过。
 - **改动范围**：`bot.js`、`run_ai_bus_l3_test.js`、`index.html`（`?v=296→297` ×13）。
+
+## A8 机器人兜底完整性（botSafePrompt 正则盲区修补）
+
+- **背景**：`botSafePrompt` 的 safe 正则 `/不发动|不使用|不出|取消|跳过|放弃|结束/` 覆盖不了「不获得」等常见拒绝按钮。G3 已实测 `lirangRecover`（获得弃牌/不获得）无密钥时正则命中不了任何按钮 → 只 warn 不动作，机器人可能卡在礼让回收。这是 L1 泛化（有密钥）之外遗留的无密钥盲区。
+- **修补**：`botSafePrompt` safe 正则追加 `不获得`（`/不发动|不使用|不出|不获得|取消|跳过|放弃|结束/`）。纯拒绝词，实测不匹配「发动【礼让】」「获得弃牌」「确认发动」等发动/接受按钮；mandatory 正则、单按钮兜底、L1 候选正则、allowlist/EXCLUDE/BOT_PHASE_ACTOR 均未触碰。
+- **测试同步**：l1 T18 原断言「lirangRecover 旧路径应不点任何按钮」锁定的是修补前的盲区行为；修补后无密钥旧路径点「不获得」→ `respondLiRangRecover(false)` 推进（预期行为变化），断言已同步为新预期。l1 21/0、l3 138/0、c_window 34/0，`node --check bot.js` 通过。
+- **改动范围**：`bot.js`、`run_ai_bus_l1_test.js`、`index.html`（`?v=297→298` ×13）。

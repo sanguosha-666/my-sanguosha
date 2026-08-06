@@ -504,7 +504,10 @@ const testCode = String.raw`
     var r2 = await botDecide('controlsChoice', g2, 0);
     if(r2 !== false) throw new Error('lirangRecover 无密钥不应被 L1 接管,实际 ' + r2);
     await runBotDecision(g2, 0);
-    if(window.__lirangCalls.length !== 0) throw new Error('lirangRecover 旧路径应不点任何按钮(盲区不崩),实际 ' + JSON.stringify(window.__lirangCalls));
+    // A8:botSafePrompt safe 正则追加「不获得」→ 无密钥旧路径点「不获得」推进
+    // (respondLiRangRecover(false)),不再是盲区不动作——这是 A8 修补的预期行为。
+    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0] !== false)
+      throw new Error('lirangRecover 旧路径应点「不获得」=respondLiRangRecover(false),实际 ' + JSON.stringify(window.__lirangCalls));
 
     var g3 = mkG('zhengyi', { type: 'zhengyi', asking: 0, seat: 1, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha' }, []);
     var r3 = await botDecide('controlsChoice', g3, 0);
