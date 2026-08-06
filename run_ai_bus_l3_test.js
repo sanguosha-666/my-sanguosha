@@ -2960,6 +2960,50 @@ const testCode = String.raw`
     if(window.__windowCalls !== 0) throw new Error('fangtian执行后不应再走 runBotActionWindow,实际 ' + window.__windowCalls);
   });
 
+  // ================= P2: G5 决策思考链(buildSystemPrompt 思考引导) =================
+  // 断言各注册项 buildSystemPrompt 已追加思考引导句(引导性,非硬规则;无密钥路径不涉及,
+  // prompt 只影响 AI 决策)。断言用新句独有子串(不用"保留/价值"等既有文本也含的词),
+  // 保证 TDD 红先行——旧文本里已出现的词测不出新句是否真的追加了。
+  await check('P2 G5:discardSubset prompt 含思考引导"先想保留(关键防御牌优先)"', function(){
+    var s = BOT_DECISIONS.discardSubset;
+    if(!s || typeof s.buildSystemPrompt !== 'function') throw new Error('discardSubset.buildSystemPrompt 未注册');
+    var t = s.buildSystemPrompt();
+    if(t.indexOf('先想保留') < 0) throw new Error('prompt 应含"先想保留(关键防御牌优先)",实际 ' + t);
+  });
+
+  await check('P2 G5:pickSlot prompt 含思考引导"先看目标装备/判定区价值"', function(){
+    var s = BOT_DECISIONS.pickSlot;
+    if(!s || typeof s.buildSystemPrompt !== 'function') throw new Error('pickSlot.buildSystemPrompt 未注册');
+    var t = s.buildSystemPrompt();
+    if(t.indexOf('先看目标装备') < 0) throw new Error('prompt 应含"先看目标装备/判定区的价值",实际 ' + t);
+  });
+
+  await check('P2 G5:dying prompt 含思考引导"判断濒死者敌是友/值不值得救"', function(){
+    var s = BOT_DECISIONS.dying;
+    if(!s || typeof s.buildSystemPrompt !== 'function') throw new Error('dying.buildSystemPrompt 未注册');
+    var t = s.buildSystemPrompt();
+    if(t.indexOf('敌是友') < 0) throw new Error('prompt 应含"敌是友/值不值得救",实际 ' + t);
+  });
+
+  await check('P2 G5:duel prompt 含思考引导"胜负预期"', function(){
+    var s = BOT_DECISIONS.duel;
+    if(!s || typeof s.buildSystemPrompt !== 'function') throw new Error('duel.buildSystemPrompt 未注册');
+    var t = s.buildSystemPrompt();
+    if(t.indexOf('胜负') < 0) throw new Error('prompt 应含"胜负预期",实际 ' + t);
+  });
+
+  await check('P2 G5:aoeResp prompt 含思考引导"血量与手牌宽裕"', function(){
+    var s = BOT_DECISIONS.aoeResp;
+    if(!s || typeof s.buildSystemPrompt !== 'function') throw new Error('aoeResp.buildSystemPrompt 未注册');
+    var t = s.buildSystemPrompt();
+    if(t.indexOf('血量') < 0) throw new Error('prompt 应含"血量与手牌宽裕",实际 ' + t);
+  });
+
+  await check('P2 G5:controlsChoice prompt 含思考引导"多数情况先判断值不值得"', function(){
+    var t = buildControlsChoiceSystemPrompt();
+    if(t.indexOf('值不值得') < 0) throw new Error('prompt 应含"值不值得",实际 ' + t);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

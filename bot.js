@@ -741,7 +741,8 @@ function buildControlsChoiceSystemPrompt(g, seat, ctx){
     +'局面(你视角下真实合法可见的信息)与按钮文案,选出你认为最合适的动作。只能选择候选'
     +'列表里的按钮,不能发明列表之外的选项。'
     +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},不要输出任何解释文字、'
-    +'代码块标记或多余字段。';
+    +'代码块标记或多余字段。'
+    +'多数情况先判断值不值得,再点。';
 }
 BOT_DECISIONS.controlsChoice = {
   match: controlsChoiceMatch,
@@ -809,7 +810,8 @@ function buildDiscardSubsetSystemPrompt(){
   return '你在扮演网页版三国杀的AI机器人。当前是你的弃牌阶段,你必须恰好弃置 need 张牌'
     +'(候选列表每一项是一组完整的弃牌下标集合,均从你当前手牌中弃掉,弃哪组都一样合法)。'
     +'思考要保留哪些牌:桃/无中生有/装备/锦囊等价值高的优先保留,闪/酒等价值低的优先弃置。'
-    +'只能选择列表内的组合,不能发明列表之外的选项。请只输出 {"choice":数字},不要解释。';
+    +'只能选择列表内的组合,不能发明列表之外的选项。请只输出 {"choice":数字},不要解释。'
+    +'先想保留什么(关键防御牌优先),再弃低价值牌。';
 }
 BOT_DECISIONS.discardSubset = {
   match: discardSubsetMatch,
@@ -862,7 +864,8 @@ function buildPickSlotSystemPrompt(){
   return '你在扮演网页版三国杀的AI机器人。你使用了顺手牵羊/过河拆桥,需要从目标处选择'
     +'拿/拆的对象(候选列表每一项是一个具体对象:随机手牌/某件装备/判定区某张延时锦囊)。'
     +'结合当前局面判断哪个对象价值最高(拆武器/拆+1马/拿装备/拆延时锦囊等)。只能选择'
-    +'列表内的选项,不能发明列表之外的选项。请只输出 {"choice":数字},不要解释。';
+    +'列表内的选项,不能发明列表之外的选项。请只输出 {"choice":数字},不要解释。'
+    +'先看目标装备/判定区的价值,再选拿/拆哪个。';
 }
 BOT_DECISIONS.pickSlot = {
   match: pickSlotMatch,
@@ -1008,7 +1011,8 @@ function dyingExecute(g, seat, choice){
 function dyingSystemPrompt(){
   return '你在扮演一款网页版三国杀里的AI机器人玩家。现在轮到你对濒死角色决定是否打出【桃】救援。'
     +'参考自己的身份、已知身份信息与当前手牌,权衡救与不救的利弊。'
-    +'只有列表内选项。只输出 {"choice":数字}，不要解释。';
+    +'只有列表内选项。只输出 {"choice":数字}，不要解释。'
+    +'先判断濒死者是敌是友、值不值得救,再选。';
 }
 BOT_DECISIONS.dying = {
   match: dyingMatch,
@@ -1043,7 +1047,8 @@ function duelExecute(g, seat, choice){
 function duelSystemPrompt(){
   return '你在扮演一款网页版三国杀里的AI机器人玩家。决斗中轮到你是否打出【杀】应战。'
     +'参考双方体力、手牌与已知身份信息判断优劣——注意当前是否受【将驰】等限制不能使用或打出杀。'
-    +'只有列表内选项。只输出 {"choice":数字}，不要解释。';
+    +'只有列表内选项。只输出 {"choice":数字}，不要解释。'
+    +'先判断这轮决斗的胜负预期,再决定出不出杀。';
 }
 BOT_DECISIONS.duel = {
   match: duelMatch,
@@ -1079,7 +1084,8 @@ function aoeRespExecute(g, seat, choice){
 function aoeRespSystemPrompt(){
   return '你在扮演一款网页版三国杀里的AI机器人玩家。南蛮入侵/万箭齐发轮到你响应,决定是否打出要求的牌。'
     +'参考自己当前手牌与体力判断——注意当前是否受【将驰】等限制不能使用或打出杀。'
-    +'只有列表内选项。只输出 {"choice":数字}，不要解释。';
+    +'只有列表内选项。只输出 {"choice":数字}，不要解释。'
+    +'先判断自己血量与手牌是否宽裕,再决定出不出。';
 }
 BOT_DECISIONS.aoeResp = {
   match: aoeRespMatch,
