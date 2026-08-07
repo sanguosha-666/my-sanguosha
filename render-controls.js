@@ -221,6 +221,11 @@ function resetXunxun(){ xunxunKeep=[]; xunxunBottom=[]; }
 // 选中后 jiedaoSeatA 存座位号,再点一次选 B 才真正提交。
 let jiedaoSeatA = null;
 function resetJiedao(){ jiedaoSeatA=null; }
+// 蛊惑声明为【借刀杀人】时的专属两步选目标(A/B 校验口径与上面 jiedaoSeatA 完全一致)。
+// 刻意用独立变量,不复用 jiedaoSeatA 本身——两者触发的 g.phase 不同(play vs guhuoTarget),
+// 理论上不会同时激活,但分开命名更清楚地表明这是两条独立状态机,互不干扰、各自 reset。
+let guhuoJiedaoSeatA = null;
+function resetGuhuoJiedao(){ guhuoJiedaoSeatA=null; }
 
 // waitAskBanner: 旁观者视角"等待 XX 决定是否发动【技能】…"这句在 renderControls 里重复十余处、
 // 形状完全一致的提示,集中成一个函数,避免每处手拼、措辞漂移。name 由调用点算好后传入(兼容各分支
@@ -3458,8 +3463,15 @@ function renderControls(g){
     if(g.pending && g.pending.type==='guhuoTarget'){
       const d=g.pending;
       const source=g.players[d.sourceSeat];
-      if(d.sourceSeat===mySeat){
+      const isJiedaoClaim = !!(d.claimedCard && d.claimedCard.name==='借刀杀人');
+      if(d.sourceSeat===mySeat && isJiedaoClaim){
+        setBanner(guhuoJiedaoSeatA===null
+          ? '【蛊惑】已生效,声明为【借刀杀人】,点上方一名持有武器的角色作为目标A。'
+          : '已选中 '+escapeHtml(g.players[guhuoJiedaoSeatA].name)+' 为目标A,点上方A攻击范围内的另一名角色作为目标B(或点A重新选)。');
+      } else if(d.sourceSeat===mySeat){
         setBanner('【蛊惑】已生效,点上方一名合法角色作为【'+(d.claimedCard&&d.claimedCard.name||'?')+'】目标。');
+      } else if(isJiedaoClaim){
+        setBanner((source?source.name:'于吉')+' 正在为【蛊惑】声明的【借刀杀人】选择目标…');
       } else {
         setBanner((source?source.name:'于吉')+' 正在为【蛊惑】选择目标…');
       }
@@ -3927,7 +3939,7 @@ function renderControls(g){
     }
     
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetZhiba();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetGuhuoJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetZhiba();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
     
     // 丁奉【奋迅】:弃牌选择阶段
     if(g.pending && g.pending.type==='fenxunDiscard' && g.pending.seat===mySeat) {

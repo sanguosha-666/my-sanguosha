@@ -272,7 +272,7 @@ function recastLianHuan(cardIdx){
 }
 
 function guhuoClaimableNames(){
-  const excluded = new Set(Object.keys(EQUIPS).concat(Object.keys(DELAY_TRICKS), ['借刀杀人']));
+  const excluded = new Set(Object.keys(EQUIPS).concat(Object.keys(DELAY_TRICKS)));
   const names = [...BASIC_CARDS.filter(name=>name!=='闪'), ...Object.keys(CARD_PLAYS).filter(name=>!excluded.has(name))];
   return [...new Set(names)];
 }
@@ -624,6 +624,10 @@ function guhuoChooseTarget(targetSeat){
   tx(g=>{
     if(g.phase!=='guhuoTarget'||!g.pending||g.pending.type!=='guhuoTarget'||g.pending.sourceSeat!==mySeat) return g;
     const d=g.pending;
+    // 借刀杀人是两个不同角色的目标(A/B),不是这个单目标流程能表达的——必须走
+    // guhuoChooseJiedaoTarget。这里显式拒绝,防止客户端调错函数把扣置牌静默吞掉
+    // (CARD_PLAYS['借刀杀人'].effect 是空函数,不拒绝的话会"成功"但什么都不发生)。
+    if(d.claimedCard && d.claimedCard.name==='借刀杀人') return g;
     const me=g.players[mySeat];
     const spec=CARD_PLAYS[guhuoActionId(d.claimedCard && d.claimedCard.name)];
     if(!me || !me.alive || !spec || !spec.target) return g;
@@ -637,6 +641,33 @@ function guhuoChooseTarget(targetSeat){
     g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【'+d.claimedCard.name+'】对 '+target.name+' 使用');
     markCardSound(g, d.claimedCard.name, mySeat, d.actualCard, targetSeat);
     spec.effect(g, me, d.claimedCard, targetSeat);
+    return g;
+  });
+}
+
+// guhuoChooseJiedaoTarget: 蛊惑声明为【借刀杀人】时的专属两目标提交(A 有武器/B 在 A
+// 攻击范围内),复用现有 guhuoTarget 这个 pending(不新增类型)——校验口径照抄
+// jieDaoShaRen(见上方),提交后discard扣置牌+startTrick接入借刀杀人已有的无懈窗口/
+// jiedaoChoice流程,不需要重新实现借刀杀人本体的任何结算逻辑。
+function guhuoChooseJiedaoTarget(seatA, seatB){
+  tx(g=>{
+    if(g.phase!=='guhuoTarget'||!g.pending||g.pending.type!=='guhuoTarget'||g.pending.sourceSeat!==mySeat) return g;
+    const d=g.pending;
+    if(!(d.claimedCard && d.claimedCard.name==='借刀杀人')) return g;
+    const me=g.players[mySeat];
+    if(!me || !me.alive) return g;
+    const A=g.players[seatA], B=g.players[seatB];
+    if(!A || !A.alive || seatA===mySeat || !A.equips.weapon) return g;
+    if(!B || !B.alive || seatB===seatA || !canReachSha(g, seatA, seatB)) return g;
+    if(hasCap(B,'kongcheng') && (B.hand||[]).length===0) return g;
+    if(isZhichiImmune(g, seatB, d.claimedCard)) return g;
+    if(hasCap(B,'weimu') && isBlackTactics(d.claimedCard)) return g;
+    g.pending=null;
+    g.phase='play';
+    g.discard.push(d.actualCard);
+    g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【借刀杀人】对 '+A.name+' 使用,目标 '+B.name);
+    markCardSound(g, '借刀杀人', mySeat, d.actualCard, seatA);
+    startTrick(g, {trick:'借刀杀人', from:mySeat, to:seatA, seatB});
     return g;
   });
 }

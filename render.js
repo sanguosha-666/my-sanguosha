@@ -568,7 +568,7 @@ function showConfirm(message, onOk, onCancel){
 // 纯提取重构,行为零变化,只是让 confirmOwnOrSha(按原效果用/当杀 二选一弹窗)也能调用同一份
 // "清空全部客户端选牌/选目标状态"逻辑,不用另外复制一份 reset* 列表。
 function resetSelectionState(){
-  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); resetSanyao(); resetZhiba();
+  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetGuhuoJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); resetSanyao(); resetZhiba();
 }
 // confirmAndPlay: 出牌四类触发点(选目标/不选目标/丈八两张当杀)统一委托的包装——
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
@@ -1108,6 +1108,9 @@ function render(g){
      !(g.phase==='qiaobianMove' && g.pending && g.pending.type==='qiaobianMove' && g.pending.seat===mySeat)) resetQiaobian();
   // 同款兜底:只要不在「自己的出牌阶段」,就退出借刀杀人选 A/B 模式。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetJiedao();
+  // 同款兜底:只要不在"轮到自己为蛊惑声明的【借刀杀人】选目标"的状态,就退出这套两步模式。
+  if(!(g.phase==='guhuoTarget' && g.pending && g.pending.type==='guhuoTarget' && g.pending.sourceSeat===mySeat
+       && g.pending.claimedCard && g.pending.claimedCard.name==='借刀杀人')) resetGuhuoJiedao();
   // 同款兜底:只要不在左慈"选武将→选技能"的三个阶段(开局初次声明/回合开始更改/回合结束
   // 更改)里、且轮到自己操作,就退出两级选择模式,不留残留。
   if(!(g.pending && g.pending.seat===mySeat &&
@@ -1226,7 +1229,34 @@ function render(g){
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">已有同名</span>';
       }
     }
-    if(g.phase==='guhuoTarget' && g.pending && g.pending.type==='guhuoTarget' && g.pending.sourceSeat===mySeat){
+    // 蛊惑声明为【借刀杀人】:走专属两步选目标(A 有武器/B 在 A 攻击范围内),不进下面
+    // 通用单目标块——校验口径与 isJiedaoSel 那套(1473行)完全一致,只是数据源从
+    // "手牌里的借刀杀人真牌"换成"蛊惑扣置牌+guhuoChooseJiedaoTarget"。
+    const isGuhuoJiedaoSel=!!(g.phase==='guhuoTarget' && g.pending && g.pending.type==='guhuoTarget'
+      && g.pending.sourceSeat===mySeat && g.pending.claimedCard && g.pending.claimedCard.name==='借刀杀人');
+    if(isGuhuoJiedaoSel){
+      if(guhuoJiedaoSeatA===null){
+        const hasSomeB = g.players.some((B,bi)=> B && B.alive && bi!==i && canReachSha(g,i,bi) && !(hasCap(B,'kongcheng') && (B.hand||[]).length===0));
+        if(i!==mySeat && p.alive && p.equips && p.equips.weapon && hasSomeB){
+          d.style.cursor='pointer';
+          d.style.outline='2px dashed var(--cinnabar-bright)';
+          d.title='选择为【借刀杀人】的目标A(需持有武器)';
+          d.onclick=()=>{ guhuoJiedaoSeatA=i; render(g); };
+        }
+      } else if(i!==guhuoJiedaoSeatA && p.alive && canReachSha(g, guhuoJiedaoSeatA, i) && !(hasCap(p,'kongcheng') && (p.hand||[]).length===0)){
+        const seatA=guhuoJiedaoSeatA, seatB=i;
+        d.style.cursor='pointer';
+        d.style.outline='3px solid var(--gold)';
+        d.onclick=()=>{ confirmAndPlay('将【蛊惑】声明的【借刀杀人】对 '+g.players[seatA].name+' 使用,目标 '+g.players[seatB].name+'？',
+            ()=>guhuoChooseJiedaoTarget(seatA, seatB)); };
+      } else if(i===guhuoJiedaoSeatA){
+        d.style.outline='3px solid var(--gold)';
+        d.style.cursor='pointer';
+        d.title='重新选择目标A';
+        d.onclick=()=>{ guhuoJiedaoSeatA=null; render(g); };
+      }
+    }
+    if(g.phase==='guhuoTarget' && g.pending && g.pending.type==='guhuoTarget' && g.pending.sourceSeat===mySeat && !isGuhuoJiedaoSel){
       const claimed=g.pending.claimedCard;
       const guhuoSpec=claimed ? CARD_PLAYS[guhuoActionId(claimed.name)] : null;
       const selfAllowed=i!==mySeat || !!(guhuoSpec && guhuoSpec.allowSelf);
