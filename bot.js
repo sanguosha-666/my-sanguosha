@@ -203,7 +203,16 @@ const BOT_PHASE_ACTOR = {
   // 行动者都是 pending.seat(左慈本人)。第一步(是否更改,huashenChangeAskStart/AskEnd)
   // 早就注册过、无密钥默认"不更改"——这两个第二步只有配了AI密钥且AI选择"更改"才会真正
   // 走到,此前一直未注册、属于"只在AI路径才会暴露"的潜在盲区,这次一并补上,防御性收录。
-  huashenChangePickStart:'seat', huashenChangePickEnd:'seat'
+  huashenChangePickStart:'seat', huashenChangePickEnd:'seat',
+  // 【渲染层bug修复顺带补上】袁绍【乱击】:luanjiChoose/luanjiConfirm 行动者都是
+  // pending.sourceSeat(袁绍本人,自主发动、机器人目前没有入口主动调用startLuanji——
+  // 防御性收录,和明策/神速等其它"自主发动类"技能同一类)。这两个phase此前从未在
+  // BOT_PHASE_ACTOR里出现过,是配合render-controls.js渲染层bug一起修的:渲染bug修好后
+  // 这两步对人类/机器人都变得可达,如果不补机器人分支,机器人反而会新出现"卡在这两步"
+  // 的风险(此前渲染都渲染不出来,机器人靠botSafePrompt兜底点不到任何东西但至少不会
+  // 被误判成"该我行动"——现在渲染修好,botSeatForState若查不到这两个key会走
+  // botFallbackSeats兜底,同样安全,但既然要修就一并补齐,不留新盲区)。
+  luanjiChoose:'sourceSeat', luanjiConfirm:'sourceSeat'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -829,6 +838,7 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   'mingcePickCard','mingcePickTarget','mingcePickTarget2','mingceChoice',
   'qiaomengChoose','qiaomengPickEquip','wangxiAsk','yaowu_choose','shensuSha',
   'zhimengAsk','zhimengPick','huashenChangePickStart','huashenChangePickEnd',
+  'luanjiChoose','luanjiConfirm',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -3701,6 +3711,18 @@ async function runBotDecision(g,seat){
       botInvoke(seat,()=>respondHuashenChangePickEnd(generalId, entry&&entry.name));
     }
     return;
+  }
+  // 【渲染层bug修复顺带补上】袁绍【乱击】选牌对(防御性收录,机器人目前不会主动发动乱击):
+  // 固定选可用牌对里的第一个,不追求判断哪对牌更值得留手。
+  if(g.phase==='luanjiChoose'&&d.type==='luanjiChoose'&&d.sourceSeat===seat){
+    const pairIndex=(d.availablePairs||[]).length?0:-1;
+    if(pairIndex>=0) botInvoke(seat,()=>pickLuanjiPair(pairIndex));
+    return;
+  }
+  // 袁绍【乱击】确认使用(防御性收录):已经选好牌对、视为使用万箭齐发,没有新增判断空间,
+  // 固定确认。
+  if(g.phase==='luanjiConfirm'&&d.type==='luanjiConfirm'&&d.sourceSeat===seat){
+    botInvoke(seat,confirmLuanji); return;
   }
   if(g.phase==='jiedaoChoice'&&d && d.type==='jiedaoChoice'&&d.seatA===seat){
     if(await botDecide('jiedaoResponse',g,seat)) return;

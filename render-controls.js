@@ -1325,7 +1325,116 @@ function renderControls(g){
     setBanner(escapeHtml(source?source.name:'?')+' 发动【明策】,等待 '+escapeHtml(target?target.name:'?')+' 选择…');
     return;
   }
-  
+
+  // 袁绍【乱击】:选择牌对阶段。【渲染层bug修复】这四个 luanji 分支原来嵌套在
+  // }else if(g.phase==='play'){ 大分支内部——但 startLuanji() 把 g.phase 切到
+  // 'luanjiChoose'/confirmLuanji 切到'luanjiConfirm'之后,g.phase 就不再是'play'了,
+  // 外层 else-if 链条永远进不来这四个分支,导致选牌/确认面板对任何人(真人和机器人)都
+  // 渲染不出来。修法是挪出 play 分支、改成独立的 g.phase==='luanjiChoose'/'luanjiConfirm'
+  // 顶层判断(和 mingceChoice/qiaomengChoose 等其它独立单角色技能同一种写法),不改
+  // startLuanji()/confirmLuanji() 本身的 phase 切换(game.js/skills.js 里 normalize 和
+  // 各响应函数的守卫都只认 pending.type,不认 g.phase,唯一依赖 g.phase 语义的是
+  // botSeatForState 的 Category A 短路——如果反过来让 startLuanji() 保持 g.phase='play'
+  // 不切换,会让机器人调度错误地把这两步当成"正常出牌阶段决策"处理,绕开
+  // BOT_PHASE_ACTOR.luanjiChoose/luanjiConfirm 已经注册好的专用分支,这条路更危险,
+  // 故选择挪渲染代码而不是改 phase 切换)。
+  if(g.phase==='luanjiChoose' && g.pending && g.pending.type==='luanjiChoose' && g.pending.sourceSeat===mySeat){
+    const availablePairs = g.pending.availablePairs || [];
+    const hand = me.hand || [];
+    const div = document.createElement('div'); div.className = 'centered';
+    const h4 = document.createElement('h4'); h4.textContent = '【乱击】选择牌对';
+    div.appendChild(h4);
+    const p = document.createElement('p'); p.textContent = '请选择两张花色相同的手牌当【万箭齐发】使用';
+    div.appendChild(p);
+
+    // 按花色分组显示
+    const suitGroups = {};
+    for (let i = 0; i < hand.length; i++) {
+      const card = hand[i];
+      const suit = card.suit;
+      if (!suitGroups[suit]) {
+        suitGroups[suit] = [];
+      }
+      suitGroups[suit].push({ index: i, card: card });
+    }
+
+    // 为每个花色组显示可选的牌对
+    for (const [suit, cards] of Object.entries(suitGroups)) {
+      if (cards.length >= 2) {
+        const suitHeader = document.createElement('h5');
+        suitHeader.textContent = suit + '花色组:';
+        div.appendChild(suitHeader);
+
+        // 显示所有可能的牌对
+        for (let i = 0; i < cards.length; i++) {
+          for (let j = i + 1; j < cards.length; j++) {
+            const pairIndex = availablePairs.findIndex(
+              pair => pair[0] === cards[i].index && pair[1] === cards[j].index
+            );
+
+            const b = document.createElement('button');
+            b.className = 'card-btn';
+            b.textContent = '【' + cards[i].card.name + '】+【' + cards[j].card.name + '】';
+            b.onclick = () => pickLuanjiPair(pairIndex);
+            div.appendChild(b);
+          }
+        }
+      }
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'ghost';
+    cancelBtn.textContent = '取消';
+    cancelBtn.onclick = () => cancelLuanji();
+    div.appendChild(cancelBtn);
+
+    c.appendChild(div);
+    setBanner('请选择两张花色相同的手牌当【万箭齐发】使用');
+    return;
+  }
+
+  // 袁绍【乱击】:确认阶段
+  if(g.phase==='luanjiConfirm' && g.pending && g.pending.type==='luanjiConfirm' && g.pending.sourceSeat===mySeat){
+    const cardIndices = g.pending.cardIndices;
+    const hand = me.hand || [];
+    const cards = [hand[cardIndices[0]], hand[cardIndices[1]]];
+
+    const div = document.createElement('div'); div.className = 'centered';
+    const h4 = document.createElement('h4'); h4.textContent = '【乱击】确认使用';
+    div.appendChild(h4);
+    const p = document.createElement('p');
+    p.textContent = '确认使用【' + cards[0].name + '】和【' + cards[1].name + '】当【万箭齐发】使用吗?';
+    div.appendChild(p);
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'primary';
+    confirmBtn.textContent = '确认';
+    confirmBtn.onclick = () => confirmLuanji();
+    div.appendChild(confirmBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'ghost';
+    cancelBtn.textContent = '取消';
+    cancelBtn.onclick = () => cancelLuanji();
+    div.appendChild(cancelBtn);
+
+    c.appendChild(div);
+    setBanner('确认使用乱击吗?');
+    return;
+  }
+
+  // 袁绍【乱击】:观察者界面（其他玩家发动乱击时）
+  if(g.phase==='luanjiChoose' && g.pending && g.pending.type==='luanjiChoose' && g.pending.sourceSeat!==mySeat){
+    const source = g.players[g.pending.sourceSeat];
+    setBanner(source ? source.name + ' 正在选择【乱击】的牌…' : '有人正在选择【乱击】的牌…');
+    return;
+  }
+  if(g.phase==='luanjiConfirm' && g.pending && g.pending.type==='luanjiConfirm' && g.pending.sourceSeat!==mySeat){
+    const source = g.players[g.pending.sourceSeat];
+    setBanner(source ? source.name + ' 正在确认【乱击】…' : '有人正在确认【乱击】…');
+    return;
+  }
+
   // 法正【恩怨】:其他玩家选择阶段
   if(g.phase==='enyuanChoose' && g.pending && g.pending.type==='enyuanChoose' && g.pending.damagerSeat!==mySeat){
     const damager = g.players[g.pending.damagerSeat];
@@ -3333,103 +3442,6 @@ function renderControls(g){
     // 方天画戟触发条件(手牌恰好剩1张+能当杀+还能出杀)在选目标途中变得不满足 → 安全退出,不卡在选牌模式
     if(fangtianMode && (!canSha || me.hand.length!==1 || !hasCap(me,'fangtian') || !canUseAs(me,(me.hand||[])[0],'杀'))) resetFangtian();
     
-    // 袁绍【乱击】:选择牌对阶段
-    if(g.pending && g.pending.type==='luanjiChoose' && g.pending.sourceSeat===mySeat){
-      const availablePairs = g.pending.availablePairs || [];
-      const hand = me.hand || [];
-      const div = document.createElement('div'); div.className = 'centered';
-      const h4 = document.createElement('h4'); h4.textContent = '【乱击】选择牌对';
-      div.appendChild(h4);
-      const p = document.createElement('p'); p.textContent = '请选择两张花色相同的手牌当【万箭齐发】使用';
-      div.appendChild(p);
-      
-      // 按花色分组显示
-      const suitGroups = {};
-      for (let i = 0; i < hand.length; i++) {
-        const card = hand[i];
-        const suit = card.suit;
-        if (!suitGroups[suit]) {
-          suitGroups[suit] = [];
-        }
-        suitGroups[suit].push({ index: i, card: card });
-      }
-      
-      // 为每个花色组显示可选的牌对
-      for (const [suit, cards] of Object.entries(suitGroups)) {
-        if (cards.length >= 2) {
-          const suitHeader = document.createElement('h5');
-          suitHeader.textContent = suit + '花色组:';
-          div.appendChild(suitHeader);
-          
-          // 显示所有可能的牌对
-          for (let i = 0; i < cards.length; i++) {
-            for (let j = i + 1; j < cards.length; j++) {
-              const pairIndex = availablePairs.findIndex(
-                pair => pair[0] === cards[i].index && pair[1] === cards[j].index
-              );
-              
-              const b = document.createElement('button');
-              b.className = 'card-btn';
-              b.textContent = '【' + cards[i].card.name + '】+【' + cards[j].card.name + '】';
-              b.onclick = () => pickLuanjiPair(pairIndex);
-              div.appendChild(b);
-            }
-          }
-        }
-      }
-      
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'ghost';
-      cancelBtn.textContent = '取消';
-      cancelBtn.onclick = () => cancelLuanji();
-      div.appendChild(cancelBtn);
-      
-      c.appendChild(div);
-      setBanner('请选择两张花色相同的手牌当【万箭齐发】使用');
-      return;
-    }
-    
-    // 袁绍【乱击】:确认阶段
-    if(g.pending && g.pending.type==='luanjiConfirm' && g.pending.sourceSeat===mySeat){
-      const cardIndices = g.pending.cardIndices;
-      const hand = me.hand || [];
-      const cards = [hand[cardIndices[0]], hand[cardIndices[1]]];
-      
-      const div = document.createElement('div'); div.className = 'centered';
-      const h4 = document.createElement('h4'); h4.textContent = '【乱击】确认使用';
-      div.appendChild(h4);
-      const p = document.createElement('p'); 
-      p.textContent = '确认使用【' + cards[0].name + '】和【' + cards[1].name + '】当【万箭齐发】使用吗?';
-      div.appendChild(p);
-      
-      const confirmBtn = document.createElement('button');
-      confirmBtn.className = 'primary';
-      confirmBtn.textContent = '确认';
-      confirmBtn.onclick = () => confirmLuanji();
-      div.appendChild(confirmBtn);
-      
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'ghost';
-      cancelBtn.textContent = '取消';
-      cancelBtn.onclick = () => cancelLuanji();
-      div.appendChild(cancelBtn);
-      
-      c.appendChild(div);
-      setBanner('确认使用乱击吗?');
-      return;
-    }
-    
-    // 袁绍【乱击】:观察者界面（其他玩家发动乱击时）
-    if(g.pending && g.pending.type==='luanjiChoose' && g.pending.sourceSeat!==mySeat){
-      const source = g.players[g.pending.sourceSeat];
-      setBanner(source ? source.name + ' 正在选择【乱击】的牌…' : '有人正在选择【乱击】的牌…');
-      return;
-    }
-    if(g.pending && g.pending.type==='luanjiConfirm' && g.pending.sourceSeat!==mySeat){
-      const source = g.players[g.pending.sourceSeat];
-      setBanner(source ? source.name + ' 正在确认【乱击】…' : '有人正在确认【乱击】…');
-      return;
-    }
     if(g.pending && g.pending.type==='guhuoTarget'){
       const d=g.pending;
       const source=g.players[d.sourceSeat];

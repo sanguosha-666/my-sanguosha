@@ -544,6 +544,39 @@ const testCode = String.raw`
     if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
   });
 
+  // ---- 渲染层bug回归:袁绍【乱击】luanjiChoose/luanjiConfirm 此前被写死嵌套在
+  // g.phase==='play' 的大分支里,而 startLuanji()/pickLuanjiPair() 把 g.phase 切到
+  // 'luanjiChoose'/'luanjiConfirm' 后,渲染条件永远对不上,面板对任何人都渲染不出来。
+  // 这两条断言直接验证渲染层修复本身(真的能收集到按钮),不是机器人决策分支。 ----
+  await check('渲染层修复:luanjiChoose 能收集到牌对按钮+取消按钮(此前渲染不出任何按钮)', function(){
+    var g = mkG('luanjiChoose',
+      { type: 'luanjiChoose', sourceSeat: 0, availablePairs: [[0, 1]] },
+      [card('杀'), card('闪')]);
+    var res = collectControlsCandidates(g, 0);
+    try{
+      if(res.candidates.length !== 2) throw new Error('应恰2个按钮(牌对+取消),实际 ' + res.candidates.length + ' labels=' + JSON.stringify(res.candidates.map(function(c){return c.label;})));
+      if(res.candidates[0].label.indexOf('杀') < 0 || res.candidates[0].label.indexOf('闪') < 0)
+        throw new Error('按钮0应是牌对组合,实际 ' + res.candidates[0].label);
+      if(res.candidates[1].label !== '取消') throw new Error('按钮1应为取消,实际 ' + res.candidates[1].label);
+    } finally {
+      res.dispose();
+    }
+  });
+
+  await check('渲染层修复:luanjiConfirm 能收集到确认+取消按钮(此前渲染不出任何按钮)', function(){
+    var g = mkG('luanjiConfirm',
+      { type: 'luanjiConfirm', sourceSeat: 0, cardIndices: [0, 1] },
+      [card('杀'), card('闪')]);
+    var res = collectControlsCandidates(g, 0);
+    try{
+      if(res.candidates.length !== 2) throw new Error('应恰2个按钮(确认+取消),实际 ' + res.candidates.length + ' labels=' + JSON.stringify(res.candidates.map(function(c){return c.label;})));
+      if(res.candidates[0].label !== '确认') throw new Error('按钮0应为确认,实际 ' + res.candidates[0].label);
+      if(res.candidates[1].label !== '取消') throw new Error('按钮1应为取消,实际 ' + res.candidates[1].label);
+    } finally {
+      res.dispose();
+    }
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

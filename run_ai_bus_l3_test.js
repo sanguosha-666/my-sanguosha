@@ -3621,6 +3621,36 @@ const testCode = String.raw`
       throw new Error('chengxiangChoose 不应登记(g.phase从不等于该值,登记了也是死代码),实际 ' + BOT_PHASE_ACTOR.chengxiangChoose);
   });
 
+  // ================= 渲染层bug修复(luanjiChoose/luanjiConfirm)顺带补上的机器人分支 =================
+  await check('渲染层bug修复:luanjiChoose 防御性兜底,固定选第一个可用牌对', async function(){
+    window.__luanjiPickCalls = [];
+    pickLuanjiPair = function(idx){ window.__luanjiPickCalls.push(idx); };
+    var g = mkSeatG({});
+    g.phase = 'luanjiChoose';
+    g.pending = { type: 'luanjiChoose', sourceSeat: 0, availablePairs: [[0, 1], [2, 3]] };
+    await runBotDecision(g, 0);
+    if(window.__luanjiPickCalls.length !== 1 || window.__luanjiPickCalls[0] !== 0)
+      throw new Error('应调用 pickLuanjiPair(0),实际 ' + JSON.stringify(window.__luanjiPickCalls));
+  });
+
+  await check('渲染层bug修复:luanjiConfirm 固定确认', async function(){
+    window.__luanjiConfirmCalls = 0;
+    confirmLuanji = function(){ window.__luanjiConfirmCalls++; };
+    var g = mkSeatG({});
+    g.phase = 'luanjiConfirm';
+    g.pending = { type: 'luanjiConfirm', sourceSeat: 0, cardIndices: [0, 1] };
+    await runBotDecision(g, 0);
+    if(window.__luanjiConfirmCalls !== 1)
+      throw new Error('应调用 confirmLuanji 一次,实际 ' + window.__luanjiConfirmCalls);
+  });
+
+  await check('渲染层bug修复:BOT_PHASE_ACTOR 已登记 luanjiChoose/luanjiConfirm', function(){
+    if(BOT_PHASE_ACTOR.luanjiChoose !== 'sourceSeat')
+      throw new Error('luanjiChoose 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.luanjiChoose);
+    if(BOT_PHASE_ACTOR.luanjiConfirm !== 'sourceSeat')
+      throw new Error('luanjiConfirm 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.luanjiConfirm);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
