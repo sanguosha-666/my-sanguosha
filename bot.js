@@ -123,7 +123,23 @@ const BOT_PHASE_ACTOR = {
   // 【第二批-第1组】曹仁【据守】:行动者是 pending.seat(曹仁本人,服务端 confirmJushou/
   // cancelJushou 守卫都是 pending.seat!==mySeat)。有"取消"按钮能命中安全正则,不卡死，
   // 同上属于"有兜底但不智能"。
-  jushouChoose:'seat'
+  jushouChoose:'seat',
+  // 【第二批-第2组,装备类4个,同一套结构】雌雄双股剑:cixiongAsk 的行动者是 pending.from
+  // (装备者/攻击者本人,服务端 respondCixiongAsk 守卫 g.pending.from!==mySeat);
+  // cixiongChoice 的行动者是 pending.to(被指定的异性目标,服务端 respondCixiongChoice
+  // 守卫 g.pending.to!==mySeat)——和举荐一样，前后两段行动者字段不同。
+  cixiongAsk:'from', cixiongChoice:'to',
+  // 贯石斧:行动者是 pending.from(装备者/攻击者本人,服务端 respondGuanshi 守卫
+  // g.pending.from!==mySeat)。
+  guanshi:'from',
+  // 寒冰剑:是否发动这一问的行动者是 pending.from(装备者/攻击者本人,服务端
+  // respondHanbingAsk 守卫 g.pending.from!==mySeat)。发动后进入的弃牌子阶段
+  // (pending.type==='hanbing')已经登记过(见上方 hanbing:'from')，这里补的是"是否发动"
+  // 这第一问。
+  hanbingAsk:'from',
+  // 青龙偃月刀:行动者是 pending.from(装备者/攻击者本人,服务端 respondQinglong 守卫
+  // g.pending.from!==mySeat)。
+  qinglong:'from'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -735,6 +751,9 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // (接线在controlsChoice之前)，且各自渲染真实按钮——同上原则收录，保持确定性兜底不受
   // AI密钥状态影响。
   'jujianPickCard','jujianPickTarget','jujianChooseEffect','jushouChoose',
+  // 【第二批-第2组】雌雄双股剑/贯石斧/寒冰剑/青龙偃月刀四个装备特效都有专用的确定性
+  // runBotDecision分支(接线在controlsChoice之前)——同上原则收录。
+  'cixiongAsk','cixiongChoice','guanshi','hanbingAsk','qinglong',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -3377,6 +3396,47 @@ async function runBotDecision(g,seat){
     const me=g.players[seat];
     if(me && (me.hand||[]).length<=3) botInvoke(seat,confirmJushou);
     else botInvoke(seat,cancelJushou);
+    return;
+  }
+  // 【第二批-第2组,装备类4个,同一套结构】雌雄双股剑是否发动:对装备者/攻击者本人没有
+  // 任何下行风险(要么令目标弃牌,要么自己白摸一张),固定发动,不接AI。
+  if(g.phase==='cixiongAsk'&&d.type==='cixiongAsk'&&d.from===seat){
+    botInvoke(seat,()=>respondCixiongAsk(true)); return;
+  }
+  // 雌雄双股剑目标选弃牌还是让攻击者摸牌:两者对目标都是纯损失,固定选"弃一张手牌"
+  // (代码保证走到这一步时目标手牌非空),不接AI、不追求判断哪个更优。
+  if(g.phase==='cixiongChoice'&&d.type==='cixiongChoice'&&d.to===seat){
+    botInvoke(seat,()=>respondCixiongChoice('discard',0)); return;
+  }
+  // 贯石斧是否发动:固定发动(花2张牌让已被闪抵消的杀依然命中,和这批其余三个装备特效
+  // 同一基调——攻击性投入,不接AI)。选牌不追求判断哪张更值,手牌优先、装备槽垫底,固定
+  // 取前2个可弃项。
+  if(g.phase==='guanshi'&&d.type==='guanshi'&&d.from===seat){
+    const me=g.players[seat];
+    const picks=[];
+    (me&&me.hand||[]).forEach((c,i)=>{ if(picks.length<2) picks.push('hand:'+i); });
+    if(picks.length<2){
+      EQUIP_SLOTS.forEach(s=>{ if(picks.length<2 && s!=='weapon' && me&&me.equips&&me.equips[s]) picks.push('equip:'+s); });
+    }
+    if(picks.length===2) botInvoke(seat,()=>respondGuanshi(picks));
+    else botInvoke(seat,()=>respondGuanshi(null));
+    return;
+  }
+  // 寒冰剑是否发动:固定发动(防止本次杀的伤害,改为让目标弃两张牌——通常比单纯造成1点
+  // 伤害更有价值，和这批其余三个装备特效同一基调)。发动后进入的弃牌子阶段(hanbing)
+  // 已经有专用分支覆盖，这里只补"是否发动"这第一问。
+  if(g.phase==='hanbingAsk'&&d.type==='hanbingAsk'&&d.from===seat){
+    botInvoke(seat,()=>respondHanbingAsk(true)); return;
+  }
+  // 青龙偃月刀是否发动:和悲歌/张郃巧变等其它响应函数同一个既有坑(CLAUDE.md规则26)——
+  // 曹彰【将驰】本回合禁杀时(jiangchiNoSlash)、或手里没有能当杀的牌时,发动请求会被
+  // 服务端respondQinglong原地拒绝,盲目发动会让机器人卡在原地。这里先探测能不能真的
+  // 发动,能则发动(再来一次杀,进攻性投入,同这批其余三个装备特效基调),不能则不发动。
+  if(g.phase==='qinglong'&&d.type==='qinglong'&&d.from===seat){
+    const me=g.players[seat];
+    const shaIdx=me?findUsableAs(me.hand,me,'杀'):-1;
+    if(me && !me.jiangchiNoSlash && shaIdx>=0) botInvoke(seat,()=>respondQinglong(true,shaIdx));
+    else botInvoke(seat,()=>respondQinglong(false));
     return;
   }
   if(g.phase==='jiedaoChoice'&&d && d.type==='jiedaoChoice'&&d.seatA===seat){

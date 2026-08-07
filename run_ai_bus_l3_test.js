@@ -3184,6 +3184,98 @@ const testCode = String.raw`
       throw new Error('jushouChoose 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.jushouChoose);
   });
 
+  // ================= 第二批-第2组:雌雄双股剑+贯石斧+寒冰剑+青龙偃月刀(装备类4个,
+  // 同一套结构) =================
+  await check('第二批-2:雌雄双股剑cixiongAsk 固定发动(respondCixiongAsk(true))', async function(){
+    window.__cixiongAskCalls = [];
+    respondCixiongAsk = function(activate){ window.__cixiongAskCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'cixiongAsk';
+    g.pending = { type: 'cixiongAsk', from: 0, to: 1, noShan: false, shaColor: 'red' };
+    await runBotDecision(g, 0);
+    if(window.__cixiongAskCalls.length !== 1 || window.__cixiongAskCalls[0] !== true)
+      throw new Error('应调用 respondCixiongAsk(true),实际 ' + JSON.stringify(window.__cixiongAskCalls));
+  });
+
+  await check('第二批-2:雌雄双股剑cixiongChoice 固定选弃手牌第一张', async function(){
+    window.__cixiongChoiceCalls = [];
+    respondCixiongChoice = function(choice, idx){ window.__cixiongChoiceCalls.push([choice, idx]); };
+    var g = mkSeatG({ myHand: [card('杀'), card('闪')] });
+    g.phase = 'cixiongChoice';
+    g.pending = { type: 'cixiongChoice', from: 1, to: 0, noShan: false, shaColor: 'red' };
+    await runBotDecision(g, 0);
+    if(window.__cixiongChoiceCalls.length !== 1 ||
+       window.__cixiongChoiceCalls[0][0] !== 'discard' || window.__cixiongChoiceCalls[0][1] !== 0)
+      throw new Error('应调用 respondCixiongChoice("discard",0),实际 ' + JSON.stringify(window.__cixiongChoiceCalls));
+  });
+
+  await check('第二批-2:贯石斧guanshi 固定发动,选手牌前两张', async function(){
+    window.__guanshiCalls = [];
+    respondGuanshi = function(picks){ window.__guanshiCalls.push(picks); };
+    var g = mkSeatG({ myHand: [card('杀'), card('酒')] });
+    g.phase = 'guanshi';
+    g.pending = { type: 'guanshi', from: 0, to: 1 };
+    await runBotDecision(g, 0);
+    if(window.__guanshiCalls.length !== 1 || JSON.stringify(window.__guanshiCalls[0]) !== JSON.stringify(['hand:0','hand:1']))
+      throw new Error('应调用 respondGuanshi(["hand:0","hand:1"]),实际 ' + JSON.stringify(window.__guanshiCalls));
+  });
+
+  await check('第二批-2:寒冰剑hanbingAsk 固定发动(respondHanbingAsk(true))', async function(){
+    window.__hanbingAskCalls = [];
+    respondHanbingAsk = function(activate){ window.__hanbingAskCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'hanbingAsk';
+    g.pending = { type: 'hanbingAsk', from: 0, to: 1, sourceCard: card('杀') };
+    await runBotDecision(g, 0);
+    if(window.__hanbingAskCalls.length !== 1 || window.__hanbingAskCalls[0] !== true)
+      throw new Error('应调用 respondHanbingAsk(true),实际 ' + JSON.stringify(window.__hanbingAskCalls));
+  });
+
+  await check('第二批-2:青龙偃月刀qinglong 有可用杀时发动', async function(){
+    window.__qinglongCalls = [];
+    respondQinglong = function(activate, idx){ window.__qinglongCalls.push([activate, idx]); };
+    var g = mkSeatG({ myHand: [card('杀')] });
+    g.phase = 'qinglong';
+    g.pending = { type: 'qinglong', from: 0, to: 1, sourceCard: card('杀') };
+    await runBotDecision(g, 0);
+    if(window.__qinglongCalls.length !== 1 ||
+       window.__qinglongCalls[0][0] !== true || window.__qinglongCalls[0][1] !== 0)
+      throw new Error('应调用 respondQinglong(true,0),实际 ' + JSON.stringify(window.__qinglongCalls));
+  });
+
+  await check('第二批-2:青龙偃月刀qinglong 无可用杀/将驰禁杀时不发动(先探测再决策)', async function(){
+    window.__qinglongCalls = [];
+    respondQinglong = function(activate, idx){ window.__qinglongCalls.push([activate, idx]); };
+    var g = mkSeatG({ myHand: [card('桃')] });
+    g.phase = 'qinglong';
+    g.pending = { type: 'qinglong', from: 0, to: 1, sourceCard: card('杀') };
+    await runBotDecision(g, 0);
+    if(window.__qinglongCalls.length !== 1 || window.__qinglongCalls[0][0] !== false)
+      throw new Error('无杀应调用 respondQinglong(false),实际 ' + JSON.stringify(window.__qinglongCalls));
+
+    window.__qinglongCalls = [];
+    var g2 = mkSeatG({ myHand: [card('杀')] });
+    g2.players[0].jiangchiNoSlash = true;
+    g2.phase = 'qinglong';
+    g2.pending = { type: 'qinglong', from: 0, to: 1, sourceCard: card('杀') };
+    await runBotDecision(g2, 0);
+    if(window.__qinglongCalls.length !== 1 || window.__qinglongCalls[0][0] !== false)
+      throw new Error('将驰禁杀应调用 respondQinglong(false),实际 ' + JSON.stringify(window.__qinglongCalls));
+  });
+
+  await check('第二批-2:BOT_PHASE_ACTOR 已登记 cixiongAsk/cixiongChoice/guanshi/hanbingAsk/qinglong', function(){
+    if(BOT_PHASE_ACTOR.cixiongAsk !== 'from')
+      throw new Error('cixiongAsk 应登记为 from,实际 ' + BOT_PHASE_ACTOR.cixiongAsk);
+    if(BOT_PHASE_ACTOR.cixiongChoice !== 'to')
+      throw new Error('cixiongChoice 应登记为 to,实际 ' + BOT_PHASE_ACTOR.cixiongChoice);
+    if(BOT_PHASE_ACTOR.guanshi !== 'from')
+      throw new Error('guanshi 应登记为 from,实际 ' + BOT_PHASE_ACTOR.guanshi);
+    if(BOT_PHASE_ACTOR.hanbingAsk !== 'from')
+      throw new Error('hanbingAsk 应登记为 from,实际 ' + BOT_PHASE_ACTOR.hanbingAsk);
+    if(BOT_PHASE_ACTOR.qinglong !== 'from')
+      throw new Error('qinglong 应登记为 from,实际 ' + BOT_PHASE_ACTOR.qinglong);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
