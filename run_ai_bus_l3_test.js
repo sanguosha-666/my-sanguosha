@@ -3276,6 +3276,49 @@ const testCode = String.raw`
       throw new Error('qinglong 应登记为 from,实际 ' + BOT_PHASE_ACTOR.qinglong);
   });
 
+  // ================= 第二批-第3组:颜良文丑【双雄】+张角【雷击】 =================
+  await check('第二批-3:双雄shuangxiongAsk 固定不发动(respondShuangxiong(false))', async function(){
+    window.__shuangxiongCalls = [];
+    respondShuangxiong = function(activate){ window.__shuangxiongCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'shuangxiongAsk';
+    g.pending = { type: 'shuangxiongAsk', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__shuangxiongCalls.length !== 1 || window.__shuangxiongCalls[0] !== false)
+      throw new Error('应调用 respondShuangxiong(false),实际 ' + JSON.stringify(window.__shuangxiongCalls));
+  });
+
+  await check('第二批-3:雷击leijiChoose 固定发动,选候选第一个目标', async function(){
+    window.__leijiTriggerCalls = [];
+    triggerLeiji = function(seat){ window.__leijiTriggerCalls.push(seat); };
+    var g = mkSeatG({});
+    g.phase = 'leijiChoose';
+    g.pending = { type: 'leijiChoose', sourceSeat: 0, availableTargets: [1, 2], shanCard: card('闪') };
+    await runBotDecision(g, 0);
+    if(window.__leijiTriggerCalls.length !== 1 || window.__leijiTriggerCalls[0] !== 1)
+      throw new Error('应调用 triggerLeiji(1),实际 ' + JSON.stringify(window.__leijiTriggerCalls));
+  });
+
+  await check('第二批-3:雷击leijiJudge 纯确认点击(doLeijiJudge)', async function(){
+    window.__doLeijiJudgeCalls = 0;
+    doLeijiJudge = function(){ window.__doLeijiJudgeCalls++; };
+    var g = mkSeatG({});
+    g.phase = 'leijiJudge';
+    g.pending = { type: 'leijiJudge', sourceSeat: 0, targetSeat: 1, resume: { kind: 'leijiJudge', sourceSeat: 0, targetSeat: 1 } };
+    await runBotDecision(g, 0);
+    if(window.__doLeijiJudgeCalls !== 1)
+      throw new Error('应调用 doLeijiJudge 一次,实际 ' + window.__doLeijiJudgeCalls);
+  });
+
+  await check('第二批-3:BOT_PHASE_ACTOR 已登记 shuangxiongAsk/leijiChoose/leijiJudge', function(){
+    if(BOT_PHASE_ACTOR.shuangxiongAsk !== 'seat')
+      throw new Error('shuangxiongAsk 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.shuangxiongAsk);
+    if(BOT_PHASE_ACTOR.leijiChoose !== 'sourceSeat')
+      throw new Error('leijiChoose 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.leijiChoose);
+    if(BOT_PHASE_ACTOR.leijiJudge !== 'sourceSeat')
+      throw new Error('leijiJudge 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.leijiJudge);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

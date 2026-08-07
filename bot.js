@@ -139,7 +139,15 @@ const BOT_PHASE_ACTOR = {
   hanbingAsk:'from',
   // 青龙偃月刀:行动者是 pending.from(装备者/攻击者本人,服务端 respondQinglong 守卫
   // g.pending.from!==mySeat)。
-  qinglong:'from'
+  qinglong:'from',
+  // 【第二批-第3组】颜良文丑【双雄】:摸牌阶段开始"是否发动"询问,行动者是 pending.seat
+  // (双雄拥有者本人,服务端 respondShuangxiong 守卫 g.pending.seat!==mySeat)。
+  shuangxiongAsk:'seat',
+  // 【第二批-第3组】张角【雷击】:leijiChoose(是否发动+选目标)/leijiJudge(进行判定的
+  // 确认点击)行动者都是 pending.sourceSeat(张角本人,服务端 triggerLeiji/cancelLeiji/
+  // doLeijiJudge 对 leijiChoose 的守卫是 sourceSeat!==mySeat；leijiJudge 本身函数体没有
+  // seat校验，但渲染层用 sourceSeat===mySeat 把关，行动者语义一致)。
+  leijiChoose:'sourceSeat', leijiJudge:'sourceSeat'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -754,6 +762,9 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // 【第二批-第2组】雌雄双股剑/贯石斧/寒冰剑/青龙偃月刀四个装备特效都有专用的确定性
   // runBotDecision分支(接线在controlsChoice之前)——同上原则收录。
   'cixiongAsk','cixiongChoice','guanshi','hanbingAsk','qinglong',
+  // 【第二批-第3组】双雄+雷击都有专用的确定性runBotDecision分支(接线在controlsChoice
+  // 之前)——同上原则收录。
+  'shuangxiongAsk','leijiChoose','leijiJudge',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -3438,6 +3449,25 @@ async function runBotDecision(g,seat){
     if(me && !me.jiangchiNoSlash && shaIdx>=0) botInvoke(seat,()=>respondQinglong(true,shaIdx));
     else botInvoke(seat,()=>respondQinglong(false));
     return;
+  }
+  // 【第二批-第3组】颜良文丑【双雄】是否发动:固定不发动,不接AI。发动的代价是放弃本回合
+  // 正常摸牌(损失2张牌),换来的只是给后续决斗设一个可用花色(shuangxiongColor),收益不
+  // 确定、代价明确,保守默认不发动(和举荐同一基调:没有明确收益不主动付代价)。
+  if(g.phase==='shuangxiongAsk'&&d.type==='shuangxiongAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondShuangxiong(false)); return;
+  }
+  // 【第二批-第3组】张角【雷击】选目标:对发动者(张角本人)没有任何下行风险——不用弃牌、
+  // 不用摸牌,纯粹是"判定一张牌,黑桃就白得2点伤害"的免费加成,固定发动+固定选候选目标
+  // 第一个,不追求判断打谁更好(和落英/洛神同一基调:没有下行风险就默认总是尝试)。
+  if(g.phase==='leijiChoose'&&d.type==='leijiChoose'&&d.sourceSeat===seat){
+    const target=(d.availableTargets||[])[0];
+    if(typeof target==='number') botInvoke(seat,()=>triggerLeiji(target));
+    else botInvoke(seat,cancelLeiji);
+    return;
+  }
+  // 张角【雷击】进行判定:纯确认点击,没有选择,直接触发(和悲歌的beigeJudge同一模式)。
+  if(g.phase==='leijiJudge'&&d.type==='leijiJudge'&&d.sourceSeat===seat){
+    botInvoke(seat,doLeijiJudge); return;
   }
   if(g.phase==='jiedaoChoice'&&d && d.type==='jiedaoChoice'&&d.seatA===seat){
     if(await botDecide('jiedaoResponse',g,seat)) return;
