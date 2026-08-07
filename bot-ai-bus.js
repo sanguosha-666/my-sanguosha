@@ -66,6 +66,15 @@ function aiSummaryReset(){
 // 等 callAiChooseIndex 的座位校验去清;若本座位是第一次写摘要(aiSummarySeat 还是
 // null),也必须立刻归属本座位,否则紧接着的第一次决策会把刚写好的摘要当成
 // "座位变化"误清掉。
+// 【跨座位异步竟态防护】调用方(scheduleBotTurn)在发起这次请求之前已经把 aiSummarySeat
+// 同步设成了 seat——但这次 callAI 是真实网络请求,等待期间(可能几百毫秒到几秒)归属
+// 完全可能被别的座位抢走:多机器人共用一个浏览器时,scheduleBotTurn 每次渲染都会跑,
+// 只要中途换了一个不同的当前行动座位,aiSummarySeat 就会被正确地清空+改成新座位——
+// 这时如果本次(旧座位)的响应姗姗来迟才 resolve,不加区分直接写回,会用"出发时的旧
+// seat"把刚刚正确建立的新归属强行覆盖回去,新座位刚攒的记忆被撕掉。修法和
+// botDecisionInFlight 那次同类竟态修复同一思路:异步操作完成时,判断结果是否还适用于
+// 当前状态——写回前重新检查一次 aiSummarySeat 是否仍是出发时的 seat,变了就说明这次
+// 响应已经过期,直接丢弃,不写入(旧摘要/新归属原样保留,不受影响)。
 async function updateAiSummary(g, seat){
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return;
   const state = buildBotVisibleState(g, seat);
@@ -88,6 +97,7 @@ async function updateAiSummary(g, seat){
     hideAiThinkingIndicator();
   }
   if(!result || !result.ok) return;
+  if(aiSummarySeat !== seat) return; // 归属已易主,这次响应过期,丢弃不写入
   const text = (result.text || '').trim();
   if(text){
     aiSummary = text.slice(0, 500);

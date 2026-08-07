@@ -132,7 +132,7 @@ files.forEach(function(file){
 });
 
 console.log('\n' + '='.repeat(60));
-console.log('  AI 摘要测试(14 项)');
+console.log('  AI 摘要测试(16 项)');
 console.log('='.repeat(60) + '\n');
 
 // 断言脚本整体在沙箱内执行(和 run_ai_bus_core_test.js 同一惯例),
@@ -240,6 +240,11 @@ const testCode = String.raw`
 
   // 7. 上限:mock 返回 600 字 → aiSummary 长度 ≤500
   await check('7 超长摘要截断到 500', async function(){
+    // 上一项测试(6)把 aiSummarySeat 换成了 2;真实调用方(scheduleBotTurn)总是先同步把
+    // aiSummarySeat 设成目标座位、再发起 updateAiSummary(见跨座位竟态防护的写回校验),
+    // 这里直接调用 updateAiSummary(g,0) 前手动补上这一步,和生产环境的调用约定保持一致
+    // (不是绕过竟态防护,是补全测试没有模拟到的前置条件)。
+    aiSummarySeat = 0;
     var long = '';
     for(var i = 0; i < 36; i++) long += '这是用来撑长度的中文摘要文本片段。'; // 36*17=612 字
     if(long.length <= 500) throw new Error('测试构造错误:长文本长度 ' + long.length + ' 应 >500');
@@ -260,6 +265,46 @@ const testCode = String.raw`
     if(idx !== 0) throw new Error('期望 0,实际 ' + idx);
     await p;
     if(window.__mockSummaryCalls < before + 1) throw new Error('updateAiSummary 应已触发 callAI');
+  });
+
+  // ---- 跨座位异步竟态防护(真实bug复现:updateAiSummary是fire-and-forget,座位A的请求
+  // 还在等待网络响应期间,座位B可能已经抢占了aiSummarySeat这个归属——A的响应姗姗来迟
+  // resolve后,若不加区分直接写回,会用"出发时的旧seat"把刚刚正确建立的新归属强行覆盖
+  // 回去,B刚攒的记忆被撕掉。这两项测试必须放在这里(test 8 之后、S2 之前)——S2 段的
+  // test 9/13 会把 updateAiSummary 整体替换成 spy 且不恢复,后面的测试拿到的已经不是
+  // 真实实现) ----
+  await check('R1 跨座位竟态:座位A请求未resolve期间座位B已抢占归属,A的迟到响应应被丢弃不覆盖', async function(){
+    var deferredResolve;
+    var originalCallAI = callAI;
+    callAI = function(provider, apiKey, opts){
+      window.__mockSummaryCalls++;
+      window.__mockSummaryArgs = { provider: provider, apiKey: apiKey, opts: opts };
+      return new Promise(function(resolve){ deferredResolve = resolve; });
+    };
+    try{
+      aiSummary = '座位0的旧摘要'; aiSummarySeat = 0;
+      var p = updateAiSummary(g, 0); // 发起座位0的请求,不 await(和真实调用方一致的 fire-and-forget)
+      // 座位0的请求还没 resolve,此时座位1抢占归属——和 scheduleBotTurn/callAiChooseIndex
+      // 真实会做的事一致(归属易主时先清空再改成新座位)
+      aiSummaryReset();
+      aiSummarySeat = 1;
+      aiSummary = '座位1的新摘要';
+      // 座位0的迟到响应现在才 resolve
+      deferredResolve({ ok: true, text: '座位0生成的过期摘要内容' });
+      await p;
+      if(aiSummarySeat !== 1) throw new Error('座位1的归属不应被座位0的迟到响应覆盖,实际 aiSummarySeat=' + aiSummarySeat);
+      if(aiSummary !== '座位1的新摘要') throw new Error('座位1的摘要内容不应被座位0的迟到响应覆盖,实际 "' + aiSummary + '"');
+    } finally {
+      callAI = originalCallAI;
+    }
+  });
+
+  await check('R2 回归:没有竟态时(归属未变)依然正常写入新摘要', async function(){
+    aiSummary = '旧内容'; aiSummarySeat = 0;
+    mockOk('座位0正常生成的新摘要');
+    await updateAiSummary(g, 0);
+    if(aiSummarySeat !== 0) throw new Error('无竟态场景归属应仍是0,实际 ' + aiSummarySeat);
+    if(aiSummary !== '座位0正常生成的新摘要') throw new Error('无竟态场景应正常写入,实际 "' + aiSummary + '"');
   });
 
   // ---- S2:scheduleBotTurn 回合检测 / over 清空 / 清除按钮 ----
