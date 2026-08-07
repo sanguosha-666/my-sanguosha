@@ -605,6 +605,38 @@ const testCode = String.raw`
     if(BOT_SEAT_PICKS.wusheng.match(g3, 0)) throw new Error('黑闪不应命中武圣(颜色不符)');
   });
 
+  // ---- 酒→杀出牌顺序修复(真实bug复现:机器人先出杀再喝酒,酒的伤害加成必须先喝酒才生效) ----
+  // 【mkSeatG的role:'zhu'默认值会污染botTargetScore】mkSeatG给所有座位都默认填了
+  // role:'zhu'(单纯图方便,不代表这是身份局),而botTargetScore对me.role==='zhu'这个分支
+  // 会走身份局的嫌疑度判断(suspicion<30直接返回-Infinity),在ffa局这个判断毫无意义——
+  // 这几个新测试要看的是酒/杀这两张牌本身的相对分数,不是身份局目标选择,统一把
+  // player.role清空,让botTargetScore走末尾的中性ffa分支(+Math.random()*10),避免被这个
+  // 和本次改动无关的默认值污染出一个不代表真实场景的-Infinity。
+  function clearRoles(g){ g.players.forEach(function(p){ if(p) p.role=null; }); return g; }
+  await check('酒→杀顺序修复:本回合杀和酒同时是候选时,酒的分数应高于杀,本地兜底应先选酒', function(){
+    var g = clearRoles(mkSeatG({ myHand: [card('杀','jo1','♠'), card('酒','jo2','♥')] }));
+    var candidates = enumerateAllLegalOneStepActions(g, 0);
+    var sha = candidates.find(function(c){ return c.action==='杀'; });
+    var jiu = candidates.find(function(c){ return c.action==='酒'; });
+    if(!sha || !jiu) throw new Error('杀/酒都应是合法候选,实际 ' + JSON.stringify(candidates));
+    if(!(jiu.localHeuristicScore > sha.localHeuristicScore))
+      throw new Error('酒的分数应高于杀,实际 酒=' + jiu.localHeuristicScore + ' 杀=' + sha.localHeuristicScore);
+    var fallback = localFallbackPlayWindow(g, 0, candidates);
+    if(!fallback || fallback.action !== '酒')
+      throw new Error('本地兜底应选酒,实际 ' + JSON.stringify(fallback));
+  });
+
+  await check('酒→杀顺序修复回归:酒/杀单独出现时分数不受影响(不污染 botCardPriority 通用表)', function(){
+    var g1 = clearRoles(mkSeatG({ myHand: [card('酒','jo3','♥')] }));
+    var jiuAlone = enumerateAllLegalOneStepActions(g1, 0).find(function(c){ return c.action==='酒'; });
+    if(!jiuAlone || jiuAlone.localHeuristicScore !== 40)
+      throw new Error('只有酒时分数应保持原值40,实际 ' + (jiuAlone && jiuAlone.localHeuristicScore));
+    var g2 = clearRoles(mkSeatG({ myHand: [card('杀','jo4','♠')] }));
+    var shaAlone = enumerateAllLegalOneStepActions(g2, 0).find(function(c){ return c.action==='杀'; });
+    if(!shaAlone || shaAlone.localHeuristicScore <= 40)
+      throw new Error('只有杀时分数不应被酒的修正逻辑影响,实际 ' + (shaAlone && shaAlone.localHeuristicScore));
+  });
+
   await check('武圣有密钥:mock 选目标 → playCard(第一张合法红牌idx, 杀, 目标);无密钥 null 不调', async function(){
     window.__playCardCalls = [];
     window.__mockAiCalls = 0;

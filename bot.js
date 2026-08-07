@@ -665,13 +665,23 @@ function buildBotPlayCandidates(g, options){
 // (忠臣/反贼过度消耗都会让内奸坐收渔利,这是四阵营研究里反复出现的同一枚硬币两面,
 // gaoshouyou.com新手误区清单同样点名);③"五谷/无懈不要随手挥霍"直接引用自
 // gaoshouyou.com原文"五谷不要乱开,开了死得快。无懈不要随意乱用,暴殄天物终将要还的"。
+// ④酒→杀顺序(真实bug复现后补的具体规则提醒,和上面三条"软性价值判断"不同,这是一条
+// 硬机制事实——酒的伤害加成只对"本回合下一张杀"生效,顺序反了加成必然浪费,不存在
+// "看情况"的判断空间。局面数据里的localHeuristicScore已经在候选层面做了对应修正
+// (enumerateAllLegalOneStepActions,同一酒→杀场景把酒的分数拉到杀之上),这里额外
+// 明说规则本身,双重保险——分数只是参考、AI仍可能选别的候选,但至少不会因为"不知道
+// 这条规则"而选错顺序。写法上和BOT_STRATEGY_GUIDANCE_TARGET的"黑杀对仁王盾无效"提醒
+// 同一先例:即使是硬事实,也放进同一份"决策参考"里,不单独开一段硬规则列表。
 const BOT_STRATEGY_GUIDANCE_PLAY =
   '决策时可参考这些经验(是判断优先级的参考,不是必须遵守的硬规则):'
   +'总体上,多做"损人利己"的事,谨慎做"损己利人"的事——粗略换算,1点体力大致相当于2张'
   +'手牌的价值,可以据此判断值不值得为了某次效果搭上手牌或体力。几个容易踩的坑:不要为'
   +'了试探身份不明的角色而无谓消耗自己的资源;不要把手牌耗到几乎不剩就去和别人正面'
   +'互殴,那样往往是在替别人火中取栗;五谷丰登、无懈可击这类关键锦囊不要随手挥霍,该省'
-  +'的时候要省。';
+  +'的时候要省。另外一条是具体的游戏机制,不是软性判断:【酒】的效果是"本回合下一张'
+  +'【杀】造成的伤害+1",这个加成必须先使用【酒】、再使用【杀】才会生效——如果先出杀'
+  +'再喝酒,杀已经结算完了,酒的加成会白白浪费,没有例外。如果候选列表里本回合同时有'
+  +'酒和杀可以出,应该先选酒。';
 
 // BOT_IDENTITY_GUIDANCE:第二阶段——身份局四阵营战术基调(详见 CLAUDE.md"AI机器人策略
 // 指导第二阶段"记录)。只在 g.gameMode==='identity' 且这个座位的 role 有值时才启用,
@@ -4044,6 +4054,21 @@ function enumerateAllLegalOneStepActions(g, seat){
     });
   } finally {
     mySeat = humanSeat;
+  }
+  // 【酒→杀顺序修复】酒的效果是"本回合下一张杀伤害+1"——这个加成必须先喝酒、再出杀才
+  // 生效(game.js 的 jiuShaBonus 在酒使用时置真,由下一次结算杀时消耗;先出杀再喝酒,
+  // 杀已经结算完了,加成纯粹浪费)。botCardPriority 是一张不带上下文的静态表(同一张表
+  // 还用于弃牌优先级排序,那里"酒排在杀前面弃"本身没错,不能整体改表),杀的基础分
+  // (66)天然高于酒(40),若本回合杀和酒同时是合法候选,不加处理时 localFallbackPlayWindow
+  // (无密钥兜底,取最高分候选)和喂给 AI 的 localHeuristicScore 参考分都会把杀排在酒前面,
+  // 导致机器人先出杀、酒的加成永远吃不到。这里只在"酒和杀同时是本次候选"这个具体场景下
+  // 现算一次修正:把酒的候选分数拉到比场上所有杀候选都高一点,只影响这一次出牌决策的
+  // 候选排序,不改动 botCardPriority 这张表本身(酒单独出现时的评分、以及弃牌场景的
+  // 优先级都不受影响)。
+  const jiuCandidate = out.find(function(c){ return c.action==='酒'; });
+  if(jiuCandidate){
+    const maxShaScore = out.reduce(function(m,c){ return c.action==='杀' ? Math.max(m,c.localHeuristicScore) : m; }, -Infinity);
+    if(maxShaScore > -Infinity) jiuCandidate.localHeuristicScore = maxShaScore + 1;
   }
   // 按 localHeuristicScore 降序截断:保留最高分前 25 条(-Infinity 目标分正常参与排序,
   // 排序稳定,同分保持原枚举顺序);结束项在截断之后才 push,恒在末尾、不参与截断。
