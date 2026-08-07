@@ -147,7 +147,63 @@ const BOT_PHASE_ACTOR = {
   // 确认点击)行动者都是 pending.sourceSeat(张角本人,服务端 triggerLeiji/cancelLeiji/
   // doLeijiJudge 对 leijiChoose 的守卫是 sourceSeat!==mySeat；leijiJudge 本身函数体没有
   // seat校验，但渲染层用 sourceSeat===mySeat 把关，行动者语义一致)。
-  leijiChoose:'sourceSeat', leijiJudge:'sourceSeat'
+  leijiChoose:'sourceSeat', leijiJudge:'sourceSeat',
+  // 【第二批-剩余清单批量处理】鲁肃【好施】:行动者是 pending.seat(好施拥有者本人,
+  // 服务端 respondHaoshi 守卫隐含在 pending.seat 上——只有平手多候选时才会开这个 pending)。
+  haoshiPick:'seat',
+  // 姜维【挑衅】发起者选弃哪张牌:行动者是 pending.from(挑衅发起者,服务端
+  // pickTiaoxinDiscard 守卫 from!==mySeat)。目前机器人从不主动发起挑衅(无入口),这条
+  // registration 是防御性收录,万一以后接了入口不会掉进盲区。
+  tiaoxinDiscard:'from',
+  // 貂蝉【闭月】:行动者是 pending.seat(服务端 respondBiyue 守卫 seat!==mySeat)。
+  biyue:'seat',
+  // 周泰【不屈】:行动者是 pending.seat(服务端 respondBuqu 守卫 seat!==mySeat)。
+  buquAsk:'seat',
+  // 曹冲【仁心】:行动者是 pending.seat(保护者本人,服务端 chooseRenxinEquip/cancelRenxin
+  // 守卫 seat!==mySeat——注意不是被保护的目标 pending.target)。
+  renxinChoose:'seat',
+  // 曹冲【称象】:行动者是 pending.seat(曹冲本人)。注意 confirmChengxiangAsk 把
+  // pending.type 从'chengxiangAsk'切到'chengxiangChoose'时,从来没有同步改g.phase——
+  // g.phase 全程停留在'chengxiangAsk'不变(渲染层 renderCaochong 本来就只按
+  // pending.type分派,不看phase),所以这里只登记一次'chengxiangAsk',不需要也不能
+  // 登记'chengxiangChoose'(那个key在botSeatForState里永远查不到,登记了也是死代码)。
+  chengxiangAsk:'seat',
+  // 许褚【裸衣】:行动者是 pending.seat(服务端 respondLuoyi 守卫 seat!==mySeat)。
+  luoyiAsk:'seat',
+  // 荀彧【节命】:行动者是 pending.seat(服务端 respondJieming 守卫 seat!==mySeat)。
+  jiemingAsk:'seat',
+  // 左慈【新生】:行动者是 pending.seat(服务端 respondXinshengAsk 守卫 seat!==mySeat)。
+  xinshengAsk:'seat',
+  // 曹植【酒诗】翻面询问(受伤且背面朝上时):行动者是 pending.seat(服务端
+  // respondJiushiFlip 守卫 seat!==mySeat)。
+  jiushiFlipAsk:'seat',
+  // 陆逊【连营】:行动者是 pending.seat(服务端 respondLianying 守卫 seat!==mySeat)。
+  lianyingAsk:'seat',
+  // 陈宫【明策】四段:mingcePickCard/mingcePickTarget/mingcePickTarget2 的行动者都是
+  // pending.sourceSeat(陈宫本人,自主发动、机器人目前没有入口主动调用startMingce——
+  // 这三段是防御性收录);mingceChoice 的行动者是 pending.targetSeat(接收牌的那个人,
+  // 可能是另一个人的机器人,真实可达)。
+  mingcePickCard:'sourceSeat', mingcePickTarget:'sourceSeat', mingcePickTarget2:'sourceSeat',
+  mingceChoice:'targetSeat',
+  // 公孙瓒【趫猛】:qiaomengChoose/qiaomengPickEquip 行动者都是 pending.sourceSeat
+  // (公孙瓒本人,被动触发——黑色杀命中且目标有装备,真实可达)。
+  qiaomengChoose:'sourceSeat', qiaomengPickEquip:'sourceSeat',
+  // 李典【忘隙】:行动者是 pending.seat(服务端 respondWangxi 守卫 seat!==mySeat)。
+  wangxiAsk:'seat',
+  // 华雄【耀武】:行动者是 pending.seat(造成伤害的那个人,服务端 respondYaowu 守卫
+  // seat!==mySeat)。
+  yaowu_choose:'seat',
+  // 夏侯渊【神速】"视为杀"选目标:行动者是 pending.seat(夏侯渊本人,自主发动、机器人
+  // 目前没有入口主动调用triggerShensu1/2——防御性收录)。
+  shensuSha:'seat',
+  // 马谡【制蛮】:zhimengAsk/zhimengPick 行动者都是 pending.from(马谡本人,被动触发——
+  // 马谡即将造成伤害时,真实可达)。
+  zhimengAsk:'from', zhimengPick:'from',
+  // 左慈"更改化身"第二步(选具体武将+技能):huashenChangePickStart/huashenChangePickEnd
+  // 行动者都是 pending.seat(左慈本人)。第一步(是否更改,huashenChangeAskStart/AskEnd)
+  // 早就注册过、无密钥默认"不更改"——这两个第二步只有配了AI密钥且AI选择"更改"才会真正
+  // 走到,此前一直未注册、属于"只在AI路径才会暴露"的潜在盲区,这次一并补上,防御性收录。
+  huashenChangePickStart:'seat', huashenChangePickEnd:'seat'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -765,6 +821,14 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // 【第二批-第3组】双雄+雷击都有专用的确定性runBotDecision分支(接线在controlsChoice
   // 之前)——同上原则收录。
   'shuangxiongAsk','leijiChoose','leijiJudge',
+  // 【第二批-剩余清单批量处理】以下全部有专用的确定性runBotDecision分支(接线在
+  // controlsChoice之前)——同上原则收录。
+  'haoshiPick','tiaoxinDiscard','biyue','buquAsk','renxinChoose',
+  'chengxiangAsk','luoyiAsk','jiemingAsk','xinshengAsk',
+  'jiushiFlipAsk','lianyingAsk',
+  'mingcePickCard','mingcePickTarget','mingcePickTarget2','mingceChoice',
+  'qiaomengChoose','qiaomengPickEquip','wangxiAsk','yaowu_choose','shensuSha',
+  'zhimengAsk','zhimengPick','huashenChangePickStart','huashenChangePickEnd',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -3468,6 +3532,175 @@ async function runBotDecision(g,seat){
   // 张角【雷击】进行判定:纯确认点击,没有选择,直接触发(和悲歌的beigeJudge同一模式)。
   if(g.phase==='leijiJudge'&&d.type==='leijiJudge'&&d.sourceSeat===seat){
     botInvoke(seat,doLeijiJudge); return;
+  }
+  // 【第二批-剩余清单批量处理】鲁肃【好施】平手多候选:固定选候选第一个(不追求判断
+  // "谁更缺牌",这几个候选本身已经是"手牌最少"的并列结果,选谁都一样合理)。
+  if(g.phase==='haoshiPick'&&d.type==='haoshiPick'&&d.seat===seat){
+    const target=(d.candidates||[])[0];
+    if(typeof target==='number') botInvoke(seat,()=>respondHaoshi(target));
+    return;
+  }
+  // 姜维【挑衅】发起者选弃哪张牌:防御性收录(机器人目前不会主动发起挑衅),固定选
+  // tiaoxinDiscardOptions 的第一个候选。
+  if(g.phase==='tiaoxinDiscard'&&d.type==='tiaoxinDiscard'&&d.from===seat){
+    const target=g.players[d.to];
+    const opts=target?tiaoxinDiscardOptions(target):[];
+    const opt=opts[0];
+    if(opt) botInvoke(seat,()=>pickTiaoxinDiscard(opt.kind, opt.kind==='hand'?opt.idx:opt.slot));
+    return;
+  }
+  // 貂蝉【闭月】:回合结束摸1张牌,零下行风险,固定发动(和落英/洛神同一基调)。
+  if(g.phase==='biyue'&&d.type==='biyue'&&d.seat===seat){
+    botInvoke(seat,()=>respondBiyue(true)); return;
+  }
+  // 周泰【不屈】:发动只有"可能防止死亡"这一种结果,即便防死条件不满足也只是回到正常
+  // 濒死流程、不会更差,是严格意义上"不会更坏、可能更好"的选择,固定发动。
+  if(g.phase==='buquAsk'&&d.type==='buquAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondBuqu(true)); return;
+  }
+  // 曹冲【仁心】:保护目标(伤害本身不是打在自己身上)要付出弃1件装备+翻面的代价,收益
+  // 是帮别人挡伤害——利他+代价明确,和举荐同一基调,保守默认不发动。
+  if(g.phase==='renxinChoose'&&d.type==='renxinChoose'&&d.seat===seat){
+    botInvoke(seat,cancelRenxin); return;
+  }
+  // 曹冲【称象】是否发动:亮4张牌选组合,没有下行风险(最差也能选0张,不会倒贴任何资源),
+  // 固定发动。
+  if(g.phase==='chengxiangAsk'&&d.type==='chengxiangAsk'&&d.seat===seat){
+    botInvoke(seat,confirmChengxiangAsk); return;
+  }
+  // 曹冲【称象】选组合:固定选sum最大的那个组合(拿到的牌/点数最多),不追求比"选最大"更细
+  // 的判断;没有合法组合时(理论上selectable至少含{indices:[],sum:0})退化选0张。
+  // 注意守卫是 g.phase==='chengxiangAsk'(不是'chengxiangChoose')——confirmChengxiangAsk
+  // 切换pending.type时从未同步改过g.phase,真实dump验证过'chengxiangChoose'这个phase值
+  // 永远不会出现,守卫写它会导致这个分支永远不触发(死代码)。
+  if(g.phase==='chengxiangAsk'&&d.type==='chengxiangChoose'&&d.seat===seat){
+    const options=d.selectable||[];
+    let best=options[0]||{indices:[],sum:0};
+    options.forEach(o=>{ if(o.sum>best.sum) best=o; });
+    if(best.indices && best.indices.length>0) botInvoke(seat,()=>confirmChengxiang(best));
+    else botInvoke(seat,cancelChengxiang);
+    return;
+  }
+  // 许褚【裸衣】:少摸1张牌换本回合杀/决斗伤害+1——代价明确(-1张牌)、收益不确定(要看
+  // 这回合到底打不打得出去),保守默认不发动。
+  if(g.phase==='luoyiAsk'&&d.type==='luoyiAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondLuoyi(false)); return;
+  }
+  // 荀彧【节命】:帮目标摸牌到手牌上限,对自己没有资源代价,但是纯粹资助别人(可能是敌人),
+  // 收益方向不明确,和举荐同一基调保守默认不发动(targetSeat传null=不发动)。
+  if(g.phase==='jiemingAsk'&&d.type==='jiemingAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondJieming(null)); return;
+  }
+  // 左慈【新生】:随机获得一个新武将加入化身池,纯粹是自己的资源增益,没有任何代价,固定
+  // 发动。(已知的"新生会阻塞其它onDamaged判断"是完全独立的既有bug,不影响这里"该不该
+  // 发动"这个判断本身的正确性,不在这次修复范围内。)
+  if(g.phase==='xinshengAsk'&&d.type==='xinshengAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondXinshengAsk(true)); return;
+  }
+  // 曹植【酒诗】翻回正面:没有下行风险(翻正面只是解除背面朝上状态,不需要额外代价),
+  // 固定发动。
+  if(g.phase==='jiushiFlipAsk'&&d.type==='jiushiFlipAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondJiushiFlip(true)); return;
+  }
+  // 陆逊【连营】:摸1张牌,零代价,固定发动。
+  if(g.phase==='lianyingAsk'&&d.type==='lianyingAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondLianying(true)); return;
+  }
+  // 陈宫【明策】三段选牌/选目标(防御性收录,机器人目前不会主动发动明策):固定选第一个
+  // 合法候选——手牌里第一张符合条件的牌/装备槽,选目标固定选第一个存活非自己的角色。
+  if(g.phase==='mingcePickCard'&&d.type==='mingcePickCard'&&d.sourceSeat===seat){
+    const me=g.players[seat];
+    const handIdx=me?(me.hand||[]).findIndex(c=>c&&(isEquipment(c)||canUseAs(me,c,'杀'))):-1;
+    if(handIdx>=0) botInvoke(seat,()=>pickMingceCard(handIdx,false));
+    else {
+      const slot=me&&me.equips&&EQUIP_SLOTS.find(s=>me.equips[s]);
+      if(slot) botInvoke(seat,()=>pickMingceCard(slot,true));
+      else botInvoke(seat,cancelMingce);
+    }
+    return;
+  }
+  if(g.phase==='mingcePickTarget'&&d.type==='mingcePickTarget'&&d.sourceSeat===seat){
+    const target=g.players.findIndex((p,i)=>p&&p.alive&&i!==seat);
+    if(target>=0) botInvoke(seat,()=>pickMingceTarget(target));
+    else botInvoke(seat,cancelMingce);
+    return;
+  }
+  if(g.phase==='mingcePickTarget2'&&d.type==='mingcePickTarget2'&&d.sourceSeat===seat){
+    const target2=(d.candidates||[])[0];
+    if(typeof target2==='number') botInvoke(seat,()=>pickMingceTarget2(target2));
+    else botInvoke(seat,cancelMingce);
+    return;
+  }
+  // 陈宫【明策】接收牌的人选效果:'sha'对选择者没有任何资源代价(视为使用一张普通杀,
+  // 不消耗自己的手牌),是纯粹的免费进攻机会,有第二目标时固定选'sha'(和"多做损人利己
+  // 的事"这条既定基调一致),没有第二目标时只能选'draw'。
+  if(g.phase==='mingceChoice'&&d.type==='mingceChoice'&&d.targetSeat===seat){
+    const opt=(typeof d.target2Seat==='number')?'sha':'draw';
+    botInvoke(seat,()=>chooseMingceOption(opt));
+    return;
+  }
+  // 公孙瓒【趫猛】:黑色杀命中且目标有装备时被动触发,拿/弃目标一件装备,对自己没有任何
+  // 代价,固定发动+固定选第一个可用装备槽。
+  if(g.phase==='qiaomengChoose'&&d.type==='qiaomengChoose'&&d.sourceSeat===seat){
+    botInvoke(seat,triggerQiaomeng); return;
+  }
+  if(g.phase==='qiaomengPickEquip'&&d.type==='qiaomengPickEquip'&&d.sourceSeat===seat){
+    const slot=(d.availableSlots||[])[0];
+    if(slot) botInvoke(seat,()=>pickQiaomengEquip(slot));
+    return;
+  }
+  // 李典【忘隙】:发动后自己(可能连同对方)各摸牌,对自己永远是净收益(即便对方也摸牌,
+  // 自己的手牌不会因此变少),固定发动。
+  if(g.phase==='wangxiAsk'&&d.type==='wangxiAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondWangxi(true)); return;
+  }
+  // 华雄【耀武】:两个选项(回复1点体力/摸1张牌)对造成伤害的自己都是纯收益、必须二选一,
+  // 体力未满选recover更划算,体力已满选draw避免空转(同举荐jujianChooseEffect的既定
+  // 判断方式)。
+  if(g.phase==='yaowu_choose'&&d.type==='yaowu_choose'&&d.seat===seat){
+    const me=g.players[seat];
+    botInvoke(seat,()=>respondYaowu(me&&me.hp<me.maxHp?'recover':'draw'));
+    return;
+  }
+  // 夏侯渊【神速】选目标(防御性收录,机器人目前不会主动发动神速1/2):固定选第一个存活
+  // 非自己的角色,respondShensuSha内部无距离限制、不受canReachSha约束。
+  if(g.phase==='shensuSha'&&d.type==='shensuSha'&&d.seat===seat){
+    const target=g.players.findIndex((p,i)=>p&&p.alive&&i!==seat);
+    if(target>=0) botInvoke(seat,()=>respondShensuSha(target));
+    return;
+  }
+  // 马谡【制蛮】是否发动:发动会防止自己刚造成的这次伤害(改为获得目标一张牌)——代价是
+  // 放弃已经命中的伤害,收益是拿1张不确定的牌,伤害通常比1张随机牌更有价值,保守默认
+  // 不发动(保留伤害)。
+  if(g.phase==='zhimengAsk'&&d.type==='zhimengAsk'&&d.from===seat){
+    botInvoke(seat,()=>respondZhimeng(false)); return;
+  }
+  // 马谡【制蛮】选牌(防御性收录,上面固定不发动理论上不会走到这一步):固定选第一个候选。
+  if(g.phase==='zhimengPick'&&d.type==='zhimengPick'&&d.from===seat){
+    const opt=(d.options||[])[0];
+    if(opt) botInvoke(seat,()=>respondZhimengPick(opt.type, opt.index));
+    return;
+  }
+  // 左慈"更改化身"第二步选具体武将+技能(防御性收录,第一步已经固定"不更改",理论上
+  // 只有配了AI密钥且AI选择"更改"才会走到这里):固定选化身池里第一个有技能条目的武将,
+  // 和BOT_DECISIONS.huashenPick的localFallback同一逻辑,不重新发明。
+  if(g.phase==='huashenChangePickStart'&&d.type==='huashenChangePickStart'&&d.seat===seat){
+    const me=g.players[seat];
+    const generalId=me&&(me.huashenPool||[]).find(id=>(HUASHEN_SKILL_TABLE[id]||[]).length);
+    if(generalId){
+      const entry=(HUASHEN_SKILL_TABLE[generalId]||[])[0];
+      botInvoke(seat,()=>respondHuashenChangePickStart(generalId, entry&&entry.name));
+    }
+    return;
+  }
+  if(g.phase==='huashenChangePickEnd'&&d.type==='huashenChangePickEnd'&&d.seat===seat){
+    const me=g.players[seat];
+    const generalId=me&&(me.huashenPool||[]).find(id=>(HUASHEN_SKILL_TABLE[id]||[]).length);
+    if(generalId){
+      const entry=(HUASHEN_SKILL_TABLE[generalId]||[])[0];
+      botInvoke(seat,()=>respondHuashenChangePickEnd(generalId, entry&&entry.name));
+    }
+    return;
   }
   if(g.phase==='jiedaoChoice'&&d && d.type==='jiedaoChoice'&&d.seatA===seat){
     if(await botDecide('jiedaoResponse',g,seat)) return;

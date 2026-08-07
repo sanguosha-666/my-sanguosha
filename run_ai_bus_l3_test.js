@@ -3319,6 +3319,308 @@ const testCode = String.raw`
       throw new Error('leijiJudge 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.leijiJudge);
   });
 
+  // ================= 第二批-剩余清单批量处理 =================
+  await check('第二批-剩余:好施haoshiPick 固定选候选第一个', async function(){
+    window.__haoshiCalls = [];
+    respondHaoshi = function(seat){ window.__haoshiCalls.push(seat); };
+    var g = mkSeatG({});
+    g.phase = 'haoshiPick';
+    g.pending = { type: 'haoshiPick', seat: 0, half: 3, candidates: [1, 2] };
+    await runBotDecision(g, 0);
+    if(window.__haoshiCalls.length !== 1 || window.__haoshiCalls[0] !== 1)
+      throw new Error('应调用 respondHaoshi(1),实际 ' + JSON.stringify(window.__haoshiCalls));
+  });
+
+  await check('第二批-剩余:挑衅tiaoxinDiscard 防御性兜底,固定选目标手牌第一张', async function(){
+    window.__tiaoxinDiscardCalls = [];
+    pickTiaoxinDiscard = function(kind, value){ window.__tiaoxinDiscardCalls.push([kind, value]); };
+    var g = mkSeatG({ hands: { 1: [card('杀')] } });
+    g.phase = 'tiaoxinDiscard';
+    g.pending = { type: 'tiaoxinDiscard', from: 0, to: 1 };
+    await runBotDecision(g, 0);
+    if(window.__tiaoxinDiscardCalls.length !== 1 ||
+       window.__tiaoxinDiscardCalls[0][0] !== 'hand' || window.__tiaoxinDiscardCalls[0][1] !== 0)
+      throw new Error('应调用 pickTiaoxinDiscard("hand",0),实际 ' + JSON.stringify(window.__tiaoxinDiscardCalls));
+  });
+
+  await check('第二批-剩余:闭月biyue 固定发动', async function(){
+    window.__biyueCalls = [];
+    respondBiyue = function(activate){ window.__biyueCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'biyue';
+    g.pending = { type: 'biyue', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__biyueCalls.length !== 1 || window.__biyueCalls[0] !== true)
+      throw new Error('应调用 respondBiyue(true),实际 ' + JSON.stringify(window.__biyueCalls));
+  });
+
+  await check('第二批-剩余:不屈buquAsk 固定发动', async function(){
+    window.__buquCalls = [];
+    respondBuqu = function(useBuqu){ window.__buquCalls.push(useBuqu); };
+    var g = mkSeatG({});
+    g.phase = 'buquAsk';
+    g.pending = { type: 'buquAsk', seat: 0, resume: { type: 'sha' } };
+    await runBotDecision(g, 0);
+    if(window.__buquCalls.length !== 1 || window.__buquCalls[0] !== true)
+      throw new Error('应调用 respondBuqu(true),实际 ' + JSON.stringify(window.__buquCalls));
+  });
+
+  await check('第二批-剩余:仁心renxinChoose 固定不发动(利他+代价明确)', async function(){
+    window.__renxinCancelCalls = 0;
+    cancelRenxin = function(){ window.__renxinCancelCalls++; };
+    var g = mkSeatG({});
+    g.phase = 'renxinChoose';
+    g.pending = { type: 'renxinChoose', seat: 0, target: 1, equipSlots: ['weapon'] };
+    await runBotDecision(g, 0);
+    if(window.__renxinCancelCalls !== 1)
+      throw new Error('应调用 cancelRenxin 一次,实际 ' + window.__renxinCancelCalls);
+  });
+
+  await check('第二批-剩余:称象chengxiangAsk 固定发动', async function(){
+    window.__chengxiangAskCalls = 0;
+    confirmChengxiangAsk = function(){ window.__chengxiangAskCalls++; };
+    var g = mkSeatG({});
+    g.phase = 'chengxiangAsk';
+    g.pending = { type: 'chengxiangAsk', seat: 0, resume: { type: 'sha' } };
+    await runBotDecision(g, 0);
+    if(window.__chengxiangAskCalls !== 1)
+      throw new Error('应调用 confirmChengxiangAsk 一次,实际 ' + window.__chengxiangAskCalls);
+  });
+
+  await check('第二批-剩余:称象chengxiangChoose 守卫用g.phase==="chengxiangAsk"(实测g.phase从不变成chengxiangChoose)', async function(){
+    window.__chengxiangCalls = [];
+    confirmChengxiang = function(sel){ window.__chengxiangCalls.push(sel); };
+    var g = mkSeatG({});
+    g.phase = 'chengxiangAsk'; // 关键:不是'chengxiangChoose'
+    g.pending = { type: 'chengxiangChoose', seat: 0, selectable: [{indices:[0],sum:5},{indices:[0,1],sum:10},{indices:[],sum:0}] };
+    await runBotDecision(g, 0);
+    if(window.__chengxiangCalls.length !== 1 || window.__chengxiangCalls[0].sum !== 10)
+      throw new Error('应选sum最大的组合(sum=10),实际 ' + JSON.stringify(window.__chengxiangCalls));
+  });
+
+  await check('第二批-剩余:裸衣luoyiAsk 固定不发动', async function(){
+    window.__luoyiCalls = [];
+    respondLuoyi = function(activate){ window.__luoyiCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'luoyiAsk';
+    g.pending = { type: 'luoyiAsk', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__luoyiCalls.length !== 1 || window.__luoyiCalls[0] !== false)
+      throw new Error('应调用 respondLuoyi(false),实际 ' + JSON.stringify(window.__luoyiCalls));
+  });
+
+  await check('第二批-剩余:节命jiemingAsk 固定不发动(targetSeat传null)', async function(){
+    window.__jiemingCalls = [];
+    respondJieming = function(targetSeat){ window.__jiemingCalls.push(targetSeat); };
+    var g = mkSeatG({});
+    g.phase = 'jiemingAsk';
+    g.pending = { type: 'jiemingAsk', seat: 0, remaining: 1, resume: { type: 'sha' } };
+    await runBotDecision(g, 0);
+    if(window.__jiemingCalls.length !== 1 || window.__jiemingCalls[0] !== null)
+      throw new Error('应调用 respondJieming(null),实际 ' + JSON.stringify(window.__jiemingCalls));
+  });
+
+  await check('第二批-剩余:新生xinshengAsk 固定发动', async function(){
+    window.__xinshengCalls = [];
+    respondXinshengAsk = function(activate){ window.__xinshengCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'xinshengAsk';
+    g.pending = { type: 'xinshengAsk', seat: 0, remaining: 1, resume: { type: 'sha' } };
+    await runBotDecision(g, 0);
+    if(window.__xinshengCalls.length !== 1 || window.__xinshengCalls[0] !== true)
+      throw new Error('应调用 respondXinshengAsk(true),实际 ' + JSON.stringify(window.__xinshengCalls));
+  });
+
+  await check('第二批-剩余:酒诗②jiushiFlipAsk 固定发动', async function(){
+    window.__jiushiCalls = [];
+    respondJiushiFlip = function(activate){ window.__jiushiCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'jiushiFlipAsk';
+    g.pending = { type: 'jiushiFlipAsk', seat: 0, wasFacedown: true, resume: { type: 'sha' } };
+    await runBotDecision(g, 0);
+    if(window.__jiushiCalls.length !== 1 || window.__jiushiCalls[0] !== true)
+      throw new Error('应调用 respondJiushiFlip(true),实际 ' + JSON.stringify(window.__jiushiCalls));
+  });
+
+  await check('第二批-剩余:连营lianyingAsk 固定发动(注:当前无任何武将带lianying cap,防御性收录)', async function(){
+    window.__lianyingCalls = [];
+    respondLianying = function(activate){ window.__lianyingCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'lianyingAsk';
+    g.pending = { type: 'lianyingAsk', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__lianyingCalls.length !== 1 || window.__lianyingCalls[0] !== true)
+      throw new Error('应调用 respondLianying(true),实际 ' + JSON.stringify(window.__lianyingCalls));
+  });
+
+  await check('第二批-剩余:明策mingcePickCard/PickTarget/PickTarget2 防御性兜底(机器人无入口主动发动)', async function(){
+    window.__mingceCardCalls = [];
+    pickMingceCard = function(idx, isEquip){ window.__mingceCardCalls.push([idx, isEquip]); };
+    var g1 = mkSeatG({ myHand: [card('杀')] });
+    g1.phase = 'mingcePickCard';
+    g1.pending = { type: 'mingcePickCard', sourceSeat: 0 };
+    await runBotDecision(g1, 0);
+    if(window.__mingceCardCalls.length !== 1 || window.__mingceCardCalls[0][0] !== 0 || window.__mingceCardCalls[0][1] !== false)
+      throw new Error('应调用 pickMingceCard(0,false),实际 ' + JSON.stringify(window.__mingceCardCalls));
+
+    window.__mingceTargetCalls = [];
+    pickMingceTarget = function(seat){ window.__mingceTargetCalls.push(seat); };
+    var g2 = mkSeatG({});
+    g2.phase = 'mingcePickTarget';
+    g2.pending = { type: 'mingcePickTarget', sourceSeat: 0 };
+    await runBotDecision(g2, 0);
+    if(window.__mingceTargetCalls.length !== 1 || window.__mingceTargetCalls[0] !== 1)
+      throw new Error('应调用 pickMingceTarget(1),实际 ' + JSON.stringify(window.__mingceTargetCalls));
+
+    window.__mingceTarget2Calls = [];
+    pickMingceTarget2 = function(seat){ window.__mingceTarget2Calls.push(seat); };
+    var g3 = mkSeatG({});
+    g3.phase = 'mingcePickTarget2';
+    g3.pending = { type: 'mingcePickTarget2', sourceSeat: 0, candidates: [2, 1] };
+    await runBotDecision(g3, 0);
+    if(window.__mingceTarget2Calls.length !== 1 || window.__mingceTarget2Calls[0] !== 2)
+      throw new Error('应调用 pickMingceTarget2(2),实际 ' + JSON.stringify(window.__mingceTarget2Calls));
+  });
+
+  await check('第二批-剩余:明策mingceChoice 有第二目标选sha,无第二目标选draw', async function(){
+    window.__mingceOptionCalls = [];
+    chooseMingceOption = function(opt){ window.__mingceOptionCalls.push(opt); };
+    var g1 = mkSeatG({});
+    g1.phase = 'mingceChoice';
+    g1.pending = { type: 'mingceChoice', sourceSeat: 1, targetSeat: 0, target2Seat: 2 };
+    await runBotDecision(g1, 0);
+    if(window.__mingceOptionCalls.length !== 1 || window.__mingceOptionCalls[0] !== 'sha')
+      throw new Error('有第二目标应选sha,实际 ' + JSON.stringify(window.__mingceOptionCalls));
+
+    window.__mingceOptionCalls = [];
+    var g2 = mkSeatG({});
+    g2.phase = 'mingceChoice';
+    g2.pending = { type: 'mingceChoice', sourceSeat: 1, targetSeat: 0, target2Seat: null };
+    await runBotDecision(g2, 0);
+    if(window.__mingceOptionCalls.length !== 1 || window.__mingceOptionCalls[0] !== 'draw')
+      throw new Error('无第二目标应选draw,实际 ' + JSON.stringify(window.__mingceOptionCalls));
+  });
+
+  await check('第二批-剩余:趫猛qiaomengChoose/PickEquip 固定发动+选第一个装备槽', async function(){
+    window.__qiaomengTriggerCalls = 0;
+    triggerQiaomeng = function(){ window.__qiaomengTriggerCalls++; };
+    var g1 = mkSeatG({});
+    g1.phase = 'qiaomengChoose';
+    g1.pending = { type: 'qiaomengChoose', sourceSeat: 0, targetSeat: 1, shaColor: 'black' };
+    await runBotDecision(g1, 0);
+    if(window.__qiaomengTriggerCalls !== 1)
+      throw new Error('应调用 triggerQiaomeng 一次,实际 ' + window.__qiaomengTriggerCalls);
+
+    window.__qiaomengEquipCalls = [];
+    pickQiaomengEquip = function(slot){ window.__qiaomengEquipCalls.push(slot); };
+    var g2 = mkSeatG({});
+    g2.phase = 'qiaomengPickEquip';
+    g2.pending = { type: 'qiaomengPickEquip', sourceSeat: 0, targetSeat: 1, availableSlots: ['armor','weapon'] };
+    await runBotDecision(g2, 0);
+    if(window.__qiaomengEquipCalls.length !== 1 || window.__qiaomengEquipCalls[0] !== 'armor')
+      throw new Error('应调用 pickQiaomengEquip("armor"),实际 ' + JSON.stringify(window.__qiaomengEquipCalls));
+  });
+
+  await check('第二批-剩余:忘隙wangxiAsk 固定发动', async function(){
+    window.__wangxiCalls = [];
+    respondWangxi = function(activate){ window.__wangxiCalls.push(activate); };
+    var g = mkSeatG({});
+    g.phase = 'wangxiAsk';
+    g.pending = { type: 'wangxiAsk', seat: 0, otherSeat: 1, death: false, amount: 1, resume: { type: 'sha' } };
+    await runBotDecision(g, 0);
+    if(window.__wangxiCalls.length !== 1 || window.__wangxiCalls[0] !== true)
+      throw new Error('应调用 respondWangxi(true),实际 ' + JSON.stringify(window.__wangxiCalls));
+  });
+
+  await check('第二批-剩余:耀武yaowu_choose 体力未满选recover,体力已满选draw', async function(){
+    window.__yaowuCalls = [];
+    respondYaowu = function(opt){ window.__yaowuCalls.push(opt); };
+    var g1 = mkSeatG({ hpOf: { 0: 2 } });
+    g1.phase = 'yaowu_choose';
+    g1.pending = { type: 'yaowu_choose', seat: 0, target: 1, resume: { type: 'sha' } };
+    await runBotDecision(g1, 0);
+    if(window.__yaowuCalls.length !== 1 || window.__yaowuCalls[0] !== 'recover')
+      throw new Error('体力未满应选recover,实际 ' + JSON.stringify(window.__yaowuCalls));
+
+    window.__yaowuCalls = [];
+    var g2 = mkSeatG({});
+    g2.phase = 'yaowu_choose';
+    g2.pending = { type: 'yaowu_choose', seat: 0, target: 1, resume: { type: 'sha' } };
+    await runBotDecision(g2, 0);
+    if(window.__yaowuCalls.length !== 1 || window.__yaowuCalls[0] !== 'draw')
+      throw new Error('体力已满应选draw,实际 ' + JSON.stringify(window.__yaowuCalls));
+  });
+
+  await check('第二批-剩余:神速shensuSha 防御性兜底,固定选第一个存活非自己目标', async function(){
+    window.__shensuCalls = [];
+    respondShensuSha = function(seat){ window.__shensuCalls.push(seat); };
+    var g = mkSeatG({});
+    g.phase = 'shensuSha';
+    g.pending = { type: 'shensuSha', seat: 0, remaining: 1, noDistance: true };
+    await runBotDecision(g, 0);
+    if(window.__shensuCalls.length !== 1 || window.__shensuCalls[0] !== 1)
+      throw new Error('应调用 respondShensuSha(1),实际 ' + JSON.stringify(window.__shensuCalls));
+  });
+
+  await check('第二批-剩余:制蛮zhimengAsk 固定不发动(保留伤害),zhimengPick防御性选第一个候选', async function(){
+    window.__zhimengAskCalls = [];
+    respondZhimeng = function(activate){ window.__zhimengAskCalls.push(activate); };
+    var g1 = mkSeatG({});
+    g1.phase = 'zhimengAsk';
+    g1.pending = { type: 'zhimengAsk', from: 0, to: 1, options: [{type:'hand',label:'手牌'}] };
+    await runBotDecision(g1, 0);
+    if(window.__zhimengAskCalls.length !== 1 || window.__zhimengAskCalls[0] !== false)
+      throw new Error('应调用 respondZhimeng(false),实际 ' + JSON.stringify(window.__zhimengAskCalls));
+
+    window.__zhimengPickCalls = [];
+    respondZhimengPick = function(type, index){ window.__zhimengPickCalls.push([type, index]); };
+    var g2 = mkSeatG({});
+    g2.phase = 'zhimengPick';
+    g2.pending = { type: 'zhimengPick', from: 0, to: 1, options: [{type:'weapon',index:undefined},{type:'hand',index:undefined}] };
+    await runBotDecision(g2, 0);
+    if(window.__zhimengPickCalls.length !== 1 || window.__zhimengPickCalls[0][0] !== 'weapon')
+      throw new Error('应调用 respondZhimengPick("weapon",undefined),实际 ' + JSON.stringify(window.__zhimengPickCalls));
+  });
+
+  await check('第二批-剩余:左慈更改化身第二步 防御性兜底,选化身池第一个有技能的武将', async function(){
+    window.__huashenPickStartCalls = [];
+    respondHuashenChangePickStart = function(id, skill){ window.__huashenPickStartCalls.push([id, skill]); };
+    var g1 = mkSeatG({});
+    g1.players[0].huashenPool = ['guanyu'];
+    g1.phase = 'huashenChangePickStart';
+    g1.pending = { type: 'huashenChangePickStart', seat: 0 };
+    await runBotDecision(g1, 0);
+    if(window.__huashenPickStartCalls.length !== 1 || window.__huashenPickStartCalls[0][0] !== 'guanyu')
+      throw new Error('应调用 respondHuashenChangePickStart("guanyu",...),实际 ' + JSON.stringify(window.__huashenPickStartCalls));
+
+    window.__huashenPickEndCalls = [];
+    respondHuashenChangePickEnd = function(id, skill){ window.__huashenPickEndCalls.push([id, skill]); };
+    var g2 = mkSeatG({});
+    g2.players[0].huashenPool = ['zhangfei'];
+    g2.phase = 'huashenChangePickEnd';
+    g2.pending = { type: 'huashenChangePickEnd', seat: 0 };
+    await runBotDecision(g2, 0);
+    if(window.__huashenPickEndCalls.length !== 1 || window.__huashenPickEndCalls[0][0] !== 'zhangfei')
+      throw new Error('应调用 respondHuashenChangePickEnd("zhangfei",...),实际 ' + JSON.stringify(window.__huashenPickEndCalls));
+  });
+
+  await check('第二批-剩余:BOT_PHASE_ACTOR 全部新增phase登记核对', function(){
+    var expect = {
+      haoshiPick:'seat', tiaoxinDiscard:'from', biyue:'seat', buquAsk:'seat', renxinChoose:'seat',
+      chengxiangAsk:'seat', luoyiAsk:'seat', jiemingAsk:'seat', xinshengAsk:'seat',
+      jiushiFlipAsk:'seat', lianyingAsk:'seat',
+      mingcePickCard:'sourceSeat', mingcePickTarget:'sourceSeat', mingcePickTarget2:'sourceSeat', mingceChoice:'targetSeat',
+      qiaomengChoose:'sourceSeat', qiaomengPickEquip:'sourceSeat', wangxiAsk:'seat', yaowu_choose:'seat', shensuSha:'seat',
+      zhimengAsk:'from', zhimengPick:'from', huashenChangePickStart:'seat', huashenChangePickEnd:'seat',
+    };
+    Object.keys(expect).forEach(function(k){
+      if(BOT_PHASE_ACTOR[k] !== expect[k])
+        throw new Error(k + ' 应登记为 ' + expect[k] + ',实际 ' + BOT_PHASE_ACTOR[k]);
+    });
+    if(BOT_PHASE_ACTOR.chengxiangChoose !== undefined)
+      throw new Error('chengxiangChoose 不应登记(g.phase从不等于该值,登记了也是死代码),实际 ' + BOT_PHASE_ACTOR.chengxiangChoose);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
