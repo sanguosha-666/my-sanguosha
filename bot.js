@@ -1971,12 +1971,37 @@ function isDuanliangCard(me, c){
 }
 function isQixiCard(c){ return !!(c && (c.suit==='♠'||c.suit==='♣')); }
 function isGuoseCard(c){ return !!(c && c.suit==='♦'); }
-// isWushengShaCard:镜像 render.js:1448 isWushengShaSel(红+可当杀+自有入口优先+杀可打出)
+// isWushengShaCard:红+可当杀+杀可打出。【候选真空修复,2026-08】此前多了一条
+// resolveActionId(g,me,c)!=='杀' 排除条件,设计假设是"resolveActionId 已经解析成杀,
+// 说明常规枚举(enumerateAllLegalOneStepActions)那边肯定已经收录了"——但常规枚举用的是
+// 不认转化能力的哑函数 botActionId(只看牌名本身),resolveActionId 是给人类点击弹窗用的
+// 智能解析函数,两者对同一张牌的判断根本不是一回事:resolveActionId 解析成'杀'的场景
+// (①闪:没有 CARD_PLAYS 入口,ownSpec 检查永远失败,恒定解析成'杀';②红色 target:false
+// 牌自己此刻打不出,如满血的桃)常规枚举反而完全不收录这张牌(botActionId 走的是牌名本身、
+// CARD_PLAYS[原名].canPlay 失败就整条跳过)——于是排除条件精确排掉了本该由这个函数兜底的
+// 真空区间,变成"两头都以为对方已经覆盖,实际上谁都没覆盖"。真实dump验证:关羽满血+只有
+// 一张闪/一张桃时,常规枚举与本函数都不收录,机器人整回合无法用武圣。去掉这条排除条件后,
+// 函数不再依赖"常规枚举已覆盖"这个错误假设,自己独立判断——对已经在常规枚举里出现的牌
+// (如未满血的桃、target:true的过河拆桥等 ownSpec.canPlay 成功的牌)本函数原本就同样返回
+// true(resolveActionId 在这些场景本来就解析成牌名本身而不是'杀',这条排除条件对它们是
+// 恒真、从未排除过),这部分候选集合不受本次改动影响,纯粹是新增闪/满血桃两类此前的真空。
+// 【真实dump顺带发现的latent bug,同一次一并修掉】不能只查 canUseAs(...)——canUseAs('杀')
+// 对红色闪也会因为龙胆(名字判断,不看颜色)独立返回 true,和武圣(颜色判断)是两条互不相干
+// 的分支;若只查 canUseAs 的总返回值,一个只有龙胆、没有武圣的赵云拿到红色闪时会被误判成
+// "命中武圣",多出一条错误打标的候选(功能上不出错,playCard仍会走longdan那条canUseAs
+// 判断,真正执行时不受影响,但候选标注错了技能来源,且和龙胆产生重复候选)。必须显式限定
+// hasCap(me,'wusheng')。
+// 【真实dump又发现的第二个latent bug,同一次一并修掉】去掉 resolveActionId!=='杀' 之后,
+// 一张红色的**真杀**(card.name本身就是'杀')也会满足 canUseAs('杀')——canUseAs 的第一行
+// isShaName(card.name) 对真杀恒真,和任何cap无关。真杀不是"转化",常规枚举本来就会按它
+// 自己的名字正确收录一条"出杀"候选,不需要武圣再重复注册一条——旧的 resolveActionId!=='杀'
+// 条件其实同时兼顾了两件不相关的事:①(错的)把闪/满血桃这些真空一并滤掉;②(对的)把真杀
+// 本身滤掉不重复注册。去掉整条判断会把②也丢了。改成显式判断 card.name!=='杀'(这张牌
+// 本身不是杀,才谈得上"转化"),精确只保留②这一个意图,不影响①的修复效果。
 function isWushengShaCard(g, me, c){
-  if(!c) return false;
+  if(!c || c.name==='杀') return false;
   const red = c.suit==='♥'||c.suit==='♦';
-  return red && canUseAs(me, c, '杀') && resolveActionId(g, me, c)!=='杀'
-    && CARD_PLAYS['杀'].canPlay(g, me, c);
+  return red && hasCap(me, 'wusheng') && canUseAs(me, c, '杀') && CARD_PLAYS['杀'].canPlay(g, me, c);
 }
 // isLongdanShaCard:赵云【龙胆】闪→杀方向。和 isWushengShaCard 刻意不同结构——闪没有
 // CARD_PLAYS['闪']这个入口(纯被动响应牌,从未有主动使用路径),resolveActionId 的
@@ -1988,7 +2013,13 @@ function isWushengShaCard(g, me, c){
 // 条件(闪恒等于'杀',排除条件会把所有闪都滤掉,等于零覆盖)。
 function isLongdanShaCard(g, me, c){
   if(!c || c.name!=='闪') return false;
-  return canUseAs(me, c, '杀') && CARD_PLAYS['杀'].canPlay(g, me, c);
+  // 【本次武圣修复顺带发现的latent bug】不能只查 canUseAs(...)——canUseAs('杀') 对红色
+  // 闪也会因为武圣(颜色判断,不看名字)独立返回 true,和 longdan(名字判断)是两条互不相干
+  // 的分支;若只查 canUseAs 的总返回值,一个只有武圣、没有龙胆的关羽拿到红色闪时会被
+  // 误判成"命中龙胆",多出一条错误打标的候选(功能上不出错——playCard仍会走wusheng那条
+  // canUseAs判断,真正执行时不受影响,但候选标注错了技能来源,且和武圣产生重复候选)。
+  // 必须显式限定 hasCap(me,'longdan')。
+  return hasCap(me, 'longdan') && canUseAs(me, c, '杀') && CARD_PLAYS['杀'].canPlay(g, me, c);
 }
 // 镜像 render.js:1162 hasHandOrEquip(顺手/拆桥同款:手牌/装备/判定区任一非空)
 function seatHasTargetableCards(p){

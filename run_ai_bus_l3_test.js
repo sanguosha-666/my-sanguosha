@@ -553,7 +553,7 @@ const testCode = String.raw`
     var g1 = mkSeatG({ myHand: [card('过河拆桥','w0','♥')] });
     if(s.match(g1, 0)) throw new Error('无武圣转化能力不应命中');
     var g2 = mkSeatG({ caps0: { wusheng: true }, myHand: [card('杀','w1','♥')] });
-    if(s.match(g2, 0)) throw new Error('红杀本身(resolveActionId=杀)不应命中武圣');
+    if(s.match(g2, 0)) throw new Error('红杀本身(card.name==="杀",常规枚举已收录,不需要武圣重复注册)不应命中武圣');
     var g3 = mkSeatG({ caps0: { wusheng: true }, myHand: [card('杀','w2','♠')] });
     if(s.match(g3, 0)) throw new Error('非红牌不应命中');
     var g4 = mkSeatG({ caps0: { wusheng: true }, myHand: [card('闪','w3','♠'), card('过河拆桥','w4','♥')] });
@@ -563,6 +563,46 @@ const testCode = String.raw`
     if(pickSeats(s, g5) !== '2') throw new Error('诸葛亮空城目标应被 canTarget 排除,实际 ' + pickSeats(s, g5));
     var g6 = mkSeatG({ caps0: { wusheng: true }, myHand: [card('过河拆桥','w6','♥')], shaUsed: true });
     if(s.match(g6, 0)) throw new Error('本回合已出杀时 canPlay 拒绝,不应命中');
+  });
+
+  // ---- 武圣候选真空修复(2026-08):去掉错误的 resolveActionId!=='杀' 排除条件 ----
+  await check('武圣真空修复:红色闪(无独立入口)/满血红桃(自己打不出)现在应正确命中武圣', function(){
+    var s = BOT_SEAT_PICKS.wusheng;
+    // 闪没有 CARD_PLAYS 入口,常规枚举永远不收录——此前被误排除的真空场景之一
+    var g1 = mkSeatG({ caps0: { wusheng: true }, myHand: [card('闪','wf1','♥')] });
+    if(!s.match(g1, 0)) throw new Error('红色闪应命中武圣(此前的候选真空)');
+    if(pickSeats(s, g1) !== '1,2') throw new Error('闪当杀两目标均应入候选,实际 ' + pickSeats(s, g1));
+    // 满血桃自己打不出(CARD_PLAYS['桃'].canPlay 因满血失败),常规枚举也不收录——另一个真空场景
+    var g2 = mkSeatG({ hpOf: { 0: 4 }, caps0: { wusheng: true }, myHand: [card('桃','wf2','♥')] });
+    if(!s.match(g2, 0)) throw new Error('满血红桃应命中武圣(此前的候选真空)');
+    // 回归:未满血桃仍然优先按桃自己的效果处理,不受本次修复影响(见下方"武圣真空修复回归")
+  });
+
+  await check('武圣真空修复回归:未满血红桃仍按桃自己的效果正常使用,不因新增武圣候选而被抢占', function(){
+    var g = mkSeatG({ hpOf: { 0: 2 }, caps0: { wusheng: true }, myHand: [card('桃','wf3','♥')] });
+    var normal = enumerateAllLegalOneStepActions(g, 0).filter(function(c){ return !c.isEndPlay; });
+    if(normal.length !== 1 || normal[0].action !== '桃')
+      throw new Error('常规枚举应收录"桃"这条自己的效果,实际 ' + JSON.stringify(normal));
+    // 武圣候选在这个场景下依然会命中(未满血桃同时也能当杀转化,这本身是改动前就有的既有行为,
+    // 不是本次修复引入的新问题——真人UI同样两个按钮同屏共存,由AI/玩家自行判断该用哪个)
+    var s = BOT_SEAT_PICKS.wusheng;
+    if(!s.match(g, 0)) throw new Error('未满血桃同时也应命中武圣(既有行为,不受本次修复影响)');
+  });
+
+  await check('武圣/龙胆颜色-名字交叉修复:只有武圣的关羽拿红闪不应误标成龙胆,反之同理', function(){
+    // 关羽(仅wusheng)+红闪:canUseAs('杀')对红闪的判断分两条独立分支(wusheng查颜色/
+    // longdan查名字)——只有wusheng该为true,longdan不该被canUseAs的总返回值污染
+    var g1 = mkSeatG({ caps0: { wusheng: true }, myHand: [card('闪','wl1','♥')] });
+    if(!BOT_SEAT_PICKS.wusheng.match(g1, 0)) throw new Error('武圣应命中红闪');
+    if(BOT_SEAT_PICKS.longdan.match(g1, 0)) throw new Error('只有武圣、没有龙胆,不应误命中龙胆(颜色判断污染名字判断)');
+    // 赵云(仅longdan)+红闪:反过来,不应误命中武圣
+    var g2 = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','wl2','♥')] });
+    if(!BOT_SEAT_PICKS.longdan.match(g2, 0)) throw new Error('龙胆应命中红闪');
+    if(BOT_SEAT_PICKS.wusheng.match(g2, 0)) throw new Error('只有龙胆、没有武圣,不应误命中武圣(名字判断污染颜色判断)');
+    // 赵云+黑闪:仍应正常命中龙胆(名字判断不看颜色),不命中武圣(颜色不符)
+    var g3 = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','wl3','♠')] });
+    if(!BOT_SEAT_PICKS.longdan.match(g3, 0)) throw new Error('龙胆应命中黑闪(名字判断不看颜色)');
+    if(BOT_SEAT_PICKS.wusheng.match(g3, 0)) throw new Error('黑闪不应命中武圣(颜色不符)');
   });
 
   await check('武圣有密钥:mock 选目标 → playCard(第一张合法红牌idx, 杀, 目标);无密钥 null 不调', async function(){
