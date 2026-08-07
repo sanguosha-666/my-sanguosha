@@ -259,13 +259,16 @@ const testCode = String.raw`
   respondJiedao = spyService('jiedaoResponse');
   giveEnyuanCard = spyService('enyuanGiveCard');
 
-  // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 12 个技能(蛊惑/旋风 +
-  // 断粮/奇袭/国色/武圣/双雄/制霸);无技能命中的状态下 botDecide('seatPick') 返回 false。 ----
-  await check('BOT_SEAT_PICKS 存在且恰含 12 个技能;无命中时 botDecide 返回 false', async function(){
+  // ---- T1:注册表行为——BOT_SEAT_PICKS 存在且恰含本项目注册的 13 个技能(蛊惑/旋风 +
+  // 断粮/奇袭/国色/武圣/龙胆/双雄/制霸);无技能命中的状态下 botDecide('seatPick') 返回 false。
+  // 龙胆(赵云闪→杀)是候选真空扫描新补的注册,和武圣同级但谓词不同(见 isLongdanShaCard
+  // 注释——闪没有 CARD_PLAYS 入口,resolveActionId 对闪恒定解析成'杀',不能复用武圣那条
+  // "resolveActionId!=='杀'"的排除条件,否则会把所有闪都滤掉)。----
+  await check('BOT_SEAT_PICKS 存在且恰含 13 个技能;无命中时 botDecide 返回 false', async function(){
     if(typeof BOT_SEAT_PICKS === 'undefined') throw new Error('BOT_SEAT_PICKS 未定义');
     var keys = Object.keys(BOT_SEAT_PICKS).sort().join(',');
-    if(keys !== 'duanliang,fanjian,guhuoTarget,guose,qingnang,qixi,quhuDamage,shuangxiong,tiaoxin,wusheng,xuanfeng,zhiba')
-      throw new Error('注册表应恰为 12 项,实际 ' + keys);
+    if(keys !== 'duanliang,fanjian,guhuoTarget,guose,longdan,qingnang,qixi,quhuDamage,shuangxiong,tiaoxin,wusheng,xuanfeng,zhiba')
+      throw new Error('注册表应恰为 13 项,实际 ' + keys);
     var g = mkSeatG({});
     var r = await botDecide('seatPick', g, 0);
     if(r !== false) throw new Error('无技能命中应返回 false(走旧分支),实际 ' + r);
@@ -586,6 +589,63 @@ const testCode = String.raw`
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
     if(window.__playCardCalls.length !== 0) throw new Error('无密钥不应调用 playCard,实际 ' + window.__playCardCalls.length);
+  });
+
+  // ---- 龙胆 longdan(赵云闪→杀方向,候选真空扫描新补;反方向杀→闪走 findUsableAs,不在此覆盖) ----
+  await check('龙胆:无转化能力/闪不在手 match false;闪在手可当杀 match true 且候选走真 canTarget', function(){
+    var s = BOT_SEAT_PICKS.longdan;
+    if(!s) throw new Error('BOT_SEAT_PICKS.longdan 未注册');
+    var g1 = mkSeatG({ myHand: [card('闪','ld0','♠')] });
+    if(s.match(g1, 0)) throw new Error('无龙胆转化能力不应命中');
+    var g2 = mkSeatG({ caps0: { longdan: true }, myHand: [card('杀','ld1','♠')] });
+    if(s.match(g2, 0)) throw new Error('手里只有真杀(不是闪)不应命中龙胆');
+    var g3 = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','ld2','♠')] });
+    if(!s.match(g3, 0)) throw new Error('闪在手且有龙胆应命中');
+    if(pickSeats(s, g3) !== '1,2') throw new Error('两目标均可达应入候选,实际 ' + pickSeats(s, g3));
+    var g4 = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','ld3','♠')], generalOf: { 1: 'zhuge' } });
+    if(pickSeats(s, g4) !== '2') throw new Error('诸葛亮空城目标应被 canTarget 排除,实际 ' + pickSeats(s, g4));
+    var g5 = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','ld4','♠')], shaUsed: true });
+    if(s.match(g5, 0)) throw new Error('本回合已出杀时 canPlay 拒绝,不应命中');
+  });
+
+  await check('龙胆有密钥:mock 选目标 → playCard(第一张闪idx, 杀, 目标);无密钥 null 不调', async function(){
+    window.__playCardCalls = [];
+    window.__mockAiCalls = 0;
+    window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
+    aiApiKey = 'test-key';
+    aiProvider = 'claude';
+    var g = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','ld5','♠')],
+      hands: { 1: [card('桃园结义','sec2')], 2: [] } });
+    var r = await botDecide('seatPick', g, 0);
+    if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
+    if(window.__playCardCalls.length !== 1) throw new Error('playCard 应被调1次,实际 ' + window.__playCardCalls.length);
+    var c0 = window.__playCardCalls[0];
+    if(c0[0] !== 0 || c0[1] !== '杀' || c0[2] !== 2)
+      throw new Error('应 playCard(0, 杀, 座位2),实际 ' + JSON.stringify(c0));
+
+    window.__playCardCalls = [];
+    aiApiKey = '';
+    aiProvider = null;
+    var g2 = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','ld6','♠')], hands: { 1: [card('杀','ldb')], 2: [card('桃','ldc')] } });
+    var r2 = await botDecide('seatPick', g2, 0);
+    if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
+    if(window.__playCardCalls.length !== 0) throw new Error('无密钥不应调用 playCard,实际 ' + window.__playCardCalls.length);
+  });
+
+  await check('龙胆:真杀和闪同时在手时互不干扰(常规枚举仍收录真杀,longdan 额外收录闪)', function(){
+    var g = mkSeatG({ caps0: { longdan: true }, myHand: [card('杀','ld7','♠'), card('闪','ld8','♠')] });
+    var normal = enumerateAllLegalOneStepActions(g, 0);
+    var shaFromNormal = normal.filter(function(c){ return c.action==='杀'; });
+    // target:true 牌按目标展开,3人局2个对手→2条候选(同一张真杀牌,不同目标各一条)
+    if(shaFromNormal.length !== 2) throw new Error('常规枚举应按2个目标展开收录真杀,实际 ' + shaFromNormal.length);
+    var s = BOT_SEAT_PICKS.longdan;
+    if(!s.match(g, 0)) throw new Error('闪同时在手应仍命中 longdan(不受真杀存在影响)');
+  });
+
+  await check('龙胆反方向(杀当闪,被动响应)不受本次改动影响:findUsableAs 仍直接命中本名/转化牌', function(){
+    var me = { hand: [{ name:'杀', id:'ldr1' }], caps:{ longdan:true } };
+    var idx = findUsableAs(me.hand, me, '闪');
+    if(idx !== 0) throw new Error('杀当闪应命中手里那张杀,实际 idx=' + idx);
   });
 
   // ---- 双雄 shuangxiong ----

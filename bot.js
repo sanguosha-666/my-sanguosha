@@ -1978,6 +1978,18 @@ function isWushengShaCard(g, me, c){
   return red && canUseAs(me, c, '杀') && resolveActionId(g, me, c)!=='杀'
     && CARD_PLAYS['杀'].canPlay(g, me, c);
 }
+// isLongdanShaCard:赵云【龙胆】闪→杀方向。和 isWushengShaCard 刻意不同结构——闪没有
+// CARD_PLAYS['闪']这个入口(纯被动响应牌,从未有主动使用路径),resolveActionId 的
+// ownSpec 检查对闪永远失败,于是它对任意一张闪恒定解析成'杀'(step2永远走不到、
+// step3 canUseAs('杀')靠 longdan 命中即真)。这意味着闪不存在"武圣那种——自己有
+// 独立效果、同时也能转化"的双候选场景,是纯粹的单一候选真空:botActionId(闪)固定
+// 返回'闪'这个name,而CARD_PLAYS['闪']不存在,常规枚举整条直接判false跳过、
+// 完全不落地——不需要也不能复用 isWushengShaCard 那个"resolveActionId!=='杀'"的排除
+// 条件(闪恒等于'杀',排除条件会把所有闪都滤掉,等于零覆盖)。
+function isLongdanShaCard(g, me, c){
+  if(!c || c.name!=='闪') return false;
+  return canUseAs(me, c, '杀') && CARD_PLAYS['杀'].canPlay(g, me, c);
+}
 // 镜像 render.js:1162 hasHandOrEquip(顺手/拆桥同款:手牌/装备/判定区任一非空)
 function seatHasTargetableCards(p){
   return !!p && ((p.hand||[]).length>0
@@ -2109,6 +2121,34 @@ BOT_SEAT_PICKS.wusheng = {
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(function(c){ return isWushengShaCard(g, me, c); });
+    if(idx>=0) botInvoke(seat, function(){ playCard(idx, '杀', targetSeat); });
+  },
+};
+
+BOT_SEAT_PICKS.longdan = {
+  match: function(g, seat){
+    if(!g || g.phase!=='play' || g.turn!==seat) return false;
+    const me = g.players && g.players[seat];
+    if(!me) return false;
+    return (me.hand||[]).some(function(c){ return isLongdanShaCard(g, me, c); });
+  },
+  buildSeatCandidates: function(g, seat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return isLongdanShaCard(g, me, c); });
+    const selCard = idx>=0 ? me.hand[idx] : null;
+    const out = [];
+    if(!selCard) return out;
+    g.players.forEach(function(p, i){
+      if(!p || !p.alive || i===seat) return;
+      if(!CARD_PLAYS['杀'].canTarget(g, me, selCard, i)) return;
+      out.push({ seat: i, label: '龙胆→'+p.name });
+    });
+    return out;
+  },
+  fallbackSeat: function(){ return null; }, // 改动前机器人从不用龙胆闪→杀转化
+  execute: function(g, seat, targetSeat){
+    const me = g.players[seat];
+    const idx = (me.hand||[]).findIndex(function(c){ return isLongdanShaCard(g, me, c); });
     if(idx>=0) botInvoke(seat, function(){ playCard(idx, '杀', targetSeat); });
   },
 };
