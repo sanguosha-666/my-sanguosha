@@ -112,6 +112,11 @@ const BOT_PHASE_ACTOR = {
   // 里明确注释"消耗支付后不可取消,因此不提供取消按钮"),候选≥2个时同样不命中任何正则,
   // 真实dump确认过真正永久卡死。
   qiangxiPickTarget:'seat',
+  // 【渲染层bug修复顺带补上,和luanjiChoose/luanjiConfirm同一批】典韦【强袭】前两段:
+  // qiangxiChooseCost/qiangxiChooseWeaponFromHand 行动者都是 pending.seat(典韦本人,
+  // 自主发动、机器人目前没有入口主动调用startQiangxi——防御性收录)。qiangxiPickTarget
+  // 早就注册过(系统性扫描紧急排查那批),这次只补前两段。
+  qiangxiChooseCost:'seat', qiangxiChooseWeaponFromHand:'seat',
   // 【第二批-第1组,每回合结束都可能触发,优先级最高】徐庶【举荐】三段:jujianPickCard/
   // jujianPickTarget 的行动者是 pending.sourceSeat(徐庶本人,服务端 respondJujianPickCard/
   // respondJujianPickTarget/cancelJujian 守卫都是 g.pending.sourceSeat!==mySeat);
@@ -819,7 +824,7 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // 目标姓名)——不排除同样会被L1抢先接管；虽然这两个分支本身不走AI候选顺序（没有注册
   // BOT_DECISIONS，不存在候选顺序错位风险），但收录进来能让"无密钥固定选第一项"这套确定性
   // 兜底的行为不受AI密钥状态影响，保持这两个分支的可预期性，和其它专用分支收录同一原则。
-  'lieRenRespond','qiangxiPickTarget',
+  'lieRenRespond','qiangxiPickTarget','qiangxiChooseCost','qiangxiChooseWeaponFromHand',
   // 【第二批-第1组】徐庶【举荐】三段+曹仁【据守】都有专用的确定性runBotDecision分支
   // (接线在controlsChoice之前)，且各自渲染真实按钮——同上原则收录，保持确定性兜底不受
   // AI密钥状态影响。
@@ -3447,6 +3452,22 @@ async function runBotDecision(g,seat){
   if(g.phase==='qiangxiPickTarget'&&d.type==='qiangxiPickTarget'&&d.seat===seat){
     const target=(d.candidates||[])[0];
     if(typeof target==='number') botInvoke(seat,()=>pickQiangxiTarget(target));
+    return;
+  }
+  // 【渲染层bug修复顺带补上】典韦【强袭】选支付方式(防御性收录,机器人目前不会主动发动
+  // 强袭):优先弃武器牌(保留体力),武器不可弃时选失去1点体力——和"选候选第一项"这类
+  // 确定性兜底同一基调,不追求判断哪个更划算。
+  if(g.phase==='qiangxiChooseCost'&&d.type==='qiangxiChooseCost'&&d.seat===seat){
+    const me=g.players[seat];
+    const opt=(me&&hasWeaponToDiscard(me))?'weapon':'hp';
+    if(opt==='hp'&&!(me&&me.hp>1)) return; // 两种都不可行时(理论上不会发生)保持不动,不误发无效请求
+    botInvoke(seat,()=>chooseQiangxiCost(opt));
+    return;
+  }
+  // 典韦【强袭】手牌选武器(防御性收录):固定选第一个武器牌下标。
+  if(g.phase==='qiangxiChooseWeaponFromHand'&&d.type==='qiangxiChooseWeaponFromHand'&&d.seat===seat){
+    const idx=(d.weaponIndices||[])[0];
+    if(typeof idx==='number') botInvoke(seat,()=>chooseQiangxiWeaponFromHand(idx));
     return;
   }
   // 【第二批-第1组,高频】徐庶【举荐】:确定性兜底,不接AI。固定"不发动"(和断粮/奇袭等

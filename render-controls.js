@@ -3247,6 +3247,123 @@ function renderControls(g){
     }
     return;
   }
+
+  // 典韦【强袭】三段。【渲染层bug修复,和袁绍【乱击】同一类】这三段原来被写死嵌套在
+  // if(g.phase==='draw'){ 大分支内部——但 startQiangxi()/chooseQiangxiCost() 等函数会把
+  // g.phase 切到'qiangxiChooseCost'/'qiangxiChooseWeaponFromHand'/'qiangxiPickTarget'
+  // 之后,g.phase 就不再是'draw'了,外层判断永远进不来这三段,导致选消耗方式/选武器/选
+  // 目标三个面板对任何人(真人和机器人)都渲染不出来。修法同乱击:挪出draw大分支、改成
+  // 独立的顶层判断(条件本身已经带着 g.phase==='qiangxiXxx' 前缀,原样搬移不需要改写)。
+  // 不改 startQiangxi() 等函数本身的phase切换——理由同乱击:bot.js的botSeatForState有
+  // 一条Category A短路(g.phase==='draw'||'play'||'discard'时直接按g.turn返回,排在
+  // BOT_PHASE_ACTOR查表之前),如果反过来让强袭保持g.phase='draw'不切换,机器人调度会被
+  // 这条短路提前拦截,绕开qiangxiChooseCost/qiangxiChooseWeaponFromHand/qiangxiPickTarget
+  // 在BOT_PHASE_ACTOR里的专用注册(qiangxiPickTarget在系统性扫描的紧急排查那批已经注册
+  // 过、qiangxiChooseCost/qiangxiChooseWeaponFromHand此前从未注册,这次一并补上)。
+  // 典韦【强袭】消耗选择阶段
+  if(g.phase==='qiangxiChooseCost' && g.pending && g.pending.type==='qiangxiChooseCost' && g.pending.seat===mySeat){
+    const canPayHp = me && me.alive && me.hp > 1;
+    const canPayWeapon = hasWeaponToDiscard(me);
+
+    const div = document.createElement('div'); div.className = 'centered';
+    const h4 = document.createElement('h4'); h4.textContent = '【强袭】支付方式';
+    div.appendChild(h4);
+    const p = document.createElement('p'); p.textContent = '请选择你要支付的消耗';
+    div.appendChild(p);
+
+    if(canPayHp) {
+      const b1 = document.createElement('button'); b1.className = 'cost-btn';
+      b1.style.background = '#e74c3c';
+      b1.textContent = '失去1点体力';
+      b1.onclick = () => chooseQiangxiCost('hp');
+      div.appendChild(b1);
+    }
+
+    if(canPayWeapon) {
+      const b2 = document.createElement('button'); b2.className = 'cost-btn';
+      b2.style.background = '#e74c3c';
+      b2.textContent = '弃置一张武器牌';
+      b2.onclick = () => chooseQiangxiCost('weapon');
+      div.appendChild(b2);
+    }
+
+    const cb = document.createElement('button'); cb.className = 'cancel-btn';
+    cb.textContent = '取消'; cb.onclick = () => cancelQiangxi();
+    div.appendChild(cb);
+    c.appendChild(div);
+    setBanner('请选择【强袭】的支付方式');
+    return;
+  }
+  if(g.phase==='qiangxiChooseCost' && g.pending && g.pending.type==='qiangxiChooseCost'){
+    const p = g.players[g.pending.seat];
+    setBanner(escapeHtml(p ? p.name : '典韦') + ' 发动【强袭】,选择支付方式…');
+    return;
+  }
+
+  // 典韦【强袭】手牌武器选择阶段
+  if(g.phase==='qiangxiChooseWeaponFromHand' && g.pending && g.pending.type==='qiangxiChooseWeaponFromHand' && g.pending.seat===mySeat){
+    const weaponIndices = g.pending.weaponIndices || [];
+
+    const div = document.createElement('div'); div.className = 'centered';
+    const h4 = document.createElement('h4'); h4.textContent = '【强袭】选择武器牌';
+    div.appendChild(h4);
+    const p = document.createElement('p'); p.textContent = '请选择要弃置的武器牌';
+    div.appendChild(p);
+
+    weaponIndices.forEach(cardIndex => {
+      const card = me.hand[cardIndex];
+      if (card) {
+        const b = document.createElement('button'); b.className = 'target-btn';
+        b.textContent = '【' + escapeHtml(card.name) + '】';
+        b.onclick = () => chooseQiangxiWeaponFromHand(cardIndex);
+        div.appendChild(b);
+      }
+    });
+
+    const cb = document.createElement('button'); cb.className = 'cancel-btn';
+    cb.textContent = '取消'; cb.onclick = () => cancelQiangxi();
+    div.appendChild(cb);
+    c.appendChild(div);
+    setBanner('请选择要弃置的武器牌');
+    return;
+  }
+  if(g.phase==='qiangxiChooseWeaponFromHand' && g.pending && g.pending.type==='qiangxiChooseWeaponFromHand'){
+    const p = g.players[g.pending.seat];
+    setBanner(escapeHtml(p ? p.name : '典韦') + ' 选择要弃置的武器牌…');
+    return;
+  }
+
+  // 典韦【强袭】目标选择阶段
+  if(g.phase==='qiangxiPickTarget' && g.pending && g.pending.type==='qiangxiPickTarget' && g.pending.seat===mySeat){
+    const candidates = g.pending.candidates || [];
+
+    const div = document.createElement('div'); div.className = 'centered';
+    const h4 = document.createElement('h4'); h4.textContent = '【强袭】选择目标';
+    div.appendChild(h4);
+    const p = document.createElement('p'); p.textContent = '请选择攻击范围内的目标角色';
+    div.appendChild(p);
+
+    candidates.forEach(targetSeat => {
+      const target = g.players[targetSeat];
+      if (target && target.alive) {
+        const b = document.createElement('button'); b.className = 'target-btn';
+        b.textContent = escapeHtml(target.name);
+        b.onclick = () => pickQiangxiTarget(targetSeat);
+        div.appendChild(b);
+      }
+    });
+
+    // 强袭消耗支付后不可取消，因此不提供取消按钮
+    c.appendChild(div);
+    setBanner('请选择攻击范围内的目标角色');
+    return;
+  }
+  if(g.phase==='qiangxiPickTarget' && g.pending && g.pending.type==='qiangxiPickTarget'){
+    const p = g.players[g.pending.seat];
+    setBanner(escapeHtml(p ? p.name : '典韦') + ' 选择【强袭】的目标…');
+    return;
+  }
+
   if(!myTurn){
     // 到这里说明:上面几千行 g.pending.xxx===mySeat 的判断没有一条命中过——真正没有任何
     // pending 需要我响应,是真正的空闲等待状态。只有在这个前提下才显示翻面提示;一旦真的
@@ -3299,110 +3416,6 @@ function renderControls(g){
       }
       setBanner('轮到你,摸牌阶段。');
     }
-  // 典韦【强袭】消耗选择阶段
-  if(g.phase==='qiangxiChooseCost' && g.pending && g.pending.type==='qiangxiChooseCost' && g.pending.seat===mySeat){
-    const canPayHp = me && me.alive && me.hp > 1;
-    const canPayWeapon = hasWeaponToDiscard(me);
-    
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【强袭】支付方式';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '请选择你要支付的消耗';
-    div.appendChild(p);
-    
-    if(canPayHp) {
-      const b1 = document.createElement('button'); b1.className = 'cost-btn';
-      b1.style.background = '#e74c3c';
-      b1.textContent = '失去1点体力';
-      b1.onclick = () => chooseQiangxiCost('hp');
-      div.appendChild(b1);
-    }
-    
-    if(canPayWeapon) {
-      const b2 = document.createElement('button'); b2.className = 'cost-btn';
-      b2.style.background = '#e74c3c';
-      b2.textContent = '弃置一张武器牌';
-      b2.onclick = () => chooseQiangxiCost('weapon');
-      div.appendChild(b2);
-    }
-    
-    const cb = document.createElement('button'); cb.className = 'cancel-btn';
-    cb.textContent = '取消'; cb.onclick = () => cancelQiangxi();
-    div.appendChild(cb);
-    c.appendChild(div);
-    setBanner('请选择【强袭】的支付方式');
-    return;
-  }
-  if(g.phase==='qiangxiChooseCost' && g.pending && g.pending.type==='qiangxiChooseCost'){
-    const p = g.players[g.pending.seat];
-    setBanner(escapeHtml(p ? p.name : '典韦') + ' 发动【强袭】,选择支付方式…');
-    return;
-  }
-  
-  // 典韦【强袭】手牌武器选择阶段
-  if(g.phase==='qiangxiChooseWeaponFromHand' && g.pending && g.pending.type==='qiangxiChooseWeaponFromHand' && g.pending.seat===mySeat){
-    const weaponIndices = g.pending.weaponIndices || [];
-    
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【强袭】选择武器牌';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '请选择要弃置的武器牌';
-    div.appendChild(p);
-    
-    weaponIndices.forEach(cardIndex => {
-      const card = me.hand[cardIndex];
-      if (card) {
-        const b = document.createElement('button'); b.className = 'target-btn';
-        b.textContent = '【' + escapeHtml(card.name) + '】';
-        b.onclick = () => chooseQiangxiWeaponFromHand(cardIndex);
-        div.appendChild(b);
-      }
-    });
-    
-    const cb = document.createElement('button'); cb.className = 'cancel-btn';
-    cb.textContent = '取消'; cb.onclick = () => cancelQiangxi();
-    div.appendChild(cb);
-    c.appendChild(div);
-    setBanner('请选择要弃置的武器牌');
-    return;
-  }
-  if(g.phase==='qiangxiChooseWeaponFromHand' && g.pending && g.pending.type==='qiangxiChooseWeaponFromHand'){
-    const p = g.players[g.pending.seat];
-    setBanner(escapeHtml(p ? p.name : '典韦') + ' 选择要弃置的武器牌…');
-    return;
-  }
-  
-  // 典韦【强袭】目标选择阶段
-  if(g.phase==='qiangxiPickTarget' && g.pending && g.pending.type==='qiangxiPickTarget' && g.pending.seat===mySeat){
-    const candidates = g.pending.candidates || [];
-    
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【强袭】选择目标';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '请选择攻击范围内的目标角色';
-    div.appendChild(p);
-    
-    candidates.forEach(targetSeat => {
-      const target = g.players[targetSeat];
-      if (target && target.alive) {
-        const b = document.createElement('button'); b.className = 'target-btn';
-        b.textContent = escapeHtml(target.name);
-        b.onclick = () => pickQiangxiTarget(targetSeat);
-        div.appendChild(b);
-      }
-    });
-    
-    // 强袭消耗支付后不可取消，因此不提供取消按钮
-    c.appendChild(div);
-    setBanner('请选择攻击范围内的目标角色');
-    return;
-  }
-  if(g.phase==='qiangxiPickTarget' && g.pending && g.pending.type==='qiangxiPickTarget'){
-    const p = g.players[g.pending.seat];
-    setBanner(escapeHtml(p ? p.name : '典韦') + ' 选择【强袭】的目标…');
-    return;
-  }
-  
   } else if(g.phase==='duanbingChoose'){
     // 【短兵】在打出杀后会把 phase 切到 duanbingChoose；必须在 play 分支之外渲染，
     // 否则阶段已经改变后永远到不了原先嵌在 play 里的选择界面。

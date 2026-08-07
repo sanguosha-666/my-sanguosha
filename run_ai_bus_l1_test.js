@@ -577,6 +577,50 @@ const testCode = String.raw`
     }
   });
 
+  // ---- 渲染层bug回归(典韦【强袭】,和乱击同一批发现的同一类问题):此前 qiangxiChooseCost/
+  // qiangxiChooseWeaponFromHand/qiangxiPickTarget 三段被写死嵌套在 g.phase==='draw' 大分支
+  // 内部,面板对任何人都渲染不出来。 ----
+  await check('渲染层修复:强袭qiangxiChooseCost 能收集到支付方式按钮(手持武器,此前渲染不出任何按钮)', function(){
+    var g = mkG('qiangxiChooseCost', { type: 'qiangxiChooseCost', seat: 0 }, [card('青龙偃月刀')]);
+    var res = collectControlsCandidates(g, 0);
+    try{
+      // 手牌里有真实武器名(EQUIPS表可识别)+hp>1,两个支付方式都应出现,加取消共3个
+      if(res.candidates.length !== 3) throw new Error('应恰3个按钮(失去体力+弃武器+取消),实际 ' + res.candidates.length + ' labels=' + JSON.stringify(res.candidates.map(function(c){return c.label;})));
+      if(res.candidates[0].label !== '失去1点体力') throw new Error('按钮0应为失去1点体力,实际 ' + res.candidates[0].label);
+      if(res.candidates[1].label !== '弃置一张武器牌') throw new Error('按钮1应为弃置一张武器牌,实际 ' + res.candidates[1].label);
+      if(res.candidates[2].label !== '取消') throw new Error('按钮2应为取消,实际 ' + res.candidates[2].label);
+    } finally {
+      res.dispose();
+    }
+  });
+
+  await check('渲染层修复:强袭qiangxiChooseWeaponFromHand 能收集到武器牌按钮(此前渲染不出任何按钮)', function(){
+    var g = mkG('qiangxiChooseWeaponFromHand',
+      { type: 'qiangxiChooseWeaponFromHand', seat: 0, weaponIndices: [0] },
+      [card('青龙偃月刀')]);
+    var res = collectControlsCandidates(g, 0);
+    try{
+      if(res.candidates.length !== 2) throw new Error('应恰2个按钮(武器牌+取消),实际 ' + res.candidates.length + ' labels=' + JSON.stringify(res.candidates.map(function(c){return c.label;})));
+      if(res.candidates[0].label.indexOf('青龙偃月刀') < 0) throw new Error('按钮0应含武器名,实际 ' + res.candidates[0].label);
+      if(res.candidates[1].label !== '取消') throw new Error('按钮1应为取消,实际 ' + res.candidates[1].label);
+    } finally {
+      res.dispose();
+    }
+  });
+
+  await check('渲染层修复:强袭qiangxiPickTarget 能收集到目标按钮(此前渲染不出任何按钮)', function(){
+    var g = mkG('qiangxiPickTarget', { type: 'qiangxiPickTarget', seat: 0, costType: 'hp', candidates: [1, 2] }, []);
+    var res = collectControlsCandidates(g, 0);
+    try{
+      // 强袭消耗支付后不可取消,只有目标按钮,没有取消按钮
+      if(res.candidates.length !== 2) throw new Error('应恰2个目标按钮,实际 ' + res.candidates.length + ' labels=' + JSON.stringify(res.candidates.map(function(c){return c.label;})));
+      if(res.candidates[0].label !== '玩家1') throw new Error('按钮0应为玩家1,实际 ' + res.candidates[0].label);
+      if(res.candidates[1].label !== '玩家2') throw new Error('按钮1应为玩家2,实际 ' + res.candidates[1].label);
+    } finally {
+      res.dispose();
+    }
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

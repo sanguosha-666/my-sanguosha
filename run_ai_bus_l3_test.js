@@ -3651,6 +3651,49 @@ const testCode = String.raw`
       throw new Error('luanjiConfirm 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.luanjiConfirm);
   });
 
+  // ================= 渲染层bug修复(典韦【强袭】,和乱击同一批)顺带补上的机器人分支 =================
+  await check('渲染层bug修复:强袭qiangxiChooseCost 有武器可弃时优先选weapon(保留体力)', async function(){
+    window.__qiangxiCostCalls = [];
+    chooseQiangxiCost = function(opt){ window.__qiangxiCostCalls.push(opt); };
+    hasWeaponToDiscard = function(){ return true; };
+    var g = mkSeatG({});
+    g.phase = 'qiangxiChooseCost';
+    g.pending = { type: 'qiangxiChooseCost', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__qiangxiCostCalls.length !== 1 || window.__qiangxiCostCalls[0] !== 'weapon')
+      throw new Error('应调用 chooseQiangxiCost("weapon"),实际 ' + JSON.stringify(window.__qiangxiCostCalls));
+  });
+
+  await check('渲染层bug修复:强袭qiangxiChooseCost 无武器可弃时选hp', async function(){
+    window.__qiangxiCostCalls = [];
+    chooseQiangxiCost = function(opt){ window.__qiangxiCostCalls.push(opt); };
+    hasWeaponToDiscard = function(){ return false; };
+    var g = mkSeatG({ hpOf: { 0: 3 } });
+    g.phase = 'qiangxiChooseCost';
+    g.pending = { type: 'qiangxiChooseCost', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__qiangxiCostCalls.length !== 1 || window.__qiangxiCostCalls[0] !== 'hp')
+      throw new Error('应调用 chooseQiangxiCost("hp"),实际 ' + JSON.stringify(window.__qiangxiCostCalls));
+  });
+
+  await check('渲染层bug修复:强袭qiangxiChooseWeaponFromHand 固定选第一个武器下标', async function(){
+    window.__qiangxiWeaponCalls = [];
+    chooseQiangxiWeaponFromHand = function(idx){ window.__qiangxiWeaponCalls.push(idx); };
+    var g = mkSeatG({});
+    g.phase = 'qiangxiChooseWeaponFromHand';
+    g.pending = { type: 'qiangxiChooseWeaponFromHand', seat: 0, weaponIndices: [2, 3] };
+    await runBotDecision(g, 0);
+    if(window.__qiangxiWeaponCalls.length !== 1 || window.__qiangxiWeaponCalls[0] !== 2)
+      throw new Error('应调用 chooseQiangxiWeaponFromHand(2),实际 ' + JSON.stringify(window.__qiangxiWeaponCalls));
+  });
+
+  await check('渲染层bug修复:BOT_PHASE_ACTOR 已登记 qiangxiChooseCost/qiangxiChooseWeaponFromHand', function(){
+    if(BOT_PHASE_ACTOR.qiangxiChooseCost !== 'seat')
+      throw new Error('qiangxiChooseCost 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiChooseCost);
+    if(BOT_PHASE_ACTOR.qiangxiChooseWeaponFromHand !== 'seat')
+      throw new Error('qiangxiChooseWeaponFromHand 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiChooseWeaponFromHand);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
