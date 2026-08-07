@@ -3101,6 +3101,89 @@ const testCode = String.raw`
       throw new Error('qiangxiPickTarget 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiPickTarget);
   });
 
+  // ================= 第二批-第1组:徐庶【举荐】+曹仁【据守】(每回合结束都可能触发,
+  // 优先级最高) =================
+  // 【背景】两者都已经有"取消"按钮能命中botSafePrompt安全正则,真实dump确认过不卡死,
+  // 只是缺乏真正判断——本批修的是"判断力",不是"消除卡死"。
+  await check('第二批-1:举荐jujianPickCard 固定不发动(cancelJujian)', async function(){
+    window.__jujianCancelCalls = 0;
+    cancelJujian = function(){ window.__jujianCancelCalls++; };
+    var g = mkSeatG({ myHand: [card('桃','a','♥',8), card('无中生有','b','♦',3)] });
+    g.phase = 'jujianPickCard';
+    g.pending = { type: 'jujianPickCard', sourceSeat: 0, endingSeat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__jujianCancelCalls !== 1)
+      throw new Error('应调用 cancelJujian 一次,实际 ' + window.__jujianCancelCalls);
+  });
+
+  await check('第二批-1:举荐jujianPickTarget 防御性兜底,固定选候选第一个', async function(){
+    window.__jujianTargetCalls = [];
+    respondJujianPickTarget = function(seat){ window.__jujianTargetCalls.push(seat); };
+    var g = mkSeatG({});
+    g.phase = 'jujianPickTarget';
+    g.pending = { type: 'jujianPickTarget', sourceSeat: 0, endingSeat: 0, candidates: [1, 2] };
+    await runBotDecision(g, 0);
+    if(window.__jujianTargetCalls.length !== 1 || window.__jujianTargetCalls[0] !== 1)
+      throw new Error('应调用 respondJujianPickTarget(1),实际 ' + JSON.stringify(window.__jujianTargetCalls));
+  });
+
+  await check('第二批-1:举荐jujianChooseEffect 体力未满选recover', async function(){
+    window.__jujianEffectCalls = [];
+    respondJujianEffect = function(opt){ window.__jujianEffectCalls.push(opt); };
+    var g = mkSeatG({ hpOf: { 0: 2 } });
+    g.phase = 'jujianChooseEffect';
+    g.pending = { type: 'jujianChooseEffect', sourceSeat: 1, endingSeat: 1, targetSeat: 0, discardCard: card('桃') };
+    await runBotDecision(g, 0);
+    if(window.__jujianEffectCalls.length !== 1 || window.__jujianEffectCalls[0] !== 'recover')
+      throw new Error('体力未满应选recover,实际 ' + JSON.stringify(window.__jujianEffectCalls));
+  });
+
+  await check('第二批-1:举荐jujianChooseEffect 体力已满选draw(避免选recover无效果)', async function(){
+    window.__jujianEffectCalls = [];
+    respondJujianEffect = function(opt){ window.__jujianEffectCalls.push(opt); };
+    var g = mkSeatG({});
+    g.phase = 'jujianChooseEffect';
+    g.pending = { type: 'jujianChooseEffect', sourceSeat: 1, endingSeat: 1, targetSeat: 0, discardCard: card('桃') };
+    await runBotDecision(g, 0);
+    if(window.__jujianEffectCalls.length !== 1 || window.__jujianEffectCalls[0] !== 'draw')
+      throw new Error('体力已满应选draw,实际 ' + JSON.stringify(window.__jujianEffectCalls));
+  });
+
+  await check('第二批-1:据守jushouChoose 手牌少(≤3)时发动(confirmJushou)', async function(){
+    window.__jushouConfirmCalls = 0; window.__jushouCancelCalls = 0;
+    confirmJushou = function(){ window.__jushouConfirmCalls++; };
+    cancelJushou = function(){ window.__jushouCancelCalls++; };
+    var g = mkSeatG({ myHand: [card('桃')] });
+    g.phase = 'jushouChoose';
+    g.pending = { type: 'jushouChoose', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__jushouConfirmCalls !== 1 || window.__jushouCancelCalls !== 0)
+      throw new Error('手牌1张应发动,实际 confirm=' + window.__jushouConfirmCalls + ' cancel=' + window.__jushouCancelCalls);
+  });
+
+  await check('第二批-1:据守jushouChoose 手牌多(>3)时不发动(cancelJushou)', async function(){
+    window.__jushouConfirmCalls = 0; window.__jushouCancelCalls = 0;
+    confirmJushou = function(){ window.__jushouConfirmCalls++; };
+    cancelJushou = function(){ window.__jushouCancelCalls++; };
+    var g = mkSeatG({ myHand: [card('杀'), card('闪'), card('桃'), card('酒'), card('无中生有')] });
+    g.phase = 'jushouChoose';
+    g.pending = { type: 'jushouChoose', seat: 0 };
+    await runBotDecision(g, 0);
+    if(window.__jushouCancelCalls !== 1 || window.__jushouConfirmCalls !== 0)
+      throw new Error('手牌5张应不发动,实际 confirm=' + window.__jushouConfirmCalls + ' cancel=' + window.__jushouCancelCalls);
+  });
+
+  await check('第二批-1:BOT_PHASE_ACTOR 已登记 jujian三段/jushouChoose', function(){
+    if(BOT_PHASE_ACTOR.jujianPickCard !== 'sourceSeat')
+      throw new Error('jujianPickCard 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.jujianPickCard);
+    if(BOT_PHASE_ACTOR.jujianPickTarget !== 'sourceSeat')
+      throw new Error('jujianPickTarget 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.jujianPickTarget);
+    if(BOT_PHASE_ACTOR.jujianChooseEffect !== 'targetSeat')
+      throw new Error('jujianChooseEffect 应登记为 targetSeat,实际 ' + BOT_PHASE_ACTOR.jujianChooseEffect);
+    if(BOT_PHASE_ACTOR.jushouChoose !== 'seat')
+      throw new Error('jushouChoose 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.jushouChoose);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

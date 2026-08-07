@@ -111,7 +111,19 @@ const BOT_PHASE_ACTOR = {
   // 服务端 pickQiangxiTarget 守卫 g.pending.seat!==mySeat)。按钮文案就是目标的纯姓名(代码
   // 里明确注释"消耗支付后不可取消,因此不提供取消按钮"),候选≥2个时同样不命中任何正则,
   // 真实dump确认过真正永久卡死。
-  qiangxiPickTarget:'seat'
+  qiangxiPickTarget:'seat',
+  // 【第二批-第1组,每回合结束都可能触发,优先级最高】徐庶【举荐】三段:jujianPickCard/
+  // jujianPickTarget 的行动者是 pending.sourceSeat(徐庶本人,服务端 respondJujianPickCard/
+  // respondJujianPickTarget/cancelJujian 守卫都是 g.pending.sourceSeat!==mySeat);
+  // jujianChooseEffect 的行动者是 pending.targetSeat(被举荐的目标,可能是另一个人,服务端
+  // respondJujianEffect 守卫 g.pending.targetSeat!==mySeat)——三段行动者不是同一个字段,
+  // 不能只登记一次。这三个 phase 都有"取消"按钮能命中 botSafePrompt 安全正则(不卡死),
+  // 只是缺乏真正判断(永远"不发动"/永远随机点)，属于第二批"有兜底但不智能"批量修复项。
+  jujianPickCard:'sourceSeat', jujianPickTarget:'sourceSeat', jujianChooseEffect:'targetSeat',
+  // 【第二批-第1组】曹仁【据守】:行动者是 pending.seat(曹仁本人,服务端 confirmJushou/
+  // cancelJushou 守卫都是 pending.seat!==mySeat)。有"取消"按钮能命中安全正则,不卡死，
+  // 同上属于"有兜底但不智能"。
+  jushouChoose:'seat'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -719,6 +731,10 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // BOT_DECISIONS，不存在候选顺序错位风险），但收录进来能让"无密钥固定选第一项"这套确定性
   // 兜底的行为不受AI密钥状态影响，保持这两个分支的可预期性，和其它专用分支收录同一原则。
   'lieRenRespond','qiangxiPickTarget',
+  // 【第二批-第1组】徐庶【举荐】三段+曹仁【据守】都有专用的确定性runBotDecision分支
+  // (接线在controlsChoice之前)，且各自渲染真实按钮——同上原则收录，保持确定性兜底不受
+  // AI密钥状态影响。
+  'jujianPickCard','jujianPickTarget','jujianChooseEffect','jushouChoose',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -3327,6 +3343,40 @@ async function runBotDecision(g,seat){
   if(g.phase==='qiangxiPickTarget'&&d.type==='qiangxiPickTarget'&&d.seat===seat){
     const target=(d.candidates||[])[0];
     if(typeof target==='number') botInvoke(seat,()=>pickQiangxiTarget(target));
+    return;
+  }
+  // 【第二批-第1组,高频】徐庶【举荐】:确定性兜底,不接AI。固定"不发动"(和断粮/奇袭等
+  // L3转化技能的既定默认一致——举荐是纯粹利他技能,发动要付出一张非基本牌的代价,保守
+  // 默认不发动符合项目里"没有明确收益就不主动消耗资源"的既定基调)。
+  if(g.phase==='jujianPickCard'&&d.type==='jujianPickCard'&&d.sourceSeat===seat){
+    botInvoke(seat,cancelJujian); return;
+  }
+  // 理论上只有先选了要弃的牌才会走到这一步,而上面的分支固定不发动、永远不会推进到这里——
+  // 这条分支是防御性兜底(万一以后接了AI或有别的入口把状态推进到这里),固定选候选第一个
+  // 目标,不追求判断哪个更好。
+  if(g.phase==='jujianPickTarget'&&d.type==='jujianPickTarget'&&d.sourceSeat===seat){
+    const target=(d.candidates||[])[0];
+    if(typeof target==='number') botInvoke(seat,()=>respondJujianPickTarget(target));
+    else botInvoke(seat,cancelJujian);
+    return;
+  }
+  // 这一步的行动者是被举荐的目标(可能是另一个人的机器人),牌已经弃出去了、不可取消
+  // (cancelJujian对jujianChooseEffect直接拒绝)，三个选项对目标都是纯收益，选一个最贴切
+  // 当前状态的:体力未满时回复更划算,体力已满时摸牌(避免"体力已满仍选回复"变成日志里的
+  // 无效果)。
+  if(g.phase==='jujianChooseEffect'&&d.type==='jujianChooseEffect'&&d.targetSeat===seat){
+    const me=g.players[seat];
+    const opt=(me && me.hp<me.maxHp) ? 'recover' : 'draw';
+    botInvoke(seat,()=>respondJujianEffect(opt));
+    return;
+  }
+  // 【第二批-第1组,高频】曹仁【据守】:确定性兜底,不接AI。摸3张牌的收益 vs 翻面(相当于
+  // 跳过下个回合正常摸牌/出牌)的代价——简单条件:手牌不多时(≤3张)值得用一次翻面换3张牌,
+  // 手牌已经充裕时没必要再承担翻面代价。不追求比这更细的判断。
+  if(g.phase==='jushouChoose'&&d.type==='jushouChoose'&&d.seat===seat){
+    const me=g.players[seat];
+    if(me && (me.hand||[]).length<=3) botInvoke(seat,confirmJushou);
+    else botInvoke(seat,cancelJushou);
     return;
   }
   if(g.phase==='jiedaoChoice'&&d && d.type==='jiedaoChoice'&&d.seatA===seat){
