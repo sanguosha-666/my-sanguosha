@@ -3066,6 +3066,41 @@ const testCode = String.raw`
     });
   });
 
+  // ================= 系统性扫描发现的紧急盲区收尾:祝融【烈刃】拼点响应 + 典韦【强袭】
+  // 选目标(Task 遗留清理) =================
+  // 【背景】真实dump确认这两步此前是真正永久卡死(不是"缺少智能判断"这类温和问题):
+  // 烈刃拼点响应的按钮文案是"【牌名】♠5"这种纯牌面拼接,强袭选目标的按钮文案是目标的纯
+  // 姓名,都不命中botSafePrompt任何正则、也没有取消选项,候选≥2个时机器人彻底点不到任何
+  // 按钮。修法是确定性兜底(固定选候选第一项),不追求判断哪个更好——目标只是消除卡死。
+  await check('系统性扫描收尾:烈刃拼点响应(lieRenRespond)固定选手牌第一张', async function(){
+    window.__lieRenCalls = [];
+    respondLieRen = function(idx){ window.__lieRenCalls.push(idx); };
+    var g = mkSeatG({ myHand: [card('闪','a','♠',5), card('桃','b','♥',8)] });
+    g.phase = 'lieRenRespond';
+    g.pending = { type: 'lieRenRespond', sourceSeat: 1, targetSeat: 0, sourceCard: card('杀','p1','♣',9) };
+    await runBotDecision(g, 0);
+    if(window.__lieRenCalls.length !== 1 || window.__lieRenCalls[0] !== 0)
+      throw new Error('应调用 respondLieRen(0),实际 ' + JSON.stringify(window.__lieRenCalls));
+  });
+
+  await check('系统性扫描收尾:强袭选目标(qiangxiPickTarget)固定选候选第一个', async function(){
+    window.__qiangxiTargetCalls = [];
+    pickQiangxiTarget = function(seat){ window.__qiangxiTargetCalls.push(seat); };
+    var g = mkSeatG({});
+    g.phase = 'qiangxiPickTarget';
+    g.pending = { type: 'qiangxiPickTarget', seat: 0, costType: 'hp', candidates: [1, 2] };
+    await runBotDecision(g, 0);
+    if(window.__qiangxiTargetCalls.length !== 1 || window.__qiangxiTargetCalls[0] !== 1)
+      throw new Error('应调用 pickQiangxiTarget(1),实际 ' + JSON.stringify(window.__qiangxiTargetCalls));
+  });
+
+  await check('系统性扫描收尾:BOT_PHASE_ACTOR 已登记 lieRenRespond/qiangxiPickTarget', function(){
+    if(BOT_PHASE_ACTOR.lieRenRespond !== 'targetSeat')
+      throw new Error('lieRenRespond 应登记为 targetSeat,实际 ' + BOT_PHASE_ACTOR.lieRenRespond);
+    if(BOT_PHASE_ACTOR.qiangxiPickTarget !== 'seat')
+      throw new Error('qiangxiPickTarget 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiPickTarget);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

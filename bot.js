@@ -101,7 +101,17 @@ const BOT_PHASE_ACTOR = {
   // 四件套、且已经在 runBotDecision 里接了线(g.phase==='xuanfengPick'&&...stage==='selecting'
   // 分支)——但这条接线全程都是死代码，因为 xuanfengPick 没登记进这张表，调度请求根本
   // 到不了 runBotDecision。登记后这套已经写好的 AI 接入立刻生效，不需要再补新代码。
-  xuanfengPick:'from'
+  xuanfengPick:'from',
+  // 【系统性扫描发现的紧急盲区】祝融【烈刃】拼点响应:行动者是 pending.targetSeat(被拼点
+  // 的目标本人,服务端 respondLieRen 守卫 g.pending.targetSeat!==mySeat)。真实dump确认过
+  // 这个不只是"没有智能判断"——目标手牌数>1时,按钮文案是"【牌名】♠5"这种纯牌面拼接,不
+  // 命中 botSafePrompt 任何正则、也没有取消选项,6轮驱动状态完全不变,真正永久卡死。
+  lieRenRespond:'targetSeat',
+  // 【系统性扫描发现的紧急盲区】典韦【强袭】选目标:行动者是 pending.seat(强袭发动者本人,
+  // 服务端 pickQiangxiTarget 守卫 g.pending.seat!==mySeat)。按钮文案就是目标的纯姓名(代码
+  // 里明确注释"消耗支付后不可取消,因此不提供取消按钮"),候选≥2个时同样不命中任何正则,
+  // 真实dump确认过真正永久卡死。
+  qiangxiPickTarget:'seat'
 };
 function botSeatForState(g){
   const d=g.pending||{};
@@ -703,6 +713,12 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // controlsChoice 之前),且 render-controls.js 会渲染"对X使用【杀】"/"失去1点体力"
   // 真实按钮——同上，不排除会被 L1 抢先接管、候选顺序错位,必须收录。
   'luanwuChoose',
+  // 【系统性扫描发现的紧急盲区】祝融【烈刃】拼点响应/典韦【强袭】选目标都有专用的确定性
+  // runBotDecision分支(接线在controlsChoice之前)，且各自渲染真实按钮("【牌名】♠5"/纯
+  // 目标姓名)——不排除同样会被L1抢先接管；虽然这两个分支本身不走AI候选顺序（没有注册
+  // BOT_DECISIONS，不存在候选顺序错位风险），但收录进来能让"无密钥固定选第一项"这套确定性
+  // 兜底的行为不受AI密钥状态影响，保持这两个分支的可预期性，和其它专用分支收录同一原则。
+  'lieRenRespond','qiangxiPickTarget',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -3297,6 +3313,21 @@ async function runBotDecision(g,seat){
   }
   if(g.phase==='shaOffsetChoice'&&d.from===seat){
     botInvoke(seat,()=>respondShaOffsetChoice((d.available||[])[0]||null)); return;
+  }
+  // 【系统性扫描发现的紧急盲区收尾】祝融【烈刃】拼点响应:确定性兜底,不追求判断哪张牌更好,
+  // 固定选手牌第一张——目的只是消除卡死，不是让这一步变聪明。手牌为空时(理论上不会,
+  // respondLieRen自己的cardIdx<0校验会拒绝)不动作，交给上游服务端自身的容错。
+  if(g.phase==='lieRenRespond'&&d.type==='lieRenRespond'&&d.targetSeat===seat){
+    const me=g.players[seat];
+    if((me.hand||[]).length>0) botInvoke(seat,()=>respondLieRen(0));
+    return;
+  }
+  // 【系统性扫描发现的紧急盲区收尾】典韦【强袭】选目标:确定性兜底，固定选候选列表第一个
+  // 目标——"消耗支付后不可取消"是既有设计，这里不加取消，只补选目标这一步不再卡死。
+  if(g.phase==='qiangxiPickTarget'&&d.type==='qiangxiPickTarget'&&d.seat===seat){
+    const target=(d.candidates||[])[0];
+    if(typeof target==='number') botInvoke(seat,()=>pickQiangxiTarget(target));
+    return;
   }
   if(g.phase==='jiedaoChoice'&&d && d.type==='jiedaoChoice'&&d.seatA===seat){
     if(await botDecide('jiedaoResponse',g,seat)) return;
