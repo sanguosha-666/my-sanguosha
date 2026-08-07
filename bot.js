@@ -373,6 +373,25 @@ function scheduleBotTurn(g){
         botMissedSchedule=false;
         try{ scheduleBotTurn(typeof currentG!=='undefined'?currentG:null); }
         catch(e){ console.warn('bot missed-schedule recheck',e); }
+      } else if(botTwoStepA){
+        // 【botTwoStepA 自我触发,真实bug修复】借刀杀人/离间/丈八蛇矛/仁德四个技能共享
+        // 的两步/三步本地状态机——阶段A/B的 execute 只把选择存进这个纯客户端本地变量,
+        // 完全不写入 Firebase(见各自 execute 里"等下一调度走阶段X"的注释)。机器人调度
+        // (scheduleBotTurn)唯一的触发来源是 Firebase 的 onValue 事件:阶段A/B没有任何
+        // 写入,就没有任何事件,就没有下一次调度——真实dump复现过,在没有其它玩家/事件
+        // 同时触发新写入的"安静房间"里,这会导致永久卡死(banner冻结在"等待XX行动…"),
+        // 和左慈/化身机制无关,原生武将(如貂蝉)同样会卡死,是这四个技能共享的架构缺陷。
+        // 修法和上面 botMissedSchedule 同一个入口、同一次 try/catch 写法,不新增机制:
+        // 只要刚才这轮调度落地后 botTwoStepA 还挂着(说明停在一个本地-only的中间阶段),
+        // 就主动补一次 scheduleBotTurn,让下一轮调度能命中 botTwoStepA 已设置的分支、
+        // 走完剩余阶段。丈八蛇矛有两个中间阶段(A→B、B→C)不需要特殊处理——A→B、B→C
+        // 各自结束都会经过这同一个 finally,各自触发各自的下一次重查,不需要为它单独
+        // 计数。用 else if(不是独立 if)避免和上面 botMissedSchedule 同帧重复调用两次
+        // scheduleBotTurn(两个分支最终都是"拿最新状态重新走一遍完整判断"，命中一次就够,
+        // scheduleBotTurn 自己的 debounce/key 匹配即使被调多次也不会真的排出重复定时器,
+        // 这里用 else if 只是避免同一帧内的冗余调用,不是必需的正确性保护)。
+        try{ scheduleBotTurn(typeof currentG!=='undefined'?currentG:null); }
+        catch(e){ console.warn('bot two-step self-trigger recheck',e); }
       }
     }
   },650+Math.floor(Math.random()*500));

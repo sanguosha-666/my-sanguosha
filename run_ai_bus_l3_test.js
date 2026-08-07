@@ -3826,6 +3826,66 @@ const testCode = String.raw`
       throw new Error('qiangxiChooseWeaponFromHand 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiChooseWeaponFromHand);
   });
 
+  // ---- botTwoStepA 自我触发机制(真实bug修复:借刀杀人/离间/丈八蛇矛/仁德四个技能
+  // 共享的两步/三步本地状态机,阶段A/B的execute只设置botTwoStepA这个纯客户端本地变量,
+  // 不写Firebase——机器人调度(scheduleBotTurn)唯一的触发来源是Firebase的onValue事件,
+  // 阶段A/B没有任何写入就没有下一次调度,真实dump复现过在"安静房间"(没有其它玩家/事件
+  // 触发额外render)里会永久卡死。修复:scheduleBotTurn的setTimeout回调finally块里,
+  // botDecisionInFlight清零后新增 else if(botTwoStepA) 分支,复用botMissedSchedule同一个
+  // scheduleBotTurn(currentG)入口主动补一次调度。这里用真实(未stub)的setTimeout验证
+  // 完整的两轮debounce(借刀:阶段A→阶段B共1次自我触发;下面补一个丈八两阶段的场景验证
+  // 需要2次自我触发也能走完,不需要为多阶段单独写逻辑)。----
+  await check('botTwoStepA自我触发:借刀杀人在"安静房间"(不手动触发render)靠自我触发走完阶段A→阶段B', async function(){
+    const ps = [];
+    for(let i=0;i<3;i++){
+      ps.push({ name:'p'+i, alive:true, hp:4, maxHp:4,
+        hand: i===1 ? [{id:'jd1',name:'借刀杀人',suit:'♠',rank:1}] : [],
+        equips: i===2 ? Object.assign(emptyEquips(),{weapon:{id:'w1',name:'青龙偃月刀'}}) : emptyEquips(),
+        delays: [], isBot: i!==0, role:'zhu', general:'yuJi', cid: i===0?myClientId:('bot-cid-'+i) });
+    }
+    const g = { players: ps, gameMode:'ffa', roundNum:1, phase:'play', turn:1,
+      log: [], pending:null, started:true, discard:[], deck:[] };
+    // 沙箱顶层只有 window.setTimeout(转发到真实 Node setTimeout),没有裸 setTimeout——
+    // bot.js 内部 scheduleBotTurn 用的是裸 setTimeout,这里补上(裸赋值在非严格模式下
+    // 直接建一个沙箱全局,和其它测试临时 stub setTimeout 同一个机制,这次是接上真实定时器
+    // 而不是 stub 掉),否则 scheduleBotTurn 自己第一次调用就会抛"setTimeout is not defined"。
+    setTimeout = window.setTimeout; clearTimeout = window.clearTimeout;
+    botTwoStepA = null;
+    window.__jieDaoCalls = [];
+    jieDaoShaRen = function(idx, seatA, seatB){ window.__jieDaoCalls.push([idx, seatA, seatB]); };
+    currentG = g;
+    scheduleBotTurn(g);
+    // 不手动调用 render/scheduleBotTurn 第二次——只是被动等待,验证自我触发机制本身能不能
+    // 靠自己走完两轮650~1150ms的debounce(阶段A→阶段B),总等待时间留够余量。
+    await new Promise(function(r){ setTimeout(r, 3200); });
+    if(window.__jieDaoCalls.length !== 1)
+      throw new Error('安静房间里应靠自我触发走完借刀杀人两阶段并提交1次jieDaoShaRen,实际 ' + JSON.stringify(window.__jieDaoCalls));
+    if(botTwoStepA !== null) throw new Error('提交后 botTwoStepA 应被 resetBotTwoStep 清空,实际 ' + JSON.stringify(botTwoStepA));
+  });
+
+  await check('botTwoStepA自我触发回归:丈八蛇矛两个中间阶段(A→B→C)同样靠自我触发走完,不需要额外处理', async function(){
+    const ps = [];
+    for(let i=0;i<3;i++){
+      ps.push({ name:'p'+i, alive:true, hp:4, maxHp:4,
+        hand: i===1 ? [{id:'c1',name:'桃',suit:'♥',rank:3},{id:'c2',name:'酒',suit:'♥',rank:9}] : [],
+        equips: i===1 ? Object.assign(emptyEquips(),{weapon:{id:'zb1',name:'丈八蛇矛'}}) : emptyEquips(),
+        delays: [], isBot: i!==0, role:'zhu', general: i===1?'guanyu':'yuJi', cid: i===0?myClientId:('bot-cid-'+i) });
+    }
+    const g = { players: ps, gameMode:'ffa', roundNum:1, phase:'play', turn:1,
+      log: [], pending:null, started:true, discard:[], deck:[], shaUsed:false };
+    setTimeout = window.setTimeout; clearTimeout = window.clearTimeout;
+    botTwoStepA = null;
+    window.__zhangbaCalls = [];
+    playZhangbaSha = function(a, b, targetSeat){ window.__zhangbaCalls.push([a, b, targetSeat]); };
+    currentG = g;
+    scheduleBotTurn(g);
+    // 丈八有两个中间阶段(A→B、B→C各一次自我触发),多留一点余量。
+    await new Promise(function(r){ setTimeout(r, 4200); });
+    if(window.__zhangbaCalls.length !== 1)
+      throw new Error('安静房间里应靠自我触发走完丈八三阶段并提交1次playZhangbaSha,实际 ' + JSON.stringify(window.__zhangbaCalls));
+    if(botTwoStepA !== null) throw new Error('提交后 botTwoStepA 应被 resetBotTwoStep 清空,实际 ' + JSON.stringify(botTwoStepA));
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
