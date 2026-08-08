@@ -25,11 +25,11 @@
 
 | 分类 | 数量 | 说明 |
 |---|---|---|
-| A 类 | 9 条（对应 9 个 `pending.type`） | 兜底命中"不发动/取消"类按钮，等价于永远不发动 |
+| A 类 | 0（**原 9 条已于 commit `4b37520` 全部修复**，见文末「A 类修复记录」） | 兜底命中"不发动/取消"类按钮，等价于永远不发动 |
 | B 类 | 0（**原 4 条已于 commit `9334e76` 全部修复**，见文末「B 类修复记录」） | 兜底可能找不到任何可点按钮，存在卡死风险 |
-| C 类 | 3 条 | 多步流程只接了后半段，发动入口本身缺失 |
+| C 类 | 2 条（**原 3 条，于吉蛊惑发动入口已于 commit `4b37520` 修复**；明策/眩惑的发动入口评估后维持现状，非遗漏，见下方说明） | 多步流程只接了后半段，发动入口本身缺失 |
 | D 类 | 0 | 未发现新的"只在有 AI 密钥时才生效"的登记项（上一轮 `BOT_SEAT_PICKS` 那批已经在此前任务解锁） |
-| E 类 | 约 92 个 `pending.type`（见文末列表逐一列名，含本次修复后转入的 7 个） | 已完整接线、无密钥也能正常触发 |
+| E 类 | 约 101 个 `pending.type`（见文末列表逐一列名，含本次两轮修复后转入的合计 16 个） | 已完整接线、无密钥也能正常触发 |
 
 这次审计一共交叉核对了约 **105 个** `pending.type`/`g.phase` 决策入口点（A9+B7+C3(仅入口函数，不计入phase统计)+E约85+已修复的ganglieAsk/guiduAsk/jiangchiAsk/yijiAsk等计入E类，不包含 `play`/`draw`/`discard`/`respond`/`duel` 等基础引擎阶段——这些属于核心机制而不是"武将/装备/锦囊技能"，且早已被大量既有测试覆盖，不在这次审计范围内）。
 
@@ -37,21 +37,7 @@
 
 ## A 类：兜底命中"不发动"类按钮，等价于永远不发动
 
-和"郭嘉遗计"是同一类 bug——机器人技术上"会点一下"，但点的永远是放弃选项，效果上等于这个技能对机器人形同虚设。
-
-| 技能/武将 | phase / pending.type | 代码位置 | 现状路径 | 判定依据 |
-|---|---|---|---|---|
-| 大乔【流离】 | `liuli` | 创建：`game.js:` grep `type:'liuli'`；按钮：`render-controls.js:2426-2445` | `BOT_PHASE_ACTOR.liuli='to'` 已登记，但 `runBotDecision` 无专属分支，`CONTROLS_CHOICE_ALLOWLIST` 不含 `liuli`（无密钥时L1直接返回false）→ 落到末尾 `botSafePrompt` | 按钮含"不发动"（`render-controls.js:2440`），命中安全正则 |
-| 小乔【天香】 | `tianxiang` | 按钮：`render-controls.js:2451-2470` | 同上（`BOT_PHASE_ACTOR.tianxiang='seat'` 已登记，无专属分支，非 allowlist） | 按钮含"不发动"（`render-controls.js:2466`） |
-| 孔融【礼让】回收 | `lirangRecover` | 按钮：`render-controls.js:2267-2280` | 同上（`BOT_PHASE_ACTOR.lirangRecover='from'` 已登记，无专属分支） | 按钮"不获得"（`render-controls.js:2275`），"不获得"在安全正则里 |
-| 孔融【争义】 | `zhengyi` | 按钮：`render-controls.js:2286-2298` | 同上（`BOT_PHASE_ACTOR.zhengyi='asking'` 已登记，无专属分支） | 按钮含"不发动"（`render-controls.js:2293`） |
-| 祝融【烈刃】发动 | `lieRenChoose` | 创建：`game.js` 触发伤害后 `pending.type==='lieRenChoose'`；按钮：`render-controls.js:1488-1507` | **完全没有 `BOT_PHASE_ACTOR` 登记**、也没有专属分支——比上面几条更彻底，连"actor 能不能解析"这一步都没有，直接靠 `botFallbackSeats` 扫描全部机器人座位逐个尝试 `botSafePrompt` | 按钮"发动烈刃"/"不发动"（`render-controls.js:1499-1503`），"不发动"命中安全正则 |
-| 祝融【烈刃】选牌 | `lieRenPickCard` | 按钮：`render-controls.js:1516-1539` | 同上，无 `BOT_PHASE_ACTOR` 登记、无专属分支 | 按钮是每张手牌 + "取消"（`render-controls.js:1534-1535`），"取消"命中安全正则；且由于 `lieRenChoose` 本身就默认被点"不发动"，这个阶段实际上永远走不到 |
-| 夏侯渊【神速1】 | `shensuChoose1` | 按钮：`render-controls.js:1672-1690` | 无 `BOT_PHASE_ACTOR` 登记、无专属分支 | 按钮"发动神速1"/"不发动"（`render-controls.js:1680-1685`），"不发动"命中安全正则 |
-| 夏侯渊【神速2】 | `shensuChoose2` | 按钮：`render-controls.js:1698-1716` | 同上 | 按钮"发动神速2"/"不发动"（`render-controls.js:1706-1711`） |
-| 张郃【巧变】回合开始 | `qiaobianTurnStart` | 按钮：`render-controls.js:2782-2812` | 无 `BOT_PHASE_ACTOR` 登记、无专属分支。**注意**：巧变还有另一个入口 `qiaobianMove`（出牌阶段中途）**已经**完整接线（`BOT_DECISIONS.qiaobianMove`），只有"回合开始"这一个变体缺失 | 首屏按钮"发动【巧变】"/"不发动"（`render-controls.js:2785-2788`），"不发动"命中安全正则 |
-
-> 上面几条里，`liuli`/`tianxiang`/`lirangRecover`/`zhengyi` 这 4 条有一个共同的、值得单独记一笔的细节：它们**都在 `BOT_PHASE_ACTOR` 里正确登记了行动者字段**（不是完全没人认识），但因为没有专属决策分支、又不在 `CONTROLS_CHOICE_ALLOWLIST`（`bot.js` 里硬编码只有 `wuxie`/`luoyingAsk`/`luoshen` 三项），**只有配置了 AI 密钥时才会走 L1 的通用按钮镜像机制**；无密钥时 L1 直接放弃（`bot.js:1041` 那行 `if(!(aiReady || allowlist)) return false;`），照样落到最后的 `botSafePrompt`。这和"完全没有 `BOT_PHASE_ACTOR` 登记"效果相同（都在无密钥时兜底点安全按钮），但**原因不同**——以后如果要修，只需要给这 4 项加一条专属分支或者扩大 allowlist，不需要像 `lieRenChoose`/`shensuChoose1/2`/`qiaobianTurnStart` 那样从头补 `BOT_PHASE_ACTOR` 登记。
+**本次审计当时列出的 9 条已经全部修复，见文末「A 类修复记录（commit `4b37520`）」。**这一节原有的表格内容已经移到该小节存档，不再作为"待处理"清单出现在这里。
 
 ---
 
@@ -67,9 +53,11 @@
 
 | 技能/武将 | 发动入口 | 代码位置 | 已接线的后续步骤 | 备注 |
 |---|---|---|---|---|
-| 于吉【蛊惑】 | `startGuhuo(cardIdx, claimedName)` / `startGuhuoResponse(cardIdx, claimedName)` | `skills.js:530`、`skills.js:559` | `guhuoQuestion`（`BOT_DECISIONS.guhuoQuestion`）、`guhuoTarget`（`BOT_SEAT_PICKS.guhuoTarget`）均完整接线 | `bot.js` 里对 `startGuhuo`/`startGuhuoResponse` 的引用次数为 0（`grep -c`已核实）。机器人可以**回应**别人发动的蛊惑（质疑/选目标），但永远不会**自己主动**扣一张牌声明成别的牌——这需要"选哪张手牌"+"声明成什么牌"两个参数的联合决策，比之前修的几个技能复杂，属于需要专门设计决策逻辑的一类，不是简单补一行 `botInvoke` |
-| 陈宫【明策】 | `startMingce()` | `game.js:3211` | `mingcePickCard`/`mingcePickTarget`/`mingcePickTarget2`/`mingceChoice` 全部有专属 `runBotDecision` 分支（"防御性收录"） | `bot.js` 对 `startMingce` 引用次数为 0。**这是此前"机器人主动技能解锁"任务里已经评估过、明确记录在案的保守决策**（见该次任务的commit说明："明策...对发动者自己净收益不明确，和举荐/仁心同一基调保守默认不主动发动"），不是这次审计的新发现，这里列出只是为了让清单完整、不遗漏 |
-| 法正【眩惑】 | `startHuanhuo()` | `game.js:7242` | **无**——`huanhuoPick`/`huanhuoPickCard`/`huanhuoPickGotCard`/`huanhuoPickSecond` 全部没有接线（见上方 B 类"潜在"条目） | `bot.js` 对 `startHuanhuo` 引用次数为 0。和"明策"同样是此前任务里明确记录的保守决策（该次commit说明："眩惑...净手牌数不变、只是转移他人的牌，保守默认不主动发动"），但**和明策不同的是**：明策的后续步骤已经全部接好，眩惑的后续步骤**一个都没接**——如果以后要解锁，工作量明显更大（需要从"要不要发动"到"选目标/选牌/选获得的牌/选第二目标"四步全部设计决策逻辑），这次审计把这个工作量差异记录下来供以后排期参考 |
+| 于吉【蛊惑】 | `startGuhuo(cardIdx, claimedName)` / `startGuhuoResponse(cardIdx, claimedName)` | `skills.js:530`、`skills.js:559` | `guhuoQuestion`（`BOT_DECISIONS.guhuoQuestion`）、`guhuoTarget`（`BOT_SEAT_PICKS.guhuoTarget`）均完整接线 | **已于 commit `4b37520` 修复**：加进 `botTryStartExtraSkills`（和天义/强袭/乱武/乱击/奋迅同一套play阶段主动发动检测入口），只接"声明为【杀】"这一种最常见用法（`startGuhuoResponse` 那种响应上下文里的"诡称"仍未接，见下方新增说明）。 |
+| 陈宫【明策】 | `startMingce()` | `game.js:3211` | `mingcePickCard`/`mingcePickTarget`/`mingcePickTarget2`/`mingceChoice` 全部有专属 `runBotDecision` 分支（"防御性收录"） | **评估后维持现状，非遗漏**。这是此前"机器人主动技能解锁"任务里已经评估过、明确记录在案的保守决策（见该次任务的commit说明："明策...对发动者自己净收益不明确，和举荐/仁心同一基调保守默认不主动发动"）。本次A类修复任务的说明里明确要求"这两个不用改"，继续保持现状。 |
+| 法正【眩惑】 | `startHuanhuo()` | `game.js:7242` | `huanhuoPick`/`huanhuoPickCard`/`huanhuoPickGotCard`/`huanhuoPickSecond` 四个子阶段**已于 commit `9334e76`（B类修复）补齐决策**（见「B 类修复记录」），但发动入口本身仍未接线 | **评估后维持现状，非遗漏**。同上，此前任务里已经评估过的保守决策，本次A类修复任务明确要求不碰。子阶段已经预先打好补丁（见B类修复记录），如果以后要接发动入口，只需要在 `botTryStartExtraSkills` 里补"是否发动+选目标"这一步，不需要再担心子阶段卡死。 |
+
+**关于于吉【蛊惑】的 `startGuhuoResponse` 补充说明**：`startGuhuoResponse(cardIdx, claimedName)` 是蛊惑的另一种用法——在自己被要求响应杀/闪/桃/无懈可击时，"诡称"手里一张不相关的牌就是对应的响应牌（一种响应上下文里的博弈/伪装）。这次**只修了 `startGuhuo`（出牌阶段主动声明），没有修 `startGuhuoResponse`**——原因是后者是在别人的响应决策点上叠加一层"是否诡称"的判断，比"出牌阶段主动发动"复杂得多（需要先读懂原本的respondShan/duelResponse/respondDying/respondWuxie各自的决策，再叠加一层诡称是否有利的判断），这次任务范围内没有覆盖，留作以后单独评估。
 
 ---
 
@@ -85,9 +73,30 @@
 
 以下这批 `pending.type`/`g.phase` 都在 `BOT_PHASE_ACTOR` 登记了行动者字段，且在 `runBotDecision` 里能找到引用该字面量的专属分支（硬编码 if 分支，或 `BOT_DECISIONS`/`BOT_SEAT_PICKS` 注册项），交叉核对后确认无密钥模式下也能正常决策，不需要逐条展开细节：
 
-`aoeResp`、`beigeChoose`、`beigeDiscard`、`beigeJudge`、`biyue`、`buquAsk`、`chengxiangAsk`、`chengxiangChoose`（经 `chengxiangAsk` 的actor+内部按 `d.type` 二次分派，见 `bot.js:3886`）、`cixiongAsk`、`cixiongChoice`、`duanbingChoose`、`duel`、`dying`、`enyuanChoose`、`enyuanChooseOption`、`enyuanGiveCard`、`fanjianSuit`（`BOT_SEAT_PICKS.fanjian`）、`fenxunDiscard`、`fenxunTarget`、`ganglieAsk`（"郭嘉遗计"任务里修过）、`ganglieChoice`、`guanshi`、`guanxingReview`、`guhuoQuestion`、`guhuoTarget`（经 `BOT_SEAT_PICKS.guhuoTarget` 特殊路径，见 `bot.js:1956,2028,4238`(行号已核对)）、`guicai`、`guiduAsk`（"郭嘉遗计"任务里修过）、`hanbing`、`hanbingAsk`、`haoshiPick`、`huanhuoPick`/`huanhuoPickCard`/`huanhuoPickGotCard`/`huanhuoPickSecond`（本次B类修复任务补齐，见文末修复记录——发动入口`startHuanhuo`仍未接线，这四个子阶段目前实际不会被触发，属于"预先打好补丁"）、`huashenChangeAskEnd`、`huashenChangeAskStart`、`huashenChangePickEnd`、`huashenChangePickStart`、`huashenPick`、`hujiaAsk`、`huogong`、`huogongReveal`、`jiangchiAsk`（"郭嘉遗计"任务里修过）、`jiedaoChoice`、`jiemingAsk`、`jijiangAsk`、`jiushiFlipAsk`、`jujianChooseEffect`、`jujianPickCard`、`jujianPickTarget`、`jushouChoose`、`leijiChoose`、`leijiJudge`、`lianyingAsk`、`lieRenRespond`（注意这是烈刃**响应方**，和上面 A 类的 `lieRenChoose`/`lieRenPickCard`（**发动方**）是两个不同的座位视角，响应方已经接好）、`liegong`、`lirangAsk`、`luanjiChoose`、`luanjiConfirm`、`luanwuChoose`、`luoshen`（`CONTROLS_CHOICE_ALLOWLIST`）、`luoyiAsk`、`luoyingAsk`（`CONTROLS_CHOICE_ALLOWLIST`）、`mengjin`、`mingceChoice`、`mingcePickCard`、`mingcePickTarget`、`mingcePickTarget2`（这四个属于"陈宫明策"链条**后半段**接线，本身没问题，只是永远走不到——见上方 C 类说明）、`pick`、`qiangxiChooseCost`、`qiangxiChooseWeaponFromHand`、`qiangxiPickTarget`、`qiaobianMove`、`qiaomengChoose`、`qiaomengPickEquip`、`qilin`、`qinglong`、`quhuDamageChoice`（`BOT_SEAT_PICKS.quhuDamage`）、`quhuRespond`、`renxinChoose`、`respond`、`shaOffsetChoice`、`shensuSha`、`shuangxiongAsk`、`tianyiPickCard`、`tianyiPickTarget`、`tianyiRespond`、`tiaoxinChoice`（本次B类修复任务补齐，专属分支+askedAt，见文末修复记录；改动前经真实验证是"mandatory正则侥幸命中"而非真卡死）、`tiaoxinDiscard`（`BOT_SEAT_PICKS.tiaoxin` 发动方，和 `tiaoxinChoice` 目标方是两个视角）、`tieqi`、`wangxiAsk`、`wugu`、`wuxie`（`CONTROLS_CHOICE_ALLOWLIST`）、`xiaoguo`、`xiaoguoChoice`（本次B类修复任务补齐专属分支，位置特意放在L1之后——见文末修复记录）、`xinshengAsk`、`xuanfengPick`（`BOT_SEAT_PICKS.xuanfeng`）、`xunxunPick`、`yaowu_choose`、`yijiAsk`、`yijiAssign`（"郭嘉遗计"任务里修过）、`zhibaAsk`、`zhimengAsk`、`zhimengPick`、`zhijiChoice`（本次B类修复任务补齐，见文末修复记录；改动前经真实验证是"mandatory正则侥幸命中"而非真卡死）。
+`aoeResp`、`beigeChoose`、`beigeDiscard`、`beigeJudge`、`biyue`、`buquAsk`、`chengxiangAsk`、`chengxiangChoose`（经 `chengxiangAsk` 的actor+内部按 `d.type` 二次分派，见 `bot.js:3886`）、`cixiongAsk`、`cixiongChoice`、`duanbingChoose`、`duel`、`dying`、`enyuanChoose`、`enyuanChooseOption`、`enyuanGiveCard`、`fanjianSuit`（`BOT_SEAT_PICKS.fanjian`）、`fenxunDiscard`、`fenxunTarget`、`ganglieAsk`（"郭嘉遗计"任务里修过）、`ganglieChoice`、`guanshi`、`guanxingReview`、`guhuoQuestion`、`guhuoTarget`（经 `BOT_SEAT_PICKS.guhuoTarget` 特殊路径，见 `bot.js:1956,2028,4238`(行号已核对)）、`guicai`、`guiduAsk`（"郭嘉遗计"任务里修过）、`hanbing`、`hanbingAsk`、`haoshiPick`、`huanhuoPick`/`huanhuoPickCard`/`huanhuoPickGotCard`/`huanhuoPickSecond`（本次B类修复任务补齐，见文末修复记录——发动入口`startHuanhuo`仍未接线，这四个子阶段目前实际不会被触发，属于"预先打好补丁"）、`huashenChangeAskEnd`、`huashenChangeAskStart`、`huashenChangePickEnd`、`huashenChangePickStart`、`huashenPick`、`hujiaAsk`、`huogong`、`huogongReveal`、`jiangchiAsk`（"郭嘉遗计"任务里修过）、`jiedaoChoice`、`jiemingAsk`、`jijiangAsk`、`jiushiFlipAsk`、`jujianChooseEffect`、`jujianPickCard`、`jujianPickTarget`、`jushouChoose`、`leijiChoose`、`leijiJudge`、`lianyingAsk`、`lieRenChoose`/`lieRenPickCard`（本次A类修复任务补齐，专属分支+askedAt，见文末「A类修复记录」——发动方，拼点结构同天义，固定发动+选点数最大牌）、`lieRenRespond`（响应方，早就接好，和发动方是两个不同的座位视角）、`liegong`、`lirangAsk`、`luanjiChoose`、`luanjiConfirm`、`luanwuChoose`、`luoshen`（`CONTROLS_CHOICE_ALLOWLIST`）、`luoyiAsk`、`luoyingAsk`（`CONTROLS_CHOICE_ALLOWLIST`）、`mengjin`、`mingceChoice`、`mingcePickCard`、`mingcePickTarget`、`mingcePickTarget2`（这四个属于"陈宫明策"链条**后半段**接线，本身没问题，只是永远走不到——见上方 C 类说明）、`pick`、`qiangxiChooseCost`、`qiangxiChooseWeaponFromHand`、`qiangxiPickTarget`、`qiaobianMove`、`qiaomengChoose`、`qiaomengPickEquip`、`qilin`、`qinglong`、`quhuDamageChoice`（`BOT_SEAT_PICKS.quhuDamage`）、`quhuRespond`、`renxinChoose`、`respond`、`shaOffsetChoice`、`shensuSha`、`shuangxiongAsk`、`tianyiPickCard`、`tianyiPickTarget`、`tianyiRespond`、`tiaoxinChoice`（本次B类修复任务补齐，专属分支+askedAt，见文末修复记录；改动前经真实验证是"mandatory正则侥幸命中"而非真卡死）、`tiaoxinDiscard`（`BOT_SEAT_PICKS.tiaoxin` 发动方，和 `tiaoxinChoice` 目标方是两个视角）、`tieqi`、`wangxiAsk`、`wugu`、`wuxie`（`CONTROLS_CHOICE_ALLOWLIST`）、`xiaoguo`、`xiaoguoChoice`（本次B类修复任务补齐专属分支，位置特意放在L1之后——见文末修复记录）、`xinshengAsk`、`xuanfengPick`（`BOT_SEAT_PICKS.xuanfeng`）、`xunxunPick`、`yaowu_choose`、`yijiAsk`、`yijiAssign`（"郭嘉遗计"任务里修过）、`zhibaAsk`、`zhimengAsk`、`zhimengPick`、`zhijiChoice`（本次B类修复任务补齐，见文末修复记录；改动前经真实验证是"mandatory正则侥幸命中"而非真卡死）、`liuli`（本次A类修复任务补齐专属分支，位置放在L1之后、不进EXCLUDE——和xiaoguoChoice同一原因，有密钥时仍交给L1/AI接管，见文末「A类修复记录」）、`tianxiang`（同liuli，位置同理放在L1之后）、`lirangRecover`（同上，位置放在L1之后；决策是主动回收，零代价纯收益）、`zhengyi`（同上，位置放在L1之后；决策是保守默认不发动）、`shensuChoose1`/`shensuChoose2`（本次A类修复任务补齐，两个独立决策点，各自有自己的限一次标志，均保守默认不发动）、`qiaobianTurnStart`（本次A类修复任务补齐，保守默认不发动，和已接线的qiaobianMove同一基调）、`guhuoTarget`初始发动侧的`startGuhuo`（本次A类修复任务加进`botTryStartExtraSkills`，声明为【杀】，见文末「A类修复记录」，注意这不是新增pending.type，只是新增了一个play阶段主动发动检测点）。
 
 （未列入 E 类清单的 `over`/`play`/`draw`/`discard`/`pickingGeneral`/`pickingLordGeneral` 等属于核心引擎阶段，走 `botSeatForState` 的 Category A 特殊分支或既有的 `draw`/`play`/`discard` 通用逻辑，不属于"武将/装备/锦囊技能"范畴，不计入这份清单的统计口径。）
+
+---
+
+## A 类修复记录（commit `4b37520`）
+
+这一节存档原始审计判断（"兜底命中`safe`正则里的'不发动/不获得/取消'类按钮，永远不发动"）以及这次修复时的根因确认、修复方式、默认决策理由。9 条 A 类 + 1 条 C 类（于吉蛊惑发动入口）一并记录，因为后者本质是同一类问题。
+
+| 技能/武将 | phase / pending.type | 原始审计判断 | 根因确认 | 修复方式与默认决策理由 |
+|---|---|---|---|---|
+| 大乔【流离】 | `liuli`，actor=`pending.to` | 兜底命中"不获得"，永远不转移伤害 | `respondLiuli(choice,newTarget)`：`choice=null` 即不发动，代价是自己承受伤害；有明确的"转嫁给别人"收益，无额外下行代价 | 补 `BOT_PHASE_ACTOR.liuli='to'` + 专属分支：能找到有效新目标（`botTargetScore>-Infinity`）就发动，出牌用手牌第一张（不够则用装备槽第一件），否则不发动；补 `setResponseAskedAt`+超时兜底（`respondLiuli(null,null)`）。**位置故意放在 L1 `controlsChoice` 之后、不进 EXCLUDE**——有密钥时仍可能被 AI 接管，这只是无密钥时的确定性默认 |
+| 小乔【天香】 | `tianxiang`，actor=`pending.seat` | 兜底命中"不获得"，永远不转移伤害 | `respondTianxiang(cardChoice,newTarget)`：同流离机制（转移伤害给别人，代价是打出一张红桃） | 同流离：有红桃手牌+有效目标就发动，否则不发动；`setResponseAskedAt`+超时兜底；位置同样放 L1 之后 |
+| 孔融【礼让】回收 | `lirangRecover`，actor=`pending.from` | 兜底命中"不获得" | 读完 `respondLiRangRecover` 才发现：这是**零代价纯收益**（孔融白拿回之前送出的牌），审计报告把它错误归类为"给别人东西换回报"的博弈类技能，实际不是 | 固定发动（`respondLiRangRecover(true)`），不是保守默认——这条已有 `setResponseAskedAt`，只补专属分支+超时兜底（同样是 `true`） |
+| 孔融【争义】 | `zhengyi`，actor=`pending.asking` | 兜底命中"不发动" | `respondZhengyi(true)` 是孔融主动把手牌给别人换取对方感激（纯粹自我牺牲，无确定性回报） | 保守默认不发动（`respondZhengyi(false)`）；已有 `setResponseAskedAt`，补专属分支+超时兜底；位置同样放 L1 之后（有密钥时留给 AI 判断局面） |
+| 祝融【烈刃】发动 | `lieRenChoose`，actor=`pending.sourceSeat` | 兜底命中"不发动" | `triggerLieRen`/`pickLieRenCard`/`cancelLieRen`：拼点机制，赢家造成伤害，输家自己受伤（拼点结构和天义类似，正向期望） | 固定发动（`triggerLieRen`），两步流程第二步见下一条；补 `BOT_PHASE_ACTOR`+`setResponseAskedAt`+超时兜底（`cancelLieRen`） |
+| 祝融【烈刃】选牌 | `lieRenPickCard`，actor=`pending.sourceSeat` | 兜底命中"不发动"（第二步同样被挡） | 拼点选牌无隐藏信息博弈价值，选点数最大的牌胜率最高 | 选手牌里 `rank` 最大的一张（`pickLieRenCard(bestIdx)`），无手牌则 `cancelLieRen`；补 `BOT_PHASE_ACTOR`+`setResponseAskedAt`+超时兜底 |
+| 夏侯渊【神速1】 | `shensuChoose1`，actor=`pending.seat` | 兜底命中"不发动" | 确认是**独立决策点**（准备阶段判定/摸牌前触发，有专属限一次标志 `shensuUsed1`，和神速2是两个完全独立的触发时机，不是同一决策的两个分支） | 保守默认不发动（`skipShensu1`）；补 `BOT_PHASE_ACTOR`+`setResponseAskedAt`+超时兜底 |
+| 夏侯渊【神速2】 | `shensuChoose2`，actor=`pending.seat` | 兜底命中"不发动" | 确认是另一个独立决策点（摸牌阶段结束/出牌前触发，`shensuUsed2`） | 保守默认不发动（`skipShensu2`）；补 `BOT_PHASE_ACTOR`+`setResponseAskedAt`+超时兜底 |
+| 张郃【巧变】回合开始 | `qiaobianTurnStart`，actor=`pending.seat` | 兜底命中"不发动" | 这是巧变技能在**回合开始时**的独立触发入口，和出牌阶段中途版本 `qiaobianMove`（已接线）是同一技能两个不同触发时机 | 保守默认不发动（`qiaobianDecline`），不重新发明局面评估逻辑，和 `qiaobianMove` 的既有保守基调一致；补 `BOT_PHASE_ACTOR`+`setResponseAskedAt`+超时兜底 |
+| 于吉【蛊惑】发动入口（C类） | 无新增 phase，`startGuhuo(cardIdx,claimedName)` 挂在 `play` 阶段 | 审计标注"响应侧已完整接线，发动入口从未被调用" | `finishGuhuo(g,false)`（诡称被戳穿）只是把这张牌正常弃置，和普通打出一张没用的牌代价相同——没有额外惩罚，纯粹的"低成本试探" | 加进 `botTryStartExtraSkills`（和天义/强袭/乱武/乱击/奋迅同一批play阶段主动发动检测入口）：手牌里找一张能声明为【杀】且对某个存活目标有合法目标的牌，声明后发动；找不到就不发动。只接"声明为杀"这一种最常见用法，`startGuhuoResponse`（响应上下文里的诡称）留作后续单独评估，不在这次范围内 |
+
+**测试**：新增 `run_aclass_fix_test.js`（17 个场景，覆盖上述全部 9 条 A 类 + 1 条 C 类的 `BOT_PHASE_ACTOR` 登记、专属分支真实调用、`askedAt` 设置、以及 guhuo 的"有/无合法目标"两种边界）。差分验证（`git stash` 还原修复前代码重跑）确认 14/17 断言在修复前会失败（其余 3 条是 askedAt-已存在检查和 guhuo 无目标负控制，修复前后行为本就一致）。另外修正了 `run_ai_bus_l1_test.js` 里两处因为这次设计变更而变得"语义已经不成立但仍然侥幸通过"的旧断言（liuli/tianxiang 的 T13/T18 场景，原先断言修复前的 `(null,null)` 兜底结果；发现原因是这两个测试的 `mkG` fixture 遗留了 `role:'zhu'`，触发 `botTargetScore` 的身份模式嫌疑度逻辑返回 `-Infinity`，加 `role=null` 清理后改为断言新的主动发动行为）；以及 lirangRecover 的一处真实回归断言（旧断言期望 `respondLiRangRecover(false)`，现在正确的行为是 `true`）。
 
 ---
 
