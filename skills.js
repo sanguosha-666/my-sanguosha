@@ -3514,17 +3514,30 @@ function confirmLuanji() {
     
     // 视为使用万箭齐发
     g.log = pushLog(g.log, `${me.name} 将【${removedCards[0].name}】和【${removedCards[1].name}】当【万箭齐发】使用`);
-    
-    // 执行万箭齐发效果
+
+    // 【真实bug修复】先清空这条luanjiConfirm自己的pending/phase,再执行万箭齐发效果——
+    // 不能等效果执行完再清。万箭齐发的effect会调aoeEffect,把g.aoe设成一个真实的AOE会话
+    // 并调aoeAdvance,后者会重新建立g.pending(问第一个目标要不要无懈/要不要打闪)、把
+    // g.phase切到'wuxie'/'aoeResp'。原来的写法是"先执行效果、再无条件g.pending=null;
+    // g.phase='play'",效果内部刚建立的响应pending会被这两行原地冲掉,导致后续没有人会
+    // 被问到万箭齐发的响应——而g.aoe本身不受影响、继续保持非null(aoeAdvance只有在
+    // 问完所有目标后才会清空g.aoe,这里被冲掉的是"问下一个目标"这一步,永远问不完)。
+    // 后果:g.aoe从此卡死非null,render-table.js/pruneExchangeCards共用的
+    // "!g.pending&&!g.aoe"这个"链已结束"判断此后再也无法满足,中央出牌区从这一刻起
+    // 永久停止淡出/清空,后续所有回合的出牌记录都会不断堆积进同一个g.exchangeCards
+    // 数组——这正是"机器人主动技能解锁"后（袁绍乱击开始被机器人真正调用到）暴露出来的
+    // 中央出牌区堆积不淡出的根因,是乱击/confirmLuanji自身一直存在的既有bug,不是这次
+    // 机器人任务或debugLogs审计任务引入的新问题,只是此前几乎没有真人会用这个技能、
+    // 机器人也从不会主动发动,这条代码路径长期没被真正跑过。
+    g.pending = null;
+    g.phase = 'play';
+
+    // 执行万箭齐发效果(可能会重新建立pending/切换phase,比如依次询问每个目标要不要打闪)
     const wanjianEffect = CARD_PLAYS['万箭齐发'];
     if (wanjianEffect && wanjianEffect.effect) {
       wanjianEffect.effect(g, me, { name: '万箭齐发', suit: removedCards[0].suit });
     }
-    
-    // 清理状态
-    g.pending = null;
-    g.phase = 'play';
-    
+
     return g;
   });
 }
