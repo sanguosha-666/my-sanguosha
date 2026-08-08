@@ -321,14 +321,18 @@ const testCode = String.raw`
     if(cands[0].label.indexOf('蛊惑') < 0) throw new Error('label 应含 蛊惑 前缀,实际 ' + cands[0].label);
   });
 
-  await check('蛊惑目标无密钥:fallback=null → botDecide 返回 true 且不调 guhuoChooseTarget', async function(){
+  await check('蛊惑目标无密钥解锁:fallbackSeat 现在按damage口径挑目标,botDecide 调用 guhuoChooseTarget', async function(){
+    // 【无密钥兜底解锁】此前fallbackSeat恒为null,这条断言锁定的是"改动前机器人从不主动
+    // 发动蛊惑目标选择"这个历史行为;这次任务的目标正是解除这个限制,断言必须跟着改,
+    // 否则就是抱着一条已经不成立的旧断言不放(参照CLAUDE.md关于"设计变更后要回头检查
+    // 旧断言语义"的规则)。
     window.__guhuoTargetCalls = [];
     aiApiKey = '';
     aiProvider = null;
     var g = mkGuhuoG({});
     var r = await botDecide('seatPick', g, 0);
-    if(r !== true) throw new Error('fallback=null 应视为"无动作已处理"返回 true,实际 ' + r);
-    if(window.__guhuoTargetCalls.length !== 0) throw new Error('不应调用 guhuoChooseTarget,实际 ' + window.__guhuoTargetCalls.length);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__guhuoTargetCalls.length !== 1) throw new Error('无密钥模式现在也应调用 guhuoChooseTarget,实际 ' + window.__guhuoTargetCalls.length);
   });
 
   await check('蛊惑目标有密钥:mock 选座位2 → guhuoChooseTarget(2);userPrompt 含声明牌名不含他人手牌', async function(){
@@ -382,14 +386,14 @@ const testCode = String.raw`
     if(cands[0].seat !== 1) throw new Error('应只剩座位1,实际 ' + cands[0].seat);
   });
 
-  await check('旋风目标无密钥:fallback=null → botDecide 返回 true 且不调 pickXuanfengTarget', async function(){
+  await check('旋风目标无密钥解锁:fallbackSeat 现在按steal口径挑目标,botDecide 调用 pickXuanfengTarget', async function(){
     window.__xuanfengCalls = [];
     aiApiKey = '';
     aiProvider = null;
     var g = mkXuanfengG({ hands: { 1: [card('杀')], 2: [card('闪')] } });
     var r = await botDecide('seatPick', g, 0);
-    if(r !== true) throw new Error('fallback=null 应返回 true,实际 ' + r);
-    if(window.__xuanfengCalls.length !== 0) throw new Error('不应调用 pickXuanfengTarget,实际 ' + window.__xuanfengCalls.length);
+    if(r !== true) throw new Error('应返回 true,实际 ' + r);
+    if(window.__xuanfengCalls.length !== 1) throw new Error('无密钥模式现在也应调用 pickXuanfengTarget,实际 ' + window.__xuanfengCalls.length);
   });
 
   await check('旋风目标有密钥:mock 选座位1 → pickXuanfengTarget(1)', async function(){
@@ -458,14 +462,14 @@ const testCode = String.raw`
     if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
   });
 
-  await check('断粮无密钥:fallback=null → botDecide true 且不调 duanLiang', async function(){
+  await check('断粮无密钥解锁:fallbackSeat 现在按damage口径挑目标,botDecide 调用 duanLiang', async function(){
     window.__duanliangCalls = [];
     aiApiKey = '';
     aiProvider = null;
     var g = mkSeatG({ caps0: { duanliang: true }, myHand: [card('酒','s9','♣')] });
     var r = await botDecide('seatPick', g, 0);
     if(r !== true) throw new Error('无密钥应返回 true,实际 ' + r);
-    if(window.__duanliangCalls.length !== 0) throw new Error('不应调用 duanLiang,实际 ' + window.__duanliangCalls.length);
+    if(window.__duanliangCalls.length !== 1) throw new Error('无密钥模式现在也应调用 duanLiang,实际 ' + window.__duanliangCalls.length);
   });
 
   // ---- 奇袭 qixi ----
@@ -505,7 +509,7 @@ const testCode = String.raw`
     var g2 = mkSeatG({ caps0: { qixi: true }, myHand: [card('过河拆桥','q9','♠')], hands: { 1: [card('杀','qa')], 2: [card('桃','qb')] } });
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__qixiCalls.length !== 0) throw new Error('无密钥不应调用 qiXi,实际 ' + window.__qixiCalls.length);
+    if(window.__qixiCalls.length !== 1) throw new Error('无密钥模式现在也应调用 qiXi,实际 ' + window.__qixiCalls.length);
   });
 
   // ---- 国色 guose ----
@@ -543,7 +547,7 @@ const testCode = String.raw`
     var g2 = mkSeatG({ caps0: { guose: true }, myHand: [card('闪','g6','♦')], hands: { 1: [card('杀','g7')], 2: [card('桃','g8')] } });
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__guoseCalls.length !== 0) throw new Error('无密钥不应调用 guoSe,实际 ' + window.__guoseCalls.length);
+    if(window.__guoseCalls.length !== 1) throw new Error('无密钥模式现在也应调用 guoSe,实际 ' + window.__guoseCalls.length);
   });
 
   // ---- 武圣 wusheng ----
@@ -660,7 +664,7 @@ const testCode = String.raw`
     var g2 = mkSeatG({ caps0: { wusheng: true }, myHand: [card('过河拆桥','w9','♥')], hands: { 1: [card('杀','wa')], 2: [card('桃','wb')] } });
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__playCardCalls.length !== 0) throw new Error('无密钥不应调用 playCard,实际 ' + window.__playCardCalls.length);
+    if(window.__playCardCalls.length !== 1) throw new Error('无密钥模式现在也应调用 playCard,实际 ' + window.__playCardCalls.length);
   });
 
   // ---- 龙胆 longdan(赵云闪→杀方向,候选真空扫描新补;反方向杀→闪走 findUsableAs,不在此覆盖) ----
@@ -701,7 +705,7 @@ const testCode = String.raw`
     var g2 = mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','ld6','♠')], hands: { 1: [card('杀','ldb')], 2: [card('桃','ldc')] } });
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__playCardCalls.length !== 0) throw new Error('无密钥不应调用 playCard,实际 ' + window.__playCardCalls.length);
+    if(window.__playCardCalls.length !== 1) throw new Error('无密钥模式现在也应调用 playCard,实际 ' + window.__playCardCalls.length);
   });
 
   await check('龙胆:真杀和闪同时在手时互不干扰(常规枚举仍收录真杀,longdan 额外收录闪)', function(){
@@ -759,7 +763,7 @@ const testCode = String.raw`
     var g2 = mkSeatG({ caps0: { shuangxiong: true }, shuangxiongColor: 'red', myHand: [card('过河拆桥','x8','♠')], hands: { 1: [card('杀','xa')], 2: [card('桃','xb')] } });
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__playCardCalls.length !== 0) throw new Error('无密钥不应调用 playCard,实际 ' + window.__playCardCalls.length);
+    if(window.__playCardCalls.length !== 1) throw new Error('无密钥模式现在也应调用 playCard,实际 ' + window.__playCardCalls.length);
   });
 
   // ================= T3:剩余简单单选 4 个(挑衅/反间/青囊/驱虎伤害) =================
@@ -799,14 +803,14 @@ const testCode = String.raw`
     if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
   });
 
-  await check('挑衅无密钥:fallback=null → botDecide true 且不调 respondTiaoxin', async function(){
+  await check('挑衅无密钥解锁:fallbackSeat 现在按damage口径挑目标,botDecide 调用 respondTiaoxin', async function(){
     window.__tiaoxinCalls = [];
     aiApiKey = '';
     aiProvider = null;
     var g = mkSeatG({ caps0: { tiaoxin: true }, hands: { 1: [card('杀','t4')], 2: [card('桃','t5')] } });
     var r = await botDecide('seatPick', g, 0);
     if(r !== true) throw new Error('无密钥应返回 true,实际 ' + r);
-    if(window.__tiaoxinCalls.length !== 0) throw new Error('不应调用 respondTiaoxin,实际 ' + window.__tiaoxinCalls.length);
+    if(window.__tiaoxinCalls.length !== 1) throw new Error('无密钥模式现在也应调用 respondTiaoxin,实际 ' + window.__tiaoxinCalls.length);
   });
 
   // ---- 反间 fanjian ----
@@ -849,7 +853,7 @@ const testCode = String.raw`
     var g2 = mkSeatG({ caps0: { fanjian: true }, myHand: [card('杀','f6')], hands: { 1: [card('桃','f7')], 2: [card('闪','f8')] } });
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__fanjianCalls.length !== 0) throw new Error('无密钥不应调用 fanJian,实际 ' + window.__fanjianCalls.length);
+    if(window.__fanjianCalls.length !== 1) throw new Error('无密钥模式现在也应调用 fanJian,实际 ' + window.__fanjianCalls.length);
   });
 
   // ---- 青囊 qingnang ----
@@ -887,7 +891,7 @@ const testCode = String.raw`
     var g2 = mkSeatG({ caps0: { qingnang: true }, myHand: [card('杀','c5')], hpOf: { 0: 3, 1: 3 } });
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__qingnangCalls.length !== 0) throw new Error('无密钥不应调用 qingNang,实际 ' + window.__qingnangCalls.length);
+    if(window.__qingnangCalls.length !== 1) throw new Error('无密钥模式现在也应调用 qingNang,实际 ' + window.__qingnangCalls.length);
   });
 
   // ---- 驱虎伤害 quhuDamage(只做选伤害目标;quhuRespond 拼点阶段不在本任务) ----
@@ -938,7 +942,7 @@ const testCode = String.raw`
     var g2 = mkQuhuDamageG({});
     var r2 = await botDecide('seatPick', g2, 0);
     if(r2 !== true) throw new Error('无密钥应返回 true,实际 ' + r2);
-    if(window.__quhuDamageCalls.length !== 0) throw new Error('无密钥不应调用 respondQuhuDamage,实际 ' + window.__quhuDamageCalls.length);
+    if(window.__quhuDamageCalls.length !== 1) throw new Error('无密钥模式现在也应调用 respondQuhuDamage,实际 ' + window.__quhuDamageCalls.length);
   });
 
   // ================= T3:多步两阶段框架(借刀杀人 jiedaoTwoStep) =================
@@ -1090,16 +1094,19 @@ const testCode = String.raw`
     if(window.__windowCalls !== 0) throw new Error('阶段A命中后不应走 runBotActionWindow(等下一调度)');
     if(!botTwoStepA || botTwoStepA.a !== 1) throw new Error('阶段A应挂起 botTwoStepA,实际 ' + JSON.stringify(botTwoStepA));
 
-    // 场景3:手牌无借刀(也无其它多步技能) → 4个决策依次未命中(无密钥时 seatPick 不接线)
-    // → 走 runBotActionWindow
+    // 场景3:手牌无借刀(也无其它多步技能、也没有其它seatPick技能的cap) → 4个多步决策+
+    // seatPick依次未命中 → 走 runBotActionWindow。【无密钥兜底解锁后更新】seatPick
+    // 现在无论有无密钥都会被尝试(不再有aiReady门槛),这个玩家没有任何BOT_SEAT_PICKS
+    // 技能的cap,seatPick内部match全部为false、candidates为空,botDecide返回false,
+    // 不改变"最终走runBotActionWindow"这个结论,只是wired顺序里多了一项'seatPick'。
     wired = [];
     window.__windowCalls = 0;
     botTwoStepA = null;
     var g3 = mkSeatG({ myHand: [card('杀','j15')] });
     await runBotDecision(g3, 0);
     if(window.__windowCalls !== 1) throw new Error('jiedaoTwoStep 未命中时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,fangtian')
-      throw new Error('无挂起态时应按序尝试4个多步+fangtian,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick,fangtian')
+      throw new Error('无挂起态时应按序尝试4个多步+seatPick+fangtian,实际 ' + wired.join(','));
 
     // 场景4:botTwoStepA 挂起但阶段B无候选(A无射程内目标:无武器range1+自己装+1马+第三人阵亡) → 两次jiedao尝试均 false,其余3决策不命中 → 走窗口不崩
     wired = [];
@@ -1110,8 +1117,8 @@ const testCode = String.raw`
     g4.players[0].equips.plus1 = { name: '的卢' };
     await runBotDecision(g4, 0);
     if(window.__windowCalls !== 1) throw new Error('阶段B无候选时应走 runBotActionWindow,实际 ' + window.__windowCalls);
-    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,fangtian')
-      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中后放行,实际 ' + wired.join(','));
+    if(wired.join(',') !== 'jiedaoTwoStep,jiedaoTwoStep,lijianTwoStep,zhangbaTwoStep,rendeTwoStep,seatPick,fangtian')
+      throw new Error('阶段B无候选应尝试2次jiedao+3次未命中+seatPick未命中后放行,实际 ' + wired.join(','));
     if(window.__jiedaoCalls.length !== 0) throw new Error('阶段B无候选不应提交 jieDaoShaRen');
 
     botDecide = realBotDecide;
@@ -2602,7 +2609,11 @@ const testCode = String.raw`
     if(window.__mockAiCalls !== 1) throw new Error('应恰1次AI调用(seatPick选候选),实际 ' + window.__mockAiCalls);
   });
 
-  await check('G1接线修复:play阶段无密钥 → seatPick 不接(aiReady守卫)、走 runBotActionWindow 不卡死', async function(){
+  await check('G1接线修复(无密钥兜底解锁后更新):play阶段无密钥 → seatPick 现在也接线、调用 duanLiang,不再落回 runBotActionWindow', async function(){
+    // 【无密钥兜底解锁】这条断言此前锁定的是"aiReady 守卫挡住无密钥模式"这个历史行为;
+    // 这次任务的目标正是解除这个限制(duanliang 的 fallbackSeat 已经从 null 换成
+    // pickBestCandidateSeat),断言必须跟着改——旧标题里的"回归红线"措辞也不再适用,
+    // 无密钥现在应该正确调用 duanLiang,而不是回退到 runBotActionWindow。
     window.__duanliangCalls = [];
     window.__windowCalls = 0;
     var realWindow = runBotActionWindow;
@@ -2613,12 +2624,12 @@ const testCode = String.raw`
       var g = mkSeatG({ caps0: { duanliang: true }, myHand: [card('酒','g2','♣')] });
       await runBotDecision(g, 0);
     } finally { restore(); runBotActionWindow = realWindow; }
-    if(window.__G1botDecideCalls.indexOf('seatPick') >= 0)
-      throw new Error('无密钥时 seatPick 不应被调(aiReady 守卫),实际 ' + JSON.stringify(window.__G1botDecideCalls));
-    if(window.__duanliangCalls.length !== 0)
-      throw new Error('无密钥不应调用 duanLiang,实际 ' + JSON.stringify(window.__duanliangCalls));
-    if(window.__windowCalls !== 1)
-      throw new Error('无密钥必须走 runBotActionWindow(回归红线:改动前在此卡死),实际 windowCalls=' + window.__windowCalls);
+    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
+      throw new Error('无密钥模式现在也应尝试 seatPick,实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__duanliangCalls.length !== 1)
+      throw new Error('无密钥模式现在也应调用 duanLiang,实际 ' + JSON.stringify(window.__duanliangCalls));
+    if(window.__windowCalls !== 0)
+      throw new Error('seatPick 命中并提交后不应再落回 runBotActionWindow,实际 windowCalls=' + window.__windowCalls);
   });
 
   await check('G1接线:guhuoTarget 阶段 → seatPick 被调且 → guhuoChooseTarget(目标)', async function(){
@@ -2653,7 +2664,12 @@ const testCode = String.raw`
       throw new Error('应 pickXuanfengTarget(座位2),实际 ' + JSON.stringify(window.__xuanfengCalls));
   });
 
-  await check('G1接线修复:xuanfengPick 阶段无密钥 → seatPick 不接(aiReady守卫)、落回 botSafePrompt 不崩', async function(){
+  await check('G1接线修复(无密钥兜底解锁后更新):xuanfengPick 阶段无密钥、且这个最小场景本身没有可弃目标 → seatPick 会被尝试但候选为空,不调用 pickXuanfengTarget', async function(){
+    // 【无密钥兜底解锁】seatPick 现在无论有无密钥都会被尝试,不再有 aiReady 门槛——
+    // 但这里用的 mkXuanfengG({}) 没有给任何座位准备手牌/装备/判定区的牌,旋风的
+    // buildSeatCandidates 会把"确实没有牌可弃"的目标排除掉、候选为空,botDecide('seatPick')
+    // 因为候选为空返回 false,不会调用 pickXuanfengTarget——这条断言现在验证的是
+    // "候选为空时不误触发"，不是"aiReady 门槛挡住了"。
     window.__xuanfengCalls = [];
     aiApiKey = ''; aiProvider = null;
     var restore = spyBotDecideLog();
@@ -2662,10 +2678,10 @@ const testCode = String.raw`
       g.phase = 'xuanfengPick';
       await runBotDecision(g, 0);
     } finally { restore(); }
-    if(window.__G1botDecideCalls.indexOf('seatPick') >= 0)
-      throw new Error('无密钥时 xuanfengPick 不应调 seatPick,实际 ' + JSON.stringify(window.__G1botDecideCalls));
+    if(window.__G1botDecideCalls.indexOf('seatPick') < 0)
+      throw new Error('无密钥模式现在也应尝试 seatPick,实际 ' + JSON.stringify(window.__G1botDecideCalls));
     if(window.__xuanfengCalls.length !== 0)
-      throw new Error('无密钥不应调用 pickXuanfengTarget,实际 ' + JSON.stringify(window.__xuanfengCalls));
+      throw new Error('这个最小场景没有可弃目标,候选为空,不应调用 pickXuanfengTarget,实际 ' + JSON.stringify(window.__xuanfengCalls));
   });
 
   await check('G1接线:quhuDamageChoice 阶段 → seatPick 被调且 → respondQuhuDamage(目标)', async function(){
@@ -3884,6 +3900,122 @@ const testCode = String.raw`
     if(window.__zhangbaCalls.length !== 1)
       throw new Error('安静房间里应靠自我触发走完丈八三阶段并提交1次playZhangbaSha,实际 ' + JSON.stringify(window.__zhangbaCalls));
     if(botTwoStepA !== null) throw new Error('提交后 botTwoStepA 应被 resetBotTwoStep 清空,实际 ' + JSON.stringify(botTwoStepA));
+  });
+
+  // ================= 无密钥兜底解锁(第一部分):13个BOT_SEAT_PICKS,验证从"从不发动"
+  // 变成"无密钥模式也会发动"。每项只构造一个"技能可以合法发动"的最小场景,spy对应
+  // 服务端函数,调runBotDecision,断言spy被调用过一次——不追求覆盖所有目标选择边界。
+  aiApiKey = ''; aiProvider = null; // 强制无密钥模式,这正是这次要解锁的路径
+
+  await check('无密钥解锁-guhuoTarget:蛊惑声明生效后应主动选目标(guhuoChooseTarget)', async function(){
+    var g = clearRoles(mkSeatG({}));
+    g.pending = { type:'guhuoTarget', sourceSeat:0, actualCard:card('杀','gt1','♠'), claimedCard:{ id:'gt1', name:'过河拆桥', suit:'♥', rank:1 } };
+    window.__gtCalls = [];
+    guhuoChooseTarget = function(s){ window.__gtCalls.push(s); };
+    await runBotDecision(g, 0);
+    if(window.__gtCalls.length !== 1) throw new Error('guhuoChooseTarget 应被调1次,实际 ' + JSON.stringify(window.__gtCalls));
+  });
+
+  await check('无密钥解锁-xuanfeng:旋风失去装备后应主动选弃置目标(pickXuanfengTarget)', async function(){
+    var g = clearRoles(mkSeatG({ hands: { 1: [card('杀','xf1','♠')] } }));
+    g.pending = { type:'xuanfengPick', from:0, stage:'selecting', selections:[] };
+    window.__xfCalls = [];
+    pickXuanfengTarget = function(s){ window.__xfCalls.push(s); };
+    await runBotDecision(g, 0);
+    if(window.__xfCalls.length !== 1) throw new Error('pickXuanfengTarget 应被调1次,实际 ' + JSON.stringify(window.__xfCalls));
+  });
+
+  await check('无密钥解锁-duanliang:断粮应主动选目标(duanLiang)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { duanliang: true }, myHand: [card('杀','dl1','♠')] }));
+    window.__dlCalls = [];
+    duanLiang = function(idx, s){ window.__dlCalls.push([idx, s]); };
+    await runBotDecision(g, 0);
+    if(window.__dlCalls.length !== 1) throw new Error('duanLiang 应被调1次,实际 ' + JSON.stringify(window.__dlCalls));
+  });
+
+  await check('无密钥解锁-qixi:奇袭应主动选目标(qiXi)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { qixi: true }, myHand: [card('过河拆桥','qx1','♠')], hands: { 1: [card('杀','qx2')] } }));
+    window.__qxCalls = [];
+    qiXi = function(idx, s){ window.__qxCalls.push([idx, s]); };
+    await runBotDecision(g, 0);
+    if(window.__qxCalls.length !== 1) throw new Error('qiXi 应被调1次,实际 ' + JSON.stringify(window.__qxCalls));
+  });
+
+  await check('无密钥解锁-guose:国色应主动选目标(guoSe)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { guose: true }, myHand: [card('杀','gs1','♦')] }));
+    window.__gsCalls = [];
+    guoSe = function(idx, s){ window.__gsCalls.push([idx, s]); };
+    await runBotDecision(g, 0);
+    if(window.__gsCalls.length !== 1) throw new Error('guoSe 应被调1次,实际 ' + JSON.stringify(window.__gsCalls));
+  });
+
+  await check('无密钥解锁-zhiba:身份局主公制霸应主动选目标(startZhiba)', async function(){
+    var g = mkSeatG({ caps0: { zhiba: true }, myHand: [card('杀','zb1','♠')], hands: { 1: [card('杀','zb2')] } });
+    g.gameMode = 'identity'; g.players[0].role = 'zhu';
+    g.players[1].role = null; g.players[2].role = null;
+    window.__zbCalls = [];
+    startZhiba = function(s){ window.__zbCalls.push(s); };
+    await runBotDecision(g, 0);
+    if(window.__zbCalls.length !== 1) throw new Error('startZhiba 应被调1次,实际 ' + JSON.stringify(window.__zbCalls));
+  });
+
+  await check('无密钥解锁-wusheng:武圣转化(红牌当杀)应主动选目标(playCard)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { wusheng: true }, myHand: [card('过河拆桥','ws1','♥')] }));
+    window.__playCardCalls = [];
+    playCard = function(idx, action, s){ window.__playCardCalls.push([idx, action, s]); };
+    await runBotDecision(g, 0);
+    if(window.__playCardCalls.length !== 1) throw new Error('playCard 应被调1次,实际 ' + JSON.stringify(window.__playCardCalls));
+  });
+
+  await check('无密钥解锁-longdan:龙胆转化(闪当杀)应主动选目标(playCard)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { longdan: true }, myHand: [card('闪','ld1','♠')] }));
+    window.__playCardCalls = [];
+    playCard = function(idx, action, s){ window.__playCardCalls.push([idx, action, s]); };
+    await runBotDecision(g, 0);
+    if(window.__playCardCalls.length !== 1) throw new Error('playCard 应被调1次,实际 ' + JSON.stringify(window.__playCardCalls));
+  });
+
+  await check('无密钥解锁-shuangxiong:双雄转化(异色当决斗)应主动选目标(playCard)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { shuangxiong: true }, shuangxiongColor: 'red', myHand: [card('过河拆桥','sx1','♠')] }));
+    window.__playCardCalls = [];
+    playCard = function(idx, action, s){ window.__playCardCalls.push([idx, action, s]); };
+    await runBotDecision(g, 0);
+    if(window.__playCardCalls.length !== 1) throw new Error('playCard 应被调1次,实际 ' + JSON.stringify(window.__playCardCalls));
+  });
+
+  await check('无密钥解锁-tiaoxin:挑衅应主动选目标(respondTiaoxin)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { tiaoxin: true }, hands: { 1: [card('杀','tx1')] } }));
+    window.__tiaoxinCalls = [];
+    respondTiaoxin = function(s){ window.__tiaoxinCalls.push(s); };
+    await runBotDecision(g, 0);
+    if(window.__tiaoxinCalls.length !== 1) throw new Error('respondTiaoxin 应被调1次,实际 ' + JSON.stringify(window.__tiaoxinCalls));
+  });
+
+  await check('无密钥解锁-fanjian:反间应主动选目标(fanJian)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { fanjian: true }, myHand: [card('杀','fj1','♠')] }));
+    window.__fanjianCalls = [];
+    fanJian = function(s){ window.__fanjianCalls.push(s); };
+    await runBotDecision(g, 0);
+    if(window.__fanjianCalls.length !== 1) throw new Error('fanJian 应被调1次,实际 ' + JSON.stringify(window.__fanjianCalls));
+  });
+
+  await check('无密钥解锁-qingnang:青囊应主动选血量最低的目标(qingNang)', async function(){
+    var g = clearRoles(mkSeatG({ caps0: { qingnang: true }, myHand: [card('杀','qn1','♠')], hpOf: { 1: 2, 2: 3 } }));
+    window.__qingNangCalls = [];
+    qingNang = function(idx, s){ window.__qingNangCalls.push([idx, s]); };
+    await runBotDecision(g, 0);
+    if(window.__qingNangCalls.length !== 1) throw new Error('qingNang 应被调1次,实际 ' + JSON.stringify(window.__qingNangCalls));
+    if(window.__qingNangCalls[0][1] !== 1) throw new Error('应优先选血量更低(2<3)的座位1,实际选了座位 ' + window.__qingNangCalls[0][1]);
+  });
+
+  await check('无密钥解锁-quhuDamage:驱虎伤害应主动选一名承受伤害的目标(respondQuhuDamage)', async function(){
+    var g = clearRoles(mkSeatG({}));
+    g.phase = 'quhuDamageChoice';
+    g.pending = { type:'quhuDamageChoice', seat:0, targets:[1,2] };
+    window.__quhuDamageCalls = [];
+    respondQuhuDamage = function(s){ window.__quhuDamageCalls.push(s); };
+    await runBotDecision(g, 0);
+    if(window.__quhuDamageCalls.length !== 1) throw new Error('respondQuhuDamage 应被调1次,实际 ' + JSON.stringify(window.__quhuDamageCalls));
   });
 
   console.log('\n' + '='.repeat(60));

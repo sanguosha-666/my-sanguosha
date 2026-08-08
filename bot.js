@@ -485,6 +485,46 @@ function botBestTarget(g,seat,card,actionId){
   });
   return best;
 }
+// ================= BOT_SEAT_PICKS 无密钥兜底解锁(第一部分) =================
+// 【本次改动】此前13个seatPick注册项的fallbackSeat几乎全是"return null"(改动前机器人
+// 从不主动发动对应技能的历史遗留保守默认)——现在要把"无密钥也能用"这些技能落地,不能
+// 简单改成"永远选第一个候选"了事,需要按技能收益方向给一个有意义的本地评分。这两个
+// 共用helper复用既有的botTargetScore(botBestTarget同款口径),不新造评分体系:
+// pickBestCandidateSeat 用于"进攻/负面效果"类技能(伤害/拆牌/拼点等,越是该打的目标
+// 分越高);pickHealFallbackSeat 用于"扶持/治疗"类技能(血量越低越优先,且避开已知敌方)。
+function pickBestCandidateSeat(g, seat, candidates, kind){
+  if(!candidates || !candidates.length) return null;
+  if(candidates.length===1) return candidates[0].seat;
+  let best=candidates[0].seat, bestScore=-Infinity;
+  candidates.forEach(function(c){
+    // 自己作为候选(allowSelf场景,如桃园结义)时botTargetScore(seat===targetSeat)恒
+    // 返回-Infinity,不能直接套用——给中性分0,不让"自己"因为公式副作用被系统性排除,
+    // 但也不会在有其他真实目标时被优先选中。
+    const s = (c.seat===seat) ? 0 : botTargetScore(g, seat, c.seat, kind);
+    if(s>bestScore){ bestScore=s; best=c.seat; }
+  });
+  return best;
+}
+function pickHealFallbackSeat(g, seat, candidates){
+  if(!candidates || !candidates.length) return null;
+  const me = g.players[seat];
+  let best=null, bestKey=Infinity;
+  candidates.forEach(function(c){
+    const p = g.players[c.seat];
+    if(!p) return;
+    const known = botKnownRole(g, seat, c.seat);
+    // 身份局:明确的敌方角色加一个大惩罚,让"血量再低也不主动扶持敌人"这个基本判断优先于
+    // 血量高低本身;非身份局/未知身份不受影响,纯按血量选。
+    let enemyPenalty = 0;
+    if(me && me.role && known){
+      if((me.role==='zhu'||me.role==='zhong') && known==='fan') enemyPenalty = 1000;
+      else if(me.role==='fan' && (known==='zhu'||known==='zhong')) enemyPenalty = 1000;
+    }
+    const key = enemyPenalty + p.hp;
+    if(key < bestKey){ bestKey = key; best = c.seat; }
+  });
+  return best;
+}
 function botActionId(card){ return isShaName(card.name)?'杀':card.name; }
 function botCardPriority(name){
   if(name==='桃') return 100;
@@ -1926,8 +1966,10 @@ BOT_SEAT_PICKS.guhuoTarget = {
     return out;
   },
   fallbackSeat: function(g, seat){
-    // 改动前:机器人从不主动发起蛊惑,该阶段对机器人无处理(死路径)。保守:null(不动作)
-    return null;
+    // 【无密钥兜底解锁】声明牌已经通过质疑生效,必须选一个目标(不选=扣置牌白白浪费),
+    // 用botTargetScore('damage')挑一个进攻价值最高的目标——和guhuoTarget自身"任意基本牌/
+    // 普通锦囊"的通用性一致,不区分具体声明的是哪张牌。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.guhuoTarget.buildSeatCandidates(g, seat), 'damage');
   },
   extraState: function(g, seat){
     const d = g.pending || {};
@@ -1974,9 +2016,9 @@ BOT_SEAT_PICKS.xuanfeng = {
     return out;
   },
   fallbackSeat: function(g, seat){
-    // 旧分支:runBotDecision 未覆盖 xuanfengPick(70+ 未覆盖之一),机器人此前走 botSafePrompt。
-    // 无密钥回退对齐"botSafePrompt 语义":若无明显安全按钮则不动 → null
-    return null;
+    // 【无密钥兜底解锁】旋风是"弃置对手一张牌"的负面效果,用botTargetScore('steal')
+    // (顺手/拆桥同款口径,额外按手牌数加权)挑一个最该被拆的目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.xuanfeng.buildSeatCandidates(g, seat), 'steal');
   },
   execute: function(g, seat, targetSeat){
     botInvoke(seat, function(){ pickXuanfengTarget(targetSeat); });
@@ -2073,7 +2115,10 @@ BOT_SEAT_PICKS.duanliang = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用断粮
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】兵粮寸断是负面判定效果,按damage口径挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.duanliang.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(function(c){ return isDuanliangCard(me, c); });
@@ -2097,7 +2142,10 @@ BOT_SEAT_PICKS.qixi = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用奇袭
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】奇袭是拆牌效果,用steal口径(顺手/拆桥同款)挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.qixi.buildSeatCandidates(g, seat), 'steal');
+  },
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(isQixiCard);
@@ -2121,7 +2169,10 @@ BOT_SEAT_PICKS.guose = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用国色
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】国色令目标乐不思蜀(跳过出牌阶段),按damage口径挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.guose.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(isGuoseCard);
@@ -2151,7 +2202,11 @@ BOT_SEAT_PICKS.zhiba = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 无密钥:机器人不主动发动制霸(新功能)
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】制霸是拼点,按damage口径挑目标(公式本身已含手牌数权重,
+    // 符合"挑手牌多的目标"这条建议方向,不用另开一套评分)。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.zhiba.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     botInvoke(seat, function(){ startZhiba(targetSeat); });
   },
@@ -2177,7 +2232,10 @@ BOT_SEAT_PICKS.wusheng = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用武圣转化
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】武圣转化后仍是杀,按damage口径挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.wusheng.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(function(c){ return isWushengShaCard(g, me, c); });
@@ -2205,7 +2263,10 @@ BOT_SEAT_PICKS.longdan = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用龙胆闪→杀转化
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】龙胆闪→杀转化后仍是杀,按damage口径挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.longdan.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(function(c){ return isLongdanShaCard(g, me, c); });
@@ -2233,7 +2294,10 @@ BOT_SEAT_PICKS.shuangxiong = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用双雄转化
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】双雄转化后是决斗,按damage口径挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.shuangxiong.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(function(c){ return canShuangxiongDuelCard(me, c); });
@@ -2268,7 +2332,10 @@ BOT_SEAT_PICKS.tiaoxin = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用挑衅
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】挑衅令目标下回合出牌阶段只能对来源出杀,按damage口径挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.tiaoxin.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     botInvoke(seat, function(){ respondTiaoxin(targetSeat); });
   },
@@ -2289,7 +2356,10 @@ BOT_SEAT_PICKS.fanjian = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用反间
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】反间是负面判定效果,按damage口径挑目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.fanjian.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     botInvoke(seat, function(){ fanJian(targetSeat); });
   },
@@ -2311,7 +2381,11 @@ BOT_SEAT_PICKS.qingnang = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前机器人从不用青囊
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】青囊是治疗效果,用pickHealFallbackSeat——挑血量最低、且不是
+    // 已知敌方角色的目标(candidates本身已经过滤了p.hp>=p.maxHp的满血角色)。
+    return pickHealFallbackSeat(g, seat, BOT_SEAT_PICKS.qingnang.buildSeatCandidates(g, seat));
+  },
   execute: function(g, seat, targetSeat){
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(function(c){ return !!c; }); // 弃第一张手牌(与真人"点一张手牌"一致)
@@ -2335,7 +2409,11 @@ BOT_SEAT_PICKS.quhuDamage = {
     });
     return out;
   },
-  fallbackSeat: function(){ return null; }, // 改动前 quhuDamageChoice 对机器人无覆盖(走 botSafePrompt),保守不动
+  fallbackSeat: function(g, seat){
+    // 【无密钥兜底解锁】驱虎伤害是选谁挨这1点伤害,按damage口径在给定候选(pending.targets)
+    // 里挑最该承受伤害的目标。
+    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.quhuDamage.buildSeatCandidates(g, seat), 'damage');
+  },
   execute: function(g, seat, targetSeat){
     botInvoke(seat, function(){ respondQuhuDamage(targetSeat); });
   },
@@ -3455,10 +3533,20 @@ async function runBotDecision(g,seat){
     // 合并成一张表 AI 选;未命中返回 false 走 runBotActionWindow(手牌枚举),两者不冲突
     // (seatPick 技能无 CARD_PLAYS 入口;武圣/双雄的 CARD_PLAYS 路径与 seatPick 的
     // "技能按钮"路径候选 label 不同,双路径都合法,不排除——测试锁定)。
-    // 【G1修复】seatPick 只在有密钥时接管(无密钥走 runBotActionWindow,与改动前逐字一致;
-    // 否则 fallback null → botDecide true → play 分支 return,机器人整回合卡死)
-    const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
-    if(aiReady && await botDecide('seatPick', g, seat)) return;
+    // 【解锁无密钥兜底】此前这里的 aiReady 门槛是因为13个fallbackSeat几乎全是
+    // "return null"——G1修复那次的注释写"否则fallback null → botDecide true →
+    // play分支return,机器人整回合卡死"是当时真实存在的风险,但那是"fallbackSeat恒为
+    // null"这个前提下的推论。这次已经把13个fallbackSeat全部换成有意义的本地评分
+    // (pickBestCandidateSeat/pickHealFallbackSeat,见各自注册处),只要对应技能的
+    // buildSeatCandidates确实有合法目标,fallbackSeat就不会是null,不会再触发那个
+    // "选了但什么都没做"的卡死路径——去掉aiReady门槛,让无密钥模式也能走本地兜底决策。
+    // 【已知的残余边界,不在本次修复范围】seatPickLocalFallback是"取第一个match的技能,
+    // 用它自己的fallbackSeat"——如果排在前面的技能matched但自身buildSeatCandidates为空
+    // (比如断粮满足出牌条件但所有人距离都>2),它的fallbackSeat会是null,
+    // seatPickLocalFallback会直接返回null而不去尝试排在后面的、真正有候选的技能。
+    // 这是seatPickLocalFallback本身"取第一个matched技能"的既有设计,不是这次新增
+    // fallbackSeat引入的问题,这次不改这个架构(一次只改一件事)。
+    if(await botDecide('seatPick', g, seat)) return;
     if(await botDecide('fangtian', g, seat)) return;
     await runBotActionWindow(g, seat); return;
   }
@@ -3979,16 +4067,17 @@ async function runBotDecision(g,seat){
   // 【G1接线】seatPick 三个 pending 阶段(蛊惑选目标/旋风选目标/驱虎选伤害目标):
   // 与 play 分支同一套 seatPick 协议(候选合并表+AI 选),此前未接线时这三个阶段对
   // 机器人是死路径(botSafePrompt 够不到座位卡点击),命中即 return。
-  // 【G1修复】与 play 分支同款 aiReady 守卫:无密钥时这三个阶段落回 botSafePrompt,
-  // 与改动前逐字一致(seatPick 是纯 AI 决策层,无密钥 fallback=null 无意义)。
-  const seatPickAiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
-  if(seatPickAiReady && g.phase==='guhuoTarget' && d && d.type==='guhuoTarget' && d.sourceSeat===seat){
+  // 【解锁无密钥兜底】原来这里也有一道 seatPickAiReady 门槛,和 play 分支那道 aiReady
+  // 门槛同一个历史原因(13个fallbackSeat当时全是null)。这三个阶段各自的fallbackSeat
+  // (guhuoTarget/xuanfeng/quhuDamage)这次已经换成有意义的本地评分,同一次去掉门槛,
+  // 不留一半解锁一半没解锁的不一致状态。
+  if(g.phase==='guhuoTarget' && d && d.type==='guhuoTarget' && d.sourceSeat===seat){
     if(await botDecide('seatPick', g, seat)) return;
   }
-  if(seatPickAiReady && g.phase==='xuanfengPick' && d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting'){
+  if(g.phase==='xuanfengPick' && d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting'){
     if(await botDecide('seatPick', g, seat)) return;
   }
-  if(seatPickAiReady && g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice' && d.seat===seat){
+  if(g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice' && d.seat===seat){
     if(await botDecide('seatPick', g, seat)) return;
   }
   if(botSafePrompt(g,seat)) return;
