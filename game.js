@@ -1854,68 +1854,75 @@ function triggerGuidu(cardIndex) {
   });
 }
 
-// askNextGuidu: 询问下一个张角
+// askNextGuidu: 询问下一个张角。
+// 【嵌套tx修复】这个函数原来自己又包了一层 tx(g=>{...}),但它的调用方
+// triggerGuidu/cancelGuidu 本身已经身处另一个 tx() 事务回调内部——在一个尚未
+// 提交的事务内部同步发起一个全新的、独立的异步事务,两个事务互相竞争、状态互相
+// 踩踏,而且这个函数体本身没有 return 语句(永远返回 undefined),外层 tx() 的
+// `const result = fn(g) || g` 兜底会吞掉这个 undefined,导致 pending/phase 的
+// 推进全部发生在抢跑的嵌套事务里,外层实际提交的只有手牌/弃牌堆的就地修改——
+// 判定牌换不掉、界面卡住。改成和 finishGuicai/continueBiyueCheck 这些"接回被
+// 打断流程"的辅助函数同样的写法:直接操作传入的 g 并 return g,不发起新事务,
+// 调用方 triggerGuidu/cancelGuidu 的 `return askNextGuidu(g, ...)` 不需要改动。
 function askNextGuidu(g, currentReplaceCard = null) {
-  tx(g => {
-    const pending = g.pending;
-    if (!pending || pending.type !== 'guiduAsk') {
-      if(currentReplaceCard) {
-        // 没有其他张角需要询问,使用当前替换牌作为最终判定牌
-        g.pending = null;
-        return finishGuidu(g, pending.judgedSeat, currentReplaceCard, pending.resume);
-      }
-      return g;
-    }
-    
-    const currentTurn = g.turn;
-    const n = g.players.length;
-    const judgedSeat = pending.judgedSeat;
-    const askedSeats = pending.askedSeats || [];
-    
-    // 从当前回合角色开始,逆时针寻找下一个有资格的张角
-    for(let k = 0; k < n; k++){
-      const s = (currentTurn - k + n) % n;
-      const p = g.players[s];
-      
-      // 跳过已经询问过的
-      if(askedSeats.includes(s)) continue;
-      
-      if(p && p.alive && hasCap(p, 'guidu')) {
-        // 检查是否有黑色手牌可以打出
-        const hand = p.hand || [];
-        for(const card of hand){
-          if(card.suit === '♠' || card.suit === '♣'){
-            // 找到下一个有资格的张角
-            pending.askedSeats = askedSeats;
-            pending.sourceSeat = s;
-            setResponseAskedAt(pending); // 切换下一位候选人即重新计时,和guhuoQuestion同一约定
-            g.phase = 'guiduAsk';
-            g.log = pushLog(g.log, '询问 ' + p.name + ' 是否发动【鬼道】替换 ' + g.players[judgedSeat].name + ' 的判定牌');
-            return g;
-          }
-        }
-        // 标记为已询问（但无黑色牌）
-        askedSeats.push(s);
-      }
-    }
-    
-    // 没有其他张角需要询问
+  const pending = g.pending;
+  if (!pending || pending.type !== 'guiduAsk') {
     if(currentReplaceCard) {
-      // 使用当前替换牌作为最终判定牌
+      // 没有其他张角需要询问,使用当前替换牌作为最终判定牌
       g.pending = null;
       return finishGuidu(g, pending.judgedSeat, currentReplaceCard, pending.resume);
-    } else {
-      // 无人发动鬼道:必须用原判定牌(pending.judgeCard,从未被替换过)接回原判定的收尾流程——
-      // 和 respondGuicai 找不到下一个鬼才候选人时 finishGuicai(g, g.pending.judgeCard) 同一
-      // 处理方式,不能直接清空 pending/phase 了事。这里曾经就是直接清空,导致任何判定(八卦阵/
-      // 延时锦囊/铁骑/洛神/双雄/刚烈/悲歌/雷击等,只要走 maybeGuidu 这个统一入口的判定类型)
-      // 只要被问过"是否发动鬼道"、最终没有人真的换牌,原判定就会被整个静默吞掉——牌从判定区
-      // 消失、效果完全不执行,还不报错也不卡死,表现为"看起来正常但效果凭空消失"。这是系统级
-      // 缺陷,影响面覆盖全部判定类型,不止张角自己的雷击。
-      g.pending = null;
-      return finishGuidu(g, pending.judgedSeat, pending.judgeCard, pending.resume);
     }
-  });
+    return g;
+  }
+
+  const currentTurn = g.turn;
+  const n = g.players.length;
+  const judgedSeat = pending.judgedSeat;
+  const askedSeats = pending.askedSeats || [];
+
+  // 从当前回合角色开始,逆时针寻找下一个有资格的张角
+  for(let k = 0; k < n; k++){
+    const s = (currentTurn - k + n) % n;
+    const p = g.players[s];
+
+    // 跳过已经询问过的
+    if(askedSeats.includes(s)) continue;
+
+    if(p && p.alive && hasCap(p, 'guidu')) {
+      // 检查是否有黑色手牌可以打出
+      const hand = p.hand || [];
+      for(const card of hand){
+        if(card.suit === '♠' || card.suit === '♣'){
+          // 找到下一个有资格的张角
+          pending.askedSeats = askedSeats;
+          pending.sourceSeat = s;
+          setResponseAskedAt(pending); // 切换下一位候选人即重新计时,和guhuoQuestion同一约定
+          g.phase = 'guiduAsk';
+          g.log = pushLog(g.log, '询问 ' + p.name + ' 是否发动【鬼道】替换 ' + g.players[judgedSeat].name + ' 的判定牌');
+          return g;
+        }
+      }
+      // 标记为已询问（但无黑色牌）
+      askedSeats.push(s);
+    }
+  }
+
+  // 没有其他张角需要询问
+  if(currentReplaceCard) {
+    // 使用当前替换牌作为最终判定牌
+    g.pending = null;
+    return finishGuidu(g, pending.judgedSeat, currentReplaceCard, pending.resume);
+  } else {
+    // 无人发动鬼道:必须用原判定牌(pending.judgeCard,从未被替换过)接回原判定的收尾流程——
+    // 和 respondGuicai 找不到下一个鬼才候选人时 finishGuicai(g, g.pending.judgeCard) 同一
+    // 处理方式,不能直接清空 pending/phase 了事。这里曾经就是直接清空,导致任何判定(八卦阵/
+    // 延时锦囊/铁骑/洛神/双雄/刚烈/悲歌/雷击等,只要走 maybeGuidu 这个统一入口的判定类型)
+    // 只要被问过"是否发动鬼道"、最终没有人真的换牌,原判定就会被整个静默吞掉——牌从判定区
+    // 消失、效果完全不执行,还不报错也不卡死,表现为"看起来正常但效果凭空消失"。这是系统级
+    // 缺陷,影响面覆盖全部判定类型,不止张角自己的雷击。
+    g.pending = null;
+    return finishGuidu(g, pending.judgedSeat, pending.judgeCard, pending.resume);
+  }
 }
 
 // finishGuidu: 鬼道替换后的处理函数。resume.kind 的分派逻辑必须和姐妹函数 finishGuicai
