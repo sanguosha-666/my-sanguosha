@@ -62,9 +62,11 @@ const BOT_PHASE_ACTOR = {
   // 专用分支;不登记会掉进 botFallbackSeats+botSafePrompt(改动前即如此,靠安全正则点
   // "不发动"按钮收尾,见 BOT_DECISIONS.lirangAsk 上方注释)。
   lirangAsk:'from',
-  // 【L1 泛化(Task G2)】这四个响应阶段没有 runBotDecision 专用分支(落到 controlsChoice
-  // 接线点),此前靠 botFallbackSeats+botSafePrompt 兜底。登记 actor 字段后 botSeatForState
-  // 能精确解析行动者,L1(有密钥)接管、无密钥继续走 botSafePrompt(行为不变)。
+  // 【A类修复,机器人技能覆盖审计】这四个此前只靠L1 controlsChoice(且不在
+  // CONTROLS_CHOICE_ALLOWLIST里,无密钥时L1直接放弃)接管,没有专属分支——落到最终
+  // botSafePrompt兜底时,四个按钮文案("不发动"/"不获得")都命中safe正则,机器人因此
+  // 永远不会主动发动,和郭嘉遗计是同一类"机器人技能形同虚设"问题(只是不卡死)。actor
+  // 字段登记早就存在,这次补的是专属决策分支,见下方runBotDecision对应注释。
   liuli:'to', tianxiang:'seat', lirangRecover:'from', zhengyi:'asking',
   // 【A1】骁果:行动者是 pending.asking(乐进,服务端 respondXiaoguo 守卫
   // g.pending.asking!==mySeat)。登记后 botSeatForState 才能解析出行动者走 runBotDecision
@@ -241,6 +243,19 @@ const BOT_PHASE_ACTOR = {
   // 变成新的卡死点",这次一并把子阶段的决策补齐,不留隐患。
   huanhuoPick:'sourceSeat', huanhuoPickCard:'sourceSeat',
   huanhuoPickGotCard:'sourceSeat', huanhuoPickSecond:'sourceSeat',
+  // 【A类修复,机器人技能覆盖审计】祝融【烈刃】发动+选牌:行动者都是 pending.sourceSeat
+  // (祝融本人,服务端 triggerLieRen/pickLieRenCard/cancelLieRen 守卫都是
+  // g.pending.sourceSeat!==mySeat)。此前完全没有登记,落到botFallbackSeats+
+  // botSafePrompt,"不发动"命中safe正则,机器人从未主动拼点过。
+  lieRenChoose:'sourceSeat', lieRenPickCard:'sourceSeat',
+  // 【A类修复】夏侯渊【神速1】/【神速2】:是两个独立的决策点(分别在准备阶段判定/摸牌前、
+  // 摸牌阶段结束出牌前触发,各自有自己的限一次标志shensuUsed1/shensuUsed2),不是同一
+  // 决策的两个分支。行动者都是pending.seat(夏侯渊本人)。此前完全没有登记。
+  shensuChoose1:'seat', shensuChoose2:'seat',
+  // 【A类修复】张郃【巧变】回合开始询问:行动者是pending.seat(张郃本人,服务端
+  // qiaobianDecline等守卫g.pending.seat!==mySeat)。此前完全没有登记。注意这和已经
+  // 接线的qiaobianMove(出牌阶段中途版本)是同一技能的两个不同触发时机,分开处理。
+  qiaobianTurnStart:'seat',
   // 华雄【耀武】:行动者是 pending.seat(造成伤害的那个人,服务端 respondYaowu 守卫
   // seat!==mySeat)。
   yaowu_choose:'seat',
@@ -622,6 +637,32 @@ function botTryStartExtraSkills(g, seat){
     if(findUsableAs(me.hand||[],me,'杀')>=0 && (me.hand||[]).length>=2){
       if(g.players.some((p,i)=>i!==seat && p && p.alive && !canReachSha(g,seat,i))){
         botInvoke(seat, startFenxun); return true;
+      }
+    }
+  }
+  // 【C类修复,机器人技能覆盖审计】于吉【蛊惑】:扣置一张手牌、声明为别的牌。这次只接
+  // "声明为【杀】"这一种最常见/最有价值的用法(蛊惑理论上能声明成CARD_PLAYS里几乎任何
+  // 非装备/非延时锦囊的牌,全量枚举决策空间过大,不是这次范围)——risk评估:即使声明为假
+  // 被质疑戳穿,finishGuhuo的false分支只是把这张牌弃掉、不产生效果,和"直接弃这张没用的
+  // 牌"完全同一代价,没有比正常弃牌更差的下场;质疑者猜对了也只是让这次蛊惑失效,不会
+  // 反过来伤到发动者自己。所以这是一个"没有明显下行风险"的技能,固定尝试发动:找手牌里
+  // 第一张能合法声明为【杀】(canPlay通过+guhuoHasLegalTarget确实有目标)的牌,不筛选
+  // "这张牌是不是本来就有用"(蛊惑本身就是拿一张牌换一次杀的机会,不需要额外判断"值不值")。
+  // 目标选择本身在后续guhuoTarget阶段(已经通过BOT_SEAT_PICKS.guhuoTarget接线),这里
+  // 不需要关心。响应侧的guhuoQuestion(质疑与否)同样早就接线过(BOT_DECISIONS.
+  // guhuoQuestion),这次不重复实现。
+  if(hasCap(me,'guhuo') && !g.guhuoUsed){
+    const spec=CARD_PLAYS[guhuoActionId('杀')];
+    if(spec){
+      const hand=me.hand||[];
+      for(let i=0;i<hand.length;i++){
+        const actual=hand[i];
+        if(!actual) continue;
+        const claimed={ id:actual.id, name:'杀', suit:actual.suit, rank:actual.rank, originalName:actual.name };
+        if(spec.canPlay && !spec.canPlay(g, me, claimed)) continue;
+        if(!guhuoHasLegalTarget(g, seat, claimed, spec)) continue;
+        botInvoke(seat, ()=>startGuhuo(i, '杀'));
+        return true;
       }
     }
   }
@@ -4014,6 +4055,86 @@ async function runBotDecision(g,seat){
     const target=(d.candidates||[])[0];
     if(typeof target==='number') botInvoke(seat,()=>pickHuanhuoSecondTarget(target));
     return;
+  }
+  // 【A类修复,机器人技能覆盖审计】大乔【流离】:弃一张牌(手牌优先,避免丢装备)把这张【杀】
+  // 转移给别人——对发动者自己没有明显下行风险(用1张牌换完全免疫这次伤害,划算),固定
+  // 发动。目标从服务端已经算好的pending.targets里用botTargetScore('damage')选"最该
+  // 承受这次伤害"的那个(和duanbingChoose同一套评分,不重新发明)。
+  if(g.phase==='liuli'&&d.type==='liuli'&&d.to===seat){
+    const me=g.players[seat];
+    const hand=(me&&me.hand)||[];
+    const targets=(d.targets||[]).slice().sort((a,b)=>botTargetScore(g,seat,b,'damage')-botTargetScore(g,seat,a,'damage'));
+    const newTarget=targets.length&&botTargetScore(g,seat,targets[0],'damage')>-Infinity?targets[0]:null;
+    let choice=null;
+    if(newTarget!==null){
+      if(hand.length>0) choice={kind:'hand', idx:0};
+      else{
+        const slot=me&&me.equips&&EQUIP_SLOTS.find(s=>me.equips[s]);
+        if(slot) choice={kind:'equip', slot};
+      }
+    }
+    if(choice) botInvoke(seat,()=>respondLiuli(choice,newTarget));
+    else botInvoke(seat,()=>respondLiuli(null,null));
+    return;
+  }
+  // 【A类修复】小乔【天香】:弃一张红桃手牌把伤害转移给别人——同样是"1张牌换免疫这次
+  // 伤害",没有明显下行风险,固定发动。目标同上用botTargetScore('damage')从
+  // pending.targets里选。
+  if(g.phase==='tianxiang'&&d.type==='tianxiang'&&d.seat===seat){
+    const me=g.players[seat];
+    const hearts=(me&&me.hand||[]).map((c,i)=>({c,i})).filter(x=>x.c&&x.c.suit==='♥');
+    const targets=(d.targets||[]).slice().sort((a,b)=>botTargetScore(g,seat,b,'damage')-botTargetScore(g,seat,a,'damage'));
+    const newTarget=targets.length&&botTargetScore(g,seat,targets[0],'damage')>-Infinity?targets[0]:null;
+    if(hearts.length>0 && newTarget!==null) botInvoke(seat,()=>respondTianxiang({idx:hearts[0].i}, newTarget));
+    else botInvoke(seat,()=>respondTianxiang(null,null));
+    return;
+  }
+  // 【A类修复】孔融【礼让】回收:白得目标本弃牌阶段弃掉的牌,对孔融自己零代价、纯收益
+  // (respondLiRangRecover(true)只是把这些牌塞回手牌,不需要付出任何东西),固定发动。
+  if(g.phase==='lirangRecover'&&d.type==='lirangRecover'&&d.from===seat){
+    botInvoke(seat,()=>respondLiRangRecover(true)); return;
+  }
+  // 【A类修复】孔融【争义】:替孔融承受本该由他承受的这次伤害,对发动者自己是纯粹的
+  // 自我牺牲(承担一次实际伤害,换不到任何直接回报),和举荐/仁心这类"有代价+纯粹利他"
+  // 的既有基调一致,保守默认不发动。
+  if(g.phase==='zhengyi'&&d.type==='zhengyi'&&d.asking===seat){
+    botInvoke(seat,()=>respondZhengyi(false)); return;
+  }
+  // 【A类修复】祝融【烈刃】发动:拼点赢面接近五成、代价只是自己拼点牌本身要弃出去
+  // (赢/输都要弃,和天义拼点同一结构),赢了能白得对方一张牌,没有额外的下行风险,固定
+  // 发动(和天义respondYijiAsk同一基调)。
+  if(g.phase==='lieRenChoose'&&d.type==='lieRenChoose'&&d.sourceSeat===seat){
+    botInvoke(seat,triggerLieRen); return;
+  }
+  // 【A类修复】祝融【烈刃】选拼点牌:固定选点数最大的一张(和天义pickTianyiCard同一
+  // 判断——拼点点数越大赢面越高,既然已经决定发动就该尽量选能赢的牌)。
+  if(g.phase==='lieRenPickCard'&&d.type==='lieRenPickCard'&&d.sourceSeat===seat){
+    const me=g.players[seat];
+    const hand=(me&&me.hand)||[];
+    let bestIdx=0;
+    hand.forEach((c,i)=>{ if(c && (c.rank||0)>((hand[bestIdx]&&hand[bestIdx].rank)||0)) bestIdx=i; });
+    if(hand.length) botInvoke(seat,()=>pickLieRenCard(bestIdx));
+    else botInvoke(seat,cancelLieRen);
+    return;
+  }
+  // 【A类修复】夏侯渊【神速1】:跳过判定和摸牌阶段(代价是放弃本回合正常摸到的牌,通常
+  // 2张),换1张无距离限制的杀——和许褚裸衣respondLuoyi(-1张牌换本回合伤害加成)同一类
+  // "有代价+收益不确定"结构,裸衣的既定默认是保守不发动,这里代价更大(整个摸牌阶段,
+  // 不只是1张牌),同一基调保守默认不发动。
+  if(g.phase==='shensuChoose1'&&d.type==='shensuChoose1'&&d.seat===seat){
+    botInvoke(seat,skipShensu1); return;
+  }
+  // 【A类修复】夏侯渊【神速2】:跳过整个出牌阶段+弃1件装备,换1张无距离限制的杀——代价
+  // 比神速1更大(丢掉出牌阶段能做的所有事+1件装备),同一基调保守默认不发动。
+  if(g.phase==='shensuChoose2'&&d.type==='shensuChoose2'&&d.seat===seat){
+    botInvoke(seat,skipShensu2); return;
+  }
+  // 【A类修复】张郃【巧变】回合开始:弃1张手牌+跳过判定/摸牌/出牌/弃牌阶段之一,是否
+  // 划算取决于跳过哪个阶段(跳摸牌是明显净损失,跳弃牌可能是净收益),局面判断复杂,和
+  // 已经接线的qiaobianMove(出牌阶段中途版本)保守默认"不移动"同一基调,这里保守默认
+  // 不发动,不重新发明一套局面评估。
+  if(g.phase==='qiaobianTurnStart'&&d.type==='qiaobianTurnStart'&&d.seat===seat){
+    botInvoke(seat,qiaobianDecline); return;
   }
   // 曹植【酒诗】翻回正面:没有下行风险(翻正面只是解除背面朝上状态,不需要额外代价),
   // 固定发动。

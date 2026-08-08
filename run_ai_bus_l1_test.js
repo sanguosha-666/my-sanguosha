@@ -368,19 +368,26 @@ const testCode = String.raw`
     if(window.__zhengyiCalls.length !== 1 || window.__zhengyiCalls[0] !== true) throw new Error('应 respondZhengyi(true),实际 ' + JSON.stringify(window.__zhengyiCalls));
   });
 
-  // ---- T13:同阶段无密钥走旧分支:botDecide false,runBotDecision 落 botSafePrompt ----
-  await check('无密钥:liuli botDecide 返回 false,runBotDecision 经 botSafePrompt 点「不发动」', async function(){
+  // ---- T13:同阶段无密钥不再落 botSafePrompt——A类修复(机器人技能覆盖审计)后
+  // liuli 补了专属决策分支,无密钥也应该主动发动(而不是像改动前那样靠botSafePrompt命中
+  // "不发动"安全正则)。这条断言的语义已经随设计变更更新,不是留着旧行为不管
+  // (CLAUDE.md关于"设计变更后要回头检查旧断言"的既定原则)。mkG默认给3个座位都填了
+  // role:'zhu'(这个字段在ffa模式下本来就不该有意义,只是这个文件早期的历史写法),会让
+  // botTargetScore误判成身份局身份未知、suspicion不够而返回-Infinity——这里显式清成
+  // null,还原"乱斗模式没有身份"的真实语义,不能保留误导性的role字段。
+  await check('无密钥:liuli 补了专属分支后应主动发动(respondLiuli非null,不再依赖botSafePrompt)', async function(){
     window.__liuliCalls = [];
     aiApiKey = '';
     aiProvider = null;
     var g = mkG('liuli', { type: 'liuli', from: 1, to: 0, usedAs: '杀', shaColor: 'red', targets: [2] }, [card('杀')]);
+    g.players.forEach(function(p){ p.role = null; });
     var r = await botDecide('controlsChoice', g, 0);
     if(r !== false) throw new Error('无密钥 liuli 不应被 L1 接管,实际 ' + r);
     if(window.__liuliCalls.length !== 0) throw new Error('botDecide 阶段不应点任何按钮');
     await runBotDecision(g, 0);
-    if(window.__liuliCalls.length !== 1) throw new Error('runBotDecision 应经旧路径点1次,实际 ' + window.__liuliCalls.length);
+    if(window.__liuliCalls.length !== 1) throw new Error('runBotDecision 应经专属分支点1次,实际 ' + window.__liuliCalls.length);
     var c0 = window.__liuliCalls[0];
-    if(c0[0] !== null || c0[1] !== null) throw new Error('旧路径应点「不发动」=respondLiuli(null,null),实际 ' + JSON.stringify(c0));
+    if(!c0[0] || c0[1] !== 2) throw new Error('应主动发动并转移给座位2,实际 ' + JSON.stringify(c0));
     if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
   });
 
@@ -482,10 +489,13 @@ const testCode = String.raw`
   });
 
   // ---- T18:无密钥对照(tianxiang/lirangRecover/zhengyi,补齐 liuli 之外的三个)----
-  // tianxiang/zhengyi 的「不发动」命中 botSafePrompt safe 正则 → 旧路径点它;
-  // lirangRecover 的「获得弃牌/不获得」都不命中 safe/mandatory 正则 → botSafePrompt
-  // 放弃点击(既有盲区,G2 未改此行为,断言"不崩且不误点")。
-  await check('无密钥:tianxiang/lirangRecover/zhengyi botDecide false,runBotDecision 走旧路径不崩', async function(){
+  // 【A类修复(机器人技能覆盖审计)后语义更新】三个此前都靠botSafePrompt兜底,现在都补了
+  // 专属分支:tianxiang对自己没有明显下行风险(1张红桃换免疫伤害),固定主动转移;
+  // lirangRecover零代价纯收益,固定主动回收;zhengyi是纯粹自我牺牲换不到直接回报,
+  // 保守默认不发动(和改动前的"不发动"结果一样,但现在是专属分支决定的,不是
+  // botSafePrompt兜底侥幸)。tianxiang同liuli一样依赖botTargetScore判断目标,清掉
+  // mkG历史遗留的role:'zhu'(ffa模式本不该有身份)避免被误判成身份局。
+  await check('无密钥:tianxiang/lirangRecover主动发动,zhengyi保守默认不发动(均走专属分支,不再是botSafePrompt兜底)', async function(){
     aiApiKey = '';
     aiProvider = null;
     window.__tianxiangCalls = [];
@@ -493,27 +503,28 @@ const testCode = String.raw`
     window.__zhengyiCalls = [];
 
     var g1 = mkG('tianxiang', { type: 'tianxiang', seat: 0, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha', targets: [2], resume: { type: 'sha' } }, [card('桃')]);
+    g1.players.forEach(function(p){ p.role = null; });
     var r1 = await botDecide('controlsChoice', g1, 0);
     if(r1 !== false) throw new Error('tianxiang 无密钥不应被 L1 接管,实际 ' + r1);
     await runBotDecision(g1, 0);
-    if(window.__tianxiangCalls.length !== 1) throw new Error('tianxiang 旧路径应点1次,实际 ' + window.__tianxiangCalls.length);
+    if(window.__tianxiangCalls.length !== 1) throw new Error('tianxiang 应经专属分支点1次,实际 ' + window.__tianxiangCalls.length);
     var t0 = window.__tianxiangCalls[0];
-    if(t0[0] !== null || t0[1] !== null) throw new Error('tianxiang 旧路径应点「不发动」=respondTianxiang(null,null),实际 ' + JSON.stringify(t0));
+    if(!t0[0] || t0[1] !== 2) throw new Error('tianxiang 应主动发动并转移给座位2,实际 ' + JSON.stringify(t0));
 
     var g2 = mkG('lirangRecover', { type: 'lirangRecover', from: 0, to: 1, cards: [card('闪')] }, []);
     var r2 = await botDecide('controlsChoice', g2, 0);
     if(r2 !== false) throw new Error('lirangRecover 无密钥不应被 L1 接管,实际 ' + r2);
     await runBotDecision(g2, 0);
-    // A8:botSafePrompt safe 正则追加「不获得」→ 无密钥旧路径点「不获得」推进
-    // (respondLiRangRecover(false)),不再是盲区不动作——这是 A8 修补的预期行为。
-    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0] !== false)
-      throw new Error('lirangRecover 旧路径应点「不获得」=respondLiRangRecover(false),实际 ' + JSON.stringify(window.__lirangCalls));
+    // A类修复:lirangRecover零代价纯收益(respondLiRangRecover(true)只是白得弃牌,
+    // 没有任何代价),专属分支固定选择"获得"——不再是安全正则侥幸命中"不获得"。
+    if(window.__lirangCalls.length !== 1 || window.__lirangCalls[0] !== true)
+      throw new Error('lirangRecover 应主动回收=respondLiRangRecover(true),实际 ' + JSON.stringify(window.__lirangCalls));
 
     var g3 = mkG('zhengyi', { type: 'zhengyi', asking: 0, seat: 1, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha' }, []);
     var r3 = await botDecide('controlsChoice', g3, 0);
     if(r3 !== false) throw new Error('zhengyi 无密钥不应被 L1 接管,实际 ' + r3);
     await runBotDecision(g3, 0);
-    if(window.__zhengyiCalls.length !== 1 || window.__zhengyiCalls[0] !== false) throw new Error('zhengyi 旧路径应点「不发动」=respondZhengyi(false),实际 ' + JSON.stringify(window.__zhengyiCalls));
+    if(window.__zhengyiCalls.length !== 1 || window.__zhengyiCalls[0] !== false) throw new Error('zhengyi 应经专属分支点「不发动」=respondZhengyi(false),实际 ' + JSON.stringify(window.__zhengyiCalls));
 
     if(document.body.children.length !== 1) throw new Error('临时 box 应已销毁');
   });

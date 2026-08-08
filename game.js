@@ -1551,7 +1551,8 @@ function finishDrawPhase(g, seat, n){
   // 【断点2修复】检查 shensuUsed2(神速2自己的标志位),不再检查共享的 shensuUsed——
   // 发动过神速1不应该挡住神速2这个独立的询问。
   if (hasCap(g.players[seat], 'shensu') && !g.shensuUsed2 && seat === g.turn) {
-    g.pending = { type: 'shensuChoose2', seat: seat };
+    // 【A类修复】补setResponseAskedAt。
+    g.pending = setResponseAskedAt({ type: 'shensuChoose2', seat: seat });
     g.phase = 'shensuChoose2';
     g.log = pushLog(g.log, g.players[seat].name + ' 可以发动【神速】跳过出牌阶段并弃置装备牌');
     return;
@@ -3605,7 +3606,8 @@ function maybeStartLieRen(g, from, to) {
   if(!source || !source.alive || !target || !target.alive || from === to || !hasCap(source,'lieRen')) return false;
   
   // 进入烈刃选择阶段
-  g.pending={type:'lieRenChoose', sourceSeat:from, targetSeat:to};
+  // 【A类修复】补setResponseAskedAt——此前没有,30秒超时兜底对这个pending形同虚设。
+  g.pending=setResponseAskedAt({type:'lieRenChoose', sourceSeat:from, targetSeat:to});
   g.phase='lieRenChoose';
   g.log=pushLog(g.log, source.name + ' 可以发动【烈刃】,与 ' + target.name + ' 拼点');
   return true;

@@ -817,7 +817,8 @@ function respondGuanxing(topOrder, bottomOrder){
 function continueQiaobianCheck(g, seat){
   const p=g.players[seat];
   if(hasCap(p,'qiaobian') && (p.hand||[]).length>0){
-    g.pending={type:'qiaobianTurnStart', seat};
+    // 【A类修复】补setResponseAskedAt。
+    g.pending=setResponseAskedAt({type:'qiaobianTurnStart', seat});
     g.phase='qiaobianTurnStart';
     g.log=pushLog(g.log, p.name+' 是否发动【巧变】…');
     return;
@@ -832,7 +833,8 @@ function continueShensu1Check(g, seat){
   // 神速1/神速2 各自独立限一次,发动过神速2不该挡住神速1这个询问(理论上神速1的开启点
   // 本来就早于神速2,这个顺序目前不会真的撞上,但字段语义要对,不能沿用共享写法)。
   if(p && p.alive && hasCap(p,'shensu') && !g.shensuUsed1 && !g.shensuSkipJudgingAndDraw){
-    g.pending = { type: 'shensuChoose1', seat };
+    // 【A类修复】补setResponseAskedAt。
+    g.pending = setResponseAskedAt({ type: 'shensuChoose1', seat });
     g.phase = 'shensuChoose1';
     g.log = pushLog(g.log, p.name + ' 可以发动【神速】跳过判定和摸牌阶段');
     return;
@@ -3570,11 +3572,12 @@ function triggerLieRen() {
     if (!me || !me.alive || !target || !target.alive) return g;
 
     // 选择一张手牌用于拼点
-    g.pending = {
+    // 【A类修复】补setResponseAskedAt。
+    g.pending = setResponseAskedAt({
       type: 'lieRenPickCard',
       sourceSeat: mySeat,
       targetSeat: pending.targetSeat
-    };
+    });
     g.phase = 'lieRenPickCard';
     g.log = pushLog(g.log, `${me.name} 发动【烈刃】,请选择一张手牌用于拼点`);
     markSkillSound(g, '烈刃');

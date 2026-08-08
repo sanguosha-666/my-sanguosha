@@ -320,6 +320,24 @@ function autoRespondAction(g){
     const target=(g.pending.candidates||[])[0];
     if(typeof target==='number') pickHuanhuoSecondTarget(target);
   };
+  // 【A类修复,机器人技能覆盖审计】超时兜底:liuli/tianxiang默认不转移(保守,和"没有明确
+  // 判断依据时不主动改变默认结果"一致);lirangRecover零代价纯收益,默认获得;zhengyi/
+  // shensuChoose1/shensuChoose2/qiaobianTurnStart都是有真实代价的选项,默认不发动;
+  // lieRenChoose拼点默认不发动(超时说明没人真的在决策,不主动开赌);lieRenPickCard
+  // 若已经进了这一步说明已经决定拼点,固定选手牌第0张收尾,不重新判断。
+  if(type==='liuli') return function(){ respondLiuli(null, null); };
+  if(type==='tianxiang') return function(){ respondTianxiang(null, null); };
+  if(type==='lirangRecover') return function(){ respondLiRangRecover(true); };
+  if(type==='zhengyi') return function(){ respondZhengyi(false); };
+  if(type==='lieRenChoose') return function(){ cancelLieRen(); };
+  if(type==='lieRenPickCard') return function(){
+    const me=g.players[g.pending.sourceSeat];
+    if(me && (me.hand||[]).length>0) pickLieRenCard(0);
+    else cancelLieRen();
+  };
+  if(type==='shensuChoose1') return function(){ skipShensu1(); };
+  if(type==='shensuChoose2') return function(){ skipShensu2(); };
+  if(type==='qiaobianTurnStart') return function(){ qiaobianDecline(); };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且
