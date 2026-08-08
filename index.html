@@ -1180,6 +1180,24 @@
   .ai-key-panel .ai-key-warn{margin-top:12px;font-size:12px;color:var(--paper-dim);line-height:1.55;}
   .ai-key-panel .ai-key-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;}
 
+  /* ===== AI测试信息窗(可拖动/可调整大小) ===== */
+  #aiTestModal{position:fixed;top:70px;right:12px;left:auto;bottom:auto;width:420px;max-width:80vw;height:480px;max-height:80vh;z-index:120;display:flex;align-items:stretch;justify-content:stretch;box-shadow:0 4px 20px rgba(0,0,0,.45)}
+  #aiTestModal.hidden{display:none}
+  .aitest-panel{position:relative;display:flex;flex-direction:column;width:100%;height:100%;background:var(--paper,#f5ecd9);border:1px solid var(--paper-dim,#a0926e);border-radius:8px;overflow:hidden;box-sizing:border-box}
+  .aitest-header{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cinnabar,#a03a2a);color:#fff;font-size:14px;font-weight:600;cursor:move;user-select:none}
+  .aitest-close{margin-left:auto;background:transparent;color:#fff}
+  .aitest-body{flex:1 1 auto;overflow-y:auto;padding:8px;font-size:13px}
+  .aitest-record{border:1px solid var(--paper-dim,#a0926e);border-radius:6px;margin-bottom:6px;background:rgba(255,255,255,.5)}
+  .aitest-record-summary{padding:6px 8px;cursor:pointer;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+  .aitest-record-summary .aitest-arrow{color:var(--cinnabar,#a03a2a);font-size:11px}
+  .aitest-record-detail{padding:6px 8px;border-top:1px dashed var(--paper-dim,#a0926e);font-size:12px;line-height:1.5;word-break:break-all}
+  .aitest-record-detail .aitest-sec{font-weight:600;color:var(--cinnabar,#a03a2a);margin-top:4px}
+  .aitest-record-detail pre{white-space:pre-wrap;background:rgba(0,0,0,.06);border-radius:4px;padding:4px;font-size:11px;max-height:160px;overflow-y:auto}
+  .aitest-footer{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:4px 10px;border-top:1px solid var(--paper-dim,#a0926e)}
+  .aitest-hint{font-size:11px;color:var(--paper-dim,#a0926e);margin-left:auto}
+  .aitest-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--cinnabar,#a03a2a) 50%);border-bottom-right-radius:8px}
+  #aiTestBtn.aitest-active{background:var(--cinnabar,#a03a2a);color:#fff}
+
   /* ===== 强制横屏软引导——骨架级重建阶段3 =====
      CSS/浏览器原生的屏幕方向锁定 API(Screen Orientation Lock)支持非常有限(尤其 iOS
      Safari 完全不支持,只有部分 Android 浏览器在"已安装为全屏 PWA"时才生效),这个项目
@@ -1974,11 +1992,23 @@
 <button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
 <button id="closeRoomBtn" class="icon-btn" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
 <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
+<button id="aiTestBtn" class="icon-btn" title="AI测试:AI托管当前玩家并显示决策信息" onclick="toggleAiTestAutopilot()">🤖</button>
 <div id="logToast"></div>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
 <div id="aiKeyModal" class="hidden"></div>
+<div id="aiTestModal" class="hidden">
+  <div class="aitest-panel">
+    <div class="aitest-header">🤖 AI测试 <span id="aiTestStatus">未托管</span><button id="aiTestCloseBtn" class="aitest-close icon-btn" onclick="closeAiTestModal()">✕</button></div>
+    <div class="aitest-body" id="aiTestBody"></div>
+    <div class="aitest-footer">
+      <button class="aitest-foot-btn" onclick="clearAiTestRecords()">清空</button>
+      <span class="aitest-hint">点击记录行展开详情</span>
+    </div>
+    <div class="aitest-resize-handle" title="拖动调整大小"></div>
+  </div>
+</div>
 <!-- 强制横屏软引导(骨架级重建阶段3):显隐逻辑纯 JS(render.js 的 checkLandscapeGate),
      这里只是静态结构,不含内联脚本。 -->
 <div id="landscapeGate" class="landscape-gate hidden">
@@ -2065,20 +2095,20 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=337"></script>
-<script src="data.js?v=337"></script>
-<script src="debug-log.js?v=337"></script>
-<script src="room-lifecycle.js?v=337"></script>
-<script src="game.js?v=337"></script>
-<script src="weapons.js?v=337"></script>
-<script src="skills.js?v=337"></script>
-<script src="bot-ai-bus.js?v=337"></script>
-<script src="bot.js?v=337"></script>
-<script src="ai-bot.js?v=337"></script>
-<script src="render.js?v=337"></script>
-<script src="render-table.js?v=337"></script>
-<script src="render-hand.js?v=337"></script>
-<script src="render-controls.js?v=337"></script>
-<script src="render-log.js?v=337"></script>
+<script src="config.js?v=338"></script>
+<script src="data.js?v=338"></script>
+<script src="debug-log.js?v=338"></script>
+<script src="room-lifecycle.js?v=338"></script>
+<script src="game.js?v=338"></script>
+<script src="weapons.js?v=338"></script>
+<script src="skills.js?v=338"></script>
+<script src="bot-ai-bus.js?v=338"></script>
+<script src="bot.js?v=338"></script>
+<script src="ai-bot.js?v=338"></script>
+<script src="render.js?v=338"></script>
+<script src="render-table.js?v=338"></script>
+<script src="render-hand.js?v=338"></script>
+<script src="render-controls.js?v=338"></script>
+<script src="render-log.js?v=338"></script>
 </body>
 </html>
