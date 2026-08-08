@@ -282,7 +282,13 @@ const BOT_PHASE_ACTOR = {
 };
 function botSeatForState(g){
   const d=g.pending||{};
-  const isBotSeat=s=>Number.isInteger(s)&&g.players[s]&&g.players[s].isBot;
+  // 【AI测试托管】托管中的真人座位视同机器人:isBotSeat 覆盖为"托管座位即真"。
+  // 一处改动覆盖 A/B 全部段落(各段都用 isBotSeat 判),托管座位在 draw/play/discard、
+  // 响应类 pending(BOT_PHASE_ACTOR)等全部阶段都能被调度。托管关闭(active=false)时
+  // aiTestAutopilot 判定恒 false,行为与托管前完全一致。
+  const isAutopilotSeat=s=>s>=0 && (typeof aiTestAutopilot!=='undefined') && aiTestAutopilot
+    && aiTestAutopilot.active && aiTestAutopilot.seat===s;
+  const isBotSeat=s=>Number.isInteger(s)&&g.players[s]&&(g.players[s].isBot||isAutopilotSeat(s));
   // A. 行动者不在 pending 字段上的几个特殊阶段
   if(g.phase==='wugu'&&d.type==='wugu'&&Array.isArray(d.order)){
     const picker=d.order[d.idx||0];
@@ -379,7 +385,12 @@ let botDecisionInFlight=false;
 // scheduleBotTurn 自己即可自愈,不需要为多次丢弃分别记录/重放。
 let botMissedSchedule=false;
 function scheduleBotTurn(g){
-  if(!g || !isBotController(g)) return;
+  if(!g) return;
+  // 【AI测试托管】托管当前玩家时,即使自己不是 isBotController(不是第一个真人)也要跑
+  // 调度;否则托管只对房主浏览器生效。非托管场景行为与原来一致(isBotController 判定)。
+  const aiTestSelf = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
+    && aiTestAutopilot.seat===mySeat;
+  if(!isBotController(g)&&!aiTestSelf) return;
   // 【AI摘要】游戏结束清空记忆;回合变化(roundNum/turn)且已有摘要时,异步更新记忆
   // (fire-and-forget,不阻塞决策;更新完成后的下一轮决策才带上新摘要)
   if(g.phase==='over'){ aiSummaryReset(); return; }
@@ -3628,7 +3639,13 @@ function botSafePrompt(g,seat){
 // 留 TODO,以后要接的话优先从 seatPick/botTwoStepA 这类高频分支开始。
 async function runBotDecision(g,seat){
   const p=g.players[seat];
-  if(!p||!p.isBot||!p.alive&&g.phase!=='pickingGeneral') return;
+  if(!p||!p.alive&&g.phase!=='pickingGeneral') return;
+  // 【AI测试托管】托管中的真人座位视同机器人:放行其进入决策(各分支的 d.X===seat 复核
+  // 仍然有效,托管座位同样要满足所在阶段的身份守卫)。托管关闭时判定恒 false,行为与
+  // 托管前完全一致(非机器人一律被拦)。
+  const isAutopilot=(typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
+    && aiTestAutopilot.seat===seat;
+  if(!p.isBot&&!isAutopilot) return;
   const d=g.pending||{};
   if(g.phase==='pickingLordGeneral'){
     // 决策已进 BOT_DECISIONS.pickGeneral(无密钥回退=botPickGeneral 打分,与旧分支逐字

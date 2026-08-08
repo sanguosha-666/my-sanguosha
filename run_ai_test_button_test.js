@@ -171,6 +171,50 @@ const testCode = String.raw`
       throw new Error('未托管时 systemPrompt 不应含托管指令,实际 '+JSON.stringify(window.__mockAiArgs.opts.systemPrompt));
   });
 
+  // ================= Task3:botSeatForState/runBotDecision 托管接入(3 项) =================
+  function mkSeatG(opt){
+    opt = opt || {};
+    var n = opt.n || 3;
+    var players = [];
+    for(var i = 0; i < n; i++){
+      players.push({
+        name: i === 0 ? '座位0' : ('座位' + i), alive: true,
+        hp: 4, maxHp: 4,
+        hand: (opt.hands && opt.hands[i]) || [], equips: emptyEquips(), delays: [],
+        role: null, general: (opt.generalOf && opt.generalOf[i]) || 'yuJi'
+      });
+    }
+    return { players: players, gameMode: 'ffa', roundNum: 1, phase: 'play', turn: 0, log: [], pending: null, started: true };
+  }
+
+  await check('botSeatForState: 托管开启时真人座位在play阶段被解析为行动者', function(){
+    var g = mkSeatG({n:3});
+    g.phase='play'; g.turn=0;
+    g.players[0].isBot=false; g.players[1].isBot=true;
+    aiTestAutopilot = {active:true, seat:0};
+    var s = botSeatForState(g);
+    if(s!==0) throw new Error('应返回0(托管真人座位),实际 '+s);
+  });
+  await check('botSeatForState: 托管关闭时真人座位恒-1(回归)', function(){
+    var g = mkSeatG({n:3});
+    g.phase='play'; g.turn=0;
+    g.players[0].isBot=false;
+    aiTestAutopilot = {active:false, seat:0};
+    var s = botSeatForState(g);
+    if(s!==-1) throw new Error('应返回-1,实际 '+s);
+  });
+  await check('runBotDecision: 托管真人座位可进入(draw分支被调用,未被首行拦截)', async function(){
+    var g = mkSeatG({n:3});
+    g.phase='draw'; g.turn=0;
+    g.players[0].isBot=false;
+    aiTestAutopilot = {active:true, seat:0};
+    // spy doDraw(函数声明,整体替换):守卫放行且命中 draw 分支才会调用它,被首行拦截则不调用
+    window.__doDrawCalled = 0;
+    doDraw = function(){ window.__doDrawCalled++; };
+    await runBotDecision(g, 0);
+    if(window.__doDrawCalled !== 1) throw new Error('draw分支应被调用(守卫放行),实际调用 '+window.__doDrawCalled+' 次');
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
