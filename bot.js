@@ -4689,7 +4689,10 @@ async function runBotActionWindow(g, seat){
           phase: lastG.phase, pendingType: lastG.pending&&lastG.pending.type||null,
           turn: lastG.turn, roundNum: lastG.roundNum, seat: seat,
           message: '机器人在出牌窗口选择了动作('+(choice&&choice.action)+')但等不到提交确认(可能被服务端守卫拒绝)',
-          pendingSnapshot: (function(){ try{ return lastG.pending?JSON.parse(JSON.stringify(lastG.pending)):null; }catch(e){ return null; } })(),
+          // 【隐私修复,2026-08】原来直接 JSON.parse(JSON.stringify(lastG.pending)) 原样转存,
+          // 和 logPendingOrphan 同一个漏洞——改用白名单化的 sanitizePendingForLog(debug-log.js),
+          // 不在这里重新发明一套过滤规则。
+          pendingSnapshot: (function(){ try{ return lastG.pending && typeof sanitizePendingForLog==='function' ? sanitizePendingForLog(lastG.pending) : null; }catch(e){ return null; } })(),
           playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(lastG) : null
         });
       }

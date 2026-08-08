@@ -92,6 +92,72 @@ function writeDebugLog(roomIdArg, kind, payload){
 // 复核结论:105处里没有发现"设计上就有问题、这次任务应该顺带修"的分支(逐条读过一遍,
 // 结论就是上述二分类),如果以后复核出这类问题,应该在这里补一条"C:"标注单独列出,而不是
 // 顺手在这次改动里修掉。
+// ==================== pendingSnapshot 白名单化(隐私修复,2026-08) ====================
+// 【根因】此前 pendingSnapshot 一律 JSON.parse(JSON.stringify(g.pending)) 原样转存,没有
+// 任何字段过滤——蛊惑(guhuoQuestion/guhuoTarget)的 actualCard(诡称牌真实身份)、恩怨
+// (enyuanChooseOption)的 heartCards(伤害来源自己的红色手牌列表)、眩惑(huanhuoPickSecond)
+// 的 transferCard(转手途中的具体牌)三个真实泄露案例都是这么产生的(见
+// docs/debug-log-audit.md)。
+//
+// 【设计原则:白名单,不是黑名单】黑名单("逐个排除敏感字段")每次新增一个带隐藏信息的技能都
+// 要记得同步更新排除清单,这正是上面三个漏洞的产生方式——写技能的时候完全没想到"这个字段会被
+// debugLogs 原样转存"这件事。改成白名单后,默认姿态反过来:只有显式列在 PENDING_SNAPSHOT_
+// ALLOWED_FIELDS 里的字段才会被保留原始内容,任何新增技能往 pending 里塞的新字段,只要没有
+// 被显式加进这份名单,默认就不会出现在 debugLogs 里——不需要每次新增技能时都记得"排除"什么,
+// 从源头堵住这类问题再次发生的可能。
+//
+// 【名单是怎么定出来的】通读了一遍 game.js normalize() 里全部 105 处校验分支实际用到的字段名
+// (逐条核对过每个字段的赋值来源,不是猜的),按语义分两类:
+//   - ALLOWED:纯结构性信息——座位号/座位号数组、数量、布尔、阶段/枚举字符串、下标/索引这类,
+//     不涉及任何具体牌的名字/花色/点数/内容。包括 resume(它是常见的"接回被打断流程"嵌套对象,
+//     递归应用同一套过滤规则,不是整体放行)。
+//   - REDACTED:字段名本身就代表"这里挂着一张/一组具体的牌"(actualCard/claimedCard/judgeCard/
+//     sourceCard/cards/cardToGive/cardName/heartCards/transferCard/revealedCards/selfCard/
+//     damageInfo/originalDamageInfo/originalCtx/pool/shaColor/suit/card/hand/delays/equips等)
+//     ——保留字段名本身(排查时"知道这里涉及一张牌"这个事实有用),但把值替换成占位符,不暴露
+//     具体内容。judgeCard/sourceCard 严格说很多场景下已经是公开信息(判定牌翻出来、杀已经打出
+//     都是公开的),但这次统一按"只要字段名语义上可能带牌面内容就脱敏"处理,不逐个论证"这次
+//     具体是不是真的已公开"——多脱敏一点不会有安全代价,少脱敏一次就可能是下一次真实泄露。
+//   - 其余没在这两份名单里出现过的字段名,一律静默丢弃(连 key 都不出现),不留占位符。
+const PENDING_SNAPSHOT_ALLOWED_FIELDS = [
+  'type','seat','from','to','asking','sourceSeat','targetSeat','target','target2Seat','targets',
+  'otherSeat','judgedSeat','damagedSeat','damagerSeat','damageSource','baseTarget','currentSeat',
+  'firstTargetSeat','endingSeat','seatA','seatB','lordSeat','exclude','active','available',
+  'amount','death','needed','noDistance','half','played','wasFacedown','previousPhase',
+  'costType','sumLimit','takeN','askedAt','depth','idx','need','kind','index','value','label',
+  'phase','askedSeats','availableTargets','availableSlots','questioners','answered','candidates',
+  'remainingSeats','remaining','discardedCounts','equipSlots','weaponIndices','cardIndices',
+  'cardIds','availablePairs','order','selectable','options','selections','resume'
+];
+const PENDING_SNAPSHOT_REDACTED_FIELDS = [
+  'actualCard','claimedCard','judgeCard','sourceCard','cards','cardToGive','cardName',
+  'heartCards','transferCard','revealedCards','selfCard','damageInfo','originalDamageInfo',
+  'originalCtx','pool','shaColor','suit','card','hand','delays','equips'
+];
+const PENDING_SNAPSHOT_REDACT_PLACEHOLDER = '[已隐藏:可能含具体牌面/手牌内容,不写入日志]';
+// sanitizePendingForLog: 递归过滤,数组元素/嵌套对象(如 resume)都过同一套名单,不是只在
+// 最外层做一次浅过滤——resume 内部还可能挂着 sourceCard/shaColor 这类同名的敏感字段。
+function sanitizePendingForLog(value, depth){
+  depth = depth || 0;
+  if(depth > 6) return null; // 防御性熔断,正常 pending 结构不会嵌套这么深
+  if(Array.isArray(value)){
+    return value.map(function(item){ return sanitizePendingForLog(item, depth + 1); });
+  }
+  if(value && typeof value === 'object'){
+    const out = {};
+    Object.keys(value).forEach(function(key){
+      if(PENDING_SNAPSHOT_ALLOWED_FIELDS.indexOf(key) >= 0){
+        out[key] = sanitizePendingForLog(value[key], depth + 1);
+      } else if(PENDING_SNAPSHOT_REDACTED_FIELDS.indexOf(key) >= 0){
+        out[key] = PENDING_SNAPSHOT_REDACT_PLACEHOLDER;
+      }
+      // 其余字段名一律不出现在结果里(白名单默认拒绝)。
+    });
+    return out;
+  }
+  return value; // 基本类型(数字/字符串/布尔/null)原样保留
+}
+
 const PENDING_ORPHAN_RATE_LIMIT_MS = 60000;
 let __pendingOrphanLastLogged = {}; // key(type+reason) -> 上次记录的ts,纯内存、不跨刷新持久化
 function logPendingOrphan(g, reason){
@@ -106,10 +172,11 @@ function logPendingOrphan(g, reason){
       if(last !== undefined && (now - last) < PENDING_ORPHAN_RATE_LIMIT_MS) return; // 60秒内已经记过同一种,跳过
       __pendingOrphanLastLogged[key] = now;
     }
-    const snap = JSON.parse(JSON.stringify(g.pending));
+    const rawType = g.pending.type || null; // 取type用来分类,不经过白名单(type本身就在白名单里,这里只是避免下面snap还没算出来前用不到)
+    const snap = sanitizePendingForLog(g.pending);
     writeDebugLog(typeof roomId !== 'undefined' ? roomId : null, 'pending_orphan_detected', {
       phase: g.phase || null,
-      pendingType: snap.type || null,
+      pendingType: rawType,
       turn: (typeof g.turn === 'number' ? g.turn : null),
       roundNum: (typeof g.roundNum === 'number' ? g.roundNum : null),
       message: 'normalize发现不合法的pending,已强制清空(' + reason + ')',
@@ -186,6 +253,52 @@ function cleanupOldDebugLogs(roomIdArg){
       }).catch(function(e){ console.warn('cleanupOldDebugLogs: 清理失败', e); });
     }).catch(function(e){ console.warn('cleanupOldDebugLogs: 读取失败', e); });
   }catch(e){ console.warn('cleanupOldDebugLogs 出错', e); }
+}
+
+// ---- 历史脏数据清理:隐私修复(2026-08,sanitizePendingForLog白名单化)之前写入的记录,
+// pendingSnapshot 里可能还留着 actualCard/heartCards/transferCard 等未脱敏的原始牌面内容
+// (guhuoQuestion/guhuoTarget/enyuanChooseOption/huanhuoPickSecond 四个已确认的真实泄露
+// 场景,见 docs/debug-log-audit.md)。这个函数只重写 pendingSnapshot 字段本身(用新的
+// sanitizePendingForLog 重新过滤一遍),不删除整条记录——同一惯例,手动在浏览器 console 里
+// 调用,不设自动触发:
+//   sanitizeExistingDebugLogs()          —— 扫描所有房间,重写pendingSnapshot不合规的记录
+//   sanitizeExistingDebugLogs('1234')    —— 只扫描房间1234的
+// 【这次修复没有代替你执行这个函数】——本地开发环境拿不到生产 Firebase 的读写权限/凭据,
+// 也不应该在没有明确确认的情况下对线上数据做批量改写,这是你自己决定要不要跑的操作。
+function sanitizeExistingDebugLogs(roomIdArg){
+  try{
+    if(typeof db === 'undefined' || !db){ console.warn('sanitizeExistingDebugLogs: Firebase 未配置'); return; }
+    function scanAndFix(snap, roomKey, updates, stats){
+      snap.forEach(function(child){
+        const entry = child.val();
+        if(!entry || entry.pendingSnapshot === undefined || entry.pendingSnapshot === null) return;
+        stats.scanned++;
+        const resanitized = sanitizePendingForLog(entry.pendingSnapshot);
+        const before = JSON.stringify(entry.pendingSnapshot);
+        const after = JSON.stringify(resanitized);
+        if(before !== after){
+          updates['debugLogs/' + roomKey + '/' + child.key + '/pendingSnapshot'] = resanitized;
+          stats.fixed++;
+        }
+      });
+    }
+    const rootRef = roomIdArg ? db.ref('debugLogs/' + roomIdArg) : db.ref('debugLogs');
+    rootRef.get().then(function(snap){
+      if(!snap.exists()){ console.log('sanitizeExistingDebugLogs: 没有记录'); return; }
+      const updates = {};
+      const stats = { scanned: 0, fixed: 0 };
+      if(roomIdArg){
+        scanAndFix(snap, roomIdArg, updates, stats);
+      }else{
+        snap.forEach(function(roomSnap){ scanAndFix(roomSnap, roomSnap.key, updates, stats); });
+      }
+      console.log('sanitizeExistingDebugLogs: 扫描了 ' + stats.scanned + ' 条带pendingSnapshot的记录,其中 ' + stats.fixed + ' 条需要重新脱敏');
+      if(stats.fixed === 0){ console.log('sanitizeExistingDebugLogs: 没有需要修复的记录'); return; }
+      db.ref().update(updates).then(function(){
+        console.log('sanitizeExistingDebugLogs: 已重写 ' + stats.fixed + ' 条记录的pendingSnapshot');
+      }).catch(function(e){ console.warn('sanitizeExistingDebugLogs: 写入失败', e); });
+    }).catch(function(e){ console.warn('sanitizeExistingDebugLogs: 读取失败', e); });
+  }catch(e){ console.warn('sanitizeExistingDebugLogs 出错', e); }
 }
 
 // ==================== "查看调试日志"按钮 / 弹窗(showDebugLog) ====================

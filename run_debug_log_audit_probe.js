@@ -113,8 +113,12 @@ const testCode = String.raw`
     labelKeys.forEach(function(k){ if(kinds.indexOf(k) < 0) throw new Error('映射表里多出一个不在枚举里的 key「' + k + '」'); });
   });
 
-  // ================= 发现2:pendingSnapshot 会把隐藏信息(actualCard)原样写进debugLogs =================
-  await check('【隐私】guhuoQuestion(于吉蛊惑)pending被normalize清空时,pendingSnapshot里的actualCard(诡称的真实牌面,应对其它玩家保密)原样写进了debugLogs', function(){
+  // ================= 发现2(已修复,2026-08):pendingSnapshot 白名单化后,actualCard 不再原样写进debugLogs =================
+  // 【断言语义已更新】这条最初的作用是"复现泄露"(审计阶段,commit 68c6a94)。这次隐私修复引入
+  // sanitizePendingForLog 白名单机制之后,同一个触发路径不应该再泄露 actualCard 的真实内容——
+  // 按 CLAUDE.md"设计变更后要回头检查旧断言语义是否还成立"的原则,更新为断言修复后的新行为,
+  // 不留着一条会一直失败的"过时结论"。
+  await check('【隐私修复验证】guhuoQuestion(于吉蛊惑)pending被normalize清空时,pendingSnapshot里的actualCard应被脱敏,不再暴露诡称的真实牌面', function(){
     var g = mkSeatG(3);
     g.pending = {
       type: 'guhuoQuestion', sourceSeat: 0, asking: 1,
@@ -129,11 +133,15 @@ const testCode = String.raw`
     if(window.__dbSetCalls.length !== 1) throw new Error('应写1条pending_orphan_detected,实际 ' + window.__dbSetCalls.length);
     var written = window.__dbSetCalls[0].entry;
     var snap = written.pendingSnapshot;
-    if(!snap || !snap.actualCard || snap.actualCard.name !== '小明弱牌'){
-      throw new Error('本次探测没有复现出actualCard——如果这是因为代码已经被修复,请更新审计文档,不要留着过时结论');
-    }
-    // 到这里说明:任何打开#debugLogBtn的玩家(包括于吉本人的对手)都能在这条记录里看到
-    // 诡称牌的真实身份——这正是蛊惑这个技能存在的唯一理由所依赖的隐藏信息。
+    if(!snap) throw new Error('pendingSnapshot不应为空(结构性字段仍应保留用于排查)');
+    if(snap.actualCard === undefined) throw new Error('actualCard这个字段名应该保留(排查时"这里涉及一张牌"这个事实有用),不应该整体消失');
+    if(typeof snap.actualCard === 'object' && snap.actualCard !== null)
+      throw new Error('actualCard不应再是原始牌对象,应替换成脱敏占位符,实际 ' + JSON.stringify(snap.actualCard));
+    if(JSON.stringify(snap).indexOf('小明弱牌') >= 0)
+      throw new Error('整个pendingSnapshot里不应出现真实牌名"小明弱牌"');
+    // sourceSeat/asking/questioners/answered/askedAt 这类结构性字段仍应该保留,不能矫枉过正
+    // 把整条pending都清空成没有诊断价值的空对象。
+    if(snap.sourceSeat !== 0 || snap.asking !== 1) throw new Error('结构性字段(sourceSeat/asking)应该保留,实际 ' + JSON.stringify(snap));
   });
 
   // ================= 发现3:同一个"卡住的坏pending"会被每个连上的客户端各自重复上报 =================

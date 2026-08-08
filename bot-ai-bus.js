@@ -354,7 +354,10 @@ function maybeAutoRespondTimeout(g){
       writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'timeout_stuck', {
         phase: g.phase, pendingType: g.pending.type||null, turn: g.turn, roundNum: g.roundNum,
         message: '30秒超时后autoRespondAction返回null,未提交任何动作',
-        pendingSnapshot: (function(){ try{ return JSON.parse(JSON.stringify(g.pending)); }catch(e){ return null; } })(),
+        // 【隐私修复,2026-08】原来直接 JSON.parse(JSON.stringify(g.pending)) 原样转存,
+        // 和 logPendingOrphan 同一个漏洞——改用白名单化的 sanitizePendingForLog(debug-log.js),
+        // 不在这里重新发明一套过滤规则。
+        pendingSnapshot: (function(){ try{ return typeof sanitizePendingForLog==='function' ? sanitizePendingForLog(g.pending) : null; }catch(e){ return null; } })(),
         playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(g) : null
       });
     }
