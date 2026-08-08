@@ -1825,7 +1825,8 @@ function respondTiaoxin(targetSeat){
     if((target.hand||[]).length===0) return g;
     
     g.tiaoxinUsed=true;
-    g.pending={type:'tiaoxinChoice', from:mySeat, to:targetSeat};
+    // 【B类修复】补setResponseAskedAt——此前没有,30秒超时兜底对这个pending形同虚设。
+    g.pending=setResponseAskedAt({type:'tiaoxinChoice', from:mySeat, to:targetSeat});
     g.phase='tiaoxinChoice';
     g.log=pushLog(g.log, me.name+' 发动【挑衅】,要求 '+target.name+' 选择:对其使用一张杀或被弃置一张牌');
     return g;

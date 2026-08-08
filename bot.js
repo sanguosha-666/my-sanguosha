@@ -219,6 +219,28 @@ const BOT_PHASE_ACTOR = {
   // 【系统性扫描发现的遗漏】曹彰【将驰】摸牌阶段三选一:行动者是 pending.seat(曹彰本人,
   // 服务端 respondJiangchi 守卫 g.pending.seat!==mySeat)。
   jiangchiAsk:'seat',
+  // 【B类修复,机器人技能覆盖审计】姜维【志继】觉醒选择:行动者是 pending.seat(姜维本人,
+  // 服务端 respondZhijiChoice 守卫 g.pending.seat!==mySeat)。此前完全没有登记,且两个
+  // 按钮("回复1点体力"/"摸两张牌")都不命中botSafePrompt任何安全正则、又恒为两个按钮
+  // 同时存在(不是"唯一按钮"的侥幸边界)——姜维体力上限降到阈值后这是强制触发的觉醒,
+  // 不是可选发动,机器人玩姜维、条件一满足就100%卡死,审计标为B类最高优先级。
+  zhijiChoice:'seat',
+  // 【B类修复,机器人技能覆盖审计】姜维【挑衅】目标二选一:行动者是 pending.to(被挑衅的
+  // 目标本人,服务端 respondTiaoxinChoice 守卫 g.pending.to!==mySeat)。注意这和"是否
+  // 发动挑衅"这个前置决策(BOT_SEAT_PICKS.tiaoxin,发动方)是两个不同座位视角——发动方
+  // 早就接好了,被挑衅的目标如果是机器人,此前完全没有任何决策代码。目标有可用杀时会
+  // 渲染两个按钮("对其使用【杀】"/"被弃置一张牌"),都不命中安全正则,真卡死;目标没有
+  // 可用杀时只渲染"被弃置一张牌"一个按钮,能被botSafePrompt"唯一按钮"兜底侥幸点掉——
+  // 这次补上确定性分支后不再依赖这个侥幸。
+  tiaoxinChoice:'to',
+  // 【B类修复,机器人技能覆盖审计,标注"潜在"风险的收尾】法正【眩惑】四个子阶段:行动者
+  // 都是 pending.sourceSeat(法正本人,自主发动、服务端各自函数守卫都是
+  // g.pending.sourceSeat!==mySeat)。这四个子阶段目前不会被机器人真正触发到(发动入口
+  // startHuanhuo 本身没有任何机器人代码调用它,是此前"机器人主动技能解锁"任务里评估过的
+  // 保守决策,这次不改),但既然审计已经指出"以后如果入口被接上、子阶段没预先补上决策会
+  // 变成新的卡死点",这次一并把子阶段的决策补齐,不留隐患。
+  huanhuoPick:'sourceSeat', huanhuoPickCard:'sourceSeat',
+  huanhuoPickGotCard:'sourceSeat', huanhuoPickSecond:'sourceSeat',
   // 华雄【耀武】:行动者是 pending.seat(造成伤害的那个人,服务端 respondYaowu 守卫
   // seat!==mySeat)。
   yaowu_choose:'seat',
@@ -994,6 +1016,15 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   'qiaomengChoose','qiaomengPickEquip','wangxiAsk','yaowu_choose','shensuSha',
   'zhimengAsk','zhimengPick','huashenChangePickStart','huashenChangePickEnd',
   'luanjiChoose','luanjiConfirm',
+  // 【B类修复,机器人技能覆盖审计】这批都有专属的确定性runBotDecision分支(接线在
+  // controlsChoice之前)——同上原则收录,防L1抢先镜像按钮。
+  // 【注意:xiaoguoChoice 不在这里】它是刻意保留在 EXCLUDE 之外的——有AI密钥时应该让
+  // L1 controlsChoice 接管(镜像真实按钮,AI能对"弃哪件装备"做更聪明的判断),这次新增
+  // 的确定性分支只是补"没有AI密钥时"的兜底,分支位置特意放在 L1 调用之后(见
+  // runBotDecision 里对应注释),不能通过加进 EXCLUDE 来"保护"——那样会连有密钥时也
+  // 抢在 L1 前面,破坏 T19/T20(run_ai_bus_l1_test.js)锁定的既有设计。
+  'tiaoxinChoice',
+  'huanhuoPick','huanhuoPickCard','huanhuoPickGotCard','huanhuoPickSecond',
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
@@ -3935,6 +3966,55 @@ async function runBotDecision(g,seat){
   if(g.phase==='jiangchiAsk'&&d.type==='jiangchiAsk'&&d.seat===seat){
     botInvoke(seat,()=>respondJiangchi('none')); return;
   }
+  // 【B类修复】姜维【志继】觉醒选择:体力上限已经-1(不可逆,两个选项都不能挽回这个代价),
+  // 摸两张牌/回复1点体力对自己都是纯收益、没有下行风险,唯一要判断的是"哪个更划算"——
+  // 觉醒条件本身就是"手牌为0",这一刻正好最缺资源,摸两张牌通常比单点体力更有价值;
+  // 但如果体力已经很低(<=1,濒死风险高),优先保命选回复体力。和华雄耀武
+  // respondYaowu(hp<maxHp?'recover':'draw')同一种"看体力决定"判断方式,不重新发明。
+  if(g.phase==='zhijiChoice'&&d.type==='zhijiChoice'&&d.seat===seat){
+    const me=g.players[seat];
+    const healOrDraw = !!(me && me.hp<=1);
+    botInvoke(seat,()=>respondZhijiChoice(healOrDraw)); return;
+  }
+  // 【B类修复】姜维【挑衅】目标二选一:对己方使用一张杀反击挑衅发起者,代价是自己的一张
+  // 杀(和被弃置一张牌同一个"损失一张牌"量级),但额外换来对发起者造成伤害的进攻收益,
+  // 比被动弃牌(对方还能挑你损失最大的那张)更划算——先探测确定真能打出杀(有牌+距离够,
+  // 遵循规则26不能只看牌够不够),能则用杀反击,不能则回退被弃牌(反正也是唯一合法选项)。
+  if(g.phase==='tiaoxinChoice'&&d.type==='tiaoxinChoice'&&d.to===seat){
+    const me=g.players[seat];
+    const shaIdx = me?findUsableAs(me.hand,me,'杀'):-1;
+    const canSha = shaIdx>=0 && canReachSha(g, seat, d.from);
+    botInvoke(seat,()=>respondTiaoxinChoice(canSha, canSha?shaIdx:undefined)); return;
+  }
+  // 【B类审计收尾,标注"潜在"】法正【眩惑】四个子阶段:发动入口startHuanhuo目前没有任何
+  // 机器人代码调用它,这四条分支实际上永远不会被触发到,只是提前补好、避免"以后接上入口
+  // 却忘了接子阶段"这种情况。决策不追求判断,和明策/旋风子阶段选牌同一基调"确定性兜底,
+  // 固定选第一个候选"。
+  if(g.phase==='huanhuoPick'&&d.type==='huanhuoPick'&&d.sourceSeat===seat){
+    const target=(d.candidates||[])[0];
+    if(typeof target==='number') botInvoke(seat,()=>pickHuanhuoTarget(target));
+    else botInvoke(seat,cancelHuanhuo);
+    return;
+  }
+  if(g.phase==='huanhuoPickCard'&&d.type==='huanhuoPickCard'&&d.sourceSeat===seat){
+    const me=g.players[seat];
+    const idx=(me&&me.hand||[]).findIndex(c=>c&&c.suit==='♥');
+    if(idx>=0) botInvoke(seat,()=>pickHuanhuoHeartCard(idx));
+    else botInvoke(seat,cancelHuanhuo);
+    return;
+  }
+  if(g.phase==='huanhuoPickGotCard'&&d.type==='huanhuoPickGotCard'&&d.sourceSeat===seat){
+    const target=g.players[d.targetSeat];
+    const slot=target&&target.equips&&EQUIP_SLOTS.find(s=>target.equips[s]);
+    if(slot) botInvoke(seat,()=>pickHuanhuoGotCard('equip',slot));
+    else if(target&&(target.hand||[]).length>0) botInvoke(seat,()=>pickHuanhuoGotCard('hand',null));
+    return;
+  }
+  if(g.phase==='huanhuoPickSecond'&&d.type==='huanhuoPickSecond'&&d.sourceSeat===seat){
+    const target=(d.candidates||[])[0];
+    if(typeof target==='number') botInvoke(seat,()=>pickHuanhuoSecondTarget(target));
+    return;
+  }
   // 曹植【酒诗】翻回正面:没有下行风险(翻正面只是解除背面朝上状态,不需要额外代价),
   // 固定发动。
   if(g.phase==='jiushiFlipAsk'&&d.type==='jiushiFlipAsk'&&d.seat===seat){
@@ -4243,6 +4323,19 @@ async function runBotDecision(g,seat){
   }
   if(g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice' && d.seat===seat){
     if(await botDecide('seatPick', g, seat)) return;
+  }
+  // 【B类修复,机器人技能覆盖审计】骁果目标二选一:按钮是"弃置X【装备名】"(按已有装备槽
+  // 各一个)+"受到1点伤害"。此前(无密钥)靠botSafePrompt的mandatory正则侥幸命中"弃置"
+  // 类按钮,不是真的判断过——这次补一条确定性分支替换掉这个侥幸,同一个选择逻辑(优先
+  // 弃装备,没有装备时受伤害)。位置刻意放在L1 controlsChoice之后、最终botSafePrompt
+  // 之前:有AI密钥时应该让L1接管(AI能对"弃哪件装备"做更聪明的判断,run_ai_bus_l1_test.js
+  // 的T19/T20锁定了这个设计,xiaoguoChoice故意不在CONTROLS_CHOICE_EXCLUDE里);没有
+  // 密钥时L1直接返回false,落到这里,用确定性判断而不是碰运气的正则匹配。
+  if(g.phase==='xiaoguoChoice' && d && d.type==='xiaoguoChoice' && d.to===seat){
+    const target=g.players[seat];
+    const slot=target&&target.equips&&EQUIP_SLOTS.find(s=>target.equips[s]);
+    botInvoke(seat,()=>respondXiaoguoChoice(slot||'damage'));
+    return;
   }
   if(botSafePrompt(g,seat)) return;
   console.warn('机器人暂未覆盖阶段',g.phase,d.type,seat);

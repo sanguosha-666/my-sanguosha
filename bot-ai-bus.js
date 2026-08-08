@@ -290,6 +290,36 @@ function autoRespondAction(g){
   if(type==='ganglieAsk') return function(){ respondGanglieAsk(false); };
   if(type==='guiduAsk') return function(){ cancelGuidu(); };
   if(type==='jiangchiAsk') return function(){ respondJiangchi('none'); };
+  // 【B类修复,机器人技能覆盖审计】超时兜底统一走各自最保守/最省判断的分支:
+  // 志继两个选项都是纯收益,固定回复体力(不用再判断局面);骁果二选一优先弃装备,没有
+  // 装备时受伤害;挑衅目标超时默认被弃牌(不主动出杀,和这批既有兜底同一保守基调);
+  // 眩惑四个子阶段固定选候选/手牌第一项,和明策的确定性兜底同一写法。
+  if(type==='zhijiChoice') return function(){ respondZhijiChoice(true); };
+  if(type==='xiaoguoChoice') return function(){
+    const target=g.players[g.pending.to];
+    const slot=target&&target.equips&&EQUIP_SLOTS.find(function(s){ return target.equips[s]; });
+    respondXiaoguoChoice(slot||'damage');
+  };
+  if(type==='tiaoxinChoice') return function(){ respondTiaoxinChoice(false); };
+  if(type==='huanhuoPick') return function(){
+    const target=(g.pending.candidates||[])[0];
+    if(typeof target==='number') pickHuanhuoTarget(target); else cancelHuanhuo();
+  };
+  if(type==='huanhuoPickCard') return function(){
+    const me=g.players[g.pending.sourceSeat];
+    const idx=(me&&me.hand||[]).findIndex(function(c){ return c&&c.suit==='♥'; });
+    if(idx>=0) pickHuanhuoHeartCard(idx); else cancelHuanhuo();
+  };
+  if(type==='huanhuoPickGotCard') return function(){
+    const target=g.players[g.pending.targetSeat];
+    const slot=target&&target.equips&&EQUIP_SLOTS.find(function(s){ return target.equips[s]; });
+    if(slot) pickHuanhuoGotCard('equip',slot);
+    else if(target&&(target.hand||[]).length>0) pickHuanhuoGotCard('hand',null);
+  };
+  if(type==='huanhuoPickSecond') return function(){
+    const target=(g.pending.candidates||[])[0];
+    if(typeof target==='number') pickHuanhuoSecondTarget(target);
+  };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且

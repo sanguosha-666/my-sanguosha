@@ -6259,7 +6259,9 @@ function startTurn(g, seat){
     if(p.hp > p.maxHp) p.hp = p.maxHp;
     // 需要玩家选择：回复1点体力 或 摸两张牌
     // 观星技能会在选择完成后获得
-    g.pending = { type:'zhijiChoice', seat };
+    // 【B类修复】补setResponseAskedAt——此前没有,30秒超时兜底对这个pending形同虚设,
+    // 和郭嘉遗计/刚烈/将驰/鬼道那批同一个遗漏点。
+    g.pending = setResponseAskedAt({ type:'zhijiChoice', seat });
     g.phase = 'zhijiChoice';
     g.log = pushLog(g.log, p.name + ' 发动【志继】觉醒,体力上限-1,请选择:回复1点体力或摸两张牌');
     return; // 等待玩家选择
@@ -7248,7 +7250,8 @@ function startHuanhuo() {
     const candidates=g.players.map((p,i)=>i!==mySeat&&p&&p.alive?i:null).filter(i=>i!==null);
     // 获得第一名角色的牌后必须交给另一名其他角色，所以场上至少需要两名其他存活角色。
     if(!heartCards.length || candidates.length<2) return g;
-    g.pending={type:'huanhuoPick',sourceSeat:mySeat,candidates};
+    // 【B类审计收尾】补setResponseAskedAt,和这四个子阶段的其余三处同一批修复。
+    g.pending=setResponseAskedAt({type:'huanhuoPick',sourceSeat:mySeat,candidates});
     g.phase='huanhuoPick';
     g.log=pushLog(g.log,me.name+' 发动【眩惑】,选择目标角色…');
     return g;
@@ -7267,11 +7270,11 @@ function pickHuanhuoTarget(seat) {
     const heartCards=(me.hand||[]).filter(card=>card.suit==='♥');
     if(!heartCards.length) return g;
     // 进入选择♥手牌阶段
-    g.pending = {
+    g.pending = setResponseAskedAt({
       type: 'huanhuoPickCard',
       sourceSeat: mySeat,
       targetSeat: seat
-    };
+    });
     g.phase='huanhuoPickCard';
     
     g.log = pushLog(g.log, me.name + ' 选择 ' + target.name + ' 作为目标,请选择一张♥手牌');
@@ -7306,11 +7309,11 @@ function pickHuanhuoHeartCard(cardIndex) {
     }
     
     // 进入选择要获得的牌阶段
-    g.pending = {
+    g.pending = setResponseAskedAt({
       type: 'huanhuoPickGotCard',
       sourceSeat: mySeat,
       targetSeat: g.pending.targetSeat
-    };
+    });
     g.phase='huanhuoPickGotCard';
     
     g.log = pushLog(g.log, me.name + ' 交给 ' + target.name + ' 一张♥手牌,请选择要获得的牌');
@@ -7333,7 +7336,7 @@ function enterHuanhuoTransfer(g, sourceSeat, firstTargetSeat, transferCardId) {
   for(let i=0;i<g.players.length;i++){
     if(i!==sourceSeat && i!==firstTargetSeat && g.players[i] && g.players[i].alive) candidates.push(i);
   }
-  g.pending={type:'huanhuoPickSecond',sourceSeat,firstTargetSeat,transferCard:gotCard,candidates};
+  g.pending=setResponseAskedAt({type:'huanhuoPickSecond',sourceSeat,firstTargetSeat,transferCard:gotCard,candidates});
   g.phase='huanhuoPickSecond';
   g.log=pushLog(g.log,me.name+' 获得了 '+target.name+' 的一张牌，请选择要交给的角色');
 }
