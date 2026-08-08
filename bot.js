@@ -1510,9 +1510,15 @@ function dyingMatch(g, seat){
 }
 function dyingBuildCandidates(g, seat){
   const p = g.players[seat];
+  const d = g.pending;
   const hasTao = findUsableAs(p.hand, p, '桃') >= 0;
   const out = [];
   if(hasTao) out.push({ action:'打出【桃】救援', save:true });
+  // 【涅槃修复,机器人技能覆盖审计后续】只有濒死者是自己(d.seat===seat)、自己拥有niepan能力
+  // (庞统)、且这局还没用过限定技时才有这个选项——这是庞统专属候选,守卫条件对齐服务端
+  // useNiepan 的守卫(g.pending.seat===mySeat && hasCap(me,'niepan') && !me.nirvanaUsed)。
+  // 其它角色/庞统已用过涅槃时不会加这个候选,不影响原有桃/不出两个选项的判断。
+  if(d.seat===seat && hasCap(p,'niepan') && !p.nirvanaUsed) out.push({ action:'发动【涅槃】', niepan:true });
   out.push({ action:'不出', save:false });
   return out;
 }
@@ -1529,15 +1535,33 @@ function dyingExtraState(g, seat){
 function dyingLocalFallback(g, seat, candidates){
   const d = g.pending;
   const p = g.players[seat];
+  const niepanChoice = candidates.find(function(c){ return c.niepan; });
+  const taoChoice = candidates.find(function(c){ return c.save && !c.niepan; });
+  if(niepanChoice && d.seat===seat){
+    // 【涅槃默认发动规则】涅槃效果=弃光手牌+装备+判定区的牌,复原武将牌,回复至3点体力,摸3张牌
+    // (game.js:useNiepan)——是一次"清空重置",值不值得发动关键看"这次要弃掉的东西值多少":
+    //  1) 没有桃可用时,不发动涅槃就是坐视自己阵亡——涅槃怎么都比等死强,直接选涅槃。
+    //  2) 有桃可用时,只有"手牌+已装备件数很少"(粗略按 <=2 判断,相当于身上基本没什么值得
+    //     留的东西)才选涅槃换满血+摸3张;否则手牌/装备里可能压着更值钱的牌(比如别的桃、
+    //     强力装备),弃了不划算,继续走原来"有桃就救"的逻辑,不抢占更优的省资源选项。
+    if(!taoChoice) return niepanChoice;
+    const equipCount = EQUIP_SLOTS.filter(function(s){ return p.equips && p.equips[s]; }).length;
+    const cheapToDiscard = (p.hand.length + equipCount) <= 2;
+    if(cheapToDiscard) return niepanChoice;
+  }
   const save = botCanSave(g, seat, d.seat) && canBotUseTaoForDying(g, seat, d.seat) && findUsableAs(p.hand, p, '桃') >= 0;
-  return candidates.find(function(c){ return c.save === save; }) || candidates[candidates.length-1];
+  return candidates.find(function(c){ return c.save === save && !c.niepan; }) || candidates[candidates.length-1];
 }
 function dyingExecute(g, seat, choice){
+  if(choice && choice.niepan){ botInvoke(seat, function(){ useNiepan(); }); return; }
   botInvoke(seat, function(){ respondDying(!!(choice && choice.save)); });
 }
 function dyingSystemPrompt(g, seat){
   return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。现在轮到你对濒死角色决定是否打出【桃】救援。'
-    +'参考自己的身份、已知身份信息与当前手牌,权衡救与不救的利弊。'
+    +'如果候选列表里出现"发动【涅槃】"选项(仅当濒死的是你自己、你是庞统、且这局还没用过涅槃时才会出现):'
+    +'涅槃会弃掉你当前所有手牌、装备和判定区的牌,复原武将牌,回复至3点体力,并摸3张新牌——是一次"清空重置",'
+    +'手牌/装备越少代价越低越划算,如果你手里压着好几张有价值的牌(尤其是桃、强力装备)弃了可能不划算。'
+    +'参考自己的身份、已知身份信息与当前手牌,权衡救与不救(或发动涅槃)的利弊。'
     +'只有列表内选项。只输出 {"choice":数字}，不要解释。'
     +'先判断濒死者是敌是友、值不值得救,再选。', g, seat);
 }
