@@ -1061,8 +1061,33 @@
   #closeRoomBtn{position:fixed;top:12px;left:12px;z-index:100;width:44px;height:44px;
     border:1px solid var(--cinnabar-bright);background:#1a1410;color:var(--cinnabar-bright);
     font-size:20px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  /* 调试日志入口(debugLogBtn):和 #closeRoomBtn 同一列、往下一格(top:64,不是同一行往右挪),
+     不是照抄 #logBtn 相对 #helpBtn 的"同一行往左挪64px"那套——h1 标题是 text-align:center,
+     视口变窄时标题("杀"印章图标)会向左移动、越靠近页面左上角,如果在 left:12 这一行再加一个
+     往右挪的按钮(比如 left:64),窄屏下右边缘64+44=108 这段区域正是标题可能移动到的地方，
+     和 CLAUDE.md 记录的 #closeRoomBtn 当年"文字按钮右边缘穿进标题印章"是同一类坑，这次
+     刻意换个方向避开(往下而不是往右),不在同一水平带上和标题抢位置。top:64 和 .log-panel
+     宽屏覆盖规则里"top:64 避开顶部44px高按钮"用的是同一个数值,两者互不冲突(.log-panel
+     在 right 侧,这里在 left 侧)。 */
+  #debugLogBtn{position:fixed;top:64px;left:12px;z-index:50;width:44px;height:44px;
+    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
+  /* 调试日志弹窗内容(showDebugLog,复用 #infoModal/.info-panel):列表默认只显示摘要行,
+     点击展开 <pre> 详情(pendingSnapshot/playersSummary/stack)。宽屏/窄屏都靠 .info-panel
+     自身的 max-height:82vh+overflow:auto 滚动,这里不再重复设置一层滚动容器,避免嵌套滚动区
+     在窄屏上出现两层滚动条互相干扰(#logToast/.corner同类问题的既有教训)。 */
+  .dbglog-item{border-bottom:1px solid var(--line);padding:8px 0;}
+  .dbglog-row{cursor:pointer;font-size:14px;line-height:1.5;}
+  .dbglog-row:hover{color:var(--gold);}
+  .dbglog-time{color:var(--paper-dim);font-size:12px;margin-right:6px;}
+  .dbglog-kind{font-weight:700;margin-right:6px;}
+  .dbglog-phase{color:var(--paper-dim);font-size:12px;}
+  .dbglog-msg{margin-top:2px;}
+  .dbglog-detail{background:#14100c;border:1px solid var(--line);border-radius:6px;
+    padding:8px;margin-top:6px;font-size:12px;white-space:pre-wrap;word-break:break-all;
+    max-height:40vh;overflow:auto;}
+  .dbglog-empty,.dbglog-loading{color:var(--paper-dim);text-align:center;padding:20px 0;}
   .log-modal div:last-child{color:var(--paper);}
   /* 常驻日志小面板:嵌在 controls 下方的正常文档流里,不用 fixed 定位——手机窄屏下固定定位
      容易和其它元素重叠(#closeRoomBtn 那次真机踩过的坑),这里刻意避开同类问题。只展示最近
@@ -1948,6 +1973,7 @@
 <button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
 <button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
 <button id="closeRoomBtn" class="icon-btn" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
+<button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
 <div id="logToast"></div>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
@@ -2039,20 +2065,20 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=328"></script>
-<script src="data.js?v=328"></script>
-<script src="debug-log.js?v=328"></script>
-<script src="room-lifecycle.js?v=328"></script>
-<script src="game.js?v=328"></script>
-<script src="weapons.js?v=328"></script>
-<script src="skills.js?v=328"></script>
-<script src="bot-ai-bus.js?v=328"></script>
-<script src="bot.js?v=328"></script>
-<script src="ai-bot.js?v=328"></script>
-<script src="render.js?v=328"></script>
-<script src="render-table.js?v=328"></script>
-<script src="render-hand.js?v=328"></script>
-<script src="render-controls.js?v=328"></script>
-<script src="render-log.js?v=328"></script>
+<script src="config.js?v=329"></script>
+<script src="data.js?v=329"></script>
+<script src="debug-log.js?v=329"></script>
+<script src="room-lifecycle.js?v=329"></script>
+<script src="game.js?v=329"></script>
+<script src="weapons.js?v=329"></script>
+<script src="skills.js?v=329"></script>
+<script src="bot-ai-bus.js?v=329"></script>
+<script src="bot.js?v=329"></script>
+<script src="ai-bot.js?v=329"></script>
+<script src="render.js?v=329"></script>
+<script src="render-table.js?v=329"></script>
+<script src="render-hand.js?v=329"></script>
+<script src="render-controls.js?v=329"></script>
+<script src="render-log.js?v=329"></script>
 </body>
 </html>

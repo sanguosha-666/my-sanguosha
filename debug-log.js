@@ -74,9 +74,38 @@ function writeDebugLog(roomIdArg, kind, payload){
 // logPendingOrphan: normalize() 里"检测到不合法 pending、强制清空"的统一入口。
 // 【调用时机要求】必须在真正执行 g.pending=null 之前调用——此时 g.pending 还是清空前
 // 的原始内容,记录下来的 pendingSnapshot 才有意义("被清空前是什么",不是清空后的 null)。
+//
+// 【A/B 分类,2026-08 复核后引入】normalize() 里 105 处调用点全部传一个以 'A:' 或 'B:'
+// 开头的 reason 字符串,标注这次复核对该分支的判断——不是自由文本,是这两个前缀的约定:
+//   'A:' —— 校验条件包含"结构不合法"(字段类型不对、必须非空的数组为空、resume/judgeCard
+//           这类子对象缺失等),这些字段只有创建/收尾这条链的 respond*/finish* 函数自己
+//           写错了才会出现,和"引用的座位是否还存活"这个会随时随外部事件变化的条件无关。
+//           一旦触发基本可以断定是上游某个收尾函数漏写了、真正的bug信号,不做频率控制,
+//           每次都记(这类分支设计上就该几乎不触发,不存在"正常游戏里也会频繁触发"的
+//           风险,限流反而会把唯一一次报警埋掉)。
+//   'B:' —— 校验条件只是"引用的座位是否还存活"(或同等的纯粹存在性检查),而这个项目里
+//           大量pending代表的是"多方参与的、可被并发中断的流程"(比如决斗/AOE响应/濒死
+//           求桃期间另一方因为完全不相关的伤害/技能而阵亡)——CLAUDE.md"濒死求桃"那段
+//           明确写了阵亡随时可能挂起并打断进行中的流程,所以这类校验在正常游戏里确实
+//           会不时合理触发,不是bug信号,但同一类型短时间内反复触发也没有额外信息量,
+//           所以做60秒频率控制(同一 pendingType+reason 一个窗口只记一次),避免刷屏。
+// 复核结论:105处里没有发现"设计上就有问题、这次任务应该顺带修"的分支(逐条读过一遍,
+// 结论就是上述二分类),如果以后复核出这类问题,应该在这里补一条"C:"标注单独列出,而不是
+// 顺手在这次改动里修掉。
+const PENDING_ORPHAN_RATE_LIMIT_MS = 60000;
+let __pendingOrphanLastLogged = {}; // key(type+reason) -> 上次记录的ts,纯内存、不跨刷新持久化
 function logPendingOrphan(g, reason){
   try{
     if(!g || !g.pending) return;
+    const type = g.pending.type || 'unknown';
+    const isRateLimited = typeof reason === 'string' && reason.indexOf('B:') === 0;
+    if(isRateLimited){
+      const key = type + '|' + reason;
+      const now = Date.now();
+      const last = __pendingOrphanLastLogged[key];
+      if(last !== undefined && (now - last) < PENDING_ORPHAN_RATE_LIMIT_MS) return; // 60秒内已经记过同一种,跳过
+      __pendingOrphanLastLogged[key] = now;
+    }
     const snap = JSON.parse(JSON.stringify(g.pending));
     writeDebugLog(typeof roomId !== 'undefined' ? roomId : null, 'pending_orphan_detected', {
       phase: g.phase || null,
@@ -157,4 +186,85 @@ function cleanupOldDebugLogs(roomIdArg){
       }).catch(function(e){ console.warn('cleanupOldDebugLogs: 清理失败', e); });
     }).catch(function(e){ console.warn('cleanupOldDebugLogs: 读取失败', e); });
   }catch(e){ console.warn('cleanupOldDebugLogs 出错', e); }
+}
+
+// ==================== "查看调试日志"按钮 / 弹窗(showDebugLog) ====================
+// 入口:index.html 里 #debugLogBtn(挂在 #closeRoomBtn 正下方,44x44圆形图标🐛),
+// onclick 直接调这里。复用 render.js 的 showInfo/#infoModal 机制(和帮助/日志浮层
+// 同一套弹窗骨架),不新建一套弹窗系统。
+
+// kind 中文映射:维护这一份,不在渲染代码里散着写文案。
+const DEBUG_LOG_KIND_LABELS = {
+  js_error: '❌ JS异常',
+  timeout_stuck: '⏱️ 超时卡死',
+  bot_decision_failed: '🤖 机器人决策失败',
+  pending_orphan_detected: '🧹 pending被清空'
+};
+
+// debugLogEntryHtml: 单条记录的默认视图(摘要行,一直显示)+ 展开详情(默认隐藏,点摘要行
+// 切换)。默认视图:时间 + kind中文 + phase(如果有) + message。展开详情:turn/roundNum/
+// seat/pendingType/pendingSnapshot/playersSummary/stack 整体格式化成 JSON pretty-print。
+function debugLogEntryHtml(entry, idx){
+  const kindLabel = (DEBUG_LOG_KIND_LABELS[entry.kind] !== undefined) ? DEBUG_LOG_KIND_LABELS[entry.kind] : String(entry.kind);
+  const phaseHtml = entry.phase ? ('<span class="dbglog-phase">phase=' + escapeHtml(String(entry.phase)) + '</span>') : '';
+  const summary = '<div class="dbglog-row" data-idx="' + idx + '">'
+    + '<span class="dbglog-time">' + escapeHtml(entry.isoTime || '') + '</span>'
+    + '<span class="dbglog-kind">' + escapeHtml(kindLabel) + '</span>'
+    + phaseHtml
+    + '<div class="dbglog-msg">' + escapeHtml(entry.message || '') + '</div>'
+    + '</div>';
+  const detailObj = {
+    turn: entry.turn, roundNum: entry.roundNum, seat: entry.seat, pendingType: entry.pendingType,
+    pendingSnapshot: entry.pendingSnapshot, playersSummary: entry.playersSummary, stack: entry.stack
+  };
+  const detail = '<pre class="dbglog-detail hidden" data-idx="' + idx + '">'
+    + escapeHtml(JSON.stringify(detailObj, null, 2)) + '</pre>';
+  return '<div class="dbglog-item">' + summary + detail + '</div>';
+}
+
+// showDebugLog: 拉取当前房间最近50条记录(orderByKey().limitToFirst(50)——key是反向
+// 时间戳,数值最小=时间最新,天然拿到"最近的50条"而不是"最早的50条")展示。
+function showDebugLog(){
+  if(typeof showInfo !== 'function') return; // render.js 未加载(理论上不会发生),静默跳过
+  if(typeof db === 'undefined' || !db){
+    showInfo('调试日志', '<div class="dbglog-empty">Firebase 未配置,无法查看调试日志</div>');
+    return;
+  }
+  const rid = (typeof roomId !== 'undefined') ? roomId : null;
+  if(!rid){
+    showInfo('调试日志', '<div class="dbglog-empty">当前不在房间中,没有可查看的调试日志</div>');
+    return;
+  }
+  showInfo('调试日志(房间 ' + escapeHtml(String(rid)) + ')', '<div class="dbglog-loading">加载中…</div>');
+  db.ref('debugLogs/' + rid).orderByKey().limitToFirst(50).get().then(function(snap){
+    // 拉取是异步的,期间用户可能已经手动关闭了弹窗——这时不要再往(可能已经被清空的)
+    // #infoModal 里塞内容,否则下一次打开无关的浮层(比如帮助面板)会突然被这次的结果覆盖。
+    const m = document.getElementById('infoModal');
+    if(!m || m.classList.contains('hidden')) return;
+    const body = m.querySelector('.info-body');
+    if(!body) return;
+    if(!snap.exists()){
+      body.innerHTML = '<div class="dbglog-empty">暂无调试日志记录(这是好事)</div>';
+      return;
+    }
+    let html = '';
+    let idx = 0;
+    snap.forEach(function(child){
+      html += debugLogEntryHtml(child.val() || {}, idx);
+      idx++;
+    });
+    body.innerHTML = '<div class="dbglog-list">' + html + '</div>';
+    const rows = body.querySelectorAll('.dbglog-row');
+    for(let i = 0; i < rows.length; i++){
+      rows[i].onclick = function(){
+        const d = body.querySelector('.dbglog-detail[data-idx="' + this.getAttribute('data-idx') + '"]');
+        if(d) d.classList.toggle('hidden');
+      };
+    }
+  }).catch(function(){
+    const m = document.getElementById('infoModal');
+    if(!m || m.classList.contains('hidden')) return;
+    const body = m.querySelector('.info-body');
+    if(body) body.innerHTML = '<div class="dbglog-empty">拉取调试日志失败,请检查网络或 Firebase 配置</div>';
+  });
 }
