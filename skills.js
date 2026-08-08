@@ -707,7 +707,10 @@ function cancelGuhuoTarget(){
 function continueHuashenChangeCheckAtTurnStart(g, seat){
   const p = g.players[seat];
   if(p && p.alive && hasCap(p,'huashen') && p.huashenGeneral!==null){
-    g.pending = {type:'huashenChangeAskStart', seat};
+    // 【超时修复】必须 setResponseAskedAt,否则 g.pending.askedAt 是 undefined,
+    // maybeAutoRespondTimeout 的 typeof askedAt!=='number' 守卫会直接拦掉,30秒超时
+    // 永远不会触发——和 autoRespondAction 白名单是否登记这个 type 无关,两处都要改。
+    g.pending = setResponseAskedAt({type:'huashenChangeAskStart', seat});
     g.phase = 'huashenChangeAskStart';
     g.log = pushLog(g.log, p.name+' 是否更改【化身】声明的技能…');
     return;
@@ -730,7 +733,8 @@ function respondHuashenChangeAskStart(activate){
       continueGuanxingCheck(g, seat);
       return g;
     }
-    g.pending = {type:'huashenChangePickStart', seat};
+    // 同上,setResponseAskedAt 补时间戳(不补则超时机制对这个中间阶段同样失效)。
+    g.pending = setResponseAskedAt({type:'huashenChangePickStart', seat});
     g.phase = 'huashenChangePickStart';
     g.log = pushLog(g.log, me.name+' 重新选择借用一名武将的技能…');
     return g;

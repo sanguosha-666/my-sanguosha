@@ -303,7 +303,8 @@ function respondHuashenChangeAskEnd(activate){
       continueBiyueCheck(g, endingSeat);
       return g;
     }
-    g.pending = {type:'huashenChangePickEnd', seat:endingSeat};
+    // 同上,setResponseAskedAt 补时间戳(不补则超时机制对这个中间阶段同样失效)。
+    g.pending = setResponseAskedAt({type:'huashenChangePickEnd', seat:endingSeat});
     g.phase = 'huashenChangePickEnd';
     g.log = pushLog(g.log, me.name+' 重新选择借用一名武将的技能…');
     return g;

@@ -224,6 +224,132 @@ const testCode = String.raw`
     if(window.__aiCalls !== 0) throw new Error('callAI 不应被调用,实际 ' + window.__aiCalls);
   });
 
+  // ---- 左慈【化身/新生】超时兜底修复(真实bug:huashenChangeAskStart/AskEnd/
+  // PickStart/PickEnd 此前既没登记进 autoRespondAction 白名单,创建时也没打 askedAt
+  // 时间戳——两处都要修,只改一处等于没修。这四项都用真实respond函数(不是spy)全链路
+  // 验证:超时后pending真的被清、流程真的往下走,不是只验证"函数被调了一次") ----
+
+  // 7. huashenChangeAskStart 超时 -> 真实提交respondHuashenChangeAskStart(false) ->
+  //    "不更改"分支生效,pending推进离开huashenChangeAskStart(不卡在原地)。
+  var g7 = mkG({
+    phase: 'huashenChangeAskStart',
+    pending: setResponseAskedAt({ type: 'huashenChangeAskStart', seat: 0 })
+  });
+  g7.players[0].huashenGeneral = 'xiahouyuan';
+  g7.players[0].huashenPool = ['xiahouyuan'];
+  g7.pending.askedAt = Date.now() - 31000; // 补造成"31秒前问的"
+  window.__g = g7;
+  maybeAutoRespondTimeout(g7);
+  await check('huashenChangeAskStart 超时 -> 真实提交respondHuashenChangeAskStart(false),不再卡在原地', function(){
+    if(g7.phase === 'huashenChangeAskStart') throw new Error('phase 不应仍停在 huashenChangeAskStart,实际 ' + g7.phase);
+    if(g7.pending && g7.pending.type === 'huashenChangeAskStart') throw new Error('pending 不应仍是 huashenChangeAskStart');
+    if(!g7.log.some(function(e){ return /不更改/.test(e.text||e); })) throw new Error('应记录"不更改"日志');
+  });
+
+  // 8. huashenChangeAskEnd 超时 -> 真实提交respondHuashenChangeAskEnd(false)
+  var g8 = mkG({
+    phase: 'huashenChangeAskEnd',
+    pending: setResponseAskedAt({ type: 'huashenChangeAskEnd', seat: 0 })
+  });
+  g8.players[0].huashenGeneral = 'xiahouyuan';
+  g8.players[0].huashenPool = ['xiahouyuan'];
+  g8.pending.askedAt = Date.now() - 31000;
+  window.__g = g8;
+  maybeAutoRespondTimeout(g8);
+  await check('huashenChangeAskEnd 超时 -> 真实提交respondHuashenChangeAskEnd(false),不再卡在原地', function(){
+    if(g8.phase === 'huashenChangeAskEnd') throw new Error('phase 不应仍停在 huashenChangeAskEnd,实际 ' + g8.phase);
+    if(g8.pending && g8.pending.type === 'huashenChangeAskEnd') throw new Error('pending 不应仍是 huashenChangeAskEnd');
+  });
+
+  // 9. huashenChangePickStart 超时 -> 兜底选huashenPool里第一个技能表非空的武将+它的
+  //    第一个技能条目,真实提交respondHuashenChangePickStart,validateHuashenPick必须
+  //    通过(不是随便传一个字符串导致守卫拒绝、pending原地不动)。
+  var g9 = mkG({
+    phase: 'huashenChangePickStart',
+    pending: setResponseAskedAt({ type: 'huashenChangePickStart', seat: 0 })
+  });
+  g9.players[0].huashenGeneral = 'xiahouyuan';
+  g9.players[0].huashenPool = ['xiahouyuan'];
+  g9.players[0].huashenSkillName = '神速';
+  g9.pending.askedAt = Date.now() - 31000;
+  window.__g = g9;
+  maybeAutoRespondTimeout(g9);
+  await check('huashenChangePickStart 超时 -> 兜底选择合法武将+技能,真实提交并推进(不被validateHuashenPick拒绝)', function(){
+    if(g9.phase === 'huashenChangePickStart') throw new Error('phase 不应仍停在 huashenChangePickStart,实际 ' + g9.phase);
+    if(g9.pending && g9.pending.type === 'huashenChangePickStart') throw new Error('pending 不应仍是 huashenChangePickStart(说明兜底选择被validateHuashenPick拒绝)');
+    if(g9.players[0].huashenGeneral !== 'xiahouyuan') throw new Error('huashenGeneral 应保持/确认为 xiahouyuan,实际 ' + g9.players[0].huashenGeneral);
+    if(g9.players[0].huashenSkillName !== '神速') throw new Error('huashenSkillName 应为 神速,实际 ' + g9.players[0].huashenSkillName);
+  });
+
+  // 10. huashenChangePickEnd 超时 -> 同上,respondHuashenChangePickEnd(room-lifecycle.js)
+  var g10 = mkG({
+    phase: 'huashenChangePickEnd',
+    pending: setResponseAskedAt({ type: 'huashenChangePickEnd', seat: 0 })
+  });
+  g10.players[0].huashenGeneral = 'xiahouyuan';
+  g10.players[0].huashenPool = ['xiahouyuan'];
+  g10.players[0].huashenSkillName = '神速';
+  g10.pending.askedAt = Date.now() - 31000;
+  window.__g = g10;
+  maybeAutoRespondTimeout(g10);
+  await check('huashenChangePickEnd 超时 -> 兜底选择合法武将+技能,真实提交并推进(不被validateHuashenPick拒绝)', function(){
+    if(g10.phase === 'huashenChangePickEnd') throw new Error('phase 不应仍停在 huashenChangePickEnd,实际 ' + g10.phase);
+    if(g10.pending && g10.pending.type === 'huashenChangePickEnd') throw new Error('pending 不应仍是 huashenChangePickEnd(说明兜底选择被validateHuashenPick拒绝)');
+    if(g10.players[0].huashenGeneral !== 'xiahouyuan') throw new Error('huashenGeneral 应保持/确认为 xiahouyuan,实际 ' + g10.players[0].huashenGeneral);
+    if(g10.players[0].huashenSkillName !== '神速') throw new Error('huashenSkillName 应为 神速,实际 ' + g10.players[0].huashenSkillName);
+  });
+
+  // 11. 关键回归:直接调用真实的pending创建函数(不是本测试手动构造pending),验证
+  //     这次编辑的四处调用点(skills.js/game.js/room-lifecycle.js)真的补上了
+  //     setResponseAskedAt——如果只改了 autoRespondAction 白名单、忘了这四处创建点,
+  //     上面7~10项测试就是在自己伪造的假前提(手动写了askedAt)上通过,测不出真实bug
+  //     是否修复。这里让真实代码路径自己创建pending,检查它自带的askedAt是不是number。
+  var g11 = mkG({ phase: 'play', turn: 0 });
+  g11.players[0].general = 'zuoci';
+  g11.players[0].huashenGeneral = 'xiahouyuan';
+  g11.players[0].huashenPool = ['xiahouyuan'];
+  continueHuashenChangeCheckAtTurnStart(g11, 0); // 真实回合开始入口,不是测试手搭的假pending
+  await check('回归:continueHuashenChangeCheckAtTurnStart真实创建的pending自带askedAt(不是测试伪造的)', function(){
+    if(!g11.pending || g11.pending.type !== 'huashenChangeAskStart') throw new Error('应真实进入 huashenChangeAskStart,实际 ' + JSON.stringify(g11.pending));
+    if(typeof g11.pending.askedAt !== 'number') throw new Error('真实创建的pending应自带askedAt数字,实际 ' + g11.pending.askedAt);
+  });
+
+  var g11b = mkG({ phase: 'huashenChangeAskStart', pending: { type: 'huashenChangeAskStart', seat: 0 } });
+  g11b.players[0].general = 'zuoci';
+  g11b.players[0].huashenGeneral = 'xiahouyuan';
+  g11b.players[0].huashenPool = ['xiahouyuan'];
+  window.__g = g11b; // respondHuashenChangeAskStart 内部走 tx(),stub 读 window.__g
+  mySeat = 0;
+  respondHuashenChangeAskStart(true); // 真实"更改"分支,走到huashenChangePickStart
+  await check('回归:respondHuashenChangeAskStart(true)真实创建的huashenChangePickStart pending自带askedAt', function(){
+    var g = window.__g;
+    if(!g.pending || g.pending.type !== 'huashenChangePickStart') throw new Error('应真实进入 huashenChangePickStart,实际 ' + JSON.stringify(g.pending));
+    if(typeof g.pending.askedAt !== 'number') throw new Error('真实创建的pending应自带askedAt数字,实际 ' + g.pending.askedAt);
+  });
+
+  var g11c = mkG({ phase: 'play', turn: 0 });
+  g11c.players[0].general = 'zuoci';
+  g11c.players[0].huashenGeneral = 'xiahouyuan';
+  g11c.players[0].huashenPool = ['xiahouyuan'];
+  continueHuashenChangeCheckAtTurnEnd(g11c, 0); // 真实回合结束入口
+  await check('回归:continueHuashenChangeCheckAtTurnEnd真实创建的pending自带askedAt', function(){
+    if(!g11c.pending || g11c.pending.type !== 'huashenChangeAskEnd') throw new Error('应真实进入 huashenChangeAskEnd,实际 ' + JSON.stringify(g11c.pending));
+    if(typeof g11c.pending.askedAt !== 'number') throw new Error('真实创建的pending应自带askedAt数字,实际 ' + g11c.pending.askedAt);
+  });
+
+  var g11d = mkG({ phase: 'huashenChangeAskEnd', pending: { type: 'huashenChangeAskEnd', seat: 0 } });
+  g11d.players[0].general = 'zuoci';
+  g11d.players[0].huashenGeneral = 'xiahouyuan';
+  g11d.players[0].huashenPool = ['xiahouyuan'];
+  window.__g = g11d;
+  mySeat = 0;
+  respondHuashenChangeAskEnd(true); // 真实"更改"分支,走到huashenChangePickEnd
+  await check('回归:respondHuashenChangeAskEnd(true)真实创建的huashenChangePickEnd pending自带askedAt', function(){
+    var g = window.__g;
+    if(!g.pending || g.pending.type !== 'huashenChangePickEnd') throw new Error('应真实进入 huashenChangePickEnd,实际 ' + JSON.stringify(g.pending));
+    if(typeof g.pending.askedAt !== 'number') throw new Error('真实创建的pending应自带askedAt数字,实际 ' + g.pending.askedAt);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

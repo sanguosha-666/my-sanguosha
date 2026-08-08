@@ -247,6 +247,33 @@ function autoRespondAction(g){
   if(type==='jijiangAsk') return function(){ respondJijiangAsk(false); };       // 激将求助:不出
   if(type==='hujiaAsk') return function(){ respondHujiaAsk(false); };           // 护驾求助:不出
   if(type==='zhibaAsk') return function(){ respondZhiba(0); };                  // 制霸拼点:出第0张
+  // 左慈【化身/新生】"是否更改化身"超时兜底(真实bug修复:这四个pending此前既没有登记
+  // 在这张白名单里,创建时也没有setResponseAskedAt补时间戳——两处都不改,30秒超时机制
+  // 对这四个phase形同虚设,机器人一旦在这四步没有正常响应就永久卡死,重试也救不回来。
+  // AskStart/AskEnd:直接提交"不更改",和respondHuashenChangeAskStart/End的参数语义
+  // 一致(activate=false)。
+  if(type==='huashenChangeAskStart') return function(){ respondHuashenChangeAskStart(false); };
+  if(type==='huashenChangeAskEnd') return function(){ respondHuashenChangeAskEnd(false); };
+  // PickStart/PickEnd:不能传null/undefined——respondHuashenChangePickStart/End内部用
+  // validateHuashenPick(me.huashenPool, generalId, skillName)校验,generalId必须在
+  // huashenPool里、skillName必须是HUASHEN_SKILL_TABLE[generalId]里真实存在的技能名,
+  // 传非法值会被守卫直接拒绝、pending原地不动、等于没修。这里镜像runBotDecision里
+  // 已有的huashenChangePickStart/PickEnd确定性分支同一条兜底规则:选huashenPool里第一个
+  // 技能表非空的武将+它的第一个技能条目,必然合法。
+  if(type==='huashenChangePickStart') return function(){
+    const me = g.players[g.pending.seat];
+    const generalId = me && (me.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
+    if(!generalId) return;
+    const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
+    respondHuashenChangePickStart(generalId, entry && entry.name);
+  };
+  if(type==='huashenChangePickEnd') return function(){
+    const me = g.players[g.pending.seat];
+    const generalId = me && (me.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
+    if(!generalId) return;
+    const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
+    respondHuashenChangePickEnd(generalId, entry && entry.name);
+  };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且

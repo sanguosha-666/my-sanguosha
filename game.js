@@ -5680,7 +5680,10 @@ function finishTurn(g, endingSeat){
 function continueHuashenChangeCheckAtTurnEnd(g, endingSeat){
   const p = g.players[endingSeat];
   if(p && p.alive && hasCap(p,'huashen') && p.huashenGeneral!==null){
-    g.pending = {type:'huashenChangeAskEnd', seat:endingSeat};
+    // 【超时修复】同 continueHuashenChangeCheckAtTurnStart——setResponseAskedAt 补时间戳,
+    // 否则30秒自动超时机制对这个phase无效(g.pending.askedAt 是 undefined,
+    // maybeAutoRespondTimeout 的守卫直接拦掉)。
+    g.pending = setResponseAskedAt({type:'huashenChangeAskEnd', seat:endingSeat});
     g.phase = 'huashenChangeAskEnd';
     g.log = pushLog(g.log, p.name+' 是否更改【化身】声明的技能…');
     return;
