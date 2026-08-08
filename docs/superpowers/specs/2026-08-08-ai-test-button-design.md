@@ -23,6 +23,7 @@
 | 托管覆盖 | **全部决策点全覆盖**（复用现有 `runBotDecision` + `runBotActionWindow` 全部 ~33 个 `BOT_DECISIONS` 分支） |
 | 按钮交互 | **单按钮开关 + 自动弹窗**（点开=托管+弹窗，再点=关闭托管） |
 | 生效时机 | **任意时刻可开启，轮到该玩家才实际接管**（大厅/对局中均可） |
+| 弹窗交互 | **可拖动 + 可调整大小**（信息窗不遮挡游戏界面，可自由摆放/缩放） |
 
 ## 三、方案选择
 
@@ -86,6 +87,13 @@ aiTestAutopilot = { active: false, seat: null, records: [] }
 ### 4.5 信息窗（#aiTestModal）
 
 **DOM**：`index.html` 加 `<div id="aiTestModal" class="hidden">`，结构仿 `#infoModal`（index.html:1979 + CSS 1135-1136 的 fixed 遮罩 + flex 居中模式）。
+
+**可拖动 + 可调整大小**（本次需求追加）：
+- 默认弹出位置：屏幕右上角（不遮挡中央出牌区/自己座位）
+- **拖动**：`#aiTestModal` 头部 `.aitest-header` 作为拖拽手柄（`mousedown` + `mousemove`/`touchmove` 更新 `left/top`），仿项目内既有拖动实现（若有）或标准 pointer 事件写法；拖动时禁用文本选中（`user-select:none`）
+- **调整大小**：右下角加 resize 手柄（`.aitest-resize-handle`，CSS `cursor:nwse-resize`），拖拽更新 `width/height`（带 `min-width/min-height` 下限，防止缩到不可用）
+- 位置/尺寸为**会话内内存状态**（不持久化到 localStorage——测试工具，刷新即恢复默认；如需持久化实现时随手加，不做承诺）
+- 关闭弹窗后再打开：恢复默认位置/尺寸
 
 **结构**：
 ```
@@ -169,6 +177,7 @@ render(g) → finally → scheduleBotTurn(g)
 5. **无密钥不开启**：mock aiApiKey 为空 → toggle 不开启托管
 6. **既有回归套件全绿**：run_ai_bus_l1/l2/l3/core/info/lordskill 等
 7. **折叠弹窗渲染**：jsdom 或轻量 DOM stub 下 appendAiTestRecord 后 summary 可见、detail 默认 hidden
+8. **拖动/调整大小**：拖动 header 后 `left/top` 变化且拖动期间 `user-select:none`；拖动 resize 手柄后 `width/height` 变化且不低于 min 下限；关闭再打开恢复默认位置/尺寸
 
 ## 八、改动清单
 
