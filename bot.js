@@ -3506,6 +3506,12 @@ function botSafePrompt(g,seat){
 // 一次 await botPlay(g,seat) 里,不需要在这里(runBotDecision)单独再 await 一次
 // botBestTarget,那不是它现在的调用形状。async function 包裹一段同步代码不影响其行为
 // (相当于自动包一层 resolved promise),所以其它分支原样照抄、零改动。
+// 【调试日志系统 bot_decision_failed TODO】目前只在 runBotActionWindow(强C同窗多步循环)
+// 里接了"等不到提交确认"这一处(见其内部 executePlayWindowChoiceAwait 超时分支),因为那里
+// 恰好已经有"execute后拿到提交后的新快照"这个现成信号。这个函数(runBotDecision)下面绝大
+// 多数分支都是 botInvoke(seat, fn) 后直接 return,fire-and-forget、没有等提交回调,要接入
+// "提交前后状态是否真的变化"需要给每个分支都补 onCommitted 参数,改动面较大,这次不做——
+// 留 TODO,以后要接的话优先从 seatPick/botTwoStepA 这类高频分支开始。
 async function runBotDecision(g,seat){
   const p=g.players[seat];
   if(!p||!p.isBot||!p.alive&&g.phase!=='pickingGeneral') return;
@@ -4387,7 +4393,24 @@ async function runBotActionWindow(g, seat){
     if(choice && (choice.isEndPlay || choice.action==='结束出牌阶段')) break;
     // 无密钥:执行一步即返回(与弱C逐字一致);有密钥:等提交回调,拿不到新快照就 break
     if(!aiReady) return;
-    if(!newG || newG===lastG) break;
+    if(!newG || newG===lastG){
+      // 【bot_decision_failed 第一批接入点】强C同窗多步循环里最容易判断"提交是否真的
+      // 生效"的地方:executePlayWindowChoiceAwait 等不到 tx 的 onCommitted 回调(超时
+      // BOT_COMMIT_TIMEOUT_MS后resolve null),意味着这次选择的动作(playCard/endPlay)
+      // 执行了但没能成功提交——很可能是服务端守卫拒绝、或提交过程本身出了问题。其余
+      // 决策分支(seatPick/botTwoStepA等)大多是fire-and-forget、没有现成的"提交后拿到
+      // 新快照"信号,接入需要较大改动,先不做,留 TODO(见下方 runBotDecision 顶部注释)。
+      if(!newG && typeof writeDebugLog==='function'){
+        writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_failed', {
+          phase: lastG.phase, pendingType: lastG.pending&&lastG.pending.type||null,
+          turn: lastG.turn, roundNum: lastG.roundNum, seat: seat,
+          message: '机器人在出牌窗口选择了动作('+(choice&&choice.action)+')但等不到提交确认(可能被服务端守卫拒绝)',
+          pendingSnapshot: (function(){ try{ return lastG.pending?JSON.parse(JSON.stringify(lastG.pending)):null; }catch(e){ return null; } })(),
+          playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(lastG) : null
+        });
+      }
+      break;
+    }
     lastG = newG;
   }
 }

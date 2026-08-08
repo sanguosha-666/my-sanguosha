@@ -1,4 +1,12 @@
 // ---------- local state ----------
+// normalize() 里散落的 logPendingOrphan(g,reason) 调用(见下方各处"发现不合法pending"
+// 分支)依赖 debug-log.js 先定义好这个函数——index.html 里真实加载顺序确实如此,但
+// 项目里不少测试脚本单独加载 game.js、不带 debug-log.js。用"未定义才补一个no-op"的
+// 写法兜底:debug-log.js 若已先加载,这里的 typeof 检查为假,不会覆盖真实实现;
+// 没加载时(测试环境)兜底成no-op,不影响 normalize 本身的校验逻辑。
+if(typeof logPendingOrphan==='undefined'){
+  var logPendingOrphan = function(){};
+}
 let roomId = null, mySeat = null;
 let gameRef = null;
 let chatRef = null, chatQuery = null;
@@ -137,6 +145,7 @@ function normalize(g){
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        !Array.isArray(d.candidates) || d.candidates.length===0 ||
        typeof d.costType!=='string' || !['hp','weapon'].includes(d.costType)){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -145,6 +154,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='qiangxiChooseCost'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -154,6 +164,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        !Array.isArray(d.weaponIndices) || d.weaponIndices.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -175,6 +186,7 @@ function normalize(g){
     // 刚建立的 pending 清掉,明策永远走不过第一步(而 mingceUsed 已被消耗)。
     // 和贾诩【乱武】remainingSeats.length===0 被误当脏数据是同一类错误。
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -190,6 +202,7 @@ function normalize(g){
        (d.targetSeat!==null && (typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive)) ||
        !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
        typeof d.cardName !== 'string' || d.cardName === ''){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -203,6 +216,7 @@ function normalize(g){
        !Array.isArray(d.candidates) || d.candidates.length===0 ||
        !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
        typeof d.cardName !== 'string' || d.cardName === ''){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -216,6 +230,7 @@ function normalize(g){
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        (d.target2Seat!==null && (typeof d.target2Seat!=='number' || !g.players[d.target2Seat]))||
        typeof d.cardName !== 'string' || d.cardName === ''){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -240,6 +255,7 @@ function normalize(g){
     if(typeof d.currentSeat!=='number' || !g.players[d.currentSeat] || !g.players[d.currentSeat].alive ||
        !Array.isArray(d.remainingSeats) ||
        typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -254,6 +270,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        !Array.isArray(d.availablePairs) || d.availablePairs.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -264,6 +281,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        !Array.isArray(d.cardIndices) || d.cardIndices.length !== 2){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -274,6 +292,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -285,6 +304,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        !d.resume || typeof d.resume.kind!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -298,6 +318,7 @@ function normalize(g){
        !d.judgeCard || !d.judgeCard.suit ||
        !d.resume || typeof d.resume.kind!=='string' ||
        !Array.isArray(d.askedSeats)){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -361,6 +382,7 @@ function normalize(g){
     const p=g.players[d.seat];
     if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral!==null
        || !Array.isArray(p.huashenPool) || p.huashenPool.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -375,6 +397,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='dying'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.resume || typeof d.resume.type!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -382,6 +405,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='zhijiChoice'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -391,6 +415,7 @@ function normalize(g){
     if(typeof d.from!=='number' || typeof d.to!=='number' ||
        !g.players[d.from] || !g.players[d.from].alive ||
        !g.players[d.to] || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -399,6 +424,7 @@ function normalize(g){
     if(typeof d.from!=='number' || typeof d.to!=='number' ||
        !g.players[d.from] || !g.players[d.from].alive ||
        !g.players[d.to] || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -406,6 +432,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='yijiAsk'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -415,6 +442,7 @@ function normalize(g){
     if(typeof d.seat!=='number' || typeof d.otherSeat!=='number' || !Number.isInteger(d.amount) || d.amount<=0 
        || !g.players[d.seat] || !g.players[d.seat].alive || !g.players[d.otherSeat] || !g.players[d.otherSeat].alive
        || !d.resume || typeof d.resume.type!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -426,6 +454,7 @@ function normalize(g){
        !g.players[d.to] || !g.players[d.to].alive ||
        !Array.isArray(d.available) || d.available.length===0 ||
        !d.available.every(id => ['mengjin','qinglong','guanshifu'].includes(id))){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -436,6 +465,7 @@ function normalize(g){
        !g.players[d.from] || !g.players[d.from].alive ||
        !g.players[d.to] || !g.players[d.to].alive ||
        !Array.isArray(d.available) || d.available.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -443,6 +473,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='yijiAssign'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive || !Array.isArray(d.cards) || d.cards.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -453,6 +484,7 @@ function normalize(g){
        !g.players[d.seat] || !g.players[d.target] ||
        !d.sourceCard || typeof d.sourceCard!=='object' ||
        !d.resume || typeof d.resume!=='object' || typeof d.resume.type!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -466,6 +498,7 @@ function normalize(g){
        !g.players[d.from] || !g.players[d.from].alive ||
        !g.players[d.to] || !g.players[d.to].alive ||
        !Array.isArray(d.options) || d.options.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -476,6 +509,7 @@ function normalize(g){
        !g.players[d.from] || !g.players[d.from].alive ||
        !g.players[d.to] || !g.players[d.to].alive ||
        !Array.isArray(d.options) || d.options.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -501,23 +535,28 @@ function normalize(g){
   if(g.pending && g.pending.type==='guicai'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.judgeCard || !d.judgeCard.suit || !d.resume || typeof d.resume.kind!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
   // 铁骑判定阶段:from/to 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='tieqi' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 烈弓阶段:from/to 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='liegong' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 骁果询问阶段:endingSeat/asking 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='xiaoguo' && (typeof g.pending.endingSeat!=='number' || typeof g.pending.asking!=='number')){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 骁果二选一阶段:from/endingSeat/to 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='xiaoguoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.endingSeat!=='number' || typeof g.pending.to!=='number')){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 主公技求助阶段(激将/护驾):lordSeat/asking 应是数字座位号、need 应是字符串、
@@ -528,6 +567,7 @@ function normalize(g){
       typeof g.pending.need!=='string' || !g.pending.resume ||
       typeof g.pending.resume!=='object' || typeof g.pending.resume.phase!=='string' ||
       !g.pending.resume.pending)){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 孙策【制霸】拼点阶段:lordSeat/targetSeat 应是数字座位号、selfCard 是孙策已出的拼点牌、
@@ -536,10 +576,12 @@ function normalize(g){
      (typeof g.pending.lordSeat!=='number' || typeof g.pending.targetSeat!=='number' ||
       !g.pending.selfCard || !g.pending.resume ||
       typeof g.pending.resume!=='object' || typeof g.pending.resume.phase!=='string')){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 借刀杀人选择阶段:from/seatA/seatB 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 于吉【蛊惑】质疑阶段:sourceSeat/asking 应是合法座位,实际牌和声明牌应存在;回答列表缺失时回退空数组
@@ -551,6 +593,7 @@ function normalize(g){
        !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        !g.players[d.asking] || !g.players[d.asking].alive ||
        !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -559,6 +602,7 @@ function normalize(g){
     const d=g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -567,6 +611,7 @@ function normalize(g){
     g.pending.pool = g.pending.pool || [];
     g.pending.order = g.pending.order || [];
     if(typeof g.pending.from!=='number' || typeof g.pending.idx!=='number' || g.pending.order.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -574,17 +619,20 @@ function normalize(g){
   if(g.pending && g.pending.type==='huogongReveal'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
   if(g.pending && g.pending.type==='huogong'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !d.suit || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
   // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
+    logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
     g.pending=null; g.phase='play';
   }
   // 群体锦囊(南蛮入侵/万箭齐发)响应阶段:from/to 都应是数字座位号且对应玩家存活;不对就整体
@@ -593,6 +641,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='aoeResp'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.aoe=null; g.phase='play';
     }
   }
@@ -604,6 +653,7 @@ function normalize(g){
     if(typeof d.from!=='number' || typeof d.to!=='number' || typeof d.active!=='number'
        || !g.players[d.from] || !g.players[d.to] || !g.players[d.active]
        || !g.players[d.from].alive || !g.players[d.to].alive || !g.players[d.active].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -611,6 +661,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='ganglieChoice'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.sourceSeat!=='number' || !g.players[d.seat] || !g.players[d.sourceSeat] || !g.players[d.seat].alive || !g.players[d.sourceSeat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -619,6 +670,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='guanshi'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -627,6 +679,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='hanbing'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -635,6 +688,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='hanbingAsk'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -643,6 +697,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='luoyiAsk'){
     const d=g.pending;
     if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='draw';
     }
   }
@@ -653,6 +708,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='qiaobianMove'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -663,6 +719,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='qiaobianTurnStart'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='draw';
     }
   }
@@ -675,6 +732,7 @@ function normalize(g){
     const d=g.pending;
     const p=g.players[d.seat];
     if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='draw';
     }
   }
@@ -683,6 +741,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='qilin'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -691,6 +750,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='qinglong'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -698,6 +758,7 @@ function normalize(g){
   if(g.pending && (g.pending.type==='cixiongAsk' || g.pending.type==='cixiongChoice')){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -710,6 +771,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='shuangxiongAsk'){
     const d=g.pending;
     if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='draw';
     }
   }
@@ -717,6 +779,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='guanxingReview'){
     const gp=g.pending.seat;
     if(typeof gp!=='number' || !g.players[gp] || !g.players[gp].alive || !Array.isArray(g.pending.cards)){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -726,6 +789,7 @@ function normalize(g){
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive 
        || !Array.isArray(d.cards) || d.cards.length===0 
        || !Number.isInteger(d.takeN) || d.takeN<=0 || d.takeN>d.cards.length){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -811,12 +875,14 @@ function normalize(g){
   if(g.pending && g.pending.type==="shensuChoose1"){
     const d = g.pending;
     if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = "judge";
     }
   }
   if(g.pending && g.pending.type==="shensuChoose2"){
     const d = g.pending;
     if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = "play";
     }
   }
@@ -825,6 +891,7 @@ function normalize(g){
     if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive ||
        typeof d.remaining!=="number" || d.remaining <= 0 ||
        typeof d.noDistance!=="boolean"){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = g.shensuSkipJudgingAndDraw ? "play" : (g.shensuSkipPlay ? "discard" : "play");
     }
@@ -835,12 +902,14 @@ function normalize(g){
        !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        typeof d.needed!=="number" || typeof d.played!=="number"){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = "play";
     }
   }
   if(g.pending && g.pending.type==='quhuRespond'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !d.selfCard || !g.players[d.seat] || !g.players[d.targetSeat]){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -848,6 +917,7 @@ function normalize(g){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !Array.isArray(d.targets) || d.targets.length===0
        || !g.players[d.seat] || !g.players[d.targetSeat] || !d.targets.every(t=>Number.isInteger(t) && g.players[t] && g.players[t].alive)){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -855,6 +925,7 @@ function normalize(g){
   if(g.pending && (g.pending.type==='tianyiPickCard' || g.pending.type==='tianyiPickTarget')){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = 'play';
     }
   }
@@ -863,6 +934,7 @@ function normalize(g){
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        !d.selfCard || typeof d.selfCard.rank!=='number'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = 'play';
     }
   }
@@ -870,6 +942,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='buquAsk'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = 'play';
     }
   }
@@ -877,6 +950,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='lianyingAsk'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = 'play';
     }
   }
@@ -886,6 +960,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        d.shaColor !== 'black'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = 'play';
     }
   }
@@ -896,12 +971,14 @@ function normalize(g){
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        !Array.isArray(d.availableSlots) || d.availableSlots.length === 0 ||
        !g.players[d.targetSeat].equips || Object.keys(g.players[d.targetSeat].equips).length === 0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null; g.phase = 'play';
     }
   }
   if(g.pending && g.pending.type==='fanjianSuit'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !g.players[d.seat] || !g.players[d.targetSeat]){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -911,6 +988,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='jiemingAsk'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -918,24 +996,28 @@ function normalize(g){
   if(g.pending && g.pending.type==='xinshengAsk'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
   if(g.pending && g.pending.type==='liuli'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to]){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
   if(g.pending && g.pending.type==='tianxiang'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive || !Array.isArray(d.targets) || d.targets.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
   if(g.pending && g.pending.type==='biyue'){
     const d=g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='discard';
     }
   }
@@ -945,24 +1027,28 @@ function normalize(g){
     const d=g.pending;
     const p=g.players[d.seat];
     if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='discard';
     }
   }
   if(g.pending && g.pending.type==='lirangAsk'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='draw';
     }
   }
   if(g.pending && g.pending.type==='lirangRecover'){
     const d=g.pending;
     if(typeof d.from!=='number' || typeof d.to!=='number' || !Array.isArray(d.cards) || !g.players[d.from] || !g.players[d.to]){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='discard';
     }
   }
   if(g.pending && g.pending.type==='zhengyi'){
     const d=g.pending;
     if(typeof d.seat!=='number' || typeof d.asking!=='number' || !g.players[d.seat] || !g.players[d.asking] || !g.players[d.seat].alive || !g.players[d.asking].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -972,6 +1058,7 @@ function normalize(g){
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        !Array.isArray(d.candidates) || d.candidates.length===0 ||
        !Number.isInteger(d.half) || d.half<=0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending=null; g.phase='play';
     }
   }
@@ -979,6 +1066,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='jushouChoose'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'end';
     }
@@ -988,11 +1076,13 @@ function normalize(g){
     const d = g.pending;
     const srcOk = Number.isInteger(d.sourceSeat) && g.players[d.sourceSeat] && g.players[d.sourceSeat].alive;
     if(!srcOk){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
     } else if(d.type==='jujianChooseEffect'){
       const tgtOk = Number.isInteger(d.targetSeat) && g.players[d.targetSeat] && g.players[d.targetSeat].alive;
       if(!tgtOk){
+        logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
         g.pending = null;
         if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
       }
@@ -1002,6 +1092,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='jiangchiAsk'){
     const d = g.pending;
     if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       if(g.phase==='jiangchiAsk') g.phase = 'draw';
     }
@@ -1011,6 +1102,7 @@ function normalize(g){
     const d = g.pending;
     if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
        !Array.isArray(d.cardIds)){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       if(g.phase==='luoyingAsk') g.phase = 'play';
     }
@@ -1020,6 +1112,7 @@ function normalize(g){
     const d = g.pending;
     if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
        typeof d.wasFacedown!=='boolean'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       if(g.phase==='jiushiFlipAsk') g.phase = 'play';
     }
@@ -1030,6 +1123,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
        (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = g.phase === 'beigeChoose' ? 'play' : g.phase;
     }
@@ -1040,6 +1134,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
        (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1050,6 +1145,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
        !d.resume || typeof d.resume.kind!=='string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1062,6 +1158,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1072,6 +1169,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1083,6 +1181,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        !d.sourceCard || typeof d.sourceCard.rank!=='number'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1109,6 +1208,7 @@ function normalize(g){
        d.discardedCounts.length !== d.targets.length ||
        d.discardedCounts.some(c => typeof c !== 'number' || c < 0) ||
        typeof d.previousPhase !== 'string'){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = d.previousPhase || (g.phase === 'xuanfengPick' ? 'discard' : g.phase);
     }
@@ -1134,6 +1234,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.baseTarget!=='number' || !g.players[d.baseTarget] || !g.players[d.baseTarget].alive ||
        !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1144,6 +1245,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1155,6 +1257,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
        !Array.isArray(d.heartCards)){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1166,6 +1269,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
        !(g.players[d.damagerSeat].hand||[]).some(card=>card && card.suit==='♥')){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1176,6 +1280,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        !Array.isArray(d.candidates) || d.candidates.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1187,6 +1292,7 @@ function normalize(g){
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        !(g.players[d.sourceSeat].hand||[]).some(card=>card && card.suit==='♥')){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1199,6 +1305,7 @@ function normalize(g){
        typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
        ((g.players[d.targetSeat].hand||[]).length +
         EQUIP_SLOTS.filter(slot=>g.players[d.targetSeat].equips && g.players[d.targetSeat].equips[slot]).length)===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1211,6 +1318,7 @@ function normalize(g){
        typeof d.firstTargetSeat!=='number' || !g.players[d.firstTargetSeat] || !g.players[d.firstTargetSeat].alive ||
        typeof d.transferCard!=='object' || !d.transferCard ||
        !Array.isArray(d.candidates) || d.candidates.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1220,6 +1328,7 @@ function normalize(g){
   if(g.pending && g.pending.type==='fenxunDiscard'){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1230,6 +1339,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1247,6 +1357,7 @@ function normalize(g){
     const d = g.pending;
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        typeof d.damageInfo!=='object' || d.damageInfo === null){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1258,6 +1369,7 @@ function normalize(g){
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
        !Array.isArray(d.revealedCards) || d.revealedCards.length === 0 ||
        !Array.isArray(d.selectable) || !Number.isInteger(d.sumLimit) || d.sumLimit <= 0){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }
@@ -1271,6 +1383,7 @@ function normalize(g){
        g.players[d.target].hp > 1 ||
        !Array.isArray(d.equipSlots) || d.equipSlots.length === 0 ||
        typeof d.originalDamageInfo!=='object' || d.originalDamageInfo===null){
+      logPendingOrphan(g, 'normalize校验未通过,pending结构不合法');
       g.pending = null;
       g.phase = 'play';
     }

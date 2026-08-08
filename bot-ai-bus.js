@@ -289,7 +289,19 @@ function maybeAutoRespondTimeout(g){
   if(!g || !g.pending || typeof g.pending.askedAt !== 'number') return false;
   if(Date.now() - g.pending.askedAt < RESPONSE_TIMEOUT_MS) return false;
   const act = autoRespondAction(g);
-  if(!act) return false;
+  if(!act){
+    // 30秒超时后没有保守动作可提交:pending 会一直悬在这里直到有人手动操作,是"卡死"
+    // 的直接信号,记一条 timeout_stuck(fire-and-forget,不影响这次tick本身的返回值)。
+    if(typeof writeDebugLog==='function'){
+      writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'timeout_stuck', {
+        phase: g.phase, pendingType: g.pending.type||null, turn: g.turn, roundNum: g.roundNum,
+        message: '30秒超时后autoRespondAction返回null,未提交任何动作',
+        pendingSnapshot: (function(){ try{ return JSON.parse(JSON.stringify(g.pending)); }catch(e){ return null; } })(),
+        playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(g) : null
+      });
+    }
+    return false;
+  }
   const actorField = (typeof BOT_PHASE_ACTOR!=='undefined' && BOT_PHASE_ACTOR) ? BOT_PHASE_ACTOR[g.phase] : undefined;
   const actor = actorField!==undefined ? g.pending[actorField] : null;
   if(typeof actor!=='number' || !g.players || !g.players[actor]) return false;
