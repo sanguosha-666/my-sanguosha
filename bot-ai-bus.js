@@ -205,7 +205,7 @@ async function callAiChooseIndex(opts){
   }
   if(autopilotHit && aiTestLastCall) aiTestLastCall.rawResponse = result && result.ok ? result.text : null;
   if(!result || !result.ok){
-    aiTestLastReason = null;
+    if(autopilotHit) aiTestLastReason = null; // 未托管零触碰(与下方越界分支同款守卫)
     return null;
   }
   let idx, reason;

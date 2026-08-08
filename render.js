@@ -1024,6 +1024,9 @@ function render(g){
   // 真人的数组下标左移。每次快照都用稳定 cid 重新定位自己，避免客户端继续拿旧座位号操作。
   const currentSeat=(g.players||[]).findIndex(p=>p&&p.cid===myClientId);
   if(currentSeat>=0) mySeat=currentSeat;
+  // AI测试托管:mySeat 重定位后同步刷新托管座位。支持"大厅先开托管、进房后再自动生效"
+  // (aiTestAutopilot 定义在 ai-bot.js,本文件加载更早,typeof 只是跨文件防御惯例)。
+  if(typeof aiTestAutopilot!=='undefined' && aiTestAutopilot && aiTestAutopilot.active) aiTestAutopilot.seat = mySeat;
   // 机器人调度必须和渲染解耦(见函数末尾的 finally):scheduleBotTurn 原本是 render 的最后
   // 一行,渲染中途任何一处抛异常都会执行不到它、机器人从此永久停摆——这个症状和"机器人不
   // 行动"的座位判定 bug 长得一模一样,会把排查方向带偏,所以这里用 try/finally 拆开。
