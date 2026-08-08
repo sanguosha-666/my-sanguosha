@@ -177,6 +177,27 @@ const testCode = String.raw`
       throw new Error('未托管时 systemPrompt 不应含托管指令,实际 '+JSON.stringify(window.__mockAiArgs.opts.systemPrompt));
   });
 
+  // ================= Task5:aiTestLastCall 采集(2 项) =================
+  await check('callAiChooseIndex: 托管命中时aiTestLastCall被设置(含prompt与rawResponse)', async function(){
+    aiTestAutopilot = {active:true, seat:0};
+    aiTestLastCall = null;
+    var i = await callAiChooseIndex({g:g, seat:0, candidates:[{index:0,label:'a'},{index:1,label:'b'}]});
+    if(i!==1) throw new Error('应返回1,实际 '+i);
+    if(!aiTestLastCall) throw new Error('托管命中应设置aiTestLastCall,实际 null');
+    if(typeof aiTestLastCall.prompt!=='string' || aiTestLastCall.prompt.indexOf('AI测试托管')<0)
+      throw new Error('prompt应含托管指令,实际 '+JSON.stringify(aiTestLastCall.prompt));
+    if(aiTestLastCall.rawResponse!=='{"choice":1,"reason":"测试理由"}')
+      throw new Error('rawResponse应取AI返回文本,实际 '+JSON.stringify(aiTestLastCall.rawResponse));
+  });
+  await check('callAiChooseIndex: 未托管时aiTestLastCall不被触碰(零变化)', async function(){
+    aiTestAutopilot = {active:false, seat:0};
+    aiTestLastCall = { prompt: 'stale', rawResponse: 'stale-r' };
+    var i = await callAiChooseIndex({g:g, seat:0, candidates:[{index:0,label:'a'},{index:1,label:'b'}]});
+    if(i!==1) throw new Error('应返回1,实际 '+i);
+    if(!aiTestLastCall || aiTestLastCall.prompt!=='stale')
+      throw new Error('未托管不应改写aiTestLastCall,实际 '+JSON.stringify(aiTestLastCall));
+  });
+
   // ================= Task3:botSeatForState/runBotDecision 托管接入(3 项) =================
   function mkSeatG(opt){
     opt = opt || {};
@@ -219,6 +240,40 @@ const testCode = String.raw`
     doDraw = function(){ window.__doDrawCalled++; };
     await runBotDecision(g, 0);
     if(window.__doDrawCalled !== 1) throw new Error('draw分支应被调用(守卫放行),实际调用 '+window.__doDrawCalled+' 次');
+  });
+
+  // ================= Task5:决策记录采集(2 项) =================
+  await check('aiTestDecisionHook: 直接调用追加record(stateInfo/phaseLabel/reason回退)', function(){
+    aiTestAutopilot = {active:true, seat:0, records:[]};
+    aiTestLastReason = '直接调用理由';
+    var g2 = mkSeatG({n:3});
+    g2.phase='duel';
+    aiTestDecisionHook(g2, 0, {summary:'决策(duel)', prompt:'p1', rawResponse:'r1', choice:1});
+    if(aiTestAutopilot.records.length!==1) throw new Error('应追加1条,实际 '+aiTestAutopilot.records.length);
+    var rec = aiTestAutopilot.records[0];
+    if(rec.phaseLabel!=='duel') throw new Error('phaseLabel应为原始phase字符串,实际 '+rec.phaseLabel);
+    if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应非空字符串');
+    if(rec.summary!=='决策(duel)') throw new Error('summary应透传,实际 '+rec.summary);
+    if(rec.prompt!=='p1' || rec.rawResponse!=='r1') throw new Error('prompt/rawResponse应透传');
+    if(rec.choice!==1) throw new Error('choice应透传,实际 '+rec.choice);
+    if(rec.reason!=='直接调用理由') throw new Error('reason应回退aiTestLastReason,实际 '+rec.reason);
+  });
+  await check('runBotDecision: 托管决策后采集hook被调用(records增长+透传,draw分支照常)', async function(){
+    var g3 = mkSeatG({n:3});
+    g3.phase='draw'; g3.turn=0;
+    g3.players[0].isBot=false;
+    aiTestAutopilot = {active:true, seat:0, records:[]};
+    aiTestLastCall = { prompt: '本次prompt', rawResponse: '本次raw' };
+    window.__doDrawCalled = 0;
+    doDraw = function(){ window.__doDrawCalled++; };
+    await runBotDecision(g3, 0);
+    if(aiTestAutopilot.records.length < 1) throw new Error('应至少追加1条record,实际 '+aiTestAutopilot.records.length);
+    var rec = aiTestAutopilot.records[0];
+    if(typeof rec.summary!=='string' || !rec.summary) throw new Error('summary应非空');
+    if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应为非空字符串');
+    if(rec.prompt!=='本次prompt') throw new Error('prompt应取aiTestLastCall,实际 '+rec.prompt);
+    if(rec.rawResponse!=='本次raw') throw new Error('rawResponse应取aiTestLastCall,实际 '+rec.rawResponse);
+    if(window.__doDrawCalled !== 1) throw new Error('draw分支应照常执行,实际 '+window.__doDrawCalled+' 次');
   });
 
   // ============ Task3b:非控制器浏览器托管调度放行(限托管座位自己)(2 项) ============

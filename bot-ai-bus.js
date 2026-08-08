@@ -84,6 +84,11 @@ let aiSummaryTurn = -1;
 // 的局部变量),函数外的测试/采集代码永远读不到——必须放模块顶层才符合"供 record 采集"
 // 的语义。
 let aiTestLastReason = null;
+// aiTestLastCall:AI测试托管模式下,最近一次托管命中的 callAiChooseIndex 实际发送的
+// prompt 全文 + AI 原始返回文本。模块级变量,供信息窗 record 采集(aiTestDecisionHook /
+// runBotDecision 采集分支)。未托管时恒为 null——赋值只发生在 autopilotHit 分支,与未
+// 托管行为零变化。同样必须放模块顶层:函数体内声明(var 提升后是函数局部变量)外部读不到。
+let aiTestLastCall = null;
 function aiSummaryReset(){
   aiSummary = '';
   aiSummarySeat = null;
@@ -176,6 +181,13 @@ async function callAiChooseIndex(opts){
     ? '\n\n本局记忆摘要(你自己维护的,参考即可):\n'+aiSummary
     : '';
   const g = opts.g, seat = opts.seat;
+  // 【AI测试托管】采集本次实际发送的 prompt 全文(仅托管命中时;未托管不触碰 aiTestLastCall)。
+  // 与下方真正发给 callAI 的 systemPrompt/userPrompt 拼法逐字一致,保证记录里的就是实际内容。
+  if(autopilotHit){
+    const sysText = (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote
+      + '\n\n(本次为AI测试托管)在返回choice的同时,用一句中文解释你的选择理由。返回格式:{"choice":数字,"reason":"理由文本"}';
+    aiTestLastCall = { prompt: sysText + '\n\n' + (opts.userPrompt||''), rawResponse: null };
+  }
   showAiThinkingIndicator(g, seat);
   let result;
   try{
@@ -191,6 +203,7 @@ async function callAiChooseIndex(opts){
   }finally{
     hideAiThinkingIndicator();
   }
+  if(autopilotHit && aiTestLastCall) aiTestLastCall.rawResponse = result && result.ok ? result.text : null;
   if(!result || !result.ok){
     aiTestLastReason = null;
     return null;

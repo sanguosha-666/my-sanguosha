@@ -3657,6 +3657,22 @@ async function runBotDecision(g,seat){
   const isAutopilot=(typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
     && aiTestAutopilot.seat===seat;
   if(!p.isBot&&!isAutopilot) return;
+  // 【AI测试托管】每次托管决策追加一条信息窗 record。hook 内部自行组装 stateInfo/reason
+  // (reason 回退 aiTestLastReason);prompt/rawResponse 来自 callAiChooseIndex 写下的
+  // aiTestLastCall(托管命中时有值)。choice 传 null 表示"未知具体动作"(execute 后的真实
+  // 动作摘要由后续任务回填)。采集失败绝不影响决策主流程,故外层再包一层 try/catch。
+  if(isAutopilot && typeof aiTestDecisionHook==='function'){
+    try{
+      const lastCall=(typeof aiTestLastCall!=='undefined') ? aiTestLastCall : null;
+      aiTestDecisionHook(g, seat, {
+        summary: '决策(' + g.phase + ')',
+        prompt: lastCall ? lastCall.prompt : '',
+        rawResponse: lastCall ? lastCall.rawResponse : '',
+        choice: null,   // execute 后由后续任务/真实值回填;此处传 null 表示"未知具体动作"
+        reason: undefined  // hook 内部回退 aiTestLastReason
+      });
+    }catch(e){ /* 防御:采集异常不影响决策主流程 */ }
+  }
   const d=g.pending||{};
   if(g.phase==='pickingLordGeneral'){
     // 决策已进 BOT_DECISIONS.pickGeneral(无密钥回退=botPickGeneral 打分,与旧分支逐字

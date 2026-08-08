@@ -809,7 +809,7 @@ function renderAiTestRecords(){
       +'<div class="aitest-sec">① AI获取的信息</div><pre>'+escapeHtml(rec.stateInfo)+'</pre>'
       +(rec.prompt ? '<div class="aitest-sec">发送的Prompt</div><pre>'+escapeHtml(rec.prompt)+'</pre>' : '')
       +'<div class="aitest-sec">② AI返回的信息</div><pre>'+escapeHtml(rec.rawResponse || '(无)')+'</pre>'
-      +'<div class="aitest-sec">解析choice</div><div>'+(rec.choice===null?'(无动作/本地兜底)':rec.choice)+'</div>'
+      +'<div class="aitest-sec">解析choice</div><div>'+(rec.choice===null?'(无动作/本地兜底)':escapeHtml(String(rec.choice)))+'</div>'
       +'<div class="aitest-sec">③ 理由</div><div>'+escapeHtml(rec.reason || '(无)')+'</div>'
       +'</div></div>';
   }).join('');
@@ -837,8 +837,9 @@ function aiTestDecisionHook(g, seat, info){
   try{
     if(typeof info!=='object' || !info) return;
     if(typeof aiTestAutopilot==='undefined' || !aiTestAutopilot) return;
-    const phaseLabel = (typeof phaseName!=='undefined' && phaseName)
-      ? (phaseName[g && g.phase] || (g && g.phase) || '') : ((g && g.phase) || '');
+    // phaseName 是 render.js 里 render() 的局部 const,这里拿不到中文名,直接用原始
+    // phase 字符串(信息窗里展示英文 phase 已足够定位阶段)。
+    const phaseLabel = (g && g.phase) || '';
     const stateInfo = (typeof buildBotVisibleState==='function')
       ? JSON.stringify(buildBotVisibleState(g, seat)) : '';
     appendAiTestRecord({
@@ -857,7 +858,7 @@ function aiTestDecisionHook(g, seat, info){
 }
 
 // 拖动:header mousedown/mousemove 更新 left/top;resize:右下角手柄更新 width/height。
-// pointer 事件统一处理,兼容触屏(mouse/touch 都转成 pointer 事件由浏览器合成)。
+// 桌面 mouse 事件;触屏依赖浏览器合成 mouse 序列(体验可接受,测试工具场景)。
 (function initAiTestModalDrag(){
   if(typeof document==='undefined'||!document.addEventListener) return;
   document.addEventListener('mousedown', function(e){
