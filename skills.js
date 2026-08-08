@@ -754,6 +754,23 @@ function respondHuashenChangePickStart(generalId, skillName){
     return g;
   });
 }
+// abandonHuashenChangePickStart: 放弃这次"更改化身"的边界收尾——正常情况下走不到这里
+// (huashenPool 里理论上总有至少一个技能表非空的武将),但机器人兜底(bot.js)/超时兜底
+// (bot-ai-bus.js的autoRespondAction)在真的找不到任何合法候选时,不能对着这个pending
+// 什么都不做(那样g.pending会永久悬空,回合卡死)。等价于respondHuashenChangeAskStart
+// 的activate=false分支——按"未更改"处理,直接推进到continueGuanxingCheck,不重新发明
+// 一遍收尾逻辑。
+function abandonHuashenChangePickStart(){
+  tx(g=>{
+    if(g.phase!=='huashenChangePickStart' || !g.pending || g.pending.type!=='huashenChangePickStart' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    const seat = g.pending.seat;
+    g.log = pushLog(g.log, (me?me.name:'左慈')+'：【化身】候选武将均无可用技能,放弃这次更改');
+    g.pending = null;
+    continueGuanxingCheck(g, seat);
+    return g;
+  });
+}
 function continueGuanxingCheck(g, seat){
   const p=g.players[seat];
   if(hasCap(p,'guanxing')){

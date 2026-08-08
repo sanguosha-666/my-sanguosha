@@ -350,6 +350,72 @@ const testCode = String.raw`
     if(typeof g.pending.askedAt !== 'number') throw new Error('真实创建的pending应自带askedAt数字,实际 ' + g.pending.askedAt);
   });
 
+  // ---- 问题一:huashenChangePickStart/PickEnd 找不到合法候选武将时静默 return,
+  // pending 永久悬空(本局内恒定,重试无法自愈)的真实bug ----
+
+  // 12. runBotDecision 走到 huashenChangePickStart,huashenPool 里没有任何一个在
+  //     HUASHEN_SKILL_TABLE 里有可用技能条目的武将(构造一个不存在的武将id)——
+  //     修复前:generalId=find返回undefined,if(generalId)分支不执行,直接return,
+  //     pending原地不动;修复后:落到else分支调用abandonHuashenChangePickStart,
+  //     真实推进离开huashenChangePickStart。
+  var g12 = mkG({ phase: 'huashenChangePickStart', turn: 0, pending: { type: 'huashenChangePickStart', seat: 0 } });
+  g12.players[0].isBot = true;
+  g12.players[0].general = 'zuoci';
+  g12.players[0].huashenGeneral = 'xiahouyuan';
+  g12.players[0].huashenPool = ['__no_such_general__']; // 池子里没有任何合法候选
+  window.__g = g12;
+  mySeat = 0;
+  await runBotDecision(g12, 0);
+  await check('问题一修复:huashenChangePickStart 找不到候选武将时不再静默卡死,真实推进离开原phase', function(){
+    var g = window.__g;
+    if(g.phase === 'huashenChangePickStart') throw new Error('phase 不应仍停在 huashenChangePickStart,实际 ' + g.phase);
+    if(g.pending && g.pending.type === 'huashenChangePickStart') throw new Error('pending 不应仍是 huashenChangePickStart(静默卡死复现)');
+  });
+
+  // 13. 同上,回合结束一侧 huashenChangePickEnd
+  var g13 = mkG({ phase: 'huashenChangePickEnd', turn: 0, pending: { type: 'huashenChangePickEnd', seat: 0 } });
+  g13.players[0].isBot = true;
+  g13.players[0].general = 'zuoci';
+  g13.players[0].huashenGeneral = 'xiahouyuan';
+  g13.players[0].huashenPool = ['__no_such_general__'];
+  window.__g = g13;
+  mySeat = 0;
+  await runBotDecision(g13, 0);
+  await check('问题一修复:huashenChangePickEnd 找不到候选武将时不再静默卡死,真实推进离开原phase', function(){
+    var g = window.__g;
+    if(g.phase === 'huashenChangePickEnd') throw new Error('phase 不应仍停在 huashenChangePickEnd,实际 ' + g.phase);
+    if(g.pending && g.pending.type === 'huashenChangePickEnd') throw new Error('pending 不应仍是 huashenChangePickEnd(静默卡死复现)');
+  });
+
+  // 14. 安全网同款修复:maybeAutoRespondTimeout 对同一个"找不到候选"边界,超时后也不再
+  //     静默无作为(问题二的白名单条目本身如果继续沿用旧的"找不到就return"写法,这条
+  //     安全网对这个边界条件同样失效——两处必须用同一套兜底,不能只修其中一处)。
+  var g14 = mkG({ phase: 'huashenChangePickStart', pending: setResponseAskedAt({ type: 'huashenChangePickStart', seat: 0 }) });
+  g14.players[0].general = 'zuoci';
+  g14.players[0].huashenGeneral = 'xiahouyuan';
+  g14.players[0].huashenPool = ['__no_such_general__'];
+  g14.pending.askedAt = Date.now() - 31000;
+  window.__g = g14;
+  mySeat = 0;
+  maybeAutoRespondTimeout(g14);
+  await check('安全网同款修复:huashenChangePickStart 超时且找不到候选武将时,同样不再静默无作为', function(){
+    if(g14.phase === 'huashenChangePickStart') throw new Error('phase 不应仍停在 huashenChangePickStart,实际 ' + g14.phase);
+    if(g14.pending && g14.pending.type === 'huashenChangePickStart') throw new Error('pending 不应仍是 huashenChangePickStart(安全网对这个边界依然无效)');
+  });
+
+  var g15 = mkG({ phase: 'huashenChangePickEnd', pending: setResponseAskedAt({ type: 'huashenChangePickEnd', seat: 0 }) });
+  g15.players[0].general = 'zuoci';
+  g15.players[0].huashenGeneral = 'xiahouyuan';
+  g15.players[0].huashenPool = ['__no_such_general__'];
+  g15.pending.askedAt = Date.now() - 31000;
+  window.__g = g15;
+  mySeat = 0;
+  maybeAutoRespondTimeout(g15);
+  await check('安全网同款修复:huashenChangePickEnd 超时且找不到候选武将时,同样不再静默无作为', function(){
+    if(g15.phase === 'huashenChangePickEnd') throw new Error('phase 不应仍停在 huashenChangePickEnd,实际 ' + g15.phase);
+    if(g15.pending && g15.pending.type === 'huashenChangePickEnd') throw new Error('pending 不应仍是 huashenChangePickEnd(安全网对这个边界依然无效)');
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

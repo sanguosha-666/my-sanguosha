@@ -324,6 +324,20 @@ function respondHuashenChangePickEnd(generalId, skillName){
     return g;
   });
 }
+// abandonHuashenChangePickEnd: 回合结束一侧的同款边界收尾,见 skills.js 的
+// abandonHuashenChangePickStart 注释——找不到任何合法候选时,按"未更改"处理,推进到
+// continueBiyueCheck,不让pending永久悬空。
+function abandonHuashenChangePickEnd(){
+  tx(g=>{
+    if(g.phase!=='huashenChangePickEnd' || !g.pending || g.pending.type!=='huashenChangePickEnd' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    const endingSeat = g.pending.seat;
+    g.log = pushLog(g.log, (me?me.name:'左慈')+'：【化身】候选武将均无可用技能,放弃这次更改');
+    g.pending = null;
+    continueBiyueCheck(g, endingSeat);
+    return g;
+  });
+}
 
 // respondPickGeneral: 三选一模式下,玩家从自己的候选(p.generalChoices)里选一个。
 // finishLordGeneralPick: 主公选将结算的共用主体(respondPickLordGeneral/debugPickLordGeneral

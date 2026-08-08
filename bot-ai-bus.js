@@ -260,17 +260,23 @@ function autoRespondAction(g){
   // 传非法值会被守卫直接拒绝、pending原地不动、等于没修。这里镜像runBotDecision里
   // 已有的huashenChangePickStart/PickEnd确定性分支同一条兜底规则:选huashenPool里第一个
   // 技能表非空的武将+它的第一个技能条目,必然合法。
+  // 【真实bug修复,和bot.js里runBotDecision的同款分支同一处根因】generalId找不到时
+  // (huashenPool里没有任何一个在HUASHEN_SKILL_TABLE里有可用技能条目的武将)不能什么都
+  // 不做——那样这条30秒超时安全网本身也形同虚设,遇到同一个边界条件照样永久卡死。
+  // 回退到abandonHuashenChangePickStart/End(等价于respondHuashenChangeAskStart/End的
+  // activate=false分支,按"放弃这次更改"处理,推进到continueGuanxingCheck/
+  // continueBiyueCheck),不重新发明收尾逻辑。
   if(type==='huashenChangePickStart') return function(){
     const me = g.players[g.pending.seat];
     const generalId = me && (me.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
-    if(!generalId) return;
+    if(!generalId){ abandonHuashenChangePickStart(); return; }
     const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
     respondHuashenChangePickStart(generalId, entry && entry.name);
   };
   if(type==='huashenChangePickEnd') return function(){
     const me = g.players[g.pending.seat];
     const generalId = me && (me.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
-    if(!generalId) return;
+    if(!generalId){ abandonHuashenChangePickEnd(); return; }
     const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
     respondHuashenChangePickEnd(generalId, entry && entry.name);
   };

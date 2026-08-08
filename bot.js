@@ -3821,6 +3821,12 @@ async function runBotDecision(g,seat){
     if(generalId){
       const entry=(HUASHEN_SKILL_TABLE[generalId]||[])[0];
       botInvoke(seat,()=>respondHuashenChangePickStart(generalId, entry&&entry.name));
+    } else {
+      // 【真实bug修复】huashenPool 里找不到任何"在 HUASHEN_SKILL_TABLE 里有可用技能
+      // 条目"的武将时,不能什么都不做——这个卡死条件本局内恒定,不会因重试而改变,
+      // pending 会永久悬空。按"放弃这次更改"处理,推进到 continueGuanxingCheck
+      // (等价于respondHuashenChangeAskStart的activate=false分支),不重新发明收尾逻辑。
+      botInvoke(seat,abandonHuashenChangePickStart);
     }
     return;
   }
@@ -3830,6 +3836,9 @@ async function runBotDecision(g,seat){
     if(generalId){
       const entry=(HUASHEN_SKILL_TABLE[generalId]||[])[0];
       botInvoke(seat,()=>respondHuashenChangePickEnd(generalId, entry&&entry.name));
+    } else {
+      // 同上,回合结束一侧的同款修复,推进到 continueBiyueCheck。
+      botInvoke(seat,abandonHuashenChangePickEnd);
     }
     return;
   }
