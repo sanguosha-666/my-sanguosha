@@ -11,10 +11,17 @@
  *
  * 修复:去掉askNextGuidu自己的tx()包裹,改成直接操作传入的g并return g的普通同步
  * 辅助函数(参照finishGuicai/continueBiyueCheck同款写法)。
+ *
+ * 【测试方法论说明】这个文件用的是 test-tx-stub.js 里"快照隔离"版本的
+ * gameRef.transaction stub,不是项目里其它测试文件常见的"共享引用"stub——这类嵌套
+ * tx() 导致状态覆盖的bug,只有快照隔离的stub才能真实测出来,共享引用stub下内外层
+ * 操作的是同一个对象引用,任何一层的原地修改都立刻互相可见,测不出"谁的返回值最终
+ * 覆盖了谁"这个真实的竞争后果。详见 test-tx-stub.js 顶部注释。
  */
 
 const vm = require('vm');
 const fs = require('fs');
+const { SNAPSHOT_TX_STUB_SOURCE } = require('./test-tx-stub');
 
 const context = {
   gameRef: { transaction: function(fn) { return fn(context.g || {}); } },
@@ -76,6 +83,10 @@ files.forEach(function(file){
   }
 });
 
+// 用快照隔离stub替换game.js加载钩子装上的共享引用stub——见文件顶部说明和
+// test-tx-stub.js 的完整背景注释。
+vm.runInContext(SNAPSHOT_TX_STUB_SOURCE, sandbox, { filename: 'test-tx-stub-inline.js' });
+
 console.log('\n' + '='.repeat(60));
 console.log('  张角【鬼道】嵌套tx修复测试');
 console.log('='.repeat(60) + '\n');
@@ -91,28 +102,11 @@ const testCode = String.raw`
     });
   }
 
-  // 【真实感知嵌套tx竞争的关键】原始的gameRef.transaction stub(game.js加载钩子里那份)
-  // 是"直接对同一个g对象引用做同步调用",这和真实Firebase的行为不一样——真实的
-  // transaction()每次都是"从服务端当前已提交状态取一份快照(不是同一个JS对象引用),
-  // 回调操作这份快照,回调返回后异步提交,提交结果整体覆盖服务端状态"。用同一个对象
-  // 引用的stub测不出"内层tx先commit、外层tx后commit、外层把内层刚提交的pending/phase
-  // 推进覆盖回旧值"这种真实竞争(对象引用共享导致两次调用其实在改同一份数据,不会互相
-  // 覆盖)。这里重新定义一份更贴近真实行为的stub:每次transaction都从serverState深拷贝
-  // 一份快照给回调、回调返回值整体覆盖serverState——嵌套发起的tx()调用会在外层tx()提交
-  // 之前抢先commit,若外层最后返回的是"没吸收内层修改的旧快照"(askNextGuidu不return的
-  // bug版本),外层commit时会把内层刚写入serverState的pending/phase推进覆盖掉,和真实
-  // Firebase下的竞争后果一致。
-  var serverState = null;
-  gameRef = {
-    transaction: function(fn){
-      var snapshot = serverState ? JSON.parse(JSON.stringify(serverState)) : {};
-      var result = fn(snapshot) || snapshot;
-      serverState = result;
-      return result;
-    }
-  };
-  function commit(g){ serverState = JSON.parse(JSON.stringify(g)); }
-  function current(){ return serverState; }
+  // gameRef.transaction 已经在文件外层被替换成 test-tx-stub.js 的"快照隔离"版本
+  // (commitGameState/currentGameState 由那个模块的源码注入到这个sandbox里,不在这里
+  // 重复定义)。用法:每个场景先 commitGameState(初始g),调用被测函数后用
+  // currentGameState() 读取"已提交"的最终结果做断言,不要用原始的g对象(调用之后它
+  // 不再代表最终提交结果,尤其是涉及嵌套tx()的场景——这正是这个文件要验证的东西)。
 
   function mkSeatG(opt){
     opt = opt || {};
@@ -142,9 +136,9 @@ const testCode = String.raw`
   await check('triggerGuidu发动成功:判定牌被替换,pending正确清空,没有出现嵌套事务错位(用clone+commit的真实感知stub)', function(){
     var g0 = mkSeatG({ n: 3, generalOf: { 0: 'zhangjiao' }, hands: { 0: [card('杀','rep1','♠',9)] } });
     g0.pending = judgePending(g0, 0, 1);
-    commit(g0); mySeat = 0;
+    commitGameState(g0); mySeat = 0;
     triggerGuidu(0);
-    var g = current();
+    var g = currentGameState();
     // 应该走到 finishGuidu 的 leijiJudge 分支,推进到 finishLeijiChain(无leijiResume时清空pending/phase=play)。
     // 若askNextGuidu的嵌套tx bug仍在,外层tx最后commit时会用"没吸收内层pending推进"的旧快照
     // 覆盖掉服务端刚提交的正确状态,这里应能测出pending卡在guiduAsk不消失。
@@ -162,9 +156,9 @@ const testCode = String.raw`
   await check('cancelGuidu:正确使用原判定牌接回流程,没有出现嵌套事务错位(用clone+commit的真实感知stub)', function(){
     var g0 = mkSeatG({ n: 3, generalOf: { 0: 'zhangjiao' }, hands: { 0: [card('杀','rep2','♠',9)] } });
     g0.pending = judgePending(g0, 0, 1);
-    commit(g0); mySeat = 0;
+    commitGameState(g0); mySeat = 0;
     cancelGuidu();
-    var g = current();
+    var g = currentGameState();
     if(g.pending !== null) throw new Error('pending应已清空,实际 ' + JSON.stringify(g.pending));
     if(g.phase !== 'play') throw new Error('phase应推进到play,实际 ' + g.phase);
     // 没有发动:手牌不应被打出
@@ -181,9 +175,9 @@ const testCode = String.raw`
     // 在cancelGuidu内部真实调用的场景:g.turn设为0,逆时针寻找下一个候选(0→2→1),0已问过应轮到2
     g0.turn = 0;
     g0.pending = judgePending(g0, 0, 1);
-    commit(g0); mySeat = 0;
+    commitGameState(g0); mySeat = 0;
     cancelGuidu();
-    var g1 = current();
+    var g1 = currentGameState();
     if(!g1.pending || g1.pending.type !== 'guiduAsk') throw new Error('应继续询问下一个张角,实际 phase=' + g1.phase + ' pending=' + JSON.stringify(g1.pending));
     if(g1.pending.sourceSeat !== 2) throw new Error('下一个被问的应是座位2(另一个张角),实际 ' + g1.pending.sourceSeat);
     if(!g1.pending.askedSeats.includes(0)) throw new Error('askedSeats应记录座位0已问过,实际 ' + JSON.stringify(g1.pending.askedSeats));
@@ -191,7 +185,7 @@ const testCode = String.raw`
     // 第二个张角(座位2)发动鬼道
     mySeat = 2;
     triggerGuidu(0);
-    var g = current();
+    var g = currentGameState();
     if(g.pending !== null) throw new Error('全部询问完毕后pending应清空,实际 ' + JSON.stringify(g.pending));
     if(g.phase !== 'play') throw new Error('phase应推进到play,实际 ' + g.phase);
     if(!g.discard.some(function(c){ return c.id === 'repB'; })) throw new Error('最终判定牌应是座位2打出的repB,实际弃牌堆 ' + JSON.stringify(g.discard));
