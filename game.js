@@ -313,11 +313,16 @@ function normalize(g){
   // 张角【鬼道】:询问是否发动鬼道阶段
   if(g.pending && g.pending.type==='guiduAsk'){
     const d = g.pending;
+    // Firebase Realtime Database 不保留空数组。maybeGuidu 创建 pending 时 askedSeats 是
+    // []（还没有任何候选人被问过），同步回来后该字段会直接缺失（undefined）；这属于合法
+    // 初始状态，不能当成脏数据清掉 pending，否则真实联机局中鬼道询问会在建立后立刻消失
+    // （和 xuanfengPick 的 targets/discardedCounts、guhuoQuestion 的 questioners/answered
+    // 同一类修复——先补默认值，再校验真正结构性的字段）。
+    if(!Array.isArray(d.askedSeats)) d.askedSeats=[];
     if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
        typeof d.judgedSeat!=='number' || !g.players[d.judgedSeat] || !g.players[d.judgedSeat].alive ||
        !d.judgeCard || !d.judgeCard.suit ||
-       !d.resume || typeof d.resume.kind!=='string' ||
-       !Array.isArray(d.askedSeats)){
+       !d.resume || typeof d.resume.kind!=='string'){
       logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guiduAsk)');
       g.pending = null;
       g.phase = 'play';
