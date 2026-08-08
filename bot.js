@@ -190,6 +190,13 @@ const BOT_PHASE_ACTOR = {
   // 可能是另一个人的机器人,真实可达)。
   mingcePickCard:'sourceSeat', mingcePickTarget:'sourceSeat', mingcePickTarget2:'sourceSeat',
   mingceChoice:'targetSeat',
+  // 【Part2补全】太史慈【天义】前两段(选拼点牌/选目标):行动者是 pending.seat(天义
+  // 发动者本人,服务端 pickTianyiCard/pickTianyiTarget 守卫 pending.seat!==mySeat)。
+  // 拼点响应段 tianyiRespond(目标本人)早就注册过(见上方 targetSeat 那一组)。
+  tianyiPickCard:'seat', tianyiPickTarget:'seat',
+  // 【Part2补全】丁奉【奋迅】两段:行动者是 pending.seat(奋迅发动者本人,服务端
+  // pickFenxunDiscard/pickFenxunTarget 守卫 pending.seat!==mySeat)。
+  fenxunDiscard:'seat', fenxunTarget:'seat',
   // 公孙瓒【趫猛】:qiaomengChoose/qiaomengPickEquip 行动者都是 pending.sourceSeat
   // (公孙瓒本人,被动触发——黑色杀命中且目标有装备,真实可达)。
   qiaomengChoose:'sourceSeat', qiaomengPickEquip:'sourceSeat',
@@ -524,6 +531,62 @@ function pickHealFallbackSeat(g, seat, candidates){
     if(key < bestKey){ bestKey = key; best = c.seat; }
   });
   return best;
+}
+// 【Part2】天义/强袭/乱武/乱击/奋迅"要不要主动发动"的判断,收敛到这一个函数,在出牌阶段
+// 的play分支里调一次。每种技能都先读过它在skills.js/game.js里的完整发动条件与后续流程
+// (见对应的runBotDecision分支和CLAUDE.md防复发规则26"先探测服务端到底允不允许"),不是
+// 只看hasCap就发动。返回true表示已经botInvoke了某个start*,调用方应立即return,让下一次
+// 调度接管随之产生的新phase。
+// 陈宫【明策】、法正【眩惑】刻意不在这里:两者对发动者自己都是"净收益不明确、纯粹把资源
+// 让给别人"(明策交出一张牌/装备,眩惑净手牌数不变、只是转移他人的牌),和举荐/仁心同一
+// 基调保守默认不主动发动;它们各自的后续选择分支(mingcePickCard等/防御性收录)仍然保留,
+// 供其它触发路径复用,只是没有一个"主动点火"的入口。
+function botTryStartExtraSkills(g, seat){
+  const me=g.players[seat];
+  if(!me || !me.alive) return false;
+  // 贾诩【乱武】:令所有其他角色各自选择出杀或掉血,对发动者自己零代价零风险,固定发动
+  // (和落英/洛神同一基调,只要求场上还有其他存活角色)。
+  if(hasCap(me,'luanwu') && !g.luanwuUsed){
+    if(g.players.some((p,i)=>i!==seat && p && p.alive)){ botInvoke(seat, startLuanwu); return true; }
+  }
+  // 太史慈【天义】:拼点赢获得本阶段【杀】次数/距离/目标数加成,拼点输本阶段不能用杀,
+  // 大致五五开的赌注,赢面收益明显大于输面代价(多数回合根本用不完已有的杀次数上限)。
+  // 要求留至少2张手牌(拼点牌+至少1张备用),避免为了赌一次拼点把手牌梭哈到只剩0张。
+  if(hasCap(me,'tianyi') && !g.tianyiUsed){
+    const hasTarget=g.players.some((p,i)=>i!==seat && p && p.alive && (p.hand||[]).length>0);
+    if(hasTarget && (me.hand||[]).length>=2){ botInvoke(seat, startTianyi); return true; }
+  }
+  // 典韦【强袭】:花1点体力或弃置一张武器牌,对攻击范围内一名角色造成1点伤害——进攻性
+  // 资源投入,和贯石斧/寒冰剑等装备特效同一基调固定发动,但先探测真的有攻击范围内的
+  // 目标、且至少一种支付方式可行(呼应规则26,避免发动后在选支付方式阶段无路可走)。
+  // 优先弃武器省体力,只有武器不可弃且体力>2(留有余量)才用体力支付。
+  if(hasCap(me,'qiangxi') && !g.qiangxiUsed){
+    const myRange=attackRange(g, seat);
+    const hasTarget=g.players.some((p,i)=>i!==seat && p && p.alive && distance(g,seat,i)<=myRange);
+    const canPay=hasWeaponToDiscard(me) || me.hp>2;
+    if(hasTarget && canPay){ botInvoke(seat, startQiangxi); return true; }
+  }
+  // 袁绍【乱击】:花2张同花色手牌当万箭齐发使用(全场AOE,自己免疫)。只有存在≥2名其他
+  // 存活角色时才划算(否则花2张牌只打1个人,不如直接出一张杀更省资源)。
+  if(hasCap(me,'luanji')){
+    const otherAlive=g.players.filter((p,i)=>i!==seat && p && p.alive).length;
+    if(otherAlive>=2){
+      const suitCount={};
+      (me.hand||[]).forEach(c=>{ if(c) suitCount[c.suit]=(suitCount[c.suit]||0)+1; });
+      if(Object.values(suitCount).some(n=>n>=2)){ botInvoke(seat, startLuanji); return true; }
+    }
+  }
+  // 丁奉【奋迅】:弃1张牌,本回合与指定角色距离视为1。只有存在"当前用canReachSha够不着、
+  // 发动后就够得着"的目标、且手里确实有能当杀用的牌时才值得发动——不能只看"手牌够不够"
+  // (规则26),否则就是白弃1张牌换不到任何实际用途。要求留至少2张手牌(备用杀+被弃的牌)。
+  if(hasCap(me,'fenxun') && !me.fenxunUsed){
+    if(findUsableAs(me.hand||[],me,'杀')>=0 && (me.hand||[]).length>=2){
+      if(g.players.some((p,i)=>i!==seat && p && p.alive && !canReachSha(g,seat,i))){
+        botInvoke(seat, startFenxun); return true;
+      }
+    }
+  }
+  return false;
 }
 function botActionId(card){ return isShaName(card.name)?'杀':card.name; }
 function botCardPriority(name){
@@ -3548,6 +3611,10 @@ async function runBotDecision(g,seat){
     // fallbackSeat引入的问题,这次不改这个架构(一次只改一件事)。
     if(await botDecide('seatPick', g, seat)) return;
     if(await botDecide('fangtian', g, seat)) return;
+    // 【Part2】天义/强袭/乱武/乱击/奋迅:此前完全没有代码调用这几个start*函数,机器人
+    // 从不主动发动。明策/眩惑经评估保守默认不主动发动(净收益不明确/纯粹利他,和
+    // 举荐/仁心同一基调),不在这里触发,见 botTryStartExtraSkills 上方注释。
+    if(botTryStartExtraSkills(g, seat)) return;
     await runBotActionWindow(g, seat); return;
   }
   if(g.phase==='discard'&&g.turn===seat){
@@ -3824,6 +3891,51 @@ async function runBotDecision(g,seat){
   // 陆逊【连营】:摸1张牌,零代价,固定发动。
   if(g.phase==='lianyingAsk'&&d.type==='lianyingAsk'&&d.seat===seat){
     botInvoke(seat,()=>respondLianying(true)); return;
+  }
+  // 【Part2补全】太史慈【天义】选拼点牌:固定选手牌里点数最大的一张(拼点点数越大赢面
+  // 越高,和"发动"这一步的判断方向一致——既然已经决定发动,就该尽量选能赢的牌)。
+  if(g.phase==='tianyiPickCard'&&d.type==='tianyiPickCard'&&d.seat===seat){
+    const me=g.players[seat];
+    const hand=(me&&me.hand)||[];
+    let bestIdx=0;
+    hand.forEach((c,i)=>{ if(c && (c.rank||0)>((hand[bestIdx]&&hand[bestIdx].rank)||0)) bestIdx=i; });
+    if(hand.length) botInvoke(seat,()=>pickTianyiCard(bestIdx));
+    else botInvoke(seat,cancelTianyi);
+    return;
+  }
+  // 【Part2补全】太史慈【天义】选拼点目标:候选=有手牌的其他存活角色,用既有的
+  // pickBestCandidateSeat('damage')按身份嫌疑/血量等评分挑一个,和guose/wusheng等
+  // seatPick技能选目标同一套评分口径,不重新发明。
+  if(g.phase==='tianyiPickTarget'&&d.type==='tianyiPickTarget'&&d.seat===seat){
+    const cardIdx=d.cardIdx;
+    const candidates=[];
+    g.players.forEach((p,i)=>{ if(i!==seat && p && p.alive && (p.hand||[]).length>0) candidates.push({seat:i}); });
+    const target=pickBestCandidateSeat(g, seat, candidates, 'damage');
+    if(typeof target==='number') botInvoke(seat,()=>pickTianyiTarget(cardIdx,target));
+    else botInvoke(seat,cancelTianyi);
+    return;
+  }
+  // 【Part2补全】丁奉【奋迅】选弃牌:优先弃一张不能当杀用的牌(保留手里能当杀用的牌,
+  // 否则发动奋迅本身就没意义了——呼应"发动"这一步已经校验过hasSha的判断方向)。
+  if(g.phase==='fenxunDiscard'&&d.type==='fenxunDiscard'&&d.seat===seat){
+    const me=g.players[seat];
+    const hand=(me&&me.hand)||[];
+    let idx=hand.findIndex(c=>c && !canUseAs(me,c,'杀'));
+    if(idx<0) idx=0;
+    if(hand.length) botInvoke(seat,()=>pickFenxunDiscard(idx));
+    else botInvoke(seat,cancelFenxun);
+    return;
+  }
+  // 【Part2补全】丁奉【奋迅】选目标:固定选候选里"当前够不着"的第一个(呼应"发动"那一步
+  // 已经校验过的真实用途——奋迅本来就是为了打够不着的目标),找不到这种目标才退化选
+  // 候选第一个(理论上不会发生,发动前已校验过)。
+  if(g.phase==='fenxunTarget'&&d.type==='fenxunTarget'&&d.seat===seat){
+    const avail=d.availableTargets||[];
+    let target=avail.find(i=>!canReachSha(g,seat,i));
+    if(typeof target!=='number') target=avail[0];
+    if(typeof target==='number') botInvoke(seat,()=>pickFenxunTarget(target));
+    else botInvoke(seat,cancelFenxun);
+    return;
   }
   // 陈宫【明策】三段选牌/选目标(防御性收录,机器人目前不会主动发动明策):固定选第一个
   // 合法候选——手牌里第一张符合条件的牌/装备槽,选目标固定选第一个存活非自己的角色。
