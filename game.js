@@ -436,11 +436,18 @@ function normalize(g){
       g.pending=null; g.phase='play';
     }
   }
-  // 李典【忘隙】询问阶段:seat/otherSeat 应是数字座位号且对应玩家存活;amount应为正整数;任一不对就整体判无效
+  // 李典【忘隙】询问阶段:seat 应是数字座位号且对应玩家存活;otherSeat 应是数字座位号且
+  // 对应玩家存在;amount应为正整数;任一不对就整体判无效。otherSeat 的"存活性"不能一刀切
+  // 要求为真——忘隙有两个合法创建入口(startNextWangxi的一般伤害队列/死亡结算处的致死
+  // 入口),后者是"李典造成致命伤害,目标死亡结算完毕后才挂起询问",这时otherSeat对应的
+  // 就是刚阵亡的那个人,d.death===true 正是用来标记这种合法情形的(见 respondWangxi 对
+  // death 的分支处理:death=true 时只有李典自己摸牌,不要求otherSeat存活)。d.death!==true
+  // 的一般场景才需要otherSeat存活,否则会把"目标已死"这个合法状态误判成脏数据清空掉。
   if(g.pending && g.pending.type==='wangxiAsk'){
     const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.otherSeat!=='number' || !Number.isInteger(d.amount) || d.amount<=0 
-       || !g.players[d.seat] || !g.players[d.seat].alive || !g.players[d.otherSeat] || !g.players[d.otherSeat].alive
+    if(typeof d.seat!=='number' || typeof d.otherSeat!=='number' || !Number.isInteger(d.amount) || d.amount<=0
+       || !g.players[d.seat] || !g.players[d.seat].alive || !g.players[d.otherSeat]
+       || (d.death!==true && !g.players[d.otherSeat].alive)
        || !d.resume || typeof d.resume.type!=='string'){
       logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(wangxiAsk)');
       g.pending=null; g.phase='play';
