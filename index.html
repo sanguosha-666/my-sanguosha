@@ -1071,6 +1071,11 @@
      在 right 侧,这里在 left 侧)。 */
   #debugLogBtn{position:fixed;top:64px;left:12px;z-index:50;width:44px;height:44px;
     border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  /* AI测试入口(aiTestBtn):和 #debugLogBtn 同一行、往右一格(debugLogBtn left:12,这里 left:64),
+     同款固定圆形图标按钮,复用 #closeRoomBtn/#debugLogBtn 那套定位+尺寸+配色。z-index:50
+     与其他图标按钮一致、低于弹窗(#aiTestModal 是 z-index:120),点开弹窗不会压住弹窗交互。 */
+  #aiTestBtn{position:fixed;top:64px;left:64px;z-index:50;width:44px;height:44px;
+    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
   /* 调试日志弹窗内容(showDebugLog,复用 #infoModal/.info-panel):列表默认只显示摘要行,
@@ -1186,6 +1191,10 @@
   .aitest-panel{position:relative;display:flex;flex-direction:column;width:100%;height:100%;background:var(--paper,#f5ecd9);border:1px solid var(--paper-dim,#a0926e);border-radius:8px;overflow:hidden;box-sizing:border-box}
   .aitest-header{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cinnabar,#a03a2a);color:#fff;font-size:14px;font-weight:600;cursor:move;user-select:none}
   .aitest-close{margin-left:auto;background:transparent;color:#fff}
+  /* .aitest-close 的 hover 覆盖全局 button:hover:not(:disabled){background:#2e2823}
+     (特异性 (0,2,1) 高于单独 .aitest-close 的 (0,1,0),会把它盖成深灰块)——加一层
+     .aitest-header 祖先把特异性提到 (0,3,0),hover 时用半透明黑,保持头栏底色不破。 */
+  .aitest-header .aitest-close:hover{background:rgba(0,0,0,.25);color:#fff}
   .aitest-body{flex:1 1 auto;overflow-y:auto;padding:8px;font-size:13px}
   .aitest-record{border:1px solid var(--paper-dim,#a0926e);border-radius:6px;margin-bottom:6px;background:rgba(255,255,255,.5)}
   .aitest-record-summary{padding:6px 8px;cursor:pointer;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
