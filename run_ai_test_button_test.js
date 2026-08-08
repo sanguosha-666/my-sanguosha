@@ -1,22 +1,28 @@
 /**
- * AI 测试托管按钮 —— Task2(parseBotPlayAiChoiceWithReason + callAiChooseIndex 托管检测)
+ * AI 测试托管按钮 —— 完整回归套件(Task 6)。
+ * Task2(parseBotPlayAiChoiceWithReason + callAiChooseIndex 托管检测)
  * + Task3(botSeatForState/runBotDecision/scheduleBotTurn 托管接入 + 非控制器浏览器
  * 托管调度放行限定) + Task4(toggleAiTestAutopilot 开关 + appendAiTestRecord/toggleAiTestRecord
- * 信息窗渲染)测试骨架。
+ * 信息窗渲染) + Task5(aiTestDecisionHook/aiTestLastCall 采集) + Task6(越界边界:托管座位
+ * 阵亡时决策不触发)。
  *
  * 加载真实完整链路(config/data/debug-log/room-lifecycle/game/weapons/skills/bot-ai-bus/
  * bot/ai-bot/render)进共享 vm 沙箱(与 run_ai_bus_l3_test.js 同一套 firebase/document/window
  * stub 与异步 check 断言惯例)。
  *
- * 覆盖(Task2 brief Step 1 + Step 6 + Task3 调度接入):
+ * 覆盖(对照 plan §七 测试清单 8 组):
  *  - parseBotPlayAiChoiceWithReason: 带reason解析 / 无reason回退老解析 / 代码块包裹 /
  *    垃圾输入回退null(4 项)
  *  - callAiChooseIndex: 托管命中时返回 idx 且 aiTestLastReason 被设置 / 未托管时 reason
- *    保持 null 零变化(2 项)
+ *    保持 null 零变化(2 项)+ aiTestLastCall 采集/不触碰(2 项)
  *  - botSeatForState: 托管开启时真人座位被解析为行动者 / 托管关闭时恒 -1(回归)
  *  - runBotDecision: 托管真人座位可进入(draw 分支被调用,守卫放行)
  *  - scheduleBotTurn: 非控制器浏览器(非 isBotController)托管自己时回调放行执行决策 /
  *    轮到别的 bot 座位时入口门 return 不调度
+ *  - toggleAiTestAutopilot: 无密钥不开启弹配置 / 有密钥开启 / 再次点击关闭(3 项)
+ *  - appendAiTestRecord 追加 + toggleAiTestRecord 折叠不抛错(2 项)
+ *  - aiTestDecisionHook 直调追加 record + runBotDecision 托管决策后 records 增长(2 项)
+ *  - 越界/边界:托管座位阵亡时 runBotDecision 首行 return,不决策不采集(1 项)
  *
  * 已知的 vm 坑(沿用 l3 结论):aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,
  * 必须用 runInContext 里裸标识符赋值;callAI 是函数声明绑定,可直接在 runInContext 里
@@ -365,6 +371,24 @@ const testCode = String.raw`
   });
   await check('toggleAiTestRecord: 折叠切换hidden类(无DOM不抛错)', function(){
     toggleAiTestRecord(0);
+  });
+
+  // ============ Task6: 越界/边界 —— 托管座位阵亡时决策不触发(1 项) ============
+  // 托管座位阵亡后 runBotDecision 首行守卫(!p.alive && phase!=='pickingGeneral')
+  // 直接 return:不执行任何决策分支(doDraw 不被调用)、不追加 record。若守卫缺失,
+  // isAutopilot 放行后 draw 分支会调用 doDraw 并采集 record —— 该断言必红。
+  await check('越界/边界: 托管座位阵亡时runBotDecision首行return(不决策/不采集)', async function(){
+    var g = mkSeatG({n:3});
+    g.phase='draw'; g.turn=0;
+    g.players[0].isBot=false; g.players[0].alive=false; // 托管座位已阵亡
+    aiTestAutopilot = {active:true, seat:0, records:[]};
+    window.__doDrawCalled = 0;
+    doDraw = function(){ window.__doDrawCalled++; };
+    await runBotDecision(g, 0);
+    if(window.__doDrawCalled !== 0)
+      throw new Error('阵亡托管座位不应执行draw分支,实际调用 '+window.__doDrawCalled+' 次(首行守卫缺失)');
+    if(aiTestAutopilot.records.length !== 0)
+      throw new Error('阵亡座位不应追加record,实际 '+aiTestAutopilot.records.length+' 条');
   });
 
   console.log('\n' + '='.repeat(60));
