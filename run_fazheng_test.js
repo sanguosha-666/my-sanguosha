@@ -93,7 +93,12 @@ console.log('Loading dependencies...\n');
 
 // 法正曾出现过“逻辑测试全过、真实界面因缺失 helper 直接 ReferenceError”的问题，因此这里
 // 同时加载真实渲染层，让专项测试覆盖 renderControls，而不再只测 game.js 状态转换。
-var files = ['config.js', 'data.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'skills.js', 'render.js', 'render-controls.js'];
+// 【测试加载清单修复】原来漏了bot-ai-bus.js——renderResponseCountdown(A1响应超时倒计时
+// 功能,db415d7引入)定义在那个文件里,被render-controls.js的渲染路径引用。这个测试文件
+// 写在bot-ai-bus.js从bot.js拆分出来(2940b65)之前,后续没有同步补上,导致眩惑/恩怨这几个
+// "真实渲染不抛错"的场景在依赖缺失上直接ReferenceError崩溃,根本没跑到断言逻辑本身。
+// 按真实index.html的加载顺序补在game.js之后、render.js之前。
+var files = ['config.js', 'data.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'bot-ai-bus.js', 'skills.js', 'render.js', 'render-controls.js'];
 var loaded = 0;
 
 files.forEach(function(file) {
