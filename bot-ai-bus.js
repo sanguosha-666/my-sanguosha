@@ -31,6 +31,30 @@ function parseBotPlayAiChoice(text){
   return r;
 }
 
+// parseBotPlayAiChoiceWithReason:AI测试托管模式的解析——AI 在返回 choice 的同时附一句
+// 中文理由({"choice":N,"reason":"..."})。复用老解析的宽容策略(JSON.parse失败剥代码块
+// 重试一次);解析出 choice 时顺带提取 reason(无 reason 字段则为 null);整体失败回退
+// 老解析函数(仍失败则 idx=null)。返回 {idx, reason}。
+function parseBotPlayAiChoiceWithReason(text){
+  if(typeof text!=='string') return {idx:null, reason:null};
+  const tryParse=(s)=>{
+    try{
+      const obj=JSON.parse(s.trim());
+      if(obj && typeof obj.choice==='number' && Number.isInteger(obj.choice)){
+        return {idx:obj.choice, reason:(typeof obj.reason==='string' && obj.reason) ? obj.reason : null};
+      }
+    }catch(e){}
+    return null;
+  };
+  let r=tryParse(text);
+  if(r!==null) return r;
+  const stripped=text.replace(/```(?:json)?/gi,'').trim();
+  if(stripped!==text) r=tryParse(stripped);
+  if(r!==null) return r;
+  const old=parseBotPlayAiChoice(text);
+  return {idx:old, reason:null};
+}
+
 // ================= AI可操作面决策总线(骨架,Task B0) =================
 // 【本段是什么】把"一个可操作面决策点"收敛成统一的注册-匹配-候选-询问-执行五段式:
 // 新决策点只需往 BOT_DECISIONS 注册 {match, buildCandidates, execute, localFallback,
@@ -53,6 +77,13 @@ let aiSummary = '';
 let aiSummarySeat = null;
 let aiSummaryRound = 0;
 let aiSummaryTurn = -1;
+// aiTestLastReason:AI测试托管模式(AI测试按钮)下,最近一次托管命中的 AI 询问里解析出的
+// 中文选择理由。模块级变量,供信息窗 record 采集(aiTestDecisionHook)。未托管时恒为
+// null——callAiChooseIndex 在未托管路径会把 reason 恒写 null,与未托管行为零变化。
+// 【为何是顶层声明】计划初稿把声明写在 callAiChooseIndex 函数体内(var 提升后是该函数
+// 的局部变量),函数外的测试/采集代码永远读不到——必须放模块顶层才符合"供 record 采集"
+// 的语义。
+let aiTestLastReason = null;
 function aiSummaryReset(){
   aiSummary = '';
   aiSummarySeat = null;
@@ -130,6 +161,10 @@ function buildBotDefaultUserPrompt(state, candidates){
 // 返回 null 交给调用方回退本地逻辑,不重试、不阻塞、不抛异常。
 async function callAiChooseIndex(opts){
   const candidates = opts.candidates || [];
+  // 【AI测试托管】检测当前座位是否处于托管模式:命中则该次询问要求 AI 附理由,
+  // 并把解析出的理由存入模块级 aiTestLastReason(供信息窗 record 采集)。
+  const autopilotHit = (typeof aiTestAutopilot!=='undefined') && aiTestAutopilot
+    && aiTestAutopilot.active && aiTestAutopilot.seat===opts.seat;
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
   if(candidates.length<=1) return candidates.length===1 ? 0 : null;
   // 【AI摘要】座位校验:座位变化(重连/换机器人)清空记忆;同座位累积。摘要只注入文本,
@@ -145,7 +180,8 @@ async function callAiChooseIndex(opts){
   let result;
   try{
     result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote,
+      systemPrompt: (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote
+        + (autopilotHit ? '\n\n(本次为AI测试托管)在返回choice的同时,用一句中文解释你的选择理由。返回格式:{"choice":数字,"reason":"理由文本"}' : ''),
       userPrompt: opts.userPrompt,
       maxTokens: opts.maxTokens || 80,
       model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
@@ -155,9 +191,23 @@ async function callAiChooseIndex(opts){
   }finally{
     hideAiThinkingIndicator();
   }
-  if(!result || !result.ok) return null;
-  const idx = parseBotPlayAiChoice(result.text);
-  if(idx===null || idx<0 || idx>=candidates.length) return null;
+  if(!result || !result.ok){
+    aiTestLastReason = null;
+    return null;
+  }
+  let idx, reason;
+  if(autopilotHit){
+    const pr = parseBotPlayAiChoiceWithReason(result.text);
+    idx = pr.idx; reason = pr.reason;
+  } else {
+    idx = parseBotPlayAiChoice(result.text);
+    reason = null;
+  }
+  aiTestLastReason = reason;
+  if(idx===null || idx<0 || idx>=candidates.length){
+    if(autopilotHit) aiTestLastReason = null;
+    return null;
+  }
   return idx;
 }
 
