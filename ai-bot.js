@@ -64,6 +64,11 @@ let aiPromptDismissed = false;
 // 天然兜底,不需要为"用户没选模型"这个最常见情形写任何特殊分支。
 let aiApiModel = '';
 
+// ===== AI测试托管(纯客户端本地状态,不写入Firebase) =====
+// active:托管开关;seat:被托管的座位(当前浏览器玩家的 mySeat);records:本次托管期间
+// 的决策记录(供信息窗展示,关闭弹窗不清空、刷新即丢)。
+let aiTestAutopilot = { active:false, seat:null, records:[] };
+
 (function hydrateAiStateFromSession(){
   try{
     aiApiKey = sessionStorage.getItem(AI_KEY_STORAGE_KEY) || '';
@@ -746,4 +751,151 @@ function handleAddBotClick(){
     addBot();
   }
 }
+
+// ============================================================
+// AI测试托管:开关 + 信息窗(渲染/拖动/调整大小)
+// ============================================================
+// 纯客户端本地功能:状态只存在本文件的 aiTestAutopilot(模块级 let),从不写入
+// Firebase/g。游戏调度侧(bot.js)用 typeof aiTestAutopilot!=='undefined' 防御式
+// 读取,本文件是 aiTestAutopilot 的全项目唯一定义点。
+
+// toggleAiTestAutopilot:AI测试按钮开关。无密钥时提示配置;有密钥时开启并弹信息窗。
+function toggleAiTestAutopilot(){
+  if(!aiTestAutopilot.active){
+    if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider){
+      if(typeof showAiKeyModal==='function') showAiKeyModal();
+      return; // 无密钥不开启托管
+    }
+    aiTestAutopilot = { active:true, seat:mySeat, records:[] };
+    openAiTestModal();
+    updateAiTestStatus();
+    const btn=document.getElementById('aiTestBtn');
+    if(btn){ btn.classList.add('aitest-active'); btn.title='关闭AI托管'; }
+  } else {
+    aiTestAutopilot.active = false;
+    updateAiTestStatus();
+    const btn=document.getElementById('aiTestBtn');
+    if(btn){ btn.classList.remove('aitest-active'); btn.title='AI测试:AI托管当前玩家并显示决策信息'; }
+    // records 保留,弹窗内容不清空
+  }
+}
+function updateAiTestStatus(){
+  const el=document.getElementById('aiTestStatus');
+  if(el) el.textContent = aiTestAutopilot.active ? ('托管中·座位'+aiTestAutopilot.seat) : '未托管';
+}
+
+function openAiTestModal(){
+  const m=document.getElementById('aiTestModal');
+  if(!m) return;
+  m.classList.remove('hidden');
+  const p=m.querySelector('.aitest-panel');
+  if(p) p.onclick=(e)=>e.stopPropagation();
+  renderAiTestRecords();
+}
+function closeAiTestModal(){
+  const m=document.getElementById('aiTestModal');
+  if(m) m.classList.add('hidden');
+}
+function renderAiTestRecords(){
+  const body=document.getElementById('aiTestBody');
+  if(!body) return;
+  body.innerHTML = aiTestAutopilot.records.map(function(rec,i){
+    return '<div class="aitest-record">'
+      +'<div class="aitest-record-summary" onclick="toggleAiTestRecord('+i+')">'
+      +'<span class="aitest-arrow">▸</span><b>'+escapeHtml(rec.time)+'</b>'
+      +'<span>['+escapeHtml(rec.phaseLabel)+']</span><span>'+escapeHtml(rec.summary)+'</span>'
+      +'</div>'
+      +'<div class="aitest-record-detail hidden" data-idx="'+i+'">'
+      +'<div class="aitest-sec">① AI获取的信息</div><pre>'+escapeHtml(rec.stateInfo)+'</pre>'
+      +(rec.prompt ? '<div class="aitest-sec">发送的Prompt</div><pre>'+escapeHtml(rec.prompt)+'</pre>' : '')
+      +'<div class="aitest-sec">② AI返回的信息</div><pre>'+escapeHtml(rec.rawResponse || '(无)')+'</pre>'
+      +'<div class="aitest-sec">解析choice</div><div>'+(rec.choice===null?'(无动作/本地兜底)':rec.choice)+'</div>'
+      +'<div class="aitest-sec">③ 理由</div><div>'+escapeHtml(rec.reason || '(无)')+'</div>'
+      +'</div></div>';
+  }).join('');
+}
+function toggleAiTestRecord(idx){
+  const el=document.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
+  if(!el) return;
+  el.classList.toggle('hidden');
+}
+function clearAiTestRecords(){
+  aiTestAutopilot.records = [];
+  renderAiTestRecords();
+}
+// appendAiTestRecord:每次托管决策完成后追加一条记录并重渲染弹窗。
+function appendAiTestRecord(rec){
+  aiTestAutopilot.records.push(rec);
+  const m=document.getElementById('aiTestModal');
+  if(m && !m.classList.contains('hidden')) renderAiTestRecords();
+}
+
+// aiTestDecisionHook:托管决策采集钩子(供 Task 5 决策完成后调用)。把一次托管决策的
+// 关键信息(状态快照、prompt、AI返回、choice、理由)聚合成一条 record 追加进信息窗。
+// 组装/渲染任何一步失败都静默忽略,不阻塞决策主流程。
+function aiTestDecisionHook(g, seat, info){
+  try{
+    if(typeof info!=='object' || !info) return;
+    if(typeof aiTestAutopilot==='undefined' || !aiTestAutopilot) return;
+    const phaseLabel = (typeof phaseName!=='undefined' && phaseName)
+      ? (phaseName[g && g.phase] || (g && g.phase) || '') : ((g && g.phase) || '');
+    const stateInfo = (typeof buildBotVisibleState==='function')
+      ? JSON.stringify(buildBotVisibleState(g, seat)) : '';
+    appendAiTestRecord({
+      time: (typeof debugLogIsoTime==='function')
+        ? debugLogIsoTime(Date.now()) : new Date().toTimeString().slice(0,8),
+      phaseLabel: phaseLabel,
+      summary: info.summary || ('决策(' + (g && g.phase) + ')'),
+      stateInfo: stateInfo,
+      prompt: info.prompt || '',
+      rawResponse: info.rawResponse || '',
+      choice: (info.choice===undefined) ? null : info.choice,
+      reason: (info.reason!==undefined) ? info.reason
+        : ((typeof aiTestLastReason!=='undefined') ? aiTestLastReason : null),
+    });
+  }catch(e){ /* 静默:采集失败不影响决策主流程 */ }
+}
+
+// 拖动:header mousedown/mousemove 更新 left/top;resize:右下角手柄更新 width/height。
+// pointer 事件统一处理,兼容触屏(mouse/touch 都转成 pointer 事件由浏览器合成)。
+(function initAiTestModalDrag(){
+  if(typeof document==='undefined'||!document.addEventListener) return;
+  document.addEventListener('mousedown', function(e){
+    const hd=e.target && e.target.closest ? e.target.closest('.aitest-header') : null;
+    if(!hd) return;
+    const m=document.getElementById('aiTestModal');
+    if(!m || m.classList.contains('hidden')) return;
+    e.preventDefault();
+    const sx=e.clientX, sy=e.clientY, ox=m.offsetLeft, oy=m.offsetTop;
+    function move(ev){
+      m.style.left=Math.max(0, ox+ev.clientX-sx)+'px';
+      m.style.top=Math.max(0, oy+ev.clientY-sy)+'px';
+      m.style.right='auto'; m.style.bottom='auto';
+    }
+    function up(){
+      document.removeEventListener('mousemove',move);
+      document.removeEventListener('mouseup',up);
+    }
+    document.addEventListener('mousemove',move);
+    document.addEventListener('mouseup',up);
+  });
+  document.addEventListener('mousedown', function(e){
+    const hd=e.target && e.target.closest ? e.target.closest('.aitest-resize-handle') : null;
+    if(!hd) return;
+    const m=document.getElementById('aiTestModal');
+    if(!m || m.classList.contains('hidden')) return;
+    e.preventDefault(); e.stopPropagation();
+    const sx=e.clientX, sy=e.clientY, ow=m.offsetWidth, oh=m.offsetHeight;
+    function move(ev){
+      m.style.width=Math.max(280, ow+ev.clientX-sx)+'px';
+      m.style.height=Math.max(200, oh+ev.clientY-sy)+'px';
+    }
+    function up(){
+      document.removeEventListener('mousemove',move);
+      document.removeEventListener('mouseup',up);
+    }
+    document.addEventListener('mousemove',move);
+    document.addEventListener('mouseup',up);
+  });
+})();
 

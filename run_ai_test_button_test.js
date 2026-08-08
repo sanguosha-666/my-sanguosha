@@ -1,7 +1,8 @@
 /**
  * AI 测试托管按钮 —— Task2(parseBotPlayAiChoiceWithReason + callAiChooseIndex 托管检测)
  * + Task3(botSeatForState/runBotDecision/scheduleBotTurn 托管接入 + 非控制器浏览器
- * 托管调度放行限定)测试骨架。
+ * 托管调度放行限定) + Task4(toggleAiTestAutopilot 开关 + appendAiTestRecord/toggleAiTestRecord
+ * 信息窗渲染)测试骨架。
  *
  * 加载真实完整链路(config/data/debug-log/room-lifecycle/game/weapons/skills/bot-ai-bus/
  * bot/ai-bot/render)进共享 vm 沙箱(与 run_ai_bus_l3_test.js 同一套 firebase/document/window
@@ -43,7 +44,7 @@ const context = {
     database: function() { return { ref: function() { return { on: function() {}, once: function() {}, push: function() { return { set: function() {}, key: 'mock_key' }; }, transaction: function() { return {}; }, set: function() {}, child: function() { return {}; }, remove: function() {}, get: function() { return { val: function() { return null; } }; } }; } }; }
   },
   document: {
-    getElementById: function(id) { return { onclick: function() {}, innerHTML: '', style: {}, className: '', classList: { add: function() {}, remove: function() {}, toggle: function() {}, contains: function() { return false; } }, appendChild: function() { return {}; }, remove: function() {}, setAttribute: function() {}, getAttribute: function() { return null; }, addEventListener: function() {}, removeEventListener: function() {} }; },
+    getElementById: function(id) { return { onclick: function() {}, innerHTML: '', style: {}, className: '', classList: { add: function() {}, remove: function() {}, toggle: function() {}, contains: function() { return false; } }, querySelector: function() { return null; }, appendChild: function() { return {}; }, remove: function() {}, setAttribute: function() {}, getAttribute: function() { return null; }, addEventListener: function() {}, removeEventListener: function() {} }; },
     createElement: function(tag) { return { src: '', href: '', rel: '', type: '', textContent: '', innerHTML: '', onclick: function() {}, onerror: function() {}, onload: function() {}, className: '', id: '', style: {}, setAttribute: function() {}, getAttribute: function() { return null; }, appendChild: function() { return {}; }, remove: function() {} }; },
     createTextNode: function(t) { return { nodeValue: t, textContent: t }; },
     createDocumentFragment: function() { return { appendChild: function() { return {}; }, querySelector: function() { return null; }, querySelectorAll: function() { return []; } }; },
@@ -274,6 +275,41 @@ const testCode = String.raw`
     restoreSetTimeout();
     if(scheduled !== 0)
       throw new Error('非控制器浏览器轮到别的bot座位时不应调度,实际调度 '+scheduled+' 次(入口门未限定托管座位)');
+  });
+
+  // ============ Task4: toggleAiTestAutopilot 开关 + 信息窗渲染(5 项) ============
+  // mock showAiKeyModal:和 callAI 一样是函数声明绑定,直接整体替换成"记录已弹窗"的桩。
+  showAiKeyModal = function(){ globalThis.__aiKeyModalShown = true; };
+
+  await check('toggleAiTestAutopilot: 无密钥不开启且弹配置框', function(){
+    aiApiKey = ''; aiProvider = 'openrouter';
+    aiTestAutopilot = {active:false, seat:null, records:[]};
+    globalThis.__aiKeyModalShown = false;
+    toggleAiTestAutopilot();
+    if(aiTestAutopilot.active) throw new Error('无密钥不应开启托管');
+    if(!globalThis.__aiKeyModalShown) throw new Error('应弹AI密钥配置');
+  });
+  await check('toggleAiTestAutopilot: 有密钥开启托管', function(){
+    aiApiKey = 'sk-or-test'; aiProvider = 'openrouter';
+    aiTestAutopilot = {active:false, seat:null, records:[]};
+    toggleAiTestAutopilot();
+    if(!aiTestAutopilot.active) throw new Error('有密钥应开启');
+    if(aiTestAutopilot.seat!==0) throw new Error('seat应为mySeat(0),实际 '+aiTestAutopilot.seat);
+  });
+  await check('toggleAiTestAutopilot: 再次点击关闭托管', function(){
+    aiTestAutopilot = {active:true, seat:0, records:[]};
+    toggleAiTestAutopilot();
+    if(aiTestAutopilot.active) throw new Error('再次点击应关闭');
+  });
+  await check('appendAiTestRecord: 追加后records增长且摘要含决策文本', function(){
+    aiTestAutopilot = {active:true, seat:0, records:[]};
+    appendAiTestRecord({time:'12:00:00', phaseLabel:'出牌阶段', summary:'选择【杀】攻击座位2',
+      stateInfo:'{"seat":0}', prompt:'', rawResponse:'{"choice":0}', choice:0, reason:'测试'});
+    if(aiTestAutopilot.records.length!==1) throw new Error('应追加1条,实际 '+aiTestAutopilot.records.length);
+    if(aiTestAutopilot.records[0].summary.indexOf('选择【杀】')<0) throw new Error('摘要应含决策文本');
+  });
+  await check('toggleAiTestRecord: 折叠切换hidden类(无DOM不抛错)', function(){
+    toggleAiTestRecord(0);
   });
 
   console.log('\n' + '='.repeat(60));
