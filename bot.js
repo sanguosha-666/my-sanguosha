@@ -300,7 +300,8 @@ function botSeatForState(g){
   }
   if(g.phase==='pickingGeneral'){
     // 选将是各选各的:任意一个还没选将的机器人都可以现在就选
-    const pick=(g.players||[]).findIndex(p=>p&&p.isBot&&!p.general);
+    // (走 isBotSeat,和 A/B 其余段落一致:托管中的真人座位也视同机器人)
+    const pick=(g.players||[]).findIndex((p,i)=>p&&isBotSeat(i)&&!p.general);
     return pick>=0?pick:-1;
   }
   if(g.phase==='draw'||g.phase==='play'||g.phase==='discard'){
@@ -386,8 +387,10 @@ let botDecisionInFlight=false;
 let botMissedSchedule=false;
 function scheduleBotTurn(g){
   if(!g) return;
-  // 【AI测试托管】托管当前玩家时,即使自己不是 isBotController(不是第一个真人)也要跑
-  // 调度;否则托管只对房主浏览器生效。非托管场景行为与原来一致(isBotController 判定)。
+  // 【AI测试托管】托管自己座位时,即使自己不是 isBotController(不是第一个真人)也允许跑
+  // 调度,但只限托管座位自己;其它机器人座位仍由控制器浏览器独占驱动(非控制器浏览器在
+  // "轮到别的 bot 座位"时直接 return,双浏览器驱动会冲突)。非托管场景行为与原来一致
+  // (isBotController 判定)。
   const aiTestSelf = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
     && aiTestAutopilot.seat===mySeat;
   if(!isBotController(g)&&!aiTestSelf) return;
@@ -395,6 +398,9 @@ function scheduleBotTurn(g){
   // (fire-and-forget,不阻塞决策;更新完成后的下一轮决策才带上新摘要)
   if(g.phase==='over'){ aiSummaryReset(); return; }
   const seat=botSeatForState(g);
+  // 【AI测试托管】非控制器浏览器(靠 aiTestSelf 放行)只允许调度托管座位自己,
+  // 绝不能驱动其它机器人座位(那是控制器浏览器的职责,双浏览器驱动会冲突)。
+  if(!isBotController(g) && !(aiTestSelf && seat===aiTestAutopilot.seat)) return;
   // seat>=0 才碰摘要座位:seat===-1 是真人回合(scheduleBotTurn 每次渲染都跑),
   // 此时 reset 会把机器人的跨回合记忆清掉,2人局(1真人+1机器人)记忆永远活不过
   // 一个真人回合。只有"换到另一个机器人座位"(或首遇机器人座位)才该清空。
@@ -423,8 +429,13 @@ function scheduleBotTurn(g){
   botTimer=setTimeout(async ()=>{
     botTimer=null;
     const latest=(typeof currentG!=='undefined')?currentG:null;
-    if(!latest || !isBotController(latest)) return;
+    if(!latest) return;
     const nowSeat=botSeatForState(latest);
+    // 【AI测试托管】回调第二道门与入口门同一口径:非控制器浏览器只在"轮到托管座位自己"
+    // 时放行,否则 return(不执行决策);控制器浏览器行为与原来完全一致。
+    const aiTestSelfNow = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
+      && aiTestAutopilot.seat===mySeat;
+    if(!isBotController(latest) && !(aiTestSelfNow && nowSeat===aiTestAutopilot.seat)) return;
     if(botStateKey(latest,nowSeat)!==key) return;
     botDecisionInFlight=true;
     try{

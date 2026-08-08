@@ -1,16 +1,21 @@
 /**
- * AI 测试托管按钮 —— Task 2 测试骨架:parseBotPlayAiChoiceWithReason 解析函数 +
- * callAiChooseIndex 托管检测/理由采集。
+ * AI 测试托管按钮 —— Task2(parseBotPlayAiChoiceWithReason + callAiChooseIndex 托管检测)
+ * + Task3(botSeatForState/runBotDecision/scheduleBotTurn 托管接入 + 非控制器浏览器
+ * 托管调度放行限定)测试骨架。
  *
  * 加载真实完整链路(config/data/debug-log/room-lifecycle/game/weapons/skills/bot-ai-bus/
  * bot/ai-bot/render)进共享 vm 沙箱(与 run_ai_bus_l3_test.js 同一套 firebase/document/window
  * stub 与异步 check 断言惯例)。
  *
- * 覆盖(Task 2 brief Step 1 + Step 6):
+ * 覆盖(Task2 brief Step 1 + Step 6 + Task3 调度接入):
  *  - parseBotPlayAiChoiceWithReason: 带reason解析 / 无reason回退老解析 / 代码块包裹 /
  *    垃圾输入回退null(4 项)
  *  - callAiChooseIndex: 托管命中时返回 idx 且 aiTestLastReason 被设置 / 未托管时 reason
  *    保持 null 零变化(2 项)
+ *  - botSeatForState: 托管开启时真人座位被解析为行动者 / 托管关闭时恒 -1(回归)
+ *  - runBotDecision: 托管真人座位可进入(draw 分支被调用,守卫放行)
+ *  - scheduleBotTurn: 非控制器浏览器(非 isBotController)托管自己时回调放行执行决策 /
+ *    轮到别的 bot 座位时入口门 return 不调度
  *
  * 已知的 vm 坑(沿用 l3 结论):aiApiKey/aiProvider 是 ai-bot.js 脚本作用域的 let 绑定,
  * 必须用 runInContext 里裸标识符赋值;callAI 是函数声明绑定,可直接在 runInContext 里
@@ -76,7 +81,7 @@ context.global = context;
 
 const sandbox = vm.createContext(context, { name: 'sgs-ai-test-button-sandbox' });
 
-console.log('Loading AI 测试托管按钮 Task2 测试环境...\n');
+console.log('Loading AI 测试托管按钮(Task2+Task3)测试环境...\n');
 
 // 加载顺序遵循 index.html:room-lifecycle 必须在 game.js 之前(game.js 顶层
 // onclick 绑定 joinRoom);bot-ai-bus.js 在 bot.js 之前(TDZ:const BOT_DECISIONS
@@ -100,7 +105,7 @@ files.forEach(function(file){
 });
 
 console.log('\n' + '='.repeat(60));
-console.log('  AI 测试托管按钮 Task2(理由解析+托管检测)');
+console.log('  AI 测试托管按钮 Task2+Task3(理由解析+托管检测+调度接入)');
 console.log('='.repeat(60) + '\n');
 
 const testCode = String.raw`
@@ -213,6 +218,62 @@ const testCode = String.raw`
     doDraw = function(){ window.__doDrawCalled++; };
     await runBotDecision(g, 0);
     if(window.__doDrawCalled !== 1) throw new Error('draw分支应被调用(守卫放行),实际调用 '+window.__doDrawCalled+' 次');
+  });
+
+  // ============ Task3b:非控制器浏览器托管调度放行(限托管座位自己)(2 项) ============
+  // 场景:我(座位0)托管自己,但我的浏览器不是 isBotController(不是"第一个真人"浏览器)。
+  // 用 cid 构造:players[0].cid 被"另一个真人"持有,myClientId 指向自己 → isBotController 恒 false,
+  // 只有 aiTestSelf(托管自己座位)放行。这两条断言在修复前必须红:
+  //  1) 回调第二道门 if(!latest || !isBotController(latest)) return 会拦住非控制器浏览器,
+  //     托管自己的回合决策永不执行 —— 断言"回调放行并执行 draw 决策"修复前必红;
+  //  2) 入口门在座位解析后没有"非控制器只限托管座位"这道限制,轮到别的 bot 座位时也会
+  //     继续排程 —— 断言"轮到别的 bot 座位不调度"修复前必红(会调度出 1 个定时器)。
+  // 沙箱里 scheduleBotTurn 用的是裸 setTimeout(和 bot.js 同一上下文),这里临时换成捕获版,
+  // 手动触发回调验证"回调放行",测完恢复真实定时器,避免真实 debounce 定时器泄漏。
+  function captureSetTimeout(){
+    window.__scheduled = [];
+    setTimeout = function(fn){ window.__scheduled.push(fn); return window.__scheduled.length; };
+    clearTimeout = function(){};
+  }
+  function restoreSetTimeout(){
+    setTimeout = window.setTimeout;
+    clearTimeout = window.clearTimeout;
+  }
+  function mkNonControllerG(turnIdx, phase){
+    var g = mkSeatG({n:3});
+    g.phase = phase || 'play';
+    g.turn = turnIdx;
+    g.players[0].isBot = false; g.players[0].cid = 'first-human-cid';
+    g.players[1].isBot = true;  g.players[1].cid = 'bot-cid-1';
+    g.players[2].isBot = true;  g.players[2].cid = 'bot-cid-2';
+    myClientId = 'my-cid-not-controller'; // 自己不是第一个真人浏览器
+    mySeat = 0;
+    return g;
+  }
+
+  await check('scheduleBotTurn回调: 非控制器浏览器托管自己时回调放行(执行draw决策)', async function(){
+    var g = mkNonControllerG(0, 'draw'); // 轮到托管座位0(draw阶段)
+    aiTestAutopilot = {active:true, seat:0};
+    captureSetTimeout();
+    scheduleBotTurn(g);
+    if(window.__scheduled.length !== 1) throw new Error('非控制器托管自己时应先调度1次,实际 '+window.__scheduled.length);
+    window.__doDrawCalled = 0;
+    doDraw = function(){ window.__doDrawCalled++; };
+    currentG = g; // 回调读 currentG(render.js 快照),手动触发定时器回调
+    await window.__scheduled[0]();
+    restoreSetTimeout();
+    if(window.__doDrawCalled !== 1)
+      throw new Error('非控制器+托管自己时回调应放行并执行draw决策,实际调用 '+window.__doDrawCalled+' 次(第二道门拦截了)');
+  });
+  await check('scheduleBotTurn入口门: 非控制器浏览器轮到别的bot座位时不调度(return)', function(){
+    var g = mkNonControllerG(1, 'play'); // 轮到别的 bot 座位1,托管座位是0
+    aiTestAutopilot = {active:true, seat:0};
+    captureSetTimeout();
+    scheduleBotTurn(g);
+    var scheduled = window.__scheduled.length;
+    restoreSetTimeout();
+    if(scheduled !== 0)
+      throw new Error('非控制器浏览器轮到别的bot座位时不应调度,实际调度 '+scheduled+' 次(入口门未限定托管座位)');
   });
 
   console.log('\n' + '='.repeat(60));
