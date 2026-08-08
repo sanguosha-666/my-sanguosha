@@ -280,6 +280,16 @@ function autoRespondAction(g){
     const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
     respondHuashenChangePickEnd(generalId, entry && entry.name);
   };
+  // 【真实bug修复】郭嘉【遗计】是否发动这第一问:超时默认"不发动"(respondYijiAsk(false)),
+  // 和这批"询问型pending超时兜底"的既有基调一致(激将/护驾/制霸等亦是保守默认,不是照抄
+  // runBotDecision里"默认发动"这条正常决策路径——这里管的是"真人/机器人都没能在30秒内
+  // 响应"这种异常情况,统一走最保守的分支,不重新引入判断)。
+  if(type==='yijiAsk') return function(){ respondYijiAsk(false); };
+  // 【系统性扫描发现的遗漏,和yijiAsk同一批】夏侯惇【刚烈】/张角【鬼道】/曹彰【将驰】:
+  // 超时统一走各自最保守的"不发动"分支,和上面这批既有兜底同一基调。
+  if(type==='ganglieAsk') return function(){ respondGanglieAsk(false); };
+  if(type==='guiduAsk') return function(){ cancelGuidu(); };
+  if(type==='jiangchiAsk') return function(){ respondJiangchi('none'); };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且

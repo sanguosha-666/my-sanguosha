@@ -1794,14 +1794,16 @@ function maybeGuidu(g, judgedSeat, judgeCard, resume) {
       for(const card of hand){
         if(card.suit === '♠' || card.suit === '♣'){
           // 找到第一个有资格的张角
-          g.pending = {
+          // 【系统性扫描发现的遗漏】补setResponseAskedAt,否则30秒超时兜底对这个pending
+          // 形同虚设(和郭嘉遗计yijiAsk同一批问题)。
+          g.pending = setResponseAskedAt({
             type: 'guiduAsk',
             sourceSeat: s,
             judgedSeat: judgedSeat,
             judgeCard: judgeCard,
             resume: resume,
             askedSeats: []
-          };
+          });
           g.phase = 'guiduAsk';
           g.log = pushLog(g.log, '询问 ' + p.name + ' 是否发动【鬼道】替换 ' + g.players[judgedSeat].name + ' 的判定牌');
           return 'pending';
@@ -1885,6 +1887,7 @@ function askNextGuidu(g, currentReplaceCard = null) {
             // 找到下一个有资格的张角
             pending.askedSeats = askedSeats;
             pending.sourceSeat = s;
+            setResponseAskedAt(pending); // 切换下一位候选人即重新计时,和guhuoQuestion同一约定
             g.phase = 'guiduAsk';
             g.log = pushLog(g.log, '询问 ' + p.name + ' 是否发动【鬼道】替换 ' + g.players[judgedSeat].name + ' 的判定牌');
             return g;
@@ -6321,7 +6324,8 @@ function continueEnterDrawPhase(g){
     // 曹彰【将驰】:摸牌阶段三选一
     const seat = g.turn;
     const p = g.players[seat];
-    g.pending = { type:'jiangchiAsk', seat, baseDraw: drawPhaseCount(g, seat) };
+    // 【系统性扫描发现的遗漏,和郭嘉遗计yijiAsk同一批】补setResponseAskedAt。
+    g.pending = setResponseAskedAt({ type:'jiangchiAsk', seat, baseDraw: drawPhaseCount(g, seat) });
     g.phase = 'jiangchiAsk';
     g.log = pushLog(g.log, p.name + ' 是否发动【将驰】…');
   } else {

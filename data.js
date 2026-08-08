@@ -175,7 +175,12 @@ const GENERALS = {
         // 原有的挂起入口负责补全(见 continueDelayResolution/finishGuicai 的 delayJudge 分支/
         // respondXiaoguoChoice,这几处已经对 g.pending.type==='dying' 做同样的事,这次一并
         // 扩展到 'yijiAsk'),这里不需要关心这些细节。
-        g.pending = { type:'yijiAsk', seat, resume:{type:ctx.srcType} };
+        // 【真实bug修复】补上 setResponseAskedAt:这个询问型pending此前没有设askedAt,
+        // bot-ai-bus.js 的 maybeAutoRespondTimeout 靠 typeof g.pending.askedAt==='number'
+        // 这条守卫判断"要不要走30秒超时兜底",没有这个字段等于这条安全网对yijiAsk形同虚设——
+        // 真人玩家忘了响应/掉线时,这个pending会永久悬空卡住整局,和左慈"更改化身"那批
+        // 询问阶段此前踩过的同一个坑。
+        g.pending = setResponseAskedAt({ type:'yijiAsk', seat, resume:{type:ctx.srcType} });
         g.phase = 'yijiAsk';
         g.log = pushLog(g.log, p.name+' 是否发动【遗计】,观看牌堆顶两张牌…');
       }
@@ -214,7 +219,10 @@ const GENERALS = {
         const sourceSeat=ctx && ctx.sourceSeat;
         const source=(typeof sourceSeat==='number') ? g.players[sourceSeat] : null;
         if(!self || !self.alive || !source || !source.alive || sourceSeat===seat || ctx.srcType==='ganglie') return;
-        g.pending={type:'ganglieAsk', seat, sourceSeat, resume:{type:ctx.srcType}};
+        // 【系统性扫描发现的遗漏,和郭嘉遗计yijiAsk同一批】补setResponseAskedAt,否则
+        // maybeAutoRespondTimeout的askedAt守卫永远拦在最前面,30秒超时兜底对这个pending
+        // 形同虚设。
+        g.pending=setResponseAskedAt({type:'ganglieAsk', seat, sourceSeat, resume:{type:ctx.srcType}});
         g.phase='ganglieAsk';
         g.log=pushLog(g.log, self.name+' 是否发动【刚烈】,对 '+source.name+' 进行判定反击…');
       }

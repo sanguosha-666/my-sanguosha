@@ -46,6 +46,13 @@ const BOT_PHASE_ACTOR = {
   luoyingAsk:'seat', luoshen:'seat',
   huashenChangeAskStart:'seat', huashenChangeAskEnd:'seat',
   guhuoQuestion:'asking', qiaobianMove:'seat',
+  // 【真实bug修复】郭嘉【遗计】是否发动这第一问(yijiAsk):行动者是 pending.seat 本人
+  // (服务端 respondYijiAsk 守卫 g.pending.seat!==mySeat)。此前只登记了第二步的
+  // yijiAssign(分配看到的两张牌),这一步完全没有登记过——botSeatForState 解析不出
+  // 行动者,请求掉进 botFallbackSeats+botSafePrompt 兜底,而"不发动"按钮的文案精确命中
+  // botSafePrompt 的安全正则(/不发动|.../),于是每次都被无条件点掉"不发动",机器人
+  // 因此永远不会主动发动遗计(第二步的分配逻辑接线再完整也用不上,因为永远走不到那一步)。
+  yijiAsk:'seat',
   // 【G4】遗计分配:行动者是 pending.seat 本人,补登记后 botSeatForState 才能解析出
   // 行动者走 runBotDecision 专用分支;不登记会掉进 botFallbackSeats+botSafePrompt
   // (按钮文案"给 自己/给 玩家X"不命中任一正则 → 只告警不动作,机器人遗计必然卡死)。
@@ -202,6 +209,16 @@ const BOT_PHASE_ACTOR = {
   qiaomengChoose:'sourceSeat', qiaomengPickEquip:'sourceSeat',
   // 李典【忘隙】:行动者是 pending.seat(服务端 respondWangxi 守卫 seat!==mySeat)。
   wangxiAsk:'seat',
+  // 【系统性扫描发现的遗漏,和郭嘉遗计yijiAsk同一批】夏侯惇【刚烈】是否发动这第一问:
+  // 行动者是 pending.seat(服务端 respondGanglieAsk 守卫 g.pending.seat!==mySeat)。此前
+  // 完全没有登记过,机器人永远被botSafePrompt兜底点掉"不发动"按钮。
+  ganglieAsk:'seat',
+  // 【系统性扫描发现的遗漏】张角【鬼道】是否发动:行动者是 pending.sourceSeat(被依次询问
+  // 的候选人本人,服务端 triggerGuidu/cancelGuidu 守卫 g.pending.sourceSeat!==mySeat)。
+  guiduAsk:'sourceSeat',
+  // 【系统性扫描发现的遗漏】曹彰【将驰】摸牌阶段三选一:行动者是 pending.seat(曹彰本人,
+  // 服务端 respondJiangchi 守卫 g.pending.seat!==mySeat)。
+  jiangchiAsk:'seat',
   // 华雄【耀武】:行动者是 pending.seat(造成伤害的那个人,服务端 respondYaowu 守卫
   // seat!==mySeat)。
   yaowu_choose:'seat',
@@ -970,7 +987,8 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   // 【第二批-剩余清单批量处理】以下全部有专用的确定性runBotDecision分支(接线在
   // controlsChoice之前)——同上原则收录。
   'haoshiPick','tiaoxinDiscard','biyue','buquAsk','renxinChoose',
-  'chengxiangAsk','luoyiAsk','jiemingAsk','xinshengAsk',
+  'chengxiangAsk','luoyiAsk','jiemingAsk','xinshengAsk','yijiAsk',
+  'ganglieAsk','guiduAsk','jiangchiAsk',
   'jiushiFlipAsk','lianyingAsk',
   'mingcePickCard','mingcePickTarget','mingcePickTarget2','mingceChoice',
   'qiaomengChoose','qiaomengPickEquip','wangxiAsk','yaowu_choose','shensuSha',
@@ -3888,6 +3906,34 @@ async function runBotDecision(g,seat){
   // 发动"这个判断本身的正确性,不在这次修复范围内。)
   if(g.phase==='xinshengAsk'&&d.type==='xinshengAsk'&&d.seat===seat){
     botInvoke(seat,()=>respondXinshengAsk(true)); return;
+  }
+  // 【真实bug修复】郭嘉【遗计】是否发动:看牌堆顶2张分给任意角色(含自己),对发动者自己
+  // 没有任何资源代价(不需要弃牌/掉血),和落英respondLuoying(true)/洛神respondLuoshen(true)
+  // 这类"没有下行风险就默认发动"的既有先例同一基调,固定发动。分配阶段(yijiAssign)早就
+  // 接过线,这里补的是此前完全没有登记过的"是否发动"这第一问(见BOT_PHASE_ACTOR.yijiAsk
+  // 上方注释)。
+  if(g.phase==='yijiAsk'&&d.type==='yijiAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondYijiAsk(true)); return;
+  }
+  // 【系统性扫描发现的遗漏,和郭嘉遗计同一批】夏侯惇【刚烈】是否发动:判定若非红桃,伤害
+  // 来源要弃2张手牌或受1点伤害反击——对发动者自己零资源代价(只是判定,没有弃牌/掉血),
+  // 且没有下行风险(红桃时无事发生,不会反噬自己),和落英/洛神同一基调固定发动。
+  if(g.phase==='ganglieAsk'&&d.type==='ganglieAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondGanglieAsk(true)); return;
+  }
+  // 【系统性扫描发现的遗漏】张角【鬼道】是否发动:要打出一张黑色手牌去替换别人的判定牌,
+  // 有真实资源代价(消耗1张手牌)且方向不确定(替换后对被判定者是好是坏,取决于原判定/
+  // 新判定内容,需要局面判断),和举荐/仁心这类"有代价+方向不明确"的既有基调一致,保守
+  // 默认不发动。
+  if(g.phase==='guiduAsk'&&d.type==='guiduAsk'&&d.sourceSeat===seat){
+    botInvoke(seat,cancelGuidu); return;
+  }
+  // 【系统性扫描发现的遗漏】曹彰【将驰】摸牌阶段三选一:"多摸1张但本回合不能出杀"和
+  // "少摸1张但本回合杀无距离限制且可多出1张"都是有真实代价、方向不确定的取舍(要看这回合
+  // 到底打不打得出去/有没有杀在手),不像忘隙/耀武那种纯收益,保守默认不发动(维持正常
+  // 摸牌数,不做任何取舍)。
+  if(g.phase==='jiangchiAsk'&&d.type==='jiangchiAsk'&&d.seat===seat){
+    botInvoke(seat,()=>respondJiangchi('none')); return;
   }
   // 曹植【酒诗】翻回正面:没有下行风险(翻正面只是解除背面朝上状态,不需要额外代价),
   // 固定发动。
