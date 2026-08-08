@@ -3,6 +3,13 @@
 > **生成时间**：2026-08-08，对应代码版本 commit `e735561d5b0b435889229f8e58d7916d05772cb6`（分支 `chengcheng`）。
 > 这份清单是对**当时那一份代码**做的静态审计，代码继续演进后清单会过时——复核方式见文末「如何验证这份清单是否过时」。
 > **这次任务只做审计，不做修复**（和"郭嘉遗计"那次任务分开），下面列出的每一条都还没有被改动。
+>
+> **2026-08-08 更新（commit `9334e76`）**：原文档标记的全部 4 条 B 类已经修复，详见文末新增的
+> 「B 类修复记录（commit 9334e76）」一节——修复过程中用真实 DOM harness 重新验证发现，原始的
+> 静态审计**只检查了 `botSafePrompt` 的"safe"正则，漏看了另一条"mandatory"正则**，导致
+> `zhijiChoice`/`xiaoguoChoice`/`tiaoxinChoice` 这 3 条的严重程度被高估（实际是"侥幸命中一个
+> 正则匹配出来的默认选项"，不是真卡死）；只有 `huanhuoPickGotCard` 子阶段被验证为真卡死。
+> 这个方法论纠正也记录在下面新增的小节里，供以后审计类似问题时参考。
 
 ## 审计方法（供复核者对照）
 
@@ -19,10 +26,10 @@
 | 分类 | 数量 | 说明 |
 |---|---|---|
 | A 类 | 9 条（对应 9 个 `pending.type`） | 兜底命中"不发动/取消"类按钮，等价于永远不发动 |
-| B 类 | 4 条（对应 3+4=7 个 `pending.type`，其中 `xiaoguoChoice`/`tiaoxinChoice` 视具体局面可能命中安全按钮、也可能真卡死；`huanhuoPick`链4个子阶段合并为1条，标记"潜在"，见表内说明） | 兜底可能找不到任何可点按钮，存在卡死风险 |
+| B 类 | 0（**原 4 条已于 commit `9334e76` 全部修复**，见文末「B 类修复记录」） | 兜底可能找不到任何可点按钮，存在卡死风险 |
 | C 类 | 3 条 | 多步流程只接了后半段，发动入口本身缺失 |
 | D 类 | 0 | 未发现新的"只在有 AI 密钥时才生效"的登记项（上一轮 `BOT_SEAT_PICKS` 那批已经在此前任务解锁） |
-| E 类 | 约 85 个 `pending.type`（见文末列表逐一列名） | 已完整接线、无密钥也能正常触发 |
+| E 类 | 约 92 个 `pending.type`（见文末列表逐一列名，含本次修复后转入的 7 个） | 已完整接线、无密钥也能正常触发 |
 
 这次审计一共交叉核对了约 **105 个** `pending.type`/`g.phase` 决策入口点（A9+B7+C3(仅入口函数，不计入phase统计)+E约85+已修复的ganglieAsk/guiduAsk/jiangchiAsk/yijiAsk等计入E类，不包含 `play`/`draw`/`discard`/`respond`/`duel` 等基础引擎阶段——这些属于核心机制而不是"武将/装备/锦囊技能"，且早已被大量既有测试覆盖，不在这次审计范围内）。
 
@@ -50,12 +57,7 @@
 
 ## B 类：兜底可能找不到任何可点按钮，存在卡死风险
 
-| 技能/武将 | phase / pending.type | 代码位置 | 现状路径 | 判定依据 |
-|---|---|---|---|---|
-| 姜维【志继】觉醒 | `zhijiChoice` | 创建：体力上限-1时触发；按钮：`render-controls.js:2681-2689` | 无 `BOT_PHASE_ACTOR` 登记、无专属分支；**且 `zhijiChoice` 被列进了 `CONTROLS_CHOICE_EXCLUDE`**（`bot.js` 里那个 exclude 集合），但由于本身就没有 actor 解析，这条 exclude 目前是"死记录"（永远不会被真正用到，因为 `botSeatForState` 解析不出行动者时根本不会走到 L1 那一步）；最终落到 `botFallbackSeats`+`botSafePrompt` | 按钮"回复1点体力"/"摸两张牌"（`render-controls.js:2684-2686`），**两个都不匹配任何安全正则**，且**始终是这两个按钮同时存在**（不是"只剩一个"的边界情况）——这是姜维体力上限降到某个阈值后**强制触发**的觉醒效果，不是可选发动，只要机器人玩姜维、体力降到阈值，这个卡死必然发生，不是低概率边界 |
-| 典韦【骁果】受害者二选一 | `xiaoguoChoice` | 按钮：`render-controls.js:2634-2645` | `BOT_PHASE_ACTOR.xiaoguoChoice='to'` 已登记，无专属分支，非 allowlist → 落到 `botSafePrompt` | 按钮是"弃置X【装备名】"（每件装备各一个）+ "受到1点伤害"（`render-controls.js:2638-2642`），全部不匹配安全正则。**分两种情况**：目标**没有任何装备**时只有"受到1点伤害"这一个按钮，`botSafePrompt` 的"唯一按钮直接点"兜底能侥幸走通（等价于"总是选受伤害"，行为上凑巧合理但纯属侥幸）；目标**有≥1件装备**时是2个以上按钮、无一匹配，**真正卡死** |
-| 姜维【挑衅】目标选择 | `tiaoxinChoice` | 按钮：`render-controls.js:2696-2714` | 无 `BOT_PHASE_ACTOR` 登记、无专属分支（注意这和"是否发动挑衅"这个前置决策是两回事——挑衅的**发动方**已经通过 `BOT_SEAT_PICKS.tiaoxin` 完整接线，能主动发动；但被挑衅的**目标**如果是机器人，它对这个二选一毫无准备） | 按钮"对其使用【杀】"（仅目标有可用的杀时才渲染）+ "被弃置一张牌"（`render-controls.js:2704-2711`，恒渲染）。目标**没有可用杀**时只有"被弃置一张牌"这一个按钮，侥幸能被"唯一按钮"兜底点掉；目标**有可用杀**时是2个按钮、都不匹配安全正则，真正卡死 |
-| 法正【眩惑】完整链条 | `huanhuoPick`/`huanhuoPickCard`/`huanhuoPickGotCard`/`huanhuoPickSecond` | 创建：`game.js` `startHuanhuo`/`pickHuanhuoTarget`/`pickHuanhuoHeartCard`/`pickHuanhuoGotCard`；按钮：`render-controls.js` 对应 `huanhuoPick*` 分支 | **这四个子阶段全部没有 `BOT_PHASE_ACTOR` 登记、也没有专属分支**——但由于 `startHuanhuo()` 本身从未被任何机器人代码调用过（见 C 类），机器人**实际上永远不会真的走到这四个阶段**，此处列为 B 类是"如果有一天有人给 `startHuanhuo` 接上机器人触发入口、却忘了同时接这四个子阶段"的**潜在**风险，不是当前会实际发生的卡死（当前谁都不会触发它） | 未逐一读按钮文案(链条本身不会被触发，暂不深入)——标记为**潜在 B 类**，等 C 类的"眩惑发动入口"被接上之后需要重新评估 |
+**本次审计当时列出的 4 条已经全部修复，见文末「B 类修复记录（commit 9334e76）」。**这一节原有的表格内容已经移到该小节存档（保留原始判断和修复后纠正的对比），不再作为"待处理"清单出现在这里。
 
 ---
 
@@ -83,11 +85,30 @@
 
 以下这批 `pending.type`/`g.phase` 都在 `BOT_PHASE_ACTOR` 登记了行动者字段，且在 `runBotDecision` 里能找到引用该字面量的专属分支（硬编码 if 分支，或 `BOT_DECISIONS`/`BOT_SEAT_PICKS` 注册项），交叉核对后确认无密钥模式下也能正常决策，不需要逐条展开细节：
 
-`aoeResp`、`beigeChoose`、`beigeDiscard`、`beigeJudge`、`biyue`、`buquAsk`、`chengxiangAsk`、`chengxiangChoose`（经 `chengxiangAsk` 的actor+内部按 `d.type` 二次分派，见 `bot.js:3886`）、`cixiongAsk`、`cixiongChoice`、`duanbingChoose`、`duel`、`dying`、`enyuanChoose`、`enyuanChooseOption`、`enyuanGiveCard`、`fanjianSuit`（`BOT_SEAT_PICKS.fanjian`）、`fenxunDiscard`、`fenxunTarget`、`ganglieAsk`（本次"郭嘉遗计"任务里刚修过）、`ganglieChoice`、`guanshi`、`guanxingReview`、`guhuoQuestion`、`guhuoTarget`（经 `BOT_SEAT_PICKS.guhuoTarget` 特殊路径，见 `bot.js:1956,2028,4238`(行号已核对)）、`guicai`、`guiduAsk`（本次"郭嘉遗计"任务里刚修过）、`hanbing`、`hanbingAsk`、`haoshiPick`、`huashenChangeAskEnd`、`huashenChangeAskStart`、`huashenChangePickEnd`、`huashenChangePickStart`、`huashenPick`、`hujiaAsk`、`huogong`、`huogongReveal`、`jiangchiAsk`（本次"郭嘉遗计"任务里刚修过）、`jiedaoChoice`、`jiemingAsk`、`jijiangAsk`、`jiushiFlipAsk`、`jujianChooseEffect`、`jujianPickCard`、`jujianPickTarget`、`jushouChoose`、`leijiChoose`、`leijiJudge`、`lianyingAsk`、`lieRenRespond`（注意这是烈刃**响应方**，和上面 A 类的 `lieRenChoose`/`lieRenPickCard`（**发动方**）是两个不同的座位视角，响应方已经接好）、`liegong`、`lirangAsk`、`luanjiChoose`、`luanjiConfirm`、`luanwuChoose`、`luoshen`（`CONTROLS_CHOICE_ALLOWLIST`）、`luoyiAsk`、`luoyingAsk`（`CONTROLS_CHOICE_ALLOWLIST`）、`mengjin`、`mingceChoice`、`mingcePickCard`、`mingcePickTarget`、`mingcePickTarget2`（这四个属于"陈宫明策"链条**后半段**接线，本身没问题，只是永远走不到——见上方 C 类说明）、`pick`、`qiangxiChooseCost`、`qiangxiChooseWeaponFromHand`、`qiangxiPickTarget`、`qiaobianMove`、`qiaomengChoose`、`qiaomengPickEquip`、`qilin`、`qinglong`、`quhuDamageChoice`（`BOT_SEAT_PICKS.quhuDamage`）、`quhuRespond`、`renxinChoose`、`respond`、`shaOffsetChoice`、`shensuSha`、`shuangxiongAsk`、`tianyiPickCard`、`tianyiPickTarget`、`tianyiRespond`、`tiaoxinDiscard`（`BOT_SEAT_PICKS.tiaoxin` 发动方，和上面 B 类 `tiaoxinChoice` 目标方是两个视角）、`tieqi`、`wangxiAsk`、`wugu`、`wuxie`（`CONTROLS_CHOICE_ALLOWLIST`）、`xiaoguo`、`xinshengAsk`、`xuanfengPick`（`BOT_SEAT_PICKS.xuanfeng`）、`xunxunPick`、`yaowu_choose`、`yijiAsk`、`yijiAssign`（本次"郭嘉遗计"任务里刚修过）、`zhibaAsk`、`zhimengAsk`、`zhimengPick`。
+`aoeResp`、`beigeChoose`、`beigeDiscard`、`beigeJudge`、`biyue`、`buquAsk`、`chengxiangAsk`、`chengxiangChoose`（经 `chengxiangAsk` 的actor+内部按 `d.type` 二次分派，见 `bot.js:3886`）、`cixiongAsk`、`cixiongChoice`、`duanbingChoose`、`duel`、`dying`、`enyuanChoose`、`enyuanChooseOption`、`enyuanGiveCard`、`fanjianSuit`（`BOT_SEAT_PICKS.fanjian`）、`fenxunDiscard`、`fenxunTarget`、`ganglieAsk`（"郭嘉遗计"任务里修过）、`ganglieChoice`、`guanshi`、`guanxingReview`、`guhuoQuestion`、`guhuoTarget`（经 `BOT_SEAT_PICKS.guhuoTarget` 特殊路径，见 `bot.js:1956,2028,4238`(行号已核对)）、`guicai`、`guiduAsk`（"郭嘉遗计"任务里修过）、`hanbing`、`hanbingAsk`、`haoshiPick`、`huanhuoPick`/`huanhuoPickCard`/`huanhuoPickGotCard`/`huanhuoPickSecond`（本次B类修复任务补齐，见文末修复记录——发动入口`startHuanhuo`仍未接线，这四个子阶段目前实际不会被触发，属于"预先打好补丁"）、`huashenChangeAskEnd`、`huashenChangeAskStart`、`huashenChangePickEnd`、`huashenChangePickStart`、`huashenPick`、`hujiaAsk`、`huogong`、`huogongReveal`、`jiangchiAsk`（"郭嘉遗计"任务里修过）、`jiedaoChoice`、`jiemingAsk`、`jijiangAsk`、`jiushiFlipAsk`、`jujianChooseEffect`、`jujianPickCard`、`jujianPickTarget`、`jushouChoose`、`leijiChoose`、`leijiJudge`、`lianyingAsk`、`lieRenRespond`（注意这是烈刃**响应方**，和上面 A 类的 `lieRenChoose`/`lieRenPickCard`（**发动方**）是两个不同的座位视角，响应方已经接好）、`liegong`、`lirangAsk`、`luanjiChoose`、`luanjiConfirm`、`luanwuChoose`、`luoshen`（`CONTROLS_CHOICE_ALLOWLIST`）、`luoyiAsk`、`luoyingAsk`（`CONTROLS_CHOICE_ALLOWLIST`）、`mengjin`、`mingceChoice`、`mingcePickCard`、`mingcePickTarget`、`mingcePickTarget2`（这四个属于"陈宫明策"链条**后半段**接线，本身没问题，只是永远走不到——见上方 C 类说明）、`pick`、`qiangxiChooseCost`、`qiangxiChooseWeaponFromHand`、`qiangxiPickTarget`、`qiaobianMove`、`qiaomengChoose`、`qiaomengPickEquip`、`qilin`、`qinglong`、`quhuDamageChoice`（`BOT_SEAT_PICKS.quhuDamage`）、`quhuRespond`、`renxinChoose`、`respond`、`shaOffsetChoice`、`shensuSha`、`shuangxiongAsk`、`tianyiPickCard`、`tianyiPickTarget`、`tianyiRespond`、`tiaoxinChoice`（本次B类修复任务补齐，专属分支+askedAt，见文末修复记录；改动前经真实验证是"mandatory正则侥幸命中"而非真卡死）、`tiaoxinDiscard`（`BOT_SEAT_PICKS.tiaoxin` 发动方，和 `tiaoxinChoice` 目标方是两个视角）、`tieqi`、`wangxiAsk`、`wugu`、`wuxie`（`CONTROLS_CHOICE_ALLOWLIST`）、`xiaoguo`、`xiaoguoChoice`（本次B类修复任务补齐专属分支，位置特意放在L1之后——见文末修复记录）、`xinshengAsk`、`xuanfengPick`（`BOT_SEAT_PICKS.xuanfeng`）、`xunxunPick`、`yaowu_choose`、`yijiAsk`、`yijiAssign`（"郭嘉遗计"任务里修过）、`zhibaAsk`、`zhimengAsk`、`zhimengPick`、`zhijiChoice`（本次B类修复任务补齐，见文末修复记录；改动前经真实验证是"mandatory正则侥幸命中"而非真卡死）。
 
 （未列入 E 类清单的 `over`/`play`/`draw`/`discard`/`pickingGeneral`/`pickingLordGeneral` 等属于核心引擎阶段，走 `botSeatForState` 的 Category A 特殊分支或既有的 `draw`/`play`/`discard` 通用逻辑，不属于"武将/装备/锦囊技能"范畴，不计入这份清单的统计口径。）
 
 ---
+
+## B 类修复记录（commit `9334e76`）
+
+这一节存档原始审计判断 vs 修复时真实验证的结果，供以后对照。
+
+| 技能/武将 | phase / pending.type | 原始审计判断 | 修复时真实验证的结果 | 修复方式 |
+|---|---|---|---|---|
+| 姜维【志继】觉醒 | `zhijiChoice` | 两个按钮"回复1点体力"/"摸两张牌"都不匹配安全正则，真卡死 | **误判**——"回复1点体力"命中 `botSafePrompt` 的 mandatory 正则（含"回复"），改动前已经能稳定点掉，只是"侥幸命中"不是真判断 | 补 `BOT_PHASE_ACTOR.zhijiChoice='seat'` + 专属分支：体力≤1时回复体力（保命），否则摸两张牌（觉醒条件本身是手牌为0，最缺资源）；补 `setResponseAskedAt` + 超时兜底 |
+| 典韦【骁果】受害者二选一 | `xiaoguoChoice` | 无装备时侥幸走通，有装备时真卡死 | **部分误判**——有装备时"弃置武器【X】"命中 mandatory 正则（含"弃置"），改动前已经能稳定点掉，不是真卡死；askedAt 此前已经正确设置（不是遗漏点） | 补专属分支：优先弃装备，无装备时受伤害（结果和 mandatory 正则侥幸命中一致，但这次是真判断）。**位置特别注意**：放在 L1 `controlsChoice` 之后、不进 `CONTROLS_CHOICE_EXCLUDE`——`xiaoguoChoice` 是 `run_ai_bus_l1_test.js` T19/T20 锁定的"有密钥时故意留给 L1/AI 接管"的既定设计，第一版改动误放位置导致这两条测试失败，已改正 |
+| 姜维【挑衅】目标二选一 | `tiaoxinChoice` | 无可用杀时侥幸走通，有可用杀时真卡死 | **误判**——有可用杀时"被弃置一张牌"命中 mandatory 正则（含"弃置"），改动前已经能稳定点掉（点的是被弃牌，不是出杀），不是真卡死 | 补 `BOT_PHASE_ACTOR.tiaoxinChoice='to'` + 专属分支：能出杀就出杀反击（进攻收益），不能则回退被弃牌；补 `setResponseAskedAt` + 超时兜底（默认被弃牌，保守） |
+| 法正【眩惑】四个子阶段 | `huanhuoPick`/`huanhuoPickCard`/`huanhuoPickGotCard`/`huanhuoPickSecond` | 标记"潜在"B类，未逐一验证按钮 | **部分确认**——`huanhuoPick`/`huanhuoPickCard` 都有"取消"按钮命中 safe 正则（不是真卡死）；`huanhuoPickGotCard` 在目标同时有手牌和装备时两个按钮都不匹配任何正则，是这次唯一验证为**真卡死**的子阶段 | 四个子阶段全部补 `BOT_PHASE_ACTOR`(`sourceSeat`) + 专属分支 + `setResponseAskedAt` + 超时兜底，决策走"确定性兜底，固定选第一个候选"（和明策同一基调）。发动入口 `startHuanhuo` 仍未接线，这四个子阶段目前实际不会被触发 |
+
+**方法论纠正（供以后审计参考）**：`botSafePrompt`（`bot.js:3522`）实际有两条正则依次尝试：
+```js
+const safe=buttons.find(b=>/不发动|不使用|不出|不获得|取消|跳过|放弃|结束/.test(b.textContent||''));
+const mandatory=buttons.find(b=>!/发动/.test(b.textContent||'')&&/选择|交给|弃置|摸牌|回复|打出/.test(b.textContent||''));
+const chosen=safe||mandatory||(buttons.length===1?buttons[0]:null);
+```
+原始审计只检查了 `safe` 这一条，凡是不匹配 `safe` 的按钮就断定"卡死"——但只要按钮文案含"弃置"/"回复"/"选择"/"交给"/"摸牌"/"打出"这几个字（且不含"发动"），就会命中 `mandatory`，不会卡死。**以后判断某个 phase 是否真的会卡死，必须对着这两条正则都测一遍，不能只测第一条**；更可靠的做法是像这次修复时那样，用真实 DOM harness（`run_ai_bus_l1_test.js`/`run_bot_bclass_fix_test.js` 的 `mkEl`/`documentStub` 那套）直接跑一次 `botSafePrompt(g,seat)`，看它的真实返回值和真实点击的按钮，不要只读正则源码做人工推断。
 
 ## 如何验证这份清单是否过时
 
