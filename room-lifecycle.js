@@ -107,11 +107,15 @@ function removeBot(){
 // 写 team 后再跑一次 normalize:tx 只在本事务开始时 normalize,fn 里改完 team 若不重跑,
 // 同一次提交快照里 teamCount 会停留在旧值(真实 Firebase 下靠 render→normalize 兜底,
 // 这里主动收口让提交快照本身自洽)。
+// 模式锁定:大厅 g.gameMode 恒 null(全项目只有 startGame 才写 gameMode),选队即写入
+// 'team' 锁定组队模式——不能要求 gameMode==='team' 才放行(否则真实大厅选队永远被拒)。
 function joinTeam(team){
   tx(g=>{
-    if(g.started || g.phase!=='lobby' || g.gameMode!=='team') return g;
+    if(g.started || g.phase!=='lobby') return g;
+    if(g.gameMode && g.gameMode!=='team') return g; // 已锁非team模式的房间拒绝
     if(!Number.isInteger(team) || team<0 || team>=SEATS) return g;
     if(!g.players[mySeat]) return g;
+    g.gameMode = 'team'; // 选队即锁定组队模式(大厅gameMode恒null,此处写入)
     g.players[mySeat].team = team;
     normalize(g);
     return g;
@@ -120,10 +124,12 @@ function joinTeam(team){
 // createNewTeam:建一个新队伍并入队。队伍号 = 当前 teamCount(由 normalize 保证整数)。
 function createNewTeam(){
   tx(g=>{
-    if(g.started || g.phase!=='lobby' || g.gameMode!=='team') return g;
+    if(g.started || g.phase!=='lobby') return g;
+    if(g.gameMode && g.gameMode!=='team') return g;
     const team = Number.isInteger(g.teamCount) ? g.teamCount : 0;
     if(team>=SEATS) return g;
     if(!g.players[mySeat]) return g;
+    g.gameMode = 'team'; // 选队即锁定组队模式
     g.players[mySeat].team = team;
     normalize(g);
     return g;

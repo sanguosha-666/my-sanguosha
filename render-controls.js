@@ -1857,7 +1857,7 @@ function renderControls(g){
         startGame('pick','identity');
       };
       c.appendChild(btnPick);
-    } else if(selectedGameMode==='team'){
+    } else if(selectedGameMode==='team' || g.gameMode==='team'){
       // 选队面板:各队(色块+队伍号+人数)+加入按钮;房主(main)专属"+机器人"按钮(Task 4)
       const teamCount = (g.teamCount && g.teamCount>=1) ? g.teamCount : 1;
       for(let t=0; t<Math.max(teamCount, 2); t++){

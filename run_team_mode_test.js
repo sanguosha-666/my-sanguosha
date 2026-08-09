@@ -47,22 +47,38 @@ function check(name, fn){
   // 沙箱内显式赋值 gameRef/mySeat(game.js 顶层的 let gameRef=null / let mySeat=null
   // 全局词法绑定会遮蔽 context 同名属性,必须像其它 run_*_test.js 那样在 vm 作用域内赋值)
   vm.runInContext('gameRef = { transaction: function(fn){ return fn(typeof g !== "undefined" ? g : {}); } }; mySeat = 0;', sandbox);
-  await check('joinTeam: 大厅写p.team并推导teamCount', function(){
-    const g = { players:[{team:null},{team:null}], log:[], gameMode:'team', phase:'lobby', started:false };
+  // 以下 joinTeam/createNewTeam 用例全部用真实大厅形态:gameMode 恒 null/缺失
+  // (全项目只有 startGame 才写 gameMode),选队即锁定 team 模式。修复前这些用例
+  // 会红——守卫 `g.gameMode!=='team'` 在 null!=='team' 下恒 return。
+  await check('joinTeam: 真实大厅(null gameMode)选队锁定模式', function(){
+    const g = { players:[{team:null},{team:null}], log:[], phase:'lobby', started:false };
     context.g = g;
     vm.runInContext('joinTeam', sandbox)(0);
     if(g.players[0].team!==0) throw new Error('应写team=0,实际 '+g.players[0].team);
+    if(g.gameMode!=='team') throw new Error('应锁定gameMode=team,实际 '+g.gameMode);
     if(g.teamCount!==1) throw new Error('teamCount应1,实际 '+g.teamCount);
   });
-  await check('joinTeam: 换队覆盖', function(){
-    const g = { players:[{team:1},{team:0}], log:[], gameMode:'team', phase:'lobby', started:false };
+  await check('joinTeam: 换队覆盖(初始0→选1)', function(){
+    const g = { players:[{team:0},{team:0}], log:[], phase:'lobby', started:false };
     context.g = g;
     vm.runInContext('joinTeam', sandbox)(1);
-    if(g.players[0].team!==1) throw new Error('应覆盖为1');
+    if(g.players[0].team!==1) throw new Error('应覆盖为1,实际 '+g.players[0].team);
+    if(g.gameMode!=='team') throw new Error('应锁定gameMode=team');
   });
-  await check('createNewTeam: 建新队并入队', function(){
-    const g = { players:[{team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:1 };
+  await check('createNewTeam: 真实大厅(null gameMode)建新队并入队', function(){
+    // 首次建队:真实大厅 teamCount 恒 0(非team模式 normalize 归零),createNewTeam 应入新队0
+    const g = { players:[{team:null},{team:null}], log:[], phase:'lobby', started:false };
     context.g = g;
+    vm.runInContext('createNewTeam', sandbox)();
+    if(g.players[0].team!==0) throw new Error('首次建队应入队0,实际 '+g.players[0].team);
+    if(g.gameMode!=='team') throw new Error('应锁定gameMode=team');
+    if(g.teamCount!==1) throw new Error('teamCount应1,实际 '+g.teamCount);
+  });
+  await check('createNewTeam: 模式已锁后新建第二队', function(){
+    const g = { players:[{team:null},{team:null}], log:[], phase:'lobby', started:false };
+    context.g = g;
+    vm.runInContext('joinTeam', sandbox)(0); // 先选队锁定 team 模式
+    if(g.gameMode!=='team') throw new Error('应先锁定gameMode=team');
     vm.runInContext('createNewTeam', sandbox)();
     if(g.players[0].team!==1) throw new Error('应入新队1,实际 '+g.players[0].team);
     if(g.teamCount!==2) throw new Error('teamCount应2,实际 '+g.teamCount);
