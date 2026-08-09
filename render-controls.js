@@ -1861,7 +1861,14 @@ function renderControls(g){
       const btnPick=document.createElement('button');
       btnPick.className='ghost';
       btnPick.textContent='开始组队赛(三选一)（'+cnt+'/'+SEATS+'）';
-      btnPick.onclick=()=>{ startGame('pick','team'); };
+      btnPick.disabled = cnt<1; // 可点,人数不足在 onclick 拦截(与身份局同款)
+      btnPick.onclick=()=>{
+        const teams={};
+        let hasNoTeam=false;
+        (g.players||[]).forEach(p=>{ if(p){ if(Number.isInteger(p.team)) teams[p.team]=true; else hasNoTeam=true; } });
+        if(Object.keys(teams).length<2 || hasNoTeam){ alert('组队模式需至少 2 个队伍且每队至少 1 人,请先在大厅选队'); return; }
+        startGame('pick','team');
+      };
       c.appendChild(btnPick);
     } else {
       const tip=document.createElement('button');
@@ -1876,7 +1883,7 @@ function renderControls(g){
       else if(cnt<SEATS) setBanner('身份局已可开始（'+cnt+' 人），主公将先选将（5 选 1）');
       else setBanner('身份局已满员，可开始');
     } else if(selectedGameMode==='team'){
-      setBanner('组队模式:玩家自由选队,每队至少 1 人、队伍数至少 2 队(人不够可先加机器人)');
+      setBanner('组队模式：玩家自由选队，每队至少 1 人、队伍数至少 2 队（人不够可先加机器人）');
     } else if(cnt<MIN_PLAYERS) setBanner('至少 '+MIN_PLAYERS+' 人即可开始,还差 '+(MIN_PLAYERS-cnt)+' 人…');
     else if(cnt<SEATS) setBanner('已可开始（'+cnt+' 人),也可等满 '+SEATS+' 人。');
     return;
