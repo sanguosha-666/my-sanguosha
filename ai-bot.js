@@ -830,9 +830,15 @@ function appendAiTestRecord(rec){
   if(m && !m.classList.contains('hidden')) renderAiTestRecords();
 }
 
-// aiTestDecisionHook:托管决策采集钩子(供 Task 5 决策完成后调用)。把一次托管决策的
-// 关键信息(状态快照、prompt、AI返回、choice、理由)聚合成一条 record 追加进信息窗。
-// 组装/渲染任何一步失败都静默忽略,不阻塞决策主流程。
+// aiTestPendingRecord:最近一次由 aiTestDecisionHook 建立的"待回填"骨架记录。
+// 骨架记录创建于 runBotDecision 决策分支执行前(此时本次 AI 调用尚未发生,prompt/
+// rawResponse/choice/reason 都还没数据);等 callAiChooseIndex 解析完成后,经
+// aiTestFillPendingRecord 回填本次真实数据。模块级变量,和 aiTestAutopilot 同一生命周期。
+let aiTestPendingRecord = null;
+// aiTestDecisionHook:托管决策采集钩子。只建立"骨架记录"(时间/阶段/状态快照/摘要),
+// prompt/rawResponse/choice/reason 留待 callAiChooseIndex 解析完成后回填——
+// 绝不在决策前读 aiTestLastCall/aiTestLastReason(那是上一条决策的缓存,读了会把上一条
+// AI 数据错贴到本条记录,多条记录重复显示同一内容)。
 function aiTestDecisionHook(g, seat, info){
   try{
     if(typeof info!=='object' || !info) return;
@@ -842,19 +848,36 @@ function aiTestDecisionHook(g, seat, info){
     const phaseLabel = (g && g.phase) || '';
     const stateInfo = (typeof buildBotVisibleState==='function')
       ? JSON.stringify(buildBotVisibleState(g, seat)) : '';
-    appendAiTestRecord({
+    aiTestPendingRecord = {
       time: (typeof debugLogIsoTime==='function')
         ? debugLogIsoTime(Date.now()) : new Date().toTimeString().slice(0,8),
       phaseLabel: phaseLabel,
       summary: info.summary || ('决策(' + (g && g.phase) + ')'),
       stateInfo: stateInfo,
-      prompt: info.prompt || '',
-      rawResponse: info.rawResponse || '',
-      choice: (info.choice===undefined) ? null : info.choice,
-      reason: (info.reason!==undefined) ? info.reason
-        : ((typeof aiTestLastReason!=='undefined') ? aiTestLastReason : null),
-    });
+      prompt: '',
+      rawResponse: '',
+      choice: null,
+      reason: null
+    };
+    appendAiTestRecord(aiTestPendingRecord);
   }catch(e){ /* 静默:采集失败不影响决策主流程 */ }
+}
+// aiTestFillPendingRecord:callAiChooseIndex 托管命中解析完成后调用,把本次 AI 调用的
+// 真实数据(prompt/rawResponse/choice/reason)回填进"最后一条待回填骨架记录"。
+// 骨架记录被多次决策先后建立时,只回填最近一条;回填后置 null 防重复/防残留。
+function aiTestFillPendingRecord(fields){
+  try{
+    if(!aiTestPendingRecord) return;
+    if(fields){
+      if(fields.prompt!==undefined) aiTestPendingRecord.prompt = fields.prompt;
+      if(fields.rawResponse!==undefined) aiTestPendingRecord.rawResponse = fields.rawResponse;
+      if(fields.choice!==undefined) aiTestPendingRecord.choice = fields.choice;
+      if(fields.reason!==undefined) aiTestPendingRecord.reason = fields.reason;
+    }
+    aiTestPendingRecord = null;
+    const m=document.getElementById('aiTestModal');
+    if(m && !m.classList.contains('hidden')) renderAiTestRecords();
+  }catch(e){ /* 静默:回填失败不影响决策主流程 */ }
 }
 
 // 拖动:header mousedown/mousemove 更新 left/top;resize:右下角手柄更新 width/height。

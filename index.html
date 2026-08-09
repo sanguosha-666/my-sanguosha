@@ -1195,7 +1195,9 @@
      (特异性 (0,2,1) 高于单独 .aitest-close 的 (0,1,0),会把它盖成深灰块)——加一层
      .aitest-header 祖先把特异性提到 (0,3,0),hover 时用半透明黑,保持头栏底色不破。 */
   .aitest-header .aitest-close:hover{background:rgba(0,0,0,.25);color:#fff}
-  .aitest-body{flex:1 1 auto;overflow-y:auto;padding:8px;font-size:13px}
+  /* 对比度修复：弹窗内所有文字继承body的浅色(--paper)在浅色面板背景上完全不可见，
+     这里显式设置深色文字色(--ink)作为弹窗内所有子元素的默认颜色 */
+  .aitest-body{flex:1 1 auto;overflow-y:auto;padding:8px;font-size:13px;color:var(--ink)}
   .aitest-record{border:1px solid var(--paper-dim,#a0926e);border-radius:6px;margin-bottom:6px;background:rgba(255,255,255,.5)}
   .aitest-record-summary{padding:6px 8px;cursor:pointer;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
   .aitest-record-summary .aitest-arrow{color:var(--cinnabar,#a03a2a);font-size:11px}
@@ -1203,7 +1205,8 @@
   .aitest-record-detail .aitest-sec{font-weight:600;color:var(--cinnabar,#a03a2a);margin-top:4px}
   .aitest-record-detail pre{white-space:pre-wrap;background:rgba(0,0,0,.06);border-radius:4px;padding:4px;font-size:11px;max-height:160px;overflow-y:auto}
   .aitest-footer{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:4px 10px;border-top:1px solid var(--paper-dim,#a0926e)}
-  .aitest-hint{font-size:11px;color:var(--paper-dim,#a0926e);margin-left:auto}
+  /* 对比度修复：paper-dim在paper背景上对比度仅1.40:1，改用ink-soft提升至11.38:1 */
+  .aitest-hint{font-size:11px;color:var(--ink-soft,#2c2722);margin-left:auto}
   .aitest-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--cinnabar,#a03a2a) 50%);border-bottom-right-radius:8px}
   #aiTestBtn.aitest-active{background:var(--cinnabar,#a03a2a);color:#fff}
 
@@ -2104,20 +2107,20 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=338"></script>
-<script src="data.js?v=338"></script>
-<script src="debug-log.js?v=338"></script>
-<script src="room-lifecycle.js?v=338"></script>
-<script src="game.js?v=338"></script>
-<script src="weapons.js?v=338"></script>
-<script src="skills.js?v=338"></script>
-<script src="bot-ai-bus.js?v=338"></script>
-<script src="bot.js?v=338"></script>
-<script src="ai-bot.js?v=338"></script>
-<script src="render.js?v=338"></script>
-<script src="render-table.js?v=338"></script>
-<script src="render-hand.js?v=338"></script>
-<script src="render-controls.js?v=338"></script>
-<script src="render-log.js?v=338"></script>
+<script src="config.js?v=339"></script>
+<script src="data.js?v=339"></script>
+<script src="debug-log.js?v=339"></script>
+<script src="room-lifecycle.js?v=339"></script>
+<script src="game.js?v=339"></script>
+<script src="weapons.js?v=339"></script>
+<script src="skills.js?v=339"></script>
+<script src="bot-ai-bus.js?v=339"></script>
+<script src="bot.js?v=339"></script>
+<script src="ai-bot.js?v=339"></script>
+<script src="render.js?v=339"></script>
+<script src="render-table.js?v=339"></script>
+<script src="render-hand.js?v=339"></script>
+<script src="render-controls.js?v=339"></script>
+<script src="render-log.js?v=339"></script>
 </body>
 </html>

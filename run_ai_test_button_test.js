@@ -168,6 +168,9 @@ const testCode = String.raw`
     var i = await callAiChooseIndex({g:g, seat:0, candidates:[{index:0,label:'a'},{index:1,label:'b'}]});
     if(i!==1) throw new Error('应返回1,实际 '+i);
     if(aiTestLastReason!=='测试理由') throw new Error('应采集理由,实际 '+aiTestLastReason);
+    // 【choice 采集修复】托管命中时 aiTestLastChoice 应同步记录解析出的下标(供信息窗
+    // "解析choice"字段展示真实AI选择,而非恒为"(无动作/本地兜底)"占位)。
+    if(aiTestLastChoice!==1) throw new Error('应采集choice=1,实际 '+aiTestLastChoice);
     // 附加:托管命中时 systemPrompt 应含"本次为AI测试托管"指令
     if(!window.__mockAiArgs || window.__mockAiArgs.opts.systemPrompt.indexOf('AI测试托管') < 0)
       throw new Error('托管命中时 systemPrompt 应含托管指令,实际 '+JSON.stringify(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt));
@@ -248,28 +251,41 @@ const testCode = String.raw`
     if(window.__doDrawCalled !== 1) throw new Error('draw分支应被调用(守卫放行),实际调用 '+window.__doDrawCalled+' 次');
   });
 
-  // ================= Task5:决策记录采集(2 项) =================
-  await check('aiTestDecisionHook: 直接调用追加record(stateInfo/phaseLabel/reason回退)', function(){
+  // ================= Task5:决策记录采集(2 项,2026-08-09 适配"骨架+回填"设计) =================
+  // 【设计变更】原实现:hook 在决策分支执行前读 aiTestLastCall/aiTestLastReason(上一条 AI
+  // 调用的缓存),导致多条记录重复显示上一条内容(draw 等确定性决策不调 AI 也贴了 wuxie 的
+  // prompt/AI返回)。改后:hook 只建骨架记录(prompt/rawResponse 空、choice/reason null),
+  // 由 callAiChooseIndex 解析完成后经 aiTestFillPendingRecord 回填本次真实数据。
+  await check('aiTestDecisionHook: 只建骨架记录(不读上一条缓存),aiTestFillPendingRecord回填真实数据', function(){
     aiTestAutopilot = {active:true, seat:0, records:[]};
-    aiTestLastReason = '直接调用理由';
+    aiTestLastReason = '旧理由'; // 模拟上一条决策残留缓存,骨架记录不应读到它
     var g2 = mkSeatG({n:3});
     g2.phase='duel';
-    aiTestDecisionHook(g2, 0, {summary:'决策(duel)', prompt:'p1', rawResponse:'r1', choice:1});
+    aiTestDecisionHook(g2, 0, {summary:'决策(duel)'});
     if(aiTestAutopilot.records.length!==1) throw new Error('应追加1条,实际 '+aiTestAutopilot.records.length);
     var rec = aiTestAutopilot.records[0];
     if(rec.phaseLabel!=='duel') throw new Error('phaseLabel应为原始phase字符串,实际 '+rec.phaseLabel);
     if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应非空字符串');
     if(rec.summary!=='决策(duel)') throw new Error('summary应透传,实际 '+rec.summary);
-    if(rec.prompt!=='p1' || rec.rawResponse!=='r1') throw new Error('prompt/rawResponse应透传');
-    if(rec.choice!==1) throw new Error('choice应透传,实际 '+rec.choice);
-    if(rec.reason!=='直接调用理由') throw new Error('reason应回退aiTestLastReason,实际 '+rec.reason);
+    // 骨架记录:prompt/rawResponse 应为空、choice 应为 null——绝不读上一条缓存
+    if(rec.prompt!=='' || rec.rawResponse!=='') throw new Error('骨架记录prompt/rawResponse应为空(不读旧缓存)');
+    if(rec.choice!==null) throw new Error('骨架记录choice应为null,实际 '+rec.choice);
+    if(rec.reason!==null) throw new Error('骨架记录reason应为null(不回退旧aiTestLastReason),实际 '+rec.reason);
+    // 回填:模拟 callAiChooseIndex 解析完成后调用,真实数据应写入同一条记录
+    aiTestFillPendingRecord({prompt:'p1', rawResponse:'r1', choice:1, reason:'新理由'});
+    if(aiTestAutopilot.records.length!==1) throw new Error('回填不应新增记录,实际 '+aiTestAutopilot.records.length);
+    rec = aiTestAutopilot.records[0];
+    if(rec.prompt!=='p1' || rec.rawResponse!=='r1') throw new Error('回填后prompt/rawResponse应为本次数据');
+    if(rec.choice!==1) throw new Error('回填后choice应为1,实际 '+rec.choice);
+    if(rec.reason!=='新理由') throw new Error('回填后reason应为本次理由,实际 '+rec.reason);
+    if(aiTestPendingRecord!==null) throw new Error('回填后aiTestPendingRecord应置null防残留');
   });
-  await check('runBotDecision: 托管决策后采集hook被调用(records增长+透传,draw分支照常)', async function(){
+  await check('runBotDecision: 托管决策后采集hook被调用(records增长,draw分支照常,不读旧缓存)', async function(){
     var g3 = mkSeatG({n:3});
     g3.phase='draw'; g3.turn=0;
     g3.players[0].isBot=false;
     aiTestAutopilot = {active:true, seat:0, records:[]};
-    aiTestLastCall = { prompt: '本次prompt', rawResponse: '本次raw' };
+    aiTestLastCall = { prompt: '旧缓存prompt', rawResponse: '旧缓存raw' }; // 模拟上一条残留
     window.__doDrawCalled = 0;
     doDraw = function(){ window.__doDrawCalled++; };
     await runBotDecision(g3, 0);
@@ -277,8 +293,9 @@ const testCode = String.raw`
     var rec = aiTestAutopilot.records[0];
     if(typeof rec.summary!=='string' || !rec.summary) throw new Error('summary应非空');
     if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应为非空字符串');
-    if(rec.prompt!=='本次prompt') throw new Error('prompt应取aiTestLastCall,实际 '+rec.prompt);
-    if(rec.rawResponse!=='本次raw') throw new Error('rawResponse应取aiTestLastCall,实际 '+rec.rawResponse);
+    // 骨架记录不应贴旧缓存:draw 是确定性决策(doDraw 不调 AI),prompt/rawResponse 应为空
+    if(rec.prompt!=='') throw new Error('骨架记录prompt应为空(不取旧aiTestLastCall),实际 '+rec.prompt);
+    if(rec.rawResponse!=='') throw new Error('骨架记录rawResponse应为空,实际 '+rec.rawResponse);
     if(window.__doDrawCalled !== 1) throw new Error('draw分支应照常执行,实际 '+window.__doDrawCalled+' 次');
   });
 

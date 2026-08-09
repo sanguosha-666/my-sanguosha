@@ -3663,13 +3663,17 @@ async function runBotDecision(g,seat){
   // 动作摘要由后续任务回填)。采集失败绝不影响决策主流程,故外层再包一层 try/catch。
   if(isAutopilot && typeof aiTestDecisionHook==='function'){
     try{
-      const lastCall=(typeof aiTestLastCall!=='undefined') ? aiTestLastCall : null;
+      // 注意:hook 在决策分支执行前调用,此时本次 AI 调用尚未发生——prompt/rawResponse
+      // 一律传空,绝不读 aiTestLastCall/aiTestLastReason(那是上一条决策的缓存,读了会把
+      // 上一条 AI 数据错误地贴到本条记录上,多条记录重复显示同一内容)。本次 AI 调用的
+      // prompt/rawResponse/choice/reason 由 callAiChooseIndex 解析完成后经
+      // aiTestFillLastRecord 回填到"最后一条待填充记录"。
       aiTestDecisionHook(g, seat, {
         summary: '决策(' + g.phase + ')',
-        prompt: lastCall ? lastCall.prompt : '',
-        rawResponse: lastCall ? lastCall.rawResponse : '',
-        choice: null,   // execute 后由后续任务/真实值回填;此处传 null 表示"未知具体动作"
-        reason: undefined  // hook 内部回退 aiTestLastReason
+        prompt: '',
+        rawResponse: '',
+        choice: undefined,  // hook 内部不再回退旧值(避免上一条数据污染),待回填
+        reason: undefined
       });
     }catch(e){ /* 防御:采集异常不影响决策主流程 */ }
   }

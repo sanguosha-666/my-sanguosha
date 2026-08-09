@@ -84,6 +84,10 @@ let aiSummaryTurn = -1;
 // 的局部变量),函数外的测试/采集代码永远读不到——必须放模块顶层才符合"供 record 采集"
 // 的语义。
 let aiTestLastReason = null;
+// aiTestLastChoice:AI测试托管模式下,最近一次托管命中的 AI 询问里解析出的 choice 下标。
+// 与 aiTestLastReason 同一机制(模块顶层声明,供信息窗 record 采集)。未托管时恒为
+// null——赋值只发生在 autopilotHit 分支,与未托管行为零变化。
+let aiTestLastChoice = null;
 // aiTestLastCall:AI测试托管模式下,最近一次托管命中的 callAiChooseIndex 实际发送的
 // prompt 全文 + AI 原始返回文本。模块级变量,供信息窗 record 采集(aiTestDecisionHook /
 // runBotDecision 采集分支)。未托管时恒为 null——赋值只发生在 autopilotHit 分支,与未
@@ -205,7 +209,7 @@ async function callAiChooseIndex(opts){
   }
   if(autopilotHit && aiTestLastCall) aiTestLastCall.rawResponse = result && result.ok ? result.text : null;
   if(!result || !result.ok){
-    if(autopilotHit) aiTestLastReason = null; // 未托管零触碰(与下方越界分支同款守卫)
+    if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; } // 未托管零触碰
     return null;
   }
   let idx, reason;
@@ -217,8 +221,21 @@ async function callAiChooseIndex(opts){
     reason = null;
   }
   aiTestLastReason = reason;
+  if(autopilotHit) aiTestLastChoice = idx;
+  // 【AI测试托管回填】解析完成后,把本次 AI 调用的真实数据回填进"最后一条待回填骨架记录"
+  // (runBotDecision 决策前由 aiTestDecisionHook 建立)。注意:只有解析成功(idx 合法)才回填
+  // choice/reason;解析失败/越界时本条记录保持骨架状态(choice 显示"(无动作/本地兜底)"是
+  // 真实语义——AI 没能给出合法选择,走了本地兜底)。
+  if(autopilotHit && typeof aiTestFillPendingRecord==='function'){
+    aiTestFillPendingRecord({
+      prompt: (aiTestLastCall && aiTestLastCall.prompt) || '',
+      rawResponse: (aiTestLastCall && aiTestLastCall.rawResponse) || '',
+      choice: idx,
+      reason: reason
+    });
+  }
   if(idx===null || idx<0 || idx>=candidates.length){
-    if(autopilotHit) aiTestLastReason = null;
+    if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
     return null;
   }
   return idx;
