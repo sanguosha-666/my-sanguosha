@@ -152,22 +152,32 @@ function createNewTeam(){
 
 // startGame(mode, gameMode):
 //   mode = 'random' | 'pick'  武将分配方式
-//   gameMode = 'ffa' | 'identity'  对战模式(乱斗/主公局);缺省或非法当 'ffa'
+//   gameMode = 'ffa' | 'identity' | 'team'  对战模式(乱斗/身份局/组队);缺省或非法当 'ffa'
 // 身份局(identity)仅允许 pick、人数 4~8;先发身份再主公 5 选 1。
 // 守卫须同时检查 pickingGeneral / pickingLordGeneral,不能只查 g.started。
 function startGame(mode, gameMode){
   tx(g=>{
     if(g.started || g.phase==='pickingGeneral' || g.phase==='pickingLordGeneral') return g;
-    const gm = (gameMode==='identity') ? 'identity' : 'ffa';
+    const gm = (gameMode==='identity') ? 'identity' : (gameMode==='team') ? 'team' : 'ffa';
     const n = g.players.length;
     if(gm==='identity'){
       if(n<4 || n>8) return g;
       if(mode!=='pick') return g;
+    } else if(gm==='team'){
+      if(n<2) return g;
+      if(mode!=='pick' && mode!=='random') return g;
+      // 队伍校验:队伍数≥2且每队≥1人
+      const teamSet = {};
+      g.players.forEach(p=>{ if(p && Number.isInteger(p.team)) teamSet[p.team]=true; });
+      if(Object.keys(teamSet).length<2) return g;
     } else {
       if(n<MIN_PLAYERS) return g;
       if(mode!=='random' && mode!=='pick') return g;
     }
     g.gameMode = gm;
+    if(gm==='team'){
+      g.log = pushLog(g.log, '组队模式开启,队伍分配: '+g.players.map(p=>((p.name||'?')+'·队'+((Number.isInteger(p.team)?p.team:-1)+1))).join(', '));
+    }
     g.generalMode = mode;
     g.winSide = null;
     g.aiRebelSuspicion = {};

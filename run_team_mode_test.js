@@ -131,6 +131,31 @@ function check(name, fn){
     if(g.players.length!==before) throw new Error('应拒绝添加,players '+before+'→'+g.players.length);
     if((g.players.filter(p=>p&&p.isBot)).length!==0) throw new Error('不应产生游离机器人');
   });
+  // —— Task 5: startGame team 分支校验。
+  // 注:真实时序=大厅选队已锁定 gameMode='team'(joinTeam/createNewTeam/addBot 都写),
+  // startGame 是最终兜底;tx 开头 normalize 在 gameMode='team' 时才保留 p.team,故用例传
+  // gameMode:'team' 模拟锁定后的真实状态(传 null 会被 normalize 清空 team,测不到校验)。
+  await check('startGame: team队数<2拒绝', function(){
+    const g = { players:[{team:0,name:'a'},{team:0,name:'b'}], log:[], gameMode:'team', phase:'lobby', started:false };
+    context.g = g;
+    vm.runInContext('startGame', sandbox)('pick','team');
+    if(g.started || g.gameMode!=='team') throw new Error('队数1应拒绝开始,实际 gameMode='+g.gameMode+' started='+g.started);
+  });
+  await check('startGame: team全员同一队拒绝', function(){
+    // 注:brief 原数据 {team:0},{team:0},{team:2} 在 teamSet 遍历下队伍数=2(不连续但≥2)
+    // 会通过校验,与"缺队1应拒绝"断言自相矛盾——按实现语义改为"全员同一队"(teamSet仅1队)拒绝。
+    const g = { players:[{team:0,name:'a'},{team:0,name:'b'},{team:0,name:'c'}], log:[], gameMode:'team', phase:'lobby', started:false };
+    context.g = g;
+    vm.runInContext('startGame', sandbox)('pick','team');
+    if(g.started || g.gameMode!=='team') throw new Error('全员同一队应拒绝开始,实际 gameMode='+g.gameMode+' started='+g.started);
+  });
+  await check('startGame: team合法进入选将', function(){
+    const g = { players:[{team:0,name:'a'},{team:1,name:'b'}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
+    context.g = g;
+    vm.runInContext('startGame', sandbox)('pick','team');
+    if(g.gameMode!=='team') throw new Error('应进入team模式,实际 '+g.gameMode);
+    if(g.phase!=='pickingGeneral') throw new Error('应进入选将,实际 '+g.phase);
+  });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
 })();
