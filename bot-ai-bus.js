@@ -176,9 +176,11 @@ function buildBotDefaultUserPrompt(state, candidates){
 // 完全不经过这两个函数,行为零变化。
 function buildAutopilotSystemPrompt(systemPrompt){
   const base = systemPrompt || buildBotDefaultSystemPrompt();
-  // 默认模板:把"只输出 {choice}，不要解释。"替换成"返回choice+理由"口径,消除矛盾;
-  // 自定义模板若仍残留"不要解释",末尾的托管标记行会作为最后指令压过它(AI 服从最后指令)。
-  const s = base.replace('只输出 {"choice":数字}，不要解释。', '只输出 {"choice":数字,"reason":"理由文本"}，并用一句中文解释理由。');
+  // 把"只输出 {"choice":数字}，不要解释。"整体去掉(前面已有"只能选列表内选项。")——
+  // 格式说明统一收敛到末尾的托管标记行,只在 prompt 里出现一次:既消除"不要解释"与
+  // "附理由"的矛盾,又不重复格式指令浪费 token。自定义 prompt 若残留"不要解释",
+  // 末尾标记行作为最后指令压过它(AI 服从最后指令)。
+  const s = base.replace('只输出 {"choice":数字}，不要解释。', '');
   return s + '\n\n(本次为AI托管)返回choice时必须同时附一句中文理由,格式 {"choice":数字,"reason":"理由文本"}。';
 }
 function buildAutopilotUserPrompt(userPrompt){
