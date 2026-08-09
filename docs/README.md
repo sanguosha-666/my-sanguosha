@@ -12,4 +12,3 @@
 
 设计稿按拼音/英文 id 命名，与 `data.js` 的 `GENERALS` id 对应（如 `caozhang_design.md` → `caozhang`）。
 未实现武将（如 `yuji`、`zuoci`）的设计稿也放此目录，待落地。
-构建触发测试 1786263947
