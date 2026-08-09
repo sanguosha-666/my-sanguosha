@@ -1,9 +1,9 @@
 // ---------- game constants ----------
-const SEATS = 8;        // 房间容量上限(desktop-layout-8p:开放到8人,支撑assignSeatZones的
-                         // top3+left2+right2满配;joinRoom里的人数上限检查直接读这个常量,
-                         // 不需要额外改逻辑)
+const SEATS = 9;        // 房间容量上限(team模式9人,支持3v3v3/4v4+机器人等;desktop-layout-8p基础扩1)
 const MIN_PLAYERS = 2;  // 开始游戏的最低人数(2 或 3 人均可开始)
 const MAX_HP = 4; // 大厅占位 / 兜底默认体力上限
+// TEAM_COLORS:组队模式队伍色表(索引即队伍号,最多9队=一人一队)。纯客户端常量,不写进Firebase。
+const TEAM_COLORS = ['#c0392b','#2471a3','#1e8449','#7d3c98','#b7950b','#e67e22','#2e86c1','#28b463','#6c3483'];
 const START_HAND = 4;
 const BASIC_CARDS = ['杀','火杀','雷杀','闪','桃','酒']; // 基本牌:不含锦囊/装备,乐进【骁果】等按"是不是基本牌"判断的地方统一查这个表
 

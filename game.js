@@ -72,8 +72,8 @@ function normalize(g){
     });
   }
   g.players = g.players || [];
-  // 身份模式:ffa/identity;非法/缺失回退 null(当乱斗行为)。winSide 仅 identity 终局用。
-  if(g.gameMode!=='ffa' && g.gameMode!=='identity') g.gameMode=null;
+  // 对战模式:ffa/identity/team;非法/缺失回退 null(当乱斗行为)。winSide 仅 identity 终局用。
+  if(g.gameMode!=='ffa' && g.gameMode!=='identity' && g.gameMode!=='team') g.gameMode=null;
   if(g.winSide!=null && !['fan','nei','lord','none'].includes(g.winSide)) g.winSide=null;
   if(g.lordGeneralPool!=null && !Array.isArray(g.lordGeneralPool)) g.lordGeneralPool=null;
   g.players.forEach(p=>{
@@ -82,7 +82,18 @@ function normalize(g){
     if(typeof p.roleRevealed!=='boolean') p.roleRevealed=false;
     // 非 identity 清空脏身份,避免旧局/乱斗残留
     if(g.gameMode!=='identity'){ p.role=null; p.roleRevealed=false; }
+    // 组队:队伍号只对 team 模式有意义;非法/非整数清 null
+    if(p.team!=null && !Number.isInteger(p.team)) p.team=null;
+    if(g.gameMode!=='team'){ p.team=null; }
   });
+  // 组队模式队伍数:从 players 实时推导(最大队伍号+1);非 team 清空。
+  if(g.gameMode==='team'){
+    let maxT = -1;
+    (g.players||[]).forEach(p=>{ if(p && Number.isInteger(p.team) && p.team>maxT) maxT=p.team; });
+    g.teamCount = maxT+1;
+  } else {
+    g.teamCount = 0;
+  }
   // 轮次计数:数字/数组防御,Firebase 吞空数组、旧存档可能没有这两个字段
   if(!Number.isInteger(g.roundNum)) g.roundNum=1;
   if(!Array.isArray(g.roundSeatsActed)) g.roundSeatsActed=[];
