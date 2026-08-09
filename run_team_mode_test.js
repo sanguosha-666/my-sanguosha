@@ -44,6 +44,29 @@ function check(name, fn){
     const c = vm.runInContext('TEAM_COLORS', sandbox);
     if(!c || c.length<9) throw new Error('应≥9色,实际 '+(c&&c.length));
   });
+  // 沙箱内显式赋值 gameRef/mySeat(game.js 顶层的 let gameRef=null / let mySeat=null
+  // 全局词法绑定会遮蔽 context 同名属性,必须像其它 run_*_test.js 那样在 vm 作用域内赋值)
+  vm.runInContext('gameRef = { transaction: function(fn){ return fn(typeof g !== "undefined" ? g : {}); } }; mySeat = 0;', sandbox);
+  await check('joinTeam: 大厅写p.team并推导teamCount', function(){
+    const g = { players:[{team:null},{team:null}], log:[], gameMode:'team', phase:'lobby', started:false };
+    context.g = g;
+    vm.runInContext('joinTeam', sandbox)(0);
+    if(g.players[0].team!==0) throw new Error('应写team=0,实际 '+g.players[0].team);
+    if(g.teamCount!==1) throw new Error('teamCount应1,实际 '+g.teamCount);
+  });
+  await check('joinTeam: 换队覆盖', function(){
+    const g = { players:[{team:1},{team:0}], log:[], gameMode:'team', phase:'lobby', started:false };
+    context.g = g;
+    vm.runInContext('joinTeam', sandbox)(1);
+    if(g.players[0].team!==1) throw new Error('应覆盖为1');
+  });
+  await check('createNewTeam: 建新队并入队', function(){
+    const g = { players:[{team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:1 };
+    context.g = g;
+    vm.runInContext('createNewTeam', sandbox)();
+    if(g.players[0].team!==1) throw new Error('应入新队1,实际 '+g.players[0].team);
+    if(g.teamCount!==2) throw new Error('teamCount应2,实际 '+g.teamCount);
+  });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
 })();

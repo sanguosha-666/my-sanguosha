@@ -1858,6 +1858,29 @@ function renderControls(g){
       };
       c.appendChild(btnPick);
     } else if(selectedGameMode==='team'){
+      // 选队面板:各队(色块+队伍号+人数)+加入按钮;房主(main)专属"+机器人"按钮(Task 4)
+      const teamCount = (g.teamCount && g.teamCount>=1) ? g.teamCount : 1;
+      for(let t=0; t<Math.max(teamCount, 2); t++){
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:6px;margin:4px 0;';
+        const dot=document.createElement('span');
+        dot.style.cssText='display:inline-block;width:14px;height:14px;border-radius:3px;background:'+(TEAM_COLORS[t]||'#999')+';';
+        const n = (g.players||[]).filter(p=>p&&p.team===t).length;
+        const lbl=document.createElement('span');
+        lbl.textContent='队伍'+(t+1)+'('+n+'人)';
+        row.appendChild(dot); row.appendChild(lbl);
+        const btn=document.createElement('button');
+        btn.className='ghost'; btn.textContent=(g.players[mySeat] && g.players[mySeat].team===t)?'已加入':'加入';
+        if(g.players[mySeat] && g.players[mySeat].team===t) btn.disabled=true;
+        btn.onclick=()=>{ joinTeam(t); if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
+        row.appendChild(btn);
+        c.appendChild(row);
+      }
+      const newBtn=document.createElement('button');
+      newBtn.className='ghost'; newBtn.textContent='+新建队伍';
+      newBtn.disabled = (g.teamCount||0)>=SEATS;
+      newBtn.onclick=()=>{ createNewTeam(); if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
+      c.appendChild(newBtn);
       const btnPick=document.createElement('button');
       btnPick.className='ghost';
       btnPick.textContent='开始组队赛(三选一)（'+cnt+'/'+SEATS+'）';

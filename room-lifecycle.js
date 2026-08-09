@@ -102,6 +102,34 @@ function removeBot(){
   });
 }
 
+// joinTeam(team):组队模式大厅选队(玩家自由选队,先到先得)。tx 写自己 p.team,
+// teamCount 由 normalize 推导(不手写,靠 normalize 收口)。队伍号 < SEATS(一人一队上限)。
+// 写 team 后再跑一次 normalize:tx 只在本事务开始时 normalize,fn 里改完 team 若不重跑,
+// 同一次提交快照里 teamCount 会停留在旧值(真实 Firebase 下靠 render→normalize 兜底,
+// 这里主动收口让提交快照本身自洽)。
+function joinTeam(team){
+  tx(g=>{
+    if(g.started || g.phase!=='lobby' || g.gameMode!=='team') return g;
+    if(!Number.isInteger(team) || team<0 || team>=SEATS) return g;
+    if(!g.players[mySeat]) return g;
+    g.players[mySeat].team = team;
+    normalize(g);
+    return g;
+  });
+}
+// createNewTeam:建一个新队伍并入队。队伍号 = 当前 teamCount(由 normalize 保证整数)。
+function createNewTeam(){
+  tx(g=>{
+    if(g.started || g.phase!=='lobby' || g.gameMode!=='team') return g;
+    const team = Number.isInteger(g.teamCount) ? g.teamCount : 0;
+    if(team>=SEATS) return g;
+    if(!g.players[mySeat]) return g;
+    g.players[mySeat].team = team;
+    normalize(g);
+    return g;
+  });
+}
+
 // startGame(mode, gameMode):
 //   mode = 'random' | 'pick'  武将分配方式
 //   gameMode = 'ffa' | 'identity'  对战模式(乱斗/主公局);缺省或非法当 'ffa'
