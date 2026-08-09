@@ -64,7 +64,7 @@ let aiPromptDismissed = false;
 // 天然兜底,不需要为"用户没选模型"这个最常见情形写任何特殊分支。
 let aiApiModel = '';
 
-// ===== AI测试托管(纯客户端本地状态,不写入Firebase) =====
+// ===== AI托管(纯客户端本地状态,不写入Firebase) =====
 // active:托管开关;seat:被托管的座位(当前浏览器玩家的 mySeat);records:本次托管期间
 // 的决策记录(供信息窗展示,关闭弹窗不清空、刷新即丢)。
 let aiTestAutopilot = { active:false, seat:null, records:[] };
@@ -753,13 +753,13 @@ function handleAddBotClick(){
 }
 
 // ============================================================
-// AI测试托管:开关 + 信息窗(渲染/拖动/调整大小)
+// AI托管:开关 + 信息窗(渲染/拖动/调整大小)
 // ============================================================
 // 纯客户端本地功能:状态只存在本文件的 aiTestAutopilot(模块级 let),从不写入
 // Firebase/g。游戏调度侧(bot.js)用 typeof aiTestAutopilot!=='undefined' 防御式
 // 读取,本文件是 aiTestAutopilot 的全项目唯一定义点。
 
-// toggleAiTestAutopilot:AI测试按钮开关。无密钥时提示配置;有密钥时开启并弹信息窗。
+// toggleAiTestAutopilot:AI托管按钮开关。无密钥时提示配置;有密钥时开启并弹信息窗。
 function toggleAiTestAutopilot(){
   if(!aiTestAutopilot.active){
     if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider){
@@ -775,7 +775,7 @@ function toggleAiTestAutopilot(){
     aiTestAutopilot.active = false;
     updateAiTestStatus();
     const btn=document.getElementById('aiTestBtn');
-    if(btn){ btn.classList.remove('aitest-active'); btn.title='AI测试:AI托管当前玩家并显示决策信息'; }
+    if(btn){ btn.classList.remove('aitest-active'); btn.title='AI托管:由AI托管当前玩家并显示决策信息'; }
     // records 保留,弹窗内容不清空
   }
 }
@@ -799,20 +799,29 @@ function closeAiTestModal(){
 function renderAiTestRecords(){
   const body=document.getElementById('aiTestBody');
   if(!body) return;
-  body.innerHTML = aiTestAutopilot.records.map(function(rec,i){
-    return '<div class="aitest-record">'
-      +'<div class="aitest-record-summary" onclick="toggleAiTestRecord('+i+')">'
-      +'<span class="aitest-arrow">▸</span><b>'+escapeHtml(rec.time)+'</b>'
-      +'<span>['+escapeHtml(rec.phaseLabel)+']</span><span>'+escapeHtml(rec.summary)+'</span>'
-      +'</div>'
-      +'<div class="aitest-record-detail hidden" data-idx="'+i+'">'
-      +'<div class="aitest-sec">① AI获取的信息</div><pre>'+escapeHtml(rec.stateInfo)+'</pre>'
-      +(rec.prompt ? '<div class="aitest-sec">发送的Prompt</div><pre>'+escapeHtml(rec.prompt)+'</pre>' : '')
-      +'<div class="aitest-sec">② AI返回的信息</div><pre>'+escapeHtml(rec.rawResponse || '(无)')+'</pre>'
-      +'<div class="aitest-sec">解析choice</div><div>'+(rec.choice===null?'(无动作/本地兜底)':escapeHtml(String(rec.choice)))+'</div>'
-      +'<div class="aitest-sec">③ 理由</div><div>'+escapeHtml(rec.reason || '(无)')+'</div>'
-      +'</div></div>';
-  }).join('');
+  body.innerHTML = aiTestAutopilot.records.map(recordHtml).join('');
+}
+// recordHtml:单条记录的完整 HTML(摘要行 + 详情区)。索引来自 records 数组位置,
+// 与 DOM 中 data-idx 一致,供 toggleAiTestRecord / aiTestFillPendingRecord 定位。
+function recordHtml(rec, i){
+  return '<div class="aitest-record">'
+    +'<div class="aitest-record-summary" onclick="toggleAiTestRecord('+i+')">'
+    +'<span class="aitest-arrow">▸</span><b>'+escapeHtml(rec.time)+'</b>'
+    +'<span>['+escapeHtml(rec.phaseLabel)+']</span><span>'+escapeHtml(rec.summary)+'</span>'
+    +'</div>'
+    +recordDetailHtml(rec, i)
+    +'</div>';
+}
+// recordDetailHtml:单条记录的详情区 HTML(默认折叠)。回填时只替换这一小段 DOM,
+// 不动其它记录节点——窗口滚动位置、已展开的其它记录全部保持原样。
+function recordDetailHtml(rec, i){
+  return '<div class="aitest-record-detail hidden" data-idx="'+i+'">'
+    +'<div class="aitest-sec">① AI获取的信息</div><pre>'+escapeHtml(rec.stateInfo)+'</pre>'
+    +(rec.prompt ? '<div class="aitest-sec">发送的Prompt</div><pre>'+escapeHtml(rec.prompt)+'</pre>' : '')
+    +'<div class="aitest-sec">② AI返回的信息</div><pre>'+escapeHtml(rec.rawResponse || '(无)')+'</pre>'
+    +'<div class="aitest-sec">解析choice</div><div>'+(rec.choice===null?'(无动作/本地兜底)':escapeHtml(String(rec.choice)))+'</div>'
+    +'<div class="aitest-sec">③ 理由</div><div>'+escapeHtml(rec.reason || '(无)')+'</div>'
+    +'</div>';
 }
 function toggleAiTestRecord(idx){
   const el=document.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
@@ -823,11 +832,15 @@ function clearAiTestRecords(){
   aiTestAutopilot.records = [];
   renderAiTestRecords();
 }
-// appendAiTestRecord:每次托管决策完成后追加一条记录并重渲染弹窗。
+// appendAiTestRecord:每次托管决策完成后追加一条记录。增量插入单条 DOM、不整窗重建
+// innerHTML——整窗重建会把已展开的详情全部收起、滚动位置重置回顶部;增量插入只动
+// 新记录自己的节点,其余原样。
 function appendAiTestRecord(rec){
   aiTestAutopilot.records.push(rec);
+  const body=document.getElementById('aiTestBody');
   const m=document.getElementById('aiTestModal');
-  if(m && !m.classList.contains('hidden')) renderAiTestRecords();
+  if(!body || (m && m.classList.contains('hidden'))) return;
+  body.insertAdjacentHTML('beforeend', recordHtml(rec, aiTestAutopilot.records.length-1));
 }
 
 // aiTestPendingRecord:最近一次由 aiTestDecisionHook 建立的"待回填"骨架记录。
@@ -874,9 +887,20 @@ function aiTestFillPendingRecord(fields){
       if(fields.choice!==undefined) aiTestPendingRecord.choice = fields.choice;
       if(fields.reason!==undefined) aiTestPendingRecord.reason = fields.reason;
     }
+    const idx = aiTestAutopilot.records.indexOf(aiTestPendingRecord);
     aiTestPendingRecord = null;
     const m=document.getElementById('aiTestModal');
-    if(m && !m.classList.contains('hidden')) renderAiTestRecords();
+    if(!m || m.classList.contains('hidden') || idx<0) return;
+    const det = m.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
+    if(!det) return;
+    // 只替换这一条记录的详情区,保留其它记录节点与滚动位置;替换前记住展开状态,
+    // 用户正点开看着的这条记录回填后保持展开(内容实时可见)。
+    const wasOpen = !det.classList.contains('hidden');
+    det.outerHTML = recordDetailHtml(aiTestAutopilot.records[idx], idx);
+    if(wasOpen){
+      const nd = m.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
+      if(nd) nd.classList.remove('hidden');
+    }
   }catch(e){ /* 静默:回填失败不影响决策主流程 */ }
 }
 

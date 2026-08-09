@@ -50,7 +50,7 @@ const context = {
     database: function() { return { ref: function() { return { on: function() {}, once: function() {}, push: function() { return { set: function() {}, key: 'mock_key' }; }, transaction: function() { return {}; }, set: function() {}, child: function() { return {}; }, remove: function() {}, get: function() { return { val: function() { return null; } }; } }; } }; }
   },
   document: {
-    getElementById: function(id) { return { onclick: function() {}, innerHTML: '', style: {}, className: '', classList: { add: function() {}, remove: function() {}, toggle: function() {}, contains: function() { return false; } }, querySelector: function() { return null; }, appendChild: function() { return {}; }, remove: function() {}, setAttribute: function() {}, getAttribute: function() { return null; }, addEventListener: function() {}, removeEventListener: function() {} }; },
+    getElementById: function(id) { return { onclick: function() {}, innerHTML: '', style: {}, className: '', classList: { add: function() {}, remove: function() {}, toggle: function() {}, contains: function() { return false; } }, querySelector: function() { return null; }, appendChild: function() { return {}; }, remove: function() {}, setAttribute: function() {}, getAttribute: function() { return null; }, addEventListener: function() {}, removeEventListener: function() {}, insertAdjacentHTML: function() {} }; },
     createElement: function(tag) { return { src: '', href: '', rel: '', type: '', textContent: '', innerHTML: '', onclick: function() {}, onerror: function() {}, onload: function() {}, className: '', id: '', style: {}, setAttribute: function() {}, getAttribute: function() { return null; }, appendChild: function() { return {}; }, remove: function() {} }; },
     createTextNode: function(t) { return { nodeValue: t, textContent: t }; },
     createDocumentFragment: function() { return { appendChild: function() { return {}; }, querySelector: function() { return null; }, querySelectorAll: function() { return []; } }; },
@@ -171,9 +171,13 @@ const testCode = String.raw`
     // 【choice 采集修复】托管命中时 aiTestLastChoice 应同步记录解析出的下标(供信息窗
     // "解析choice"字段展示真实AI选择,而非恒为"(无动作/本地兜底)"占位)。
     if(aiTestLastChoice!==1) throw new Error('应采集choice=1,实际 '+aiTestLastChoice);
-    // 附加:托管命中时 systemPrompt 应含"本次为AI测试托管"指令
-    if(!window.__mockAiArgs || window.__mockAiArgs.opts.systemPrompt.indexOf('AI测试托管') < 0)
-      throw new Error('托管命中时 systemPrompt 应含托管指令,实际 '+JSON.stringify(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt));
+    // 【prompt 分离】托管命中时 systemPrompt 应含托管标记(本次为AI托管),且不再有
+    // "不要解释"——两条互相矛盾的指令("只输出{choice}不要解释" vs "附理由")是 AI
+    // 只回 choice 不回 reason 的根因,托管专用模板必须消除它(buildAutopilotSystemPrompt)。
+    if(!window.__mockAiArgs || window.__mockAiArgs.opts.systemPrompt.indexOf('本次为AI托管') < 0)
+      throw new Error('托管命中时 systemPrompt 应含托管标记,实际 '+JSON.stringify(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt));
+    if(window.__mockAiArgs.opts.systemPrompt.indexOf('不要解释') >= 0)
+      throw new Error('托管命中时 systemPrompt 不应含"不要解释"(与附理由冲突),实际 '+JSON.stringify(window.__mockAiArgs.opts.systemPrompt));
   });
   await check('callAiChooseIndex: 未托管时reason保持null(零变化)', async function(){
     aiTestAutopilot = {active:false, seat:0};
@@ -181,9 +185,23 @@ const testCode = String.raw`
     var i = await callAiChooseIndex({g:g, seat:0, candidates:[{index:0,label:'a'},{index:1,label:'b'}]});
     if(i!==1) throw new Error('应返回1,实际 '+i);
     if(aiTestLastReason!==null) throw new Error('未托管不应采集理由,实际 '+aiTestLastReason);
-    // 附加:未托管时 systemPrompt 不应含托管指令(零变化)
-    if(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt.indexOf('AI测试托管') >= 0)
-      throw new Error('未托管时 systemPrompt 不应含托管指令,实际 '+JSON.stringify(window.__mockAiArgs.opts.systemPrompt));
+    // 未托管时 systemPrompt 应保持默认模板一字不变:含"不要解释"、不含托管标记(零变化)
+    if(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt.indexOf('本次为AI托管') >= 0)
+      throw new Error('未托管时 systemPrompt 不应含托管标记,实际 '+JSON.stringify(window.__mockAiArgs.opts.systemPrompt));
+    if(!window.__mockAiArgs || window.__mockAiArgs.opts.systemPrompt.indexOf('不要解释') < 0)
+      throw new Error('未托管时 systemPrompt 应保持默认(含"不要解释"),实际 '+JSON.stringify(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt));
+  });
+  await check('callAiChooseIndex: 托管时user prompt末尾"只返回{choice}"替换为理由格式(分离)', async function(){
+    aiTestAutopilot = {active:true, seat:0};
+    var up0 = '当前局面:{}\n\n合法候选:[]\n\n只返回 {"choice":数字}';
+    var i = await callAiChooseIndex({g:g, seat:0, candidates:[{index:0,label:'a'},{index:1,label:'b'}], userPrompt:up0});
+    if(i!==1) throw new Error('应返回1,实际 '+i);
+    if(!window.__mockAiArgs) throw new Error('应捕获实际发送参数');
+    var up = window.__mockAiArgs.opts.userPrompt;
+    if(up.indexOf('只返回 {"choice":数字}') >= 0)
+      throw new Error('托管时 user prompt 不应残留"只返回 {choice}"(与附理由冲突),实际 '+up);
+    if(up.indexOf('请按格式返回 {"choice":数字,"reason":"理由文本"}') < 0)
+      throw new Error('托管时 user prompt 末尾应为理由格式指令,实际 '+up);
   });
 
   // ================= Task5:aiTestLastCall 采集(2 项) =================
@@ -193,8 +211,8 @@ const testCode = String.raw`
     var i = await callAiChooseIndex({g:g, seat:0, candidates:[{index:0,label:'a'},{index:1,label:'b'}]});
     if(i!==1) throw new Error('应返回1,实际 '+i);
     if(!aiTestLastCall) throw new Error('托管命中应设置aiTestLastCall,实际 null');
-    if(typeof aiTestLastCall.prompt!=='string' || aiTestLastCall.prompt.indexOf('AI测试托管')<0)
-      throw new Error('prompt应含托管指令,实际 '+JSON.stringify(aiTestLastCall.prompt));
+    if(typeof aiTestLastCall.prompt!=='string' || aiTestLastCall.prompt.indexOf('本次为AI托管')<0)
+      throw new Error('prompt应含托管标记,实际 '+JSON.stringify(aiTestLastCall.prompt));
     if(aiTestLastCall.rawResponse!=='{"choice":1,"reason":"测试理由"}')
       throw new Error('rawResponse应取AI返回文本,实际 '+JSON.stringify(aiTestLastCall.rawResponse));
   });
@@ -406,6 +424,26 @@ const testCode = String.raw`
       throw new Error('阵亡托管座位不应执行draw分支,实际调用 '+window.__doDrawCalled+' 次(首行守卫缺失)');
     if(aiTestAutopilot.records.length !== 0)
       throw new Error('阵亡座位不应追加record,实际 '+aiTestAutopilot.records.length+' 条');
+  });
+
+  // ============ Task7: 回归探针 —— 确定性决策(不调AI)骨架记录确实空(无理由) ============
+  // 用户报告"都不返回决策理由了"。已确认两条独立原因:①单候选确定性路径(candidates.length
+  // ===1 时 idx=0)绕过 callAiChooseIndex,骨架永不回填 → reason 恒 null(本条锁定该行为,
+  // 是"符合预期"不是 bug);②多候选托管路径的 prompt 自相矛盾(默认模板"只输出{choice}不
+  // 要解释"/user 末尾"只返回{choice}"压过托管附加的"附理由"指令)→ 已在 callAiChooseIndex
+  // 托管分支用 buildAutopilotSystemPrompt/buildAutopilotUserPrompt 替换消除,由上面的
+  // "prompt 分离"断言锁定。此探针把"确定性决策无理由"钉成既有行为,防止未来误当 bug。
+  await check('回归探针:确定性决策(不调AI)骨架记录确实空(无理由)', function(){
+    aiTestAutopilot = {active:true, seat:0, records:[]};
+    var g4 = mkSeatG({n:3});
+    g4.phase='draw';
+    aiTestDecisionHook(g4, 0, {summary:'决策(draw)'});
+    if(aiTestAutopilot.records.length!==1) throw new Error('应1条');
+    var rec = aiTestAutopilot.records[0];
+    if(rec.reason!==null) throw new Error('确定性决策应无理由,实际 '+rec.reason);
+    if(rec.prompt!=='') throw new Error('确定性决策应无prompt');
+    if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应非空');
+    console.log('  探针:确定性决策骨架记录 reason=null(符合预期,但用户看到的是空理由)');
   });
 
   console.log('\n' + '='.repeat(60));

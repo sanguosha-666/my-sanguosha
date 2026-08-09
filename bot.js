@@ -282,7 +282,7 @@ const BOT_PHASE_ACTOR = {
 };
 function botSeatForState(g){
   const d=g.pending||{};
-  // 【AI测试托管】托管中的真人座位视同机器人:isBotSeat 覆盖为"托管座位即真"。
+  // 【AI托管】托管中的真人座位视同机器人:isBotSeat 覆盖为"托管座位即真"。
   // 一处改动覆盖 A/B 全部段落(各段都用 isBotSeat 判),托管座位在 draw/play/discard、
   // 响应类 pending(BOT_PHASE_ACTOR)等全部阶段都能被调度。托管关闭(active=false)时
   // aiTestAutopilot 判定恒 false,行为与托管前完全一致。
@@ -387,7 +387,7 @@ let botDecisionInFlight=false;
 let botMissedSchedule=false;
 function scheduleBotTurn(g){
   if(!g) return;
-  // 【AI测试托管】托管自己座位时,即使自己不是 isBotController(不是第一个真人)也允许跑
+  // 【AI托管】托管自己座位时,即使自己不是 isBotController(不是第一个真人)也允许跑
   // 调度,但只限托管座位自己;其它机器人座位仍由控制器浏览器独占驱动(非控制器浏览器在
   // "轮到别的 bot 座位"时直接 return,双浏览器驱动会冲突)。非托管场景行为与原来一致
   // (isBotController 判定)。
@@ -398,7 +398,7 @@ function scheduleBotTurn(g){
   // (fire-and-forget,不阻塞决策;更新完成后的下一轮决策才带上新摘要)
   if(g.phase==='over'){ aiSummaryReset(); return; }
   const seat=botSeatForState(g);
-  // 【AI测试托管】非控制器浏览器(靠 aiTestSelf 放行)只允许调度托管座位自己,
+  // 【AI托管】非控制器浏览器(靠 aiTestSelf 放行)只允许调度托管座位自己,
   // 绝不能驱动其它机器人座位(那是控制器浏览器的职责,双浏览器驱动会冲突)。
   if(!isBotController(g) && !(aiTestSelf && seat===aiTestAutopilot.seat)) return;
   // seat>=0 才碰摘要座位:seat===-1 是真人回合(scheduleBotTurn 每次渲染都跑),
@@ -431,7 +431,7 @@ function scheduleBotTurn(g){
     const latest=(typeof currentG!=='undefined')?currentG:null;
     if(!latest) return;
     const nowSeat=botSeatForState(latest);
-    // 【AI测试托管】回调第二道门与入口门同一口径:非控制器浏览器只在"轮到托管座位自己"
+    // 【AI托管】回调第二道门与入口门同一口径:非控制器浏览器只在"轮到托管座位自己"
     // 时放行,否则 return(不执行决策);控制器浏览器行为与原来完全一致。
     const aiTestSelfNow = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
       && aiTestAutopilot.seat===mySeat;
@@ -3651,13 +3651,13 @@ function botSafePrompt(g,seat){
 async function runBotDecision(g,seat){
   const p=g.players[seat];
   if(!p||!p.alive&&g.phase!=='pickingGeneral') return;
-  // 【AI测试托管】托管中的真人座位视同机器人:放行其进入决策(各分支的 d.X===seat 复核
+  // 【AI托管】托管中的真人座位视同机器人:放行其进入决策(各分支的 d.X===seat 复核
   // 仍然有效,托管座位同样要满足所在阶段的身份守卫)。托管关闭时判定恒 false,行为与
   // 托管前完全一致(非机器人一律被拦)。
   const isAutopilot=(typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
     && aiTestAutopilot.seat===seat;
   if(!p.isBot&&!isAutopilot) return;
-  // 【AI测试托管】每次托管决策追加一条信息窗 record。hook 内部自行组装 stateInfo/reason
+  // 【AI托管】每次托管决策追加一条信息窗 record。hook 内部自行组装 stateInfo/reason
   // (reason 回退 aiTestLastReason);prompt/rawResponse 来自 callAiChooseIndex 写下的
   // aiTestLastCall(托管命中时有值)。choice 传 null 表示"未知具体动作"(execute 后的真实
   // 动作摘要由后续任务回填)。采集失败绝不影响决策主流程,故外层再包一层 try/catch。

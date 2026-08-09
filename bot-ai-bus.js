@@ -31,7 +31,7 @@ function parseBotPlayAiChoice(text){
   return r;
 }
 
-// parseBotPlayAiChoiceWithReason:AI测试托管模式的解析——AI 在返回 choice 的同时附一句
+// parseBotPlayAiChoiceWithReason:AI托管模式的解析——AI 在返回 choice 的同时附一句
 // 中文理由({"choice":N,"reason":"..."})。复用老解析的宽容策略(JSON.parse失败剥代码块
 // 重试一次);解析出 choice 时顺带提取 reason(无 reason 字段则为 null);整体失败回退
 // 老解析函数(仍失败则 idx=null)。返回 {idx, reason}。
@@ -77,18 +77,18 @@ let aiSummary = '';
 let aiSummarySeat = null;
 let aiSummaryRound = 0;
 let aiSummaryTurn = -1;
-// aiTestLastReason:AI测试托管模式(AI测试按钮)下,最近一次托管命中的 AI 询问里解析出的
+// aiTestLastReason:AI托管模式(AI托管按钮)下,最近一次托管命中的 AI 询问里解析出的
 // 中文选择理由。模块级变量,供信息窗 record 采集(aiTestDecisionHook)。未托管时恒为
 // null——callAiChooseIndex 在未托管路径会把 reason 恒写 null,与未托管行为零变化。
 // 【为何是顶层声明】计划初稿把声明写在 callAiChooseIndex 函数体内(var 提升后是该函数
 // 的局部变量),函数外的测试/采集代码永远读不到——必须放模块顶层才符合"供 record 采集"
 // 的语义。
 let aiTestLastReason = null;
-// aiTestLastChoice:AI测试托管模式下,最近一次托管命中的 AI 询问里解析出的 choice 下标。
+// aiTestLastChoice:AI托管模式下,最近一次托管命中的 AI 询问里解析出的 choice 下标。
 // 与 aiTestLastReason 同一机制(模块顶层声明,供信息窗 record 采集)。未托管时恒为
 // null——赋值只发生在 autopilotHit 分支,与未托管行为零变化。
 let aiTestLastChoice = null;
-// aiTestLastCall:AI测试托管模式下,最近一次托管命中的 callAiChooseIndex 实际发送的
+// aiTestLastCall:AI托管模式下,最近一次托管命中的 callAiChooseIndex 实际发送的
 // prompt 全文 + AI 原始返回文本。模块级变量,供信息窗 record 采集(aiTestDecisionHook /
 // runBotDecision 采集分支)。未托管时恒为 null——赋值只发生在 autopilotHit 分支,与未
 // 托管行为零变化。同样必须放模块顶层:函数体内声明(var 提升后是函数局部变量)外部读不到。
@@ -165,12 +165,35 @@ function buildBotDefaultUserPrompt(state, candidates){
     +'\n\n只返回 {"choice":数字}';
 }
 
+// ===== AI托管专用 prompt 构造(与默认模板互不干扰,未托管路径零触碰) =====
+// 背景:默认模板里有两条和"附理由"冲突的指令——system 的"只输出 {"choice":数字}，
+// 不要解释。"和 user 末尾的"只返回 {"choice":数字}"。AI 服从最后一条指令,
+// 托管模式下这些残留会让它只回 choice 不回 reason(真实用户反馈"都不返回决策理由了")。
+// 所以托管命中时把这两处替换成"返回choice+理由"口径;若传入的自定义 prompt 里仍
+// 残留"不要解释",在末尾追加一条理由指令压过它(AI 服从最后指令)。未托管路径
+// 完全不经过这两个函数,行为零变化。
+function buildAutopilotSystemPrompt(systemPrompt){
+  const base = systemPrompt || buildBotDefaultSystemPrompt();
+  // 默认模板:把"只输出 {choice}，不要解释。"替换成"返回choice+理由"口径,消除矛盾;
+  // 自定义模板若仍残留"不要解释",末尾的托管标记行会作为最后指令压过它(AI 服从最后指令)。
+  const s = base.replace('只输出 {"choice":数字}，不要解释。', '只输出 {"choice":数字,"reason":"理由文本"}，并用一句中文解释理由。');
+  return s + '\n\n(本次为AI托管)返回choice时必须同时附一句中文理由,格式 {"choice":数字,"reason":"理由文本"}。';
+}
+function buildAutopilotUserPrompt(userPrompt){
+  const reasonLine = '请按格式返回 {"choice":数字,"reason":"理由文本"}';
+  let s = String(userPrompt || '').replace(/只返回 \{"choice":数字\}\s*$/, reasonLine);
+  if(s.indexOf(reasonLine) < 0){
+    s = s ? s + '\n\n' + reasonLine : reasonLine;
+  }
+  return s;
+}
+
 // callAiChooseIndex:一次"候选列表→索引"的AI询问,返回规范化后的合法下标或 null。
 // 守卫/超时/解析失败/越界全部收敛到这一处,与 tryAiBotPlay 同一套取舍:任何失败都
 // 返回 null 交给调用方回退本地逻辑,不重试、不阻塞、不抛异常。
 async function callAiChooseIndex(opts){
   const candidates = opts.candidates || [];
-  // 【AI测试托管】检测当前座位是否处于托管模式:命中则该次询问要求 AI 附理由,
+  // 【AI托管】检测当前座位是否处于托管模式:命中则该次询问要求 AI 附理由,
   // 并把解析出的理由存入模块级 aiTestLastReason(供信息窗 record 采集)。
   const autopilotHit = (typeof aiTestAutopilot!=='undefined') && aiTestAutopilot
     && aiTestAutopilot.active && aiTestAutopilot.seat===opts.seat;
@@ -185,20 +208,22 @@ async function callAiChooseIndex(opts){
     ? '\n\n本局记忆摘要(你自己维护的,参考即可):\n'+aiSummary
     : '';
   const g = opts.g, seat = opts.seat;
-  // 【AI测试托管】采集本次实际发送的 prompt 全文(仅托管命中时;未托管不触碰 aiTestLastCall)。
-  // 与下方真正发给 callAI 的 systemPrompt/userPrompt 拼法逐字一致,保证记录里的就是实际内容。
+  // 【AI托管】prompt 构造:托管命中时用托管专用模板(把 system 的"不要解释"/user 末尾的
+  // "只返回 {choice}" 替换成"返回choice+理由"口径,消除互相矛盾的指令),平时用默认模板
+  // 一字不变——两条路径互不干扰。aiTestLastCall 采集的 prompt 与下方实发逐字一致。
+  let sysText = (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote;
+  let userPromptText = opts.userPrompt;
   if(autopilotHit){
-    const sysText = (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote
-      + '\n\n(本次为AI测试托管)在返回choice的同时,用一句中文解释你的选择理由。返回格式:{"choice":数字,"reason":"理由文本"}';
-    aiTestLastCall = { prompt: sysText + '\n\n' + (opts.userPrompt||''), rawResponse: null };
+    sysText = buildAutopilotSystemPrompt(sysText);
+    userPromptText = buildAutopilotUserPrompt(opts.userPrompt);
+    aiTestLastCall = { prompt: sysText + '\n\n' + userPromptText, rawResponse: null };
   }
   showAiThinkingIndicator(g, seat);
   let result;
   try{
     result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote
-        + (autopilotHit ? '\n\n(本次为AI测试托管)在返回choice的同时,用一句中文解释你的选择理由。返回格式:{"choice":数字,"reason":"理由文本"}' : ''),
-      userPrompt: opts.userPrompt,
+      systemPrompt: sysText,
+      userPrompt: userPromptText,
       maxTokens: opts.maxTokens || 80,
       model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
     });
@@ -222,7 +247,7 @@ async function callAiChooseIndex(opts){
   }
   aiTestLastReason = reason;
   if(autopilotHit) aiTestLastChoice = idx;
-  // 【AI测试托管回填】解析完成后,把本次 AI 调用的真实数据回填进"最后一条待回填骨架记录"
+  // 【AI托管回填】解析完成后,把本次 AI 调用的真实数据回填进"最后一条待回填骨架记录"
   // (runBotDecision 决策前由 aiTestDecisionHook 建立)。注意:只有解析成功(idx 合法)才回填
   // choice/reason;解析失败/越界时本条记录保持骨架状态(choice 显示"(无动作/本地兜底)"是
   // 真实语义——AI 没能给出合法选择,走了本地兜底)。

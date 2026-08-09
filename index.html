@@ -1071,7 +1071,7 @@
      在 right 侧,这里在 left 侧)。 */
   #debugLogBtn{position:fixed;top:64px;left:12px;z-index:50;width:44px;height:44px;
     border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
-  /* AI测试入口(aiTestBtn):和 #debugLogBtn 同一行、往右一格(debugLogBtn left:12,这里 left:64),
+  /* AI托管入口(aiTestBtn):和 #debugLogBtn 同一行、往右一格(debugLogBtn left:12,这里 left:64),
      同款固定圆形图标按钮,复用 #closeRoomBtn/#debugLogBtn 那套定位+尺寸+配色。z-index:50
      与其他图标按钮一致、低于弹窗(#aiTestModal 是 z-index:120),点开弹窗不会压住弹窗交互。 */
   #aiTestBtn{position:fixed;top:64px;left:64px;z-index:50;width:44px;height:44px;
@@ -1185,7 +1185,7 @@
   .ai-key-panel .ai-key-warn{margin-top:12px;font-size:12px;color:var(--paper-dim);line-height:1.55;}
   .ai-key-panel .ai-key-btns{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;}
 
-  /* ===== AI测试信息窗(可拖动/可调整大小) ===== */
+  /* ===== AI托管信息窗(可拖动/可调整大小) ===== */
   #aiTestModal{position:fixed;top:70px;right:12px;left:auto;bottom:auto;width:420px;max-width:80vw;height:480px;max-height:80vh;z-index:120;display:flex;align-items:stretch;justify-content:stretch;box-shadow:0 4px 20px rgba(0,0,0,.45)}
   #aiTestModal.hidden{display:none}
   .aitest-panel{position:relative;display:flex;flex-direction:column;width:100%;height:100%;background:var(--paper,#f5ecd9);border:1px solid var(--paper-dim,#a0926e);border-radius:8px;overflow:hidden;box-sizing:border-box}
@@ -2004,7 +2004,7 @@
 <button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
 <button id="closeRoomBtn" class="icon-btn" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
 <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
-<button id="aiTestBtn" class="icon-btn" title="AI测试:AI托管当前玩家并显示决策信息" onclick="toggleAiTestAutopilot()">🤖</button>
+<button id="aiTestBtn" class="icon-btn" title="AI托管:由AI托管当前玩家并显示决策信息" onclick="toggleAiTestAutopilot()">🤖</button>
 <div id="logToast"></div>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
@@ -2012,7 +2012,7 @@
 <div id="aiKeyModal" class="hidden"></div>
 <div id="aiTestModal" class="hidden">
   <div class="aitest-panel">
-    <div class="aitest-header">🤖 AI测试 <span id="aiTestStatus">未托管</span><button id="aiTestCloseBtn" class="aitest-close icon-btn" onclick="closeAiTestModal()">✕</button></div>
+    <div class="aitest-header">🤖 AI托管 <span id="aiTestStatus">未托管</span><button id="aiTestCloseBtn" class="aitest-close icon-btn" onclick="closeAiTestModal()">✕</button></div>
     <div class="aitest-body" id="aiTestBody"></div>
     <div class="aitest-footer">
       <button class="aitest-foot-btn" onclick="clearAiTestRecords()">清空</button>
@@ -2107,20 +2107,20 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=339"></script>
-<script src="data.js?v=339"></script>
-<script src="debug-log.js?v=339"></script>
-<script src="room-lifecycle.js?v=339"></script>
-<script src="game.js?v=339"></script>
-<script src="weapons.js?v=339"></script>
-<script src="skills.js?v=339"></script>
-<script src="bot-ai-bus.js?v=339"></script>
-<script src="bot.js?v=339"></script>
-<script src="ai-bot.js?v=339"></script>
-<script src="render.js?v=339"></script>
-<script src="render-table.js?v=339"></script>
-<script src="render-hand.js?v=339"></script>
-<script src="render-controls.js?v=339"></script>
-<script src="render-log.js?v=339"></script>
+<script src="config.js?v=340"></script>
+<script src="data.js?v=340"></script>
+<script src="debug-log.js?v=340"></script>
+<script src="room-lifecycle.js?v=340"></script>
+<script src="game.js?v=340"></script>
+<script src="weapons.js?v=340"></script>
+<script src="skills.js?v=340"></script>
+<script src="bot-ai-bus.js?v=340"></script>
+<script src="bot.js?v=340"></script>
+<script src="ai-bot.js?v=340"></script>
+<script src="render.js?v=340"></script>
+<script src="render-table.js?v=340"></script>
+<script src="render-hand.js?v=340"></script>
+<script src="render-controls.js?v=340"></script>
+<script src="render-log.js?v=340"></script>
 </body>
 </html>
