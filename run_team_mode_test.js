@@ -83,6 +83,31 @@ function check(name, fn){
     if(g.players[0].team!==1) throw new Error('应入新队1,实际 '+g.players[0].team);
     if(g.teamCount!==2) throw new Error('teamCount应2,实际 '+g.teamCount);
   });
+  await check('addBot(team): 机器人入指定队', function(){
+    const g = { players:[{name:'a',isBot:false,team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
+    context.g = g; context.mySeat = 0;
+    vm.runInContext('addBot', sandbox)(1);
+    const bots = g.players.filter(p=>p.isBot);
+    if(bots.length!==1) throw new Error('应添加1个机器人');
+    if(bots[0].team!==1) throw new Error('机器人应入队1,实际 '+bots[0].team);
+    if(g.teamCount!==2) throw new Error('teamCount应保持2,实际 '+g.teamCount);
+  });
+  await check('addBot(team): 非team模式不写队', function(){
+    const g = { players:[], log:[], gameMode:'ffa', phase:'lobby', started:false };
+    context.g = g; context.mySeat = 0;
+    vm.runInContext('addBot', sandbox)(1);
+    const bots = g.players.filter(p=>p.isBot);
+    if(bots.length!==1) throw new Error('应添加1个机器人');
+    if(bots[0].team!==null) throw new Error('非team模式机器人team应null,实际 '+bots[0].team);
+  });
+  await check('addBot(team): 非法队伍号拒绝入队', function(){
+    const g = { players:[{name:'a',isBot:false,team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
+    context.g = g; context.mySeat = 0;
+    vm.runInContext('addBot', sandbox)(99); // 越界队伍号 → team 落 null(仍加机器人)
+    const bots = g.players.filter(p=>p.isBot);
+    if(bots.length!==1) throw new Error('应添加1个机器人');
+    if(bots[0].team!==null) throw new Error('越界队伍号team应null,实际 '+bots[0].team);
+  });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
 })();

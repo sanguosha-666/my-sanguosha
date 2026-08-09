@@ -75,15 +75,21 @@ function enterGame(){
 
 // 大厅机器人座位。机器人仍是标准 player，只以 isBot 区分；距离、身份、回合和胜负逻辑
 // 继续复用同一套 players 数组。只有座位0的真人可增删，避免多人同时操作造成争抢。
-function addBot(){
+// addBot(team):team 模式必须传队伍号(房主 mySeat===0 在选队面板指定),机器人入指定队;
+// 非 team 模式调用 addBot() 不带参,行为零变化(botTeam 恒 null)。
+function addBot(team){
   tx(g=>{
     if(g.started || g.phase!=='lobby' || mySeat!==0 || g.players.length>=SEATS) return g;
     const botNo=g.players.filter(p=>p&&p.isBot).length+1;
+    const botTeam = (g.gameMode==='team') ? (Number.isInteger(team)&&team>=0&&team<SEATS ? team : null) : null;
     g.players.push({
       name:'机器人'+botNo,cid:'bot-'+Date.now()+'-'+Math.floor(Math.random()*1000000),
-      isBot:true,botLevel:'smart',hp:MAX_HP,maxHp:MAX_HP,hand:[],alive:true
+      isBot:true,botLevel:'smart',hp:MAX_HP,maxHp:MAX_HP,hand:[],alive:true,team:botTeam
     });
     g.log=pushLog(g.log,'已添加机器人'+botNo);
+    // 写 team 后再跑一次 normalize(与 joinTeam 同一先例):tx 只在本事务开始时 normalize,
+    // push 机器人改完 team 后若不重跑,teamCount 停留在旧值,提交快照不自洽。
+    normalize(g);
     return g;
   });
 }

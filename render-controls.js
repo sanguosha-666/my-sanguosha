@@ -1874,6 +1874,12 @@ function renderControls(g){
         if(g.players[mySeat] && g.players[mySeat].team===t) btn.disabled=true;
         btn.onclick=()=>{ joinTeam(t); if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
         row.appendChild(btn);
+        if(mySeat===0){
+          const addBotBtn=document.createElement('button');
+          addBotBtn.className='ghost'; addBotBtn.textContent='+机器人';
+          addBotBtn.onclick=()=>{ addBot(t); if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
+          row.appendChild(addBotBtn);
+        }
         c.appendChild(row);
       }
       const newBtn=document.createElement('button');
