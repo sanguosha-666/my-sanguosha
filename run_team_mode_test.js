@@ -156,6 +156,31 @@ function check(name, fn){
     if(g.gameMode!=='team') throw new Error('应进入team模式,实际 '+g.gameMode);
     if(g.phase!=='pickingGeneral') throw new Error('应进入选将,实际 '+g.phase);
   });
+  // —— Task 6: checkWin team 分支(存活队伍数≤1判胜负;=0无胜者=最后两队同时团灭)。
+  // 注:checkWin 全函数为纯函数(读 g 不改全局),可反复调用;用例直接构造 team 状态快照。
+  await check('checkWin: 2队一方团灭对方胜', function(){
+    const g = { players:[{team:0,alive:true,name:'a'},{team:0,alive:true,name:'b'},{team:1,alive:false,name:'c'},{team:1,alive:false,name:'d'}], log:[], gameMode:'team', phase:'play', pending:null, aoe:null };
+    const done = vm.runInContext('checkWin', sandbox)(g);
+    if(!done) throw new Error('应结束');
+    if(g.winner!=='队伍1') throw new Error('胜者应队伍1,实际 '+g.winner);
+    if(g.phase!=='over') throw new Error('phase应over');
+  });
+  await check('checkWin: 3队淘汰到1队', function(){
+    const g = { players:[{team:0,alive:false,name:'a'},{team:1,alive:true,name:'b'},{team:2,alive:false,name:'c'},{team:1,alive:true,name:'d'}], log:[], gameMode:'team', phase:'play', pending:null, aoe:null };
+    const done = vm.runInContext('checkWin', sandbox)(g);
+    if(!done || g.winner!=='队伍2') throw new Error('应队伍2胜,实际 '+(done?g.winner:'未结束'));
+  });
+  await check('checkWin: 最后两队同时团灭→无胜者', function(){
+    const g = { players:[{team:0,alive:false,name:'a'},{team:1,alive:false,name:'b'}], log:[], gameMode:'team', phase:'play', pending:null, aoe:null };
+    const done = vm.runInContext('checkWin', sandbox)(g);
+    if(!done) throw new Error('应结束');
+    if(g.winner!=='无') throw new Error('应无胜者,实际 '+g.winner);
+  });
+  await check('checkWin: 两队都存活→未结束', function(){
+    const g = { players:[{team:0,alive:true,name:'a'},{team:1,alive:true,name:'b'}], log:[], gameMode:'team', phase:'play', pending:null, aoe:null };
+    const done = vm.runInContext('checkWin', sandbox)(g);
+    if(done) throw new Error('不应结束');
+  });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
 })();

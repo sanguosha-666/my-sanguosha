@@ -4742,6 +4742,21 @@ function advanceFangtianQueue(g){
 // checkWin: 乱斗=存活<=1;身份局=阵营胜负(见 identity 规格)。
 // 返回 true 表示已结束游戏。
 function checkWin(g){
+  if(g.gameMode==='team'){
+    // 组队模式:存活队伍数 ≤1 结束;=1 该队胜,=0 无胜者(最后两队同时团灭)
+    const aliveTeams = {};
+    (g.players||[]).forEach(p=>{ if(p && p.alive && Number.isInteger(p.team)) aliveTeams[p.team]=true; });
+    const teamKeys = Object.keys(aliveTeams);
+    if(teamKeys.length<=1){
+      g.phase='over';
+      g.winSide = null;
+      g.winner = teamKeys.length===1 ? ('队伍'+(Number(teamKeys[0])+1)) : '无';
+      g.pending=null; g.aoe=null;
+      g.log=pushLog(g.log, '游戏结束,胜方：'+g.winner);
+      return true;
+    }
+    return false;
+  }
   if(g.gameMode==='identity'){
     const alivePred = (pred)=> (g.players||[]).some(p=>p && p.alive && pred(p));
     const lordAlive = alivePred(p=>p.role==='zhu');
