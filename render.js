@@ -233,6 +233,14 @@ window.addEventListener('orientationchange', checkLandscapeGate);
 //     宽度富余得多),从而把原来3行压缩到2行——真实测量确认topCount最大到5(8人局)时,
 //     top行横向空间依然绰绰有余,不会挤压变形,详见CLAUDE.md"座位卡最大化"条目里的
 //     完整验证数据。
+//   - others===8(9人局,SEATS=9扩容新增): 不能继续套 topCount=n-2=6——top 行上限实测是
+//     5(8人局,见上一条),9人局塞6张会横向溢出(估算:1440×900下每张卡宽≈0.75*height≈
+//     156px,6张+5*gap8px+padding≈992px > top行可用宽度≈964px;1920×1080下更宽)。
+//     改走 top5+left2+right1:top行维持已验证的5张上限,多出的1个对手并入left列第二槽
+//     (left[data-zone-index="1"] 的 grid-row:3 槽位 CSS 早在"3行压缩成2行"之前就已
+//     预留,见 index.html 里 left/right 各两个 index 的规则),对手区因此回到3行——
+//     computeOppZoneRowsUsed 同步返回3(见该函数注释),updateDesktopSeatHeights 的
+//     纵向预算公式自动适配(行数多一行,每行高度相应变小,座位卡更小但仍在90px下限以上)。
 // 区内顺序按绝对座位号从小到大(不随mySeat旋转),保证同一输入永远同一输出。
 function assignSeatZones(playerCount, mySeat){
   const zones = new Array(playerCount);
@@ -247,6 +255,10 @@ function assignSeatZones(playerCount, mySeat){
     topCount = n; leftCount = 0; rightCount = 0;
   } else if(n===4){
     topCount = 3; leftCount = 1; rightCount = 0;
+  } else if(n>=8){
+    // 9人局(8个对手):topCount 封顶为5(实测上限,见函数上方注释),多出的1个对手并入
+    // left列第二槽(index1,grid-row:3,该槽位CSS已预留)——top5+left2+right1。
+    topCount = 5; leftCount = 2; rightCount = 1;
   } else {
     // n>=5(6~8人局): leftCount/rightCount 各封顶1,多出的座位全部推给top行,把原来
     // 3行压缩到2行。n=5(6人局)→top3+left1+right1；n=6(7人局)→top4+left1+right1；
@@ -328,9 +340,12 @@ function updateLogPanelHeight(){
 //   others>=5(6~8人局): 【座位卡最大化任务修改】leftCount/rightCount 现在各封顶1
 //     (不再是旧版的2),意味着left/right各自最多占1行(row2),row3不再被left/right
 //     使用——总行数从旧版的3行压缩到2行。
+//   others===8(9人局): leftCount=2(多出的对手并入left第二槽),left占row2+row3,
+//     总行数回到3行——和 assignSeatZones 的 9 人分支保持同步。
 function computeOppZoneRowsUsed(playerCount){
   const others = playerCount - 1;
   if(others<=3) return 1;
+  if(others>=8) return 3;
   return 2;
 }
 // updateDesktopSeatHeights(g): 和 updateLogPanelHeight() 同一套"JS量出实际渲染位置、
