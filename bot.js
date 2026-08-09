@@ -841,7 +841,12 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
       };
     }),
     // 最近日志:公开信息,取最近15条;log 项是 {seq,text} 对象,取 text 字段
-    recentLog: (g.log||[]).slice(-15).map(e => (e && typeof e==='object') ? e.text : String(e==null?'':e)),
+    // 【降噪,2026-08】全量事件里"轮到X/摸了N张牌/弃置了N张牌/加入房间"等例行事件对 AI
+    // 决策零价值(手牌数/轮次从局面就能看到),却占一半以上 token;改为过滤例行事件后
+    // 只保留最近 6 条关键事件(使用/打出/装备/伤害/阵亡/濒死/判定/无懈等),信息密度
+    // 提升、token 减半。同窗多步连贯由 runBotActionWindow 的 lastActions 意图链承担,
+    // 跨回合记忆由 aiSummary(原料同样是这份降噪后日志,质量反而更高)承担。
+    recentLog: buildBotKeyEvents(g),
     // 自身回合内标志:只投影自己的(shaUsed 全局、jiangchiNoSlash 每人一份),不含他人私有状态
     myFlags: { shaUsed: !!g.shaUsed, jiangchiNoSlash: !!(me.jiangchiNoSlash) },
     // 牌堆剩余张数:公开信息(牌堆背面可见,张数人人知道)
@@ -849,6 +854,25 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     // 自己的攻击射程:读武器槽 range(无武器默认 1),公开信息(装备区人人可见)
     myAttackRange: attackRange(g, seat),
   };
+}
+
+// buildBotKeyEvents:recentLog 降噪提取——过滤"轮到X/摸了N张牌/弃置了N张牌/加入房间/
+// 房间已创建/已添加机器人/游戏开始"等例行事件(手牌数/轮次可从局面推断,零决策价值),
+// 只保留最近 6 条关键事件。注意:过河拆桥/顺手牵羊拆掉具体装备的日志格式是
+// "X 弃置了 Y 的武器【…】"之类,不匹配"弃置了N张牌$"规则,不会被误滤。
+function buildBotKeyEvents(g){
+  return (g.log||[]).filter(function(e){
+    const t = (e && typeof e==='object') ? (e.text||'') : String(e==null?'':e);
+    if(!t) return false;
+    if(/^轮到 /.test(t)) return false;                 // 轮到 X
+    if(/摸了\d+张牌$/.test(t)) return false;            // X 摸了N张牌
+    if(/弃置了\d+张牌$/.test(t)) return false;          // X 弃置了N张牌(例行弃牌阶段)
+    if(/加入了房间/.test(t)) return false;              // X 加入了房间（座位N）
+    if(/房间已创建/.test(t)) return false;
+    if(/已添加机器人/.test(t)) return false;
+    if(/^游戏开始/.test(t)) return false;
+    return true;
+  }).slice(-6).map(e => (e && typeof e==='object') ? e.text : String(e==null?'':e));
 }
 
 // buildBotPlayCandidates:AI能选的候选动作列表,直接由已经跑过 CARD_PLAYS 真实
@@ -4694,6 +4718,10 @@ async function runBotActionWindow(g, seat){
   const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
   let steps = 0;
   let lastG = (typeof currentG!=='undefined' && currentG) ? currentG : g;
+  // 【意图链,2026-08】记录本出牌窗口内 AI 已做的每一步选择(label 如"出【顺手牵羊】→机器人1"),
+  // 以 lastActions 字段注入后续每步的可见状态——AI 每次调用虽独立,但能明确看到自己上一步
+  // 干了什么,不再靠 recentLog 猜"上一步结果",连续决策连贯性直接提升(token 增量:每步一条 label)。
+  const windowHistory = [];
   while(steps < BOT_WINDOW_MAX_STEPS){
     if(!isBotActionWindow(lastG, seat)) break;
     const candidates = enumerateAllLegalOneStepActions(lastG, seat);
@@ -4703,6 +4731,7 @@ async function runBotActionWindow(g, seat){
     if(aiReady && candidates.length>1){
       const state = buildBotVisibleState(lastG, seat);
       state.windowStep = steps;
+      state.lastActions = windowHistory.slice();
       idx = await callAiChooseIndex({
         g: lastG, seat,
         systemPrompt: buildBotDefaultSystemPrompt()
@@ -4719,6 +4748,9 @@ async function runBotActionWindow(g, seat){
       choice = localFallbackPlayWindow(lastG, seat, candidates);
     } else {
       choice = candidates[idx];
+    }
+    if(choice && !(choice.isEndPlay || choice.action==='结束出牌阶段') && choice.label){
+      windowHistory.push(choice.label);
     }
     const newG = await executePlayWindowChoiceAwait(lastG, seat, choice);
     steps++;
