@@ -956,6 +956,12 @@ function renderSeatCard(g, seat, isSelf){
   const orderBadge = orderNum
     ? '<div class="seat-order-badge" title="出牌顺序:第'+orderNum+'位">'+orderNum+'</div>'
     : '';
+  // 组队模式:队伍公开信息,座位卡显示队伍色块+队伍号(仿 .seat-identity 定位)。
+  // p.team 是 team 模式专属字段,非 team 模式恒为 null(见 normalize),天然不渲染;
+  // Number.isInteger 兜底脏数据。z-index:6 保证盖在 .seat-bottom/.seat-order-badge 之上。
+  const teamBlock = (g.gameMode==='team' && Number.isInteger(p.team))
+    ? '<div class="seat-team" style="background:'+(TEAM_COLORS[p.team]||'#999')+'">'+(p.team+1)+'</div>'
+    : '';
   // DOM 顺序 = 层叠顺序(都在同一个 .seat 定位上下文里,后面的盖在前面的上面):
   // 图片 → 顶部遮罩 → 底部遮罩 → 标题栏/武将名/血量(文字层) → 底部区(判定区+装备行)。
   // 判定区和装备行(手牌图标+装备文字)一起包进 .seat-bottom(底部锚定的 flex column),
@@ -995,6 +1001,7 @@ function renderSeatCard(g, seat, isSelf){
         }
         return '<div class="seat-identity"></div>';
       })()
+    + teamBlock
     + infoBadge
     + '<div class="seat-bottom">'+huashenLine+buquRow+delayRow+equipRow+'</div>'
     // orderBadge 排在 .seat-bottom 之后(DOM序=层叠序,后面的盖在前面上面)——两者本来

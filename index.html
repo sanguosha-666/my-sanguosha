@@ -433,6 +433,12 @@
    .seat-identity.role-zhong{ background:#c45c26; } /* 橙红 */
    .seat-identity.role-fan{ background:#3d7a4a; }   /* 绿 */
    .seat-identity.role-nei{ background:#4a5a6a; }   /* 蓝灰 */
+   /* 组队模式队伍角标:仿 .seat-identity 的定位模式,右下角,色块背景+队伍号。
+      z-index:6 保证盖在 .seat-bottom/.seat-order-badge 之上;队伍是公开信息,
+      和身份(需 canSeeRole)不同,team 模式恒展示。 */
+   .seat-team{position:absolute;right:6px;bottom:6px;width:20px;height:20px;border-radius:4px;color:#fff;
+     font-size:11px;font-weight:700;line-height:20px;text-align:center;z-index:6;}
+   .seat-team:empty{display:none;}
   /* "?"说明入口(第4次微调:从标题栏挪到这里——右上角、身份方块的正下方)。
      **它在这个新位置上落在顶部遮罩几乎完全透明的区域**(实测 SE 对手卡在该 y 坐标处
      scrim alpha≈0,等于直接压在裸立绘上),所以**必须自带不透明底衬**——通用 .info-badge
