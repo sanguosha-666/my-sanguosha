@@ -76,17 +76,25 @@ function enterGame(){
 // 大厅机器人座位。机器人仍是标准 player，只以 isBot 区分；距离、身份、回合和胜负逻辑
 // 继续复用同一套 players 数组。只有座位0的真人可增删，避免多人同时操作造成争抢。
 // addBot(team):team 模式必须传队伍号(房主 mySeat===0 在选队面板指定),机器人入指定队;
-// 非 team 模式调用 addBot() 不带参,行为零变化(botTeam 恒 null)。
+// 传了队伍号=选队即锁定 gameMode='team'(对齐 joinTeam,修游离机器人软锁:旧实现大厅
+// gameMode 恒 null,面板"+机器人"在选队前点会 botTeam=null 产游离机器人,选队锁定后
+// 开始按钮 hasNoTeam 校验永远拦截)。team 房间无参调用(通用"添加机器人"入口)直接拒绝,
+// 不产游离机器人。非 team 房间调用 addBot() 不带参,行为零变化(botTeam 恒 null)。
 function addBot(team){
   tx(g=>{
     if(g.started || g.phase!=='lobby' || mySeat!==0 || g.players.length>=SEATS) return g;
+    const isTeamRoom = g.gameMode==='team';
+    const wantTeam = Number.isInteger(team);
+    if(g.gameMode && g.gameMode!=='team') return g;          // 已锁非team房间拒绝
+    if(wantTeam && g.gameMode!=='team') g.gameMode='team';   // 传了队伍号=选队即锁定(对齐joinTeam)
+    if(g.gameMode==='team' && !wantTeam) return g;           // team房间但没指定队伍:拒绝游离机器人
     const botNo=g.players.filter(p=>p&&p.isBot).length+1;
-    const botTeam = (g.gameMode==='team') ? (Number.isInteger(team)&&team>=0&&team<SEATS ? team : null) : null;
+    const botTeam = (g.gameMode==='team' && wantTeam && team>=0 && team<SEATS) ? team : null;
     g.players.push({
       name:'机器人'+botNo,cid:'bot-'+Date.now()+'-'+Math.floor(Math.random()*1000000),
       isBot:true,botLevel:'smart',hp:MAX_HP,maxHp:MAX_HP,hand:[],alive:true,team:botTeam
     });
-    g.log=pushLog(g.log,'已添加机器人'+botNo);
+    g.log=pushLog(g.log,'已添加机器人'+botNo+(botTeam!=null?('·队'+(botTeam+1)):''));
     // 写 team 后再跑一次 normalize(与 joinTeam 同一先例):tx 只在本事务开始时 normalize,
     // push 机器人改完 team 后若不重跑,teamCount 停留在旧值,提交快照不自洽。
     normalize(g);

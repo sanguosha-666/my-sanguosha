@@ -92,13 +92,16 @@ function check(name, fn){
     if(bots[0].team!==1) throw new Error('机器人应入队1,实际 '+bots[0].team);
     if(g.teamCount!==2) throw new Error('teamCount应保持2,实际 '+g.teamCount);
   });
-  await check('addBot(team): 非team模式不写队', function(){
-    const g = { players:[], log:[], gameMode:'ffa', phase:'lobby', started:false };
+  // 真实乱斗大厅 gameMode 恒 null(全项目只有 startGame 才写 ffa/identity),通用"添加机器人"
+  // 按钮(handleAddBotClick)无参调 addBot()——必须保持旧行为零变化:能加、不写队、不锁模式。
+  await check('addBot(): 非team(默认/乱斗)房间不写队不锁模式(零变化)', function(){
+    const g = { players:[], log:[], phase:'lobby', started:false };
     context.g = g; context.mySeat = 0;
-    vm.runInContext('addBot', sandbox)(1);
+    vm.runInContext('addBot', sandbox)();
     const bots = g.players.filter(p=>p.isBot);
     if(bots.length!==1) throw new Error('应添加1个机器人');
     if(bots[0].team!==null) throw new Error('非team模式机器人team应null,实际 '+bots[0].team);
+    if(g.gameMode!==null) throw new Error('非team房间addBot不应锁定gameMode,实际 '+g.gameMode);
   });
   await check('addBot(team): 非法队伍号拒绝入队', function(){
     const g = { players:[{name:'a',isBot:false,team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
@@ -107,6 +110,26 @@ function check(name, fn){
     const bots = g.players.filter(p=>p.isBot);
     if(bots.length!==1) throw new Error('应添加1个机器人');
     if(bots[0].team!==null) throw new Error('越界队伍号team应null,实际 '+bots[0].team);
+  });
+  // —— Task 4 修复:游离机器人软锁。真实时序=房主先点"组队"模式按钮(只改 selectedGameMode,
+  // g.gameMode 仍 null)→ 面板出现 → 点"+机器人"(addBot(t))→ 旧实现 gameMode!=='team' 导致
+  // botTeam=null → 机器人游离无队 → 选队锁定模式后开始按钮 hasNoTeam 校验永远拦截。
+  await check('addBot(team): gameMode未锁定(null)指定队伍=选队即锁定', function(){
+    const g = { players:[{name:'a',isBot:false,team:null}], log:[], phase:'lobby', started:false };
+    context.g = g; context.mySeat = 0;
+    vm.runInContext('addBot', sandbox)(1); // 面板"+机器人"传队伍号
+    const bots = g.players.filter(p=>p.isBot);
+    if(bots.length!==1) throw new Error('应添加1个机器人');
+    if(bots[0].team!==1) throw new Error('机器人应入队1,实际 '+bots[0].team);
+    if(g.gameMode!=='team') throw new Error('应锁定gameMode=team,实际 '+g.gameMode);
+  });
+  await check('addBot(): team房间无参(通用入口)拒绝游离机器人', function(){
+    const g = { players:[{name:'a',isBot:false,team:0},{name:'b',isBot:false,team:1}], log:[], gameMode:'team', phase:'lobby', started:false };
+    context.g = g; context.mySeat = 0;
+    const before = g.players.length;
+    vm.runInContext('addBot', sandbox)(); // 通用入口无参(既有路径 render-controls.js:1811)
+    if(g.players.length!==before) throw new Error('应拒绝添加,players '+before+'→'+g.players.length);
+    if((g.players.filter(p=>p&&p.isBot)).length!==0) throw new Error('不应产生游离机器人');
   });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
