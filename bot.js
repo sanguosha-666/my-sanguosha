@@ -745,6 +745,10 @@ function hideAiThinkingIndicator(){
 // 真实身份(botKnownRole 返回 null 就是 null,不回退成"猜测值")——从这个函数的结构上
 // 就不可能被塞进去,不是靠事后删字段做到的。
 function botCardBrief(c){ return c ? { name:c.name, suit:c.suit, rank:c.rank } : null; }
+// botCardBriefMin:手牌投影精简版(去 rank 点数)——花色保留(黑杀打仁王盾/红桃无懈等
+// 决策需要),点数对 AI 决策价值低(判定/拼点无需精确规划)却是 token 大头;判定牌/候选
+// 牌等仍需 rank 的地方继续用 botCardBrief。token 优化,2026-08。
+function botCardBriefMin(c){ return c ? { name:c.name, suit:c.suit } : null; }
 function botPublicEquipsView(p){
   const out={};
   (typeof EQUIP_SLOTS!=='undefined' ? EQUIP_SLOTS : []).forEach(slot=>{
@@ -814,7 +818,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     // 自己的手牌/身份完全可见——这是这个座位本来就该看到的东西,不是特权。
     myRole: me.role || null,
     myHp: me.hp, myMaxHp: me.maxHp,
-    myHand: (me.hand||[]).map(botCardBrief),
+    myHand: (me.hand||[]).map(botCardBriefMin),
     myEquips: botPublicEquipsView(me),
     myDelays: botPublicDelaysView(me),
     players: (g.players||[]).map((p,i)=>{

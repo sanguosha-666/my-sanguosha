@@ -164,9 +164,9 @@ function buildBotDefaultUserPrompt(state, candidates){
   const hasScore = (candidates||[]).some(function(c){ return typeof c.localHeuristicScore === 'number'; });
   return '当前局面:\n'+JSON.stringify(state)
     +'\n\n合法候选(index从0开始):\n'+JSON.stringify(candidates.map(c=>({
-      index:c.index, label:c.label, action:c.action, card:c.card, seat:c.seat,
-      handIndex:c.handIndex, cardIdx:c.cardIdx, target:c.target, targets:c.targets,
-      pickKey:c.pickKey, discardIndices:c.discardIndices
+      index:c.index, label:c.label, action:c.action,
+      seat:c.seat, handIndex:c.handIndex, cardIdx:c.cardIdx,
+      target:c.target, targets:c.targets, pickKey:c.pickKey, discardIndices:c.discardIndices
     })))
     +(hasScore ? '\n\n说明:localHeuristicScore是本地算法的参考分,只是排序参考,不代表最优解;请结合局面与你的判断选择,不一定要选分数最高的。' : '')
     +'\n\n只返回 {"choice":数字}';
