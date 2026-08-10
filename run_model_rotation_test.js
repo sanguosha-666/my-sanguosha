@@ -11,12 +11,15 @@ const context = {
   joinRoom: function(){}, mySeat: 0, console: console, Math: Math, Date: Date, JSON: JSON, RegExp: RegExp
 };
 context.window.document = context.document;
+// callAI 内部用裸 fetch(不是 window.fetch),桥接一层让全局 fetch 委托到 window.fetch,
+// 测试里覆写 window.fetch 即对 callAI 生效。
+context.fetch = function(url, opts){ return context.window.fetch(url, opts); };
 const sandbox = vm.createContext(context);
 const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js','ai-bot.js'];
 files.forEach(f=>{ vm.runInContext(fs.readFileSync(f,'utf8'), sandbox); });
 let pass=0, fail=0;
-function check(name, fn){
-  try{ fn(); console.log('  PASS '+name); pass++; }
+async function check(name, fn){
+  try{ await fn(); console.log('  PASS '+name); pass++; }
   catch(e){ console.log('  FAIL '+name+' - '+(e&&e.message||e)); fail++; }
 }
 (async function(){
@@ -76,6 +79,25 @@ function check(name, fn){
     vm.runInContext('aiApiModels=["groq/compound","openai/gpt-oss-120b"]; _modelCooldowns={"groq/compound": Date.now()-1000}; _modelRotateIdx=0;', sandbox);
     const r = vm.runInContext('resolveAiModel', sandbox)('groq');
     if(r!=='groq/compound') throw new Error('冷却已过应恢复,实际 '+r);
+  });
+  // 9. 429 接线:mock fetch 返回 429 → 冷却写入 → 轮换跳过
+  await check('429接线: callAI收到429写冷却,resolveAiModel跳过该模型', async function(){
+    // 覆写 fetch:对 /chat/completions 返回 429 + "try again in 2m"
+    vm.runInContext('window.__origFetch = window.fetch; window.fetch = function(url, opts){ return Promise.resolve({ ok:false, status:429, text:function(){ return Promise.resolve("Rate limit reached for model x ... Please try again in 2m0.000000s. Need more tokens?"); }, json:function(){ return Promise.resolve({}); } }); };', sandbox);
+    try{
+      vm.runInContext('aiProvider="groq"; aiApiModel=""; aiApiModels=["groq/compound","openai/gpt-oss-120b"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
+      var r = await vm.runInContext('callAI', sandbox)('groq','gsk_test',{ systemPrompt:'s', userPrompt:'u', model:'groq/compound' });
+      if(r.ok) throw new Error('429应返回ok:false');
+      // 冷却写入:2m → retryAt ≈ now+120000
+      var cd = vm.runInContext('_modelCooldowns', sandbox);
+      if(!cd['groq/compound'] || typeof cd['groq/compound']!=='number') throw new Error('应写入冷却,实际 '+JSON.stringify(cd));
+      if(Math.abs(cd['groq/compound'] - Date.now() - 120000) > 5000) throw new Error('冷却应≈now+120000,实际差值 '+(cd['groq/compound']-Date.now()));
+      // 轮换跳过冷却中的模型
+      var m = vm.runInContext('resolveAiModel', sandbox)('groq');
+      if(m!=='openai/gpt-oss-120b') throw new Error('应跳过冷却的compound选gpt-oss,实际 '+m);
+    }finally{
+      vm.runInContext('window.fetch = window.__origFetch;', sandbox);
+    }
   });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
