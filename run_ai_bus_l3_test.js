@@ -1445,6 +1445,37 @@ const testCode = String.raw`
     botTwoStepA = null;
   });
 
+  await check('【组队模式修复】仁德阶段A候选:team模式下排除敌方,只保留同队(renDe是纯粹白送,不允许资敌)', function(){
+    var s = BOT_DECISIONS.rendeTwoStep;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','rt1')], n: 4 });
+    g.gameMode = 'team';
+    g.players[0].team = 1; g.players[1].team = 1; // 座位1=队友
+    g.players[2].team = 2; g.players[3].team = 2; // 座位2/3=敌方
+    var c = s.buildCandidates(g, 0);
+    if(c.map(function(x){ return x.a; }).join(',') !== '1')
+      throw new Error('team模式阶段A候选应只剩队友1,实际 ' + JSON.stringify(c));
+  });
+
+  await check('【组队模式修复】仁德阶段A候选:team模式下没有队友时候选为空(不资敌,不强行选目标)', function(){
+    var s = BOT_DECISIONS.rendeTwoStep;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','rt2')], n: 3 });
+    g.gameMode = 'team';
+    g.players[0].team = 1;
+    g.players[1].team = 2; g.players[2].team = 2; // 全是敌方
+    var c = s.buildCandidates(g, 0);
+    if(c.length !== 0) throw new Error('无队友时候选应为空,实际 ' + JSON.stringify(c));
+    if(s.match(g, 0) !== true) throw new Error('match本身不检查候选是否为空,仍应返回true(由botDecide统一处理空候选)');
+  });
+
+  await check('仁德:ffa/身份局(gameMode非team)候选不受影响,仍是存活非自己(既有行为不变)', function(){
+    var s = BOT_DECISIONS.rendeTwoStep;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','rt3')], n: 3 });
+    // 默认 gameMode:'ffa'
+    var c = s.buildCandidates(g, 0);
+    if(c.map(function(x){ return x.a; }).join(',') !== '1,2')
+      throw new Error('非team模式候选应为存活非自己1,2,实际 ' + JSON.stringify(c));
+  });
+
   await check('仁德两阶段无密钥:调度1 阶段A挂起;调度2 阶段B提交 renDe(cardIdx,targetSeat) 并重置;无AI调用', async function(){
     window.__rendeCalls = [];
     window.__mockAiCalls = 0;

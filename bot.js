@@ -2944,8 +2944,17 @@ BOT_DECISIONS.rendeTwoStep = {
       if(cont) out.push({ index: 0, label: '仁德:停止给牌', step:'B', stop: true });
       return out;
     }
+    // 【组队模式修复】仁德是纯粹单向的"把手牌白送给目标"(skills.js的renDe:
+    // me.hand.splice(...)+target.hand.push(card),目标没有任何反向代价/回报;
+    // 给出2张后的回体力也是刘备自己触发,和收牌人是谁无关)——组队模式下没有任何
+    // 场景值得把这份纯增益送给敌方,直接把敌方从候选里排除(和伤害类操作的
+    // -Infinity同一处理力度,不是"降权仍可选"这种暧昧写法)。如果场上没有任何
+    // 队友(候选为空),交给下面buildCandidates返回[]→botDecide返回false→
+    // runBotDecision继续走其它决策——"这一轮不发动仁德"永远比"发动仁德资敌"更好,
+    // 不需要额外的兜底分支去强行选一个敌方目标。
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
+      if(g.gameMode==='team' && !sameTeam(g, seat, i)) return;
       out.push({ index: 0, label: '仁德:选目标 '+p.name, step:'A', a: i });
     });
     return out;
