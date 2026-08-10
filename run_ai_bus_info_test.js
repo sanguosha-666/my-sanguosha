@@ -210,17 +210,17 @@ const testCode = String.raw`
     }
   });
 
-  // 3. recentLog:30 条日志 → 只留最近15条,且末项对齐第30条
-  await check('recentLog 长度15且末项对齐', function(){
+  // 3. recentLog:30 条日志 → buildBotKeyEvents 降噪过滤例行事件后只留最近6条关键事件,且末项对齐第30条
+  await check('recentLog 长度6且末项对齐', function(){
     var g = mkG();
     g.log = [];
     for(var i = 1; i <= 30; i++){ g.log.push({ seq: i, text: '日志' + i }); }
     var s = buildBotVisibleState(g, 0);
-    if(!Array.isArray(s.recentLog) || s.recentLog.length !== 15){
-      throw new Error('期望长度15,实际 ' + (s.recentLog && s.recentLog.length));
+    if(!Array.isArray(s.recentLog) || s.recentLog.length !== 6){
+      throw new Error('期望长度6,实际 ' + (s.recentLog && s.recentLog.length));
     }
-    if(s.recentLog[14] !== '日志30') throw new Error('末项应为 日志30,实际 ' + s.recentLog[14]);
-    if(s.recentLog[0] !== '日志16') throw new Error('首项应为 日志16,实际 ' + s.recentLog[0]);
+    if(s.recentLog[5] !== '日志30') throw new Error('末项应为 日志30,实际 ' + s.recentLog[5]);
+    if(s.recentLog[0] !== '日志25') throw new Error('首项应为 日志25,实际 ' + s.recentLog[0]);
   });
 
   // 4. myFlags:shaUsed / jiangchiNoSlash 布尔投影(自身座位)

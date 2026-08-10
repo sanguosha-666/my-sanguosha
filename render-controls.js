@@ -1849,7 +1849,7 @@ function renderControls(g){
       // 身份局仅三选一,不提供随机武将
       const btnPick=document.createElement('button');
       btnPick.className='ghost';
-      btnPick.textContent='开始身份局(三选一)（'+cnt+'/'+SEATS+'）';
+      btnPick.textContent='开始身份局(三选一)（'+cnt+'/'+Math.min(SEATS,8)+'）';
       btnPick.disabled = cnt<1; // 可点,人数不足在 onclick 拦截(规格 B)
       btnPick.onclick=()=>{
         if(cnt<4){ alert('身份局至少需要 4 名玩家'); return; }

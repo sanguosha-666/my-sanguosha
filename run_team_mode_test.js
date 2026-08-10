@@ -13,7 +13,9 @@ context.window.document = context.document;
 const sandbox = vm.createContext(context);
 // bot-ai-bus.js 必须排在 bot.js 之前(BOT_DECISIONS 是词法绑定,有 TDZ);bot.js
 // 顶层无立即执行的函数调用,只注册 BOT_DECISIONS,加载安全(run_ai_bus_core_test 同款)。
-const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js'];
+// render.js 追加在末尾:顶层只有 document/window 监听注册与 onclick 绑定(document stub
+// 已支持),无 BOT_DECISIONS 依赖;assignSeatZones 是纯函数,供最终审查 M-2 断言使用。
+const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js','render.js'];
 files.forEach(f=>{ vm.runInContext(fs.readFileSync(f,'utf8'), sandbox); });
 let pass=0, fail=0;
 function check(name, fn){
@@ -195,6 +197,36 @@ function check(name, fn){
   await check('决策参考: 含组队团队指引', function(){
     const p = vm.runInContext('buildBotDefaultSystemPrompt', sandbox)();
     if(p.indexOf('队伍')<0) throw new Error('决策参考应含组队指引');
+  });
+  // —— 最终审查 M-2: 9人布局分区断言。assignSeatZones(playerCount, mySeat) 是 render.js
+  // 里的纯函数(不依赖DOM),把"我"以外的座位分到 top/left/right 三区。逐人数×逐 mySeat
+  // 校验:数组长度=人数、自己=me、对手数=总-1、top/left/right 计数总和=对手数、
+  // left/right 各≤1、9人局必须 top6+left1+right1、无越界索引(隐式覆盖:逐槽取值校验)。
+  await check('assignSeatZones: 2~9人局×各mySeat 分区合法', function(){
+    const assignSeatZones = vm.runInContext('assignSeatZones', sandbox);
+    if(typeof assignSeatZones!=='function') throw new Error('render.js 未加载 assignSeatZones');
+    const ZONES = ['top','left','right'];
+    for(let pc=2; pc<=9; pc++){
+      for(let my=0; my<pc; my++){
+        const zones = assignSeatZones(pc, my);
+        if(!Array.isArray(zones) || zones.length!==pc){
+          throw new Error('人数'+pc+' mySeat'+my+': 数组长度应'+pc+' 实际'+(zones&&zones.length));
+        }
+        if(zones[my]!=='me') throw new Error('人数'+pc+' mySeat'+my+': 自己应me 实际'+zones[my]);
+        const counts = {top:0,left:0,right:0};
+        for(let s=0; s<pc; s++){
+          if(s===my) continue;
+          if(ZONES.indexOf(zones[s])<0) throw new Error('人数'+pc+' mySeat'+my+': 座位'+s+' 非法zone '+zones[s]+'(越界/未分配)');
+          counts[zones[s]]++;
+        }
+        const total = counts.top+counts.left+counts.right;
+        if(total!==pc-1) throw new Error('人数'+pc+' mySeat'+my+': 对手数应'+(pc-1)+' 实际'+total);
+        if(counts.left>1 || counts.right>1) throw new Error('人数'+pc+' mySeat'+my+': left/right应各≤1,实际 left='+counts.left+' right='+counts.right);
+        if(pc===9 && (counts.top!==6 || counts.left!==1 || counts.right!==1)){
+          throw new Error('9人局 mySeat'+my+': 应top6+left1+right1,实际 top='+counts.top+' left='+counts.left+' right='+counts.right);
+        }
+      }
+    }
   });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);

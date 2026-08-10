@@ -83,7 +83,6 @@ function enterGame(){
 function addBot(team){
   tx(g=>{
     if(g.started || g.phase!=='lobby' || mySeat!==0 || g.players.length>=SEATS) return g;
-    const isTeamRoom = g.gameMode==='team';
     const wantTeam = Number.isInteger(team);
     if(g.gameMode && g.gameMode!=='team') return g;          // 已锁非team房间拒绝
     if(wantTeam && g.gameMode!=='team') g.gameMode='team';   // 传了队伍号=选队即锁定(对齐joinTeam)
@@ -175,6 +174,7 @@ function startGame(mode, gameMode){
       if(n<MIN_PLAYERS) return g;
       if(mode!=='random' && mode!=='pick') return g;
     }
+    if(g.gameMode && g.gameMode!==gm) return g; // 已锁其它模式的房间拒绝改开局(选队已锁team)
     g.gameMode = gm;
     if(gm==='team'){
       g.log = pushLog(g.log, '组队模式开启,队伍分配: '+g.players.map(p=>((p.name||'?')+'·队'+((Number.isInteger(p.team)?p.team:-1)+1))).join(', '));
