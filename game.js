@@ -82,8 +82,9 @@ function normalize(g){
     if(typeof p.roleRevealed!=='boolean') p.roleRevealed=false;
     // 非 identity 清空脏身份,避免旧局/乱斗残留
     if(g.gameMode!=='identity'){ p.role=null; p.roleRevealed=false; }
-    // 组队:队伍号只对 team 模式有意义;非法/非整数清 null
+    // 组队:队伍号只对 team 模式有意义;非法/非整数/越界清 null
     if(p.team!=null && !Number.isInteger(p.team)) p.team=null;
+    if(Number.isInteger(p.team) && (p.team<0 || p.team>=SEATS)) p.team=null;
     if(g.gameMode!=='team'){ p.team=null; }
   });
   // 组队模式队伍数:从 players 实时推导(最大队伍号+1);非 team 清空。

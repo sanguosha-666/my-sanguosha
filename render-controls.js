@@ -1922,7 +1922,7 @@ function renderControls(g){
     btn.textContent='再来一局'; btn.onclick=()=>{ selectedGameMode=null; newGame(); }; c.appendChild(btn);
     // "结束并清理房间"这个按钮已经统一到页面左上角常驻的 #closeRoomBtn(cleanupRoom),
     // 不再在这里重复渲染同一个功能,避免游戏结束时同时出现两个功能一样的按钮让玩家困惑。
-    const winText = g.gameMode==='identity'
+    const winText = (g.gameMode==='identity'||g.gameMode==='team')
       ? ('胜方：'+(g.winner||'无'))
       : ('胜者：'+(g.winner||''));
     setBanner('🏆 '+escapeHtml(winText)+' · 大家看完结果后,可点左上角「关闭房间」删除本房间数据。', 'border-color:var(--gold);color:var(--gold)');

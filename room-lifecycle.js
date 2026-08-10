@@ -166,10 +166,11 @@ function startGame(mode, gameMode){
     } else if(gm==='team'){
       if(n<2) return g;
       if(mode!=='pick' && mode!=='random') return g;
-      // 队伍校验:队伍数≥2且每队≥1人
+      // 队伍校验:队伍数≥2且每队≥1人、所有人 team 非 null(防无队玩家通过服务端校验)
       const teamSet = {};
       g.players.forEach(p=>{ if(p && Number.isInteger(p.team)) teamSet[p.team]=true; });
       if(Object.keys(teamSet).length<2) return g;
+      if(g.players.some(p=>p && p.team==null)) return g;
     } else {
       if(n<MIN_PLAYERS) return g;
       if(mode!=='random' && mode!=='pick') return g;
