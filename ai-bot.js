@@ -59,9 +59,8 @@ let aiProvider = null; // 'claude' | 'openrouter' | 'groq' | null(尚未识别/�
 let aiPromptDismissed = false;
 // 用户手动选择/输入的具体模型ID。空字符串="不覆盖,交给 PROVIDER_ADAPTERS 各自的
 // buildRequest 用其内置默认档位"——这条约定和 aiApiKey/aiProvider 完全独立,选不选
-// 模型不影响密钥/提供商这两件事的既有行为。bot.js 的 5 处 callAI(...) 调用点统一传
-// model: aiApiModel || undefined,undefined 时 opts.model||'默认档位' 这行既有代码
-// 天然兜底,不需要为"用户没选模型"这个最常见情形写任何特殊分支。
+// 模型不影响密钥/提供商这两件事的既有行为。bot-ai-bus.js 的 callAI 调用点统一传
+// model: resolveAiModel(provider)——多模型轮换选实际模型,429 冷却依赖 opts.model。
 let aiApiModel = '';
 
 // ===== 多模型轮换(2026-08):groq 免费层各模型限额独立池(org×model),输入密钥后默认勾选
@@ -649,7 +648,7 @@ function showAiKeyModal(onDone){
     const isGroq = provider==='groq';
     function applyList(list, fromFallback){
       statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型')
-        + (isGroq ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入' : '');
+        + (isGroq ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入;自定义输入会退出轮换(点勾选恢复)' : '');
       // 自定义遗留(aiApiModel 非空且不在列表)→ 显示文本框并预填
       const isCustom = !!aiApiModel && !list.some(function(m){ return m.id === aiApiModel; });
       const customInput = document.createElement('input');
@@ -677,8 +676,11 @@ function showAiKeyModal(onDone){
             customInput.style.display = 'inline-block';
             aiApiModel = customInput.value.trim(); // 可能是空字符串,commitCustomModel 会在用户真正输入后覆盖
           } else if(isGroq){
-            // 多选 toggle:维护 aiApiModels(轮换池),不动 aiApiModel(手动单选优先级
-            // 留给自定义入口)。checked=本次点击后的选中态(由 renderModelListInto 计算)。
+            // 多选 toggle:维护 aiApiModels(轮换池),并同时清空 aiApiModel——用户点勾选
+            // 的意图就是回到轮换模式,否则自定义输入残留的 aiApiModel 会让 resolveAiModel
+            // 手动单选优先,轮换静默失效(checked=本次点击后的选中态,由 renderModelListInto
+            // 计算)。
+            aiApiModel = '';
             const arr = Array.isArray(aiApiModels) ? aiApiModels.slice() : [];
             const i = arr.indexOf(id);
             if(checked){ if(i<0) arr.push(id); } else { if(i>=0) arr.splice(i,1); }
