@@ -11,7 +11,9 @@ const context = {
 };
 context.window.document = context.document;
 const sandbox = vm.createContext(context);
-const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js'];
+// bot-ai-bus.js 必须排在 bot.js 之前(BOT_DECISIONS 是词法绑定,有 TDZ);bot.js
+// 顶层无立即执行的函数调用,只注册 BOT_DECISIONS,加载安全(run_ai_bus_core_test 同款)。
+const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js'];
 files.forEach(f=>{ vm.runInContext(fs.readFileSync(f,'utf8'), sandbox); });
 let pass=0, fail=0;
 function check(name, fn){
@@ -180,6 +182,19 @@ function check(name, fn){
     const g = { players:[{team:0,alive:true,name:'a'},{team:1,alive:true,name:'b'}], log:[], gameMode:'team', phase:'play', pending:null, aoe:null };
     const done = vm.runInContext('checkWin', sandbox)(g);
     if(done) throw new Error('不应结束');
+  });
+  // —— Task 9: AI 提示词适配组队。buildBotVisibleState 需要沙箱里有
+  // distance/nextAlive/attackRange(game.js 已加载)与 bot 模块自身函数;team 是
+  // normalize 兜底的公开字段,非 team 模式恒 null。
+  await check('buildBotVisibleState: team模式含myTeam与players.team', function(){
+    const g = { players:[{name:'a',team:0,hp:3,maxHp:3,hand:[],equips:{},delays:[],role:null,alive:true,faceup:true,chained:false,turnedOver:false},{name:'b',team:1,hp:3,maxHp:3,hand:[],equips:{},delays:[],role:null,alive:true,faceup:true,chained:false,turnedOver:false}], gameMode:'team', phase:'play', turn:0, roundNum:1, log:[], aiSuspicionEvents:[] };
+    const s = vm.runInContext('buildBotVisibleState', sandbox)(g, 0);
+    if(s.myTeam!==0) throw new Error('myTeam应0,实际 '+s.myTeam);
+    if(s.players[1].team!==1) throw new Error('players[1].team应1');
+  });
+  await check('决策参考: 含组队团队指引', function(){
+    const p = vm.runInContext('buildBotDefaultSystemPrompt', sandbox)();
+    if(p.indexOf('队伍')<0) throw new Error('决策参考应含组队指引');
   });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);

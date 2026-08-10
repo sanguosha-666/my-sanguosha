@@ -809,6 +809,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
   return {
     seat,
     gameMode: g.gameMode || 'ffa',
+    myTeam: Number.isInteger(me.team) ? me.team : null,
     round: g.roundNum || 1,
     recentSuspicionEvents: (g.aiSuspicionEvents||[]).slice(-10).map(e=>({
       round:e.round, source:e.source, target:e.target, amount:e.amount, kind:e.kind
@@ -831,6 +832,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
         equips: botPublicEquipsView(p), delays: botPublicDelaysView(p),
         knownRole: knownRole, // 复用既有的安全揭示逻辑,不知道就是 null
         deadRole: !p.alive && g.gameMode==='identity' ? knownRole : undefined, // 已死玩家的身份
+        team: Number.isInteger(p.team) ? p.team : null, // 队伍公开信息(组队模式);非team恒null
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
         generalSkill: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].skill||'') : undefined, // 武将技能常开(公开信息)
         generalDesc: (p.general && typeof GENERALS!=='undefined' && GENERALS[p.general]) ? String(GENERALS[p.general].desc||'').slice(0, i===seat ? 9999 : 60) : undefined, // 武将描述常开;自己全量,他人截断60字(token优化)
