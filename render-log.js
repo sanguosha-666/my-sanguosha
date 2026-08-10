@@ -235,6 +235,63 @@ const QUICK_CHAT_PHRASES = [
   '承让承让！'
 ];
 const CHAT_EMOJIS = ['😀','😂','🤣','😊','😍','😎','😭','😡','👍','👏'];
+
+// ===== 聊天语音播报(Chat TTS, 2026-08):收到新聊天消息用 speechSynthesis 念内容,
+// 按发送者武将性别选声(男低音/女高音)。纯客户端本地行为,不写 Firebase。
+// 复用 announceMyTurn(render.js)同款写法:cancel() 防堆积 + try/catch 静默失败。
+let chatVoiceEnabled = (function(){
+  try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); }
+  catch(e){ return true; }
+})();
+const spokenChatIds = new Set(); // 已念消息 id 去重;enterGame 每次执行时重置(见 room-lifecycle)
+function toggleChatVoice(){
+  chatVoiceEnabled = !chatVoiceEnabled;
+  try{ localStorage.setItem('sgs_chat_voice', chatVoiceEnabled?'1':'0'); }catch(e){}
+  const btn=document.getElementById('chatVoiceBtn');
+  if(btn) btn.textContent = chatVoiceEnabled ? '🔊' : '🔇';
+  return chatVoiceEnabled;
+}
+// pickChatVoice:按性别选中文 voice(名字关键词),列表为空/无匹配返回 null(调用方 fallback pitch)。
+function pickChatVoice(gender){
+  try{
+    if(!('speechSynthesis' in window)) return null;
+    const voices = window.speechSynthesis.getVoices();
+    if(!voices || !voices.length) return null;
+    const isFemale = gender==='female';
+    const kw = isFemale ? /female|女|huihui|xiaoxiao|xiaoyi/i : /male|男|kangkang|yunxi/i;
+    return voices.find(v => kw.test(v.name) && /zh/i.test(v.lang||'')) || null;
+  }catch(e){ return null; }
+}
+function speakChatMessage(text, gender){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(String(text||'').slice(0,60));
+    u.lang = 'zh-CN';
+    const v = pickChatVoice(gender);
+    if(v) u.voice = v;
+    u.pitch = (gender==='female') ? 1.2 : 0.8;
+    window.speechSynthesis.cancel(); // 防多次快速触发排队堆积
+    window.speechSynthesis.speak(u);
+  }catch(e){ /* 语音失败静默忽略 */ }
+}
+// detectAndSpeakNewChat:遍历聊天消息,念"新且非emoji"的。性别来源:消息 general 字段→getGeneral。
+function detectAndSpeakNewChat(messages){
+  if(!chatVoiceEnabled || !Array.isArray(messages)) return;
+  messages.forEach(function(m){
+    if(!m || typeof m!=='object') return;
+    if(m.id!=null && spokenChatIds.has(m.id)) return; // 已念过去重
+    if(m.id!=null) spokenChatIds.add(m.id);
+    if(m.type==='emoji') return; // 表情不念
+    const text = (m.text!=null ? String(m.text) : '').trim();
+    if(!text) return;
+    let gender = 'male';
+    try{
+      const gen = (typeof getGeneral==='function' && m.general) ? getGeneral(m.general) : null;
+      if(gen && gen.gender==='female') gender = 'female';
+    }catch(e){}
+    speakChatMessage(text, gender);
+  });
+}
 function chatSenderLabel(g, msg){
   const p=Number.isInteger(msg.seat) && g.players ? g.players[msg.seat] : null;
   const generalId=(p&&p.general)||msg.general;
