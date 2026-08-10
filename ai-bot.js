@@ -177,7 +177,7 @@ const PROVIDER_ADAPTERS = {
     // endpoint/默认模型不同)——已用真实网络请求验证过支持浏览器直连 CORS,见文件头部
     // 【Groq 正式加入为第三个 provider】那段说明,不是没测过就先加进来。
     label: 'Groq(极速推理)',
-    defaultModel: 'llama-3.3-70b-versatile',
+    defaultModel: 'groq/compound',
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
     buildRequest(apiKey, opts){
       const messages = [];
@@ -232,7 +232,7 @@ const AI_MODEL_OPTIONS = {
     { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B(开源)' },
   ],
   groq: [
-    { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B(默认)' },
+    { id: 'groq/compound', label: 'Groq Compound(默认)' },
     { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B(更快更省)' },
     { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B(更强)' },
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B(更快)' },

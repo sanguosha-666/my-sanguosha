@@ -364,7 +364,7 @@ const testCode = String.raw`
   await check('D3-1. 三家 PROVIDER_ADAPTERS.defaultModel 与既有默认档位一致', async function(){
     if(PROVIDER_ADAPTERS.claude.defaultModel !== 'claude-haiku-4-5-20251001') throw new Error('claude.defaultModel 应为 claude-haiku-4-5-20251001,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.claude.defaultModel));
     if(PROVIDER_ADAPTERS.openrouter.defaultModel !== 'openai/gpt-4o-mini') throw new Error('openrouter.defaultModel 应为 openai/gpt-4o-mini,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.openrouter.defaultModel));
-    if(PROVIDER_ADAPTERS.groq.defaultModel !== 'llama-3.3-70b-versatile') throw new Error('groq.defaultModel 应为 llama-3.3-70b-versatile,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.groq.defaultModel));
+    if(PROVIDER_ADAPTERS.groq.defaultModel !== 'groq/compound') throw new Error('groq.defaultModel 应为 groq/compound,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.groq.defaultModel));
   });
 
   // D3-2. AI_DEFAULT_MODEL 派生自 adapters(单源,不再各自写死)
