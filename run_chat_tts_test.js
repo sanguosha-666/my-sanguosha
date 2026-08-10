@@ -13,6 +13,10 @@ const context = {
   firebase: { initializeApp: function(){ return { database: function(){ return { ref: function(){ return { on: function(){}, once: function(){}, push: function(){ return { set: function(){}, key:'k' }; }, transaction: function(){}, set: function(){}, update: function(){}, child: function(){ return {}; }, remove: function(){}, get: function(){ return { val: function(){ return null; } }; } }; } }; } }; }, database: function(){ return { ref: function(){ return { on: function(){}, once: function(){}, push: function(){ return { set: function(){}, key:'k' }; }, transaction: function(){}, set: function(){}, child: function(){ return {}; }, remove: function(){}, get: function(){ return { val: function(){ return null; } }; } }; } }; } },
   document: { getElementById: function(){ return { onclick: function(){}, innerHTML:'', style:{}, className:'', classList:{ add:function(){}, remove:function(){}, toggle:function(){}, contains:function(){ return false; } }, querySelector: function(){ return null; }, appendChild: function(){ return {}; }, remove: function(){}, setAttribute: function(){}, addEventListener: function(){}, removeEventListener: function(){} }; }, createElement: function(){ return { textContent:'', innerHTML:'', className:'', style:{}, onclick: function(){}, appendChild: function(){}, setAttribute: function(){}, classList:{ add:function(){}, remove:function(){}, toggle:function(){}, contains:function(){ return false; } } }; }, body:{ innerHTML:'', appendChild:function(){} }, head:{ appendChild:function(){} }, addEventListener: function(){}, removeEventListener: function(){}, querySelector: function(){ return null; }, querySelectorAll: function(){ return []; } },
   window: { location:{ search:'', href:'http://localhost' }, localStorage: { getItem: function(k){ return context.__ls && k in context.__ls ? context.__ls[k] : null; }, setItem: function(k,v){ if(!context.__ls) context.__ls={}; context.__ls[k]=String(v); }, removeItem: function(k){ if(context.__ls) delete context.__ls[k]; } }, addEventListener:function(){}, removeEventListener:function(){}, setTimeout:function(f,t){ return setTimeout(f,t); }, clearTimeout:function(){}, alert:function(){}, confirm:function(){ return true; }, open:function(){}, navigator:{ userAgent:'test' }, speechSynthesis: { speak: function(u){ speakCalls.push({ text: u.text, voice: u.voice && u.voice.name || null, pitch: u.pitch, lang: u.lang }); }, cancel: function(){}, getVoices: function(){ return voicesMock; } } },
+  // M-1:顶层 localStorage stub(非 window 内)——render-log.js 模块级 IIFE 用裸
+  // `typeof localStorage!=='undefined'` 读开关持久化,必须沙箱顶层有它才激活读取路径。
+  // 与 window.localStorage 共享同一份 __ls 存储,保证模块代码与测试断言读写一致。
+  localStorage: { getItem: function(k){ return context.__ls && k in context.__ls ? context.__ls[k] : null; }, setItem: function(k,v){ if(!context.__ls) context.__ls={}; context.__ls[k]=String(v); }, removeItem: function(k){ if(context.__ls) delete context.__ls[k]; } },
   joinRoom: function(){}, mySeat: 0, console: console, Math: Math, Date: Date, JSON: JSON, RegExp: RegExp,
   // speechSynthesis.speak 需要 utterance 对象(text/lang/pitch/voice 由 speak stub 读取),补构造器 stub
   SpeechSynthesisUtterance: function(text){ this.text=String(text==null?'':text); this.lang=''; this.pitch=1; this.voice=null; }
@@ -41,7 +45,7 @@ function check(name, fn){
     const msgs=[{ id:'m1a', text:'a', type:'text', general:'zhangfei', seat:1 }];
     vm.runInContext('detectAndSpeakNewChat', sandbox)(msgs);
     vm.runInContext('detectAndSpeakNewChat', sandbox)(msgs.concat([{ id:'m1b', text:'b', type:'text', general:'guojia', seat:1 }]));
-    if(speakCalls.length!==2) throw new Error('应念2条(m2新+m1不重复),实际 '+speakCalls.length);
+    if(speakCalls.length!==2) throw new Error('应念2条(m1b新+m1a不重复),实际 '+speakCalls.length);
   });
   // 3. emoji 跳过
   await check('detectAndSpeakNewChat: emoji消息不念', function(){
@@ -59,11 +63,34 @@ function check(name, fn){
     vm.runInContext('detectAndSpeakNewChat', sandbox)([{ id:'m5', text:'y', type:'text', general:'zhangfei', seat:1 }]);
     if(speakCalls.length!==1) throw new Error('重开应念,实际 '+speakCalls.length);
   });
-  // 5. gender→pitch 映射(无对应 voice 时 fallback pitch)
-  await check('speakChatMessage: male→pitch 0.8 / female→pitch 1.2', function(){
+  // 4b. M-6:开关关闭期间到达的消息也被标记 id,重开语音后旧消息不重放
+  await check('detectAndSpeakNewChat: 关闭期间的旧消息重开后不重放(M-6)', function(){
+    speakCalls.length = 0;
+    vm.runInContext('toggleChatVoice', sandbox)(); // 开→关
+    vm.runInContext('detectAndSpeakNewChat', sandbox)([{ id:'m6off', text:'old', type:'text', general:'zhangfei', seat:1 }]);
+    if(speakCalls.length!==0) throw new Error('关闭期间不应念');
+    vm.runInContext('toggleChatVoice', sandbox)(); // 关→开
+    vm.runInContext('detectAndSpeakNewChat', sandbox)([{ id:'m6off', text:'old', type:'text', general:'zhangfei', seat:1 }, { id:'m6on', text:'new', type:'text', general:'zhangfei', seat:1 }]);
+    if(speakCalls.length!==1) throw new Error('重开后应只念新消息,实际念 '+speakCalls.length+' 条');
+    if(speakCalls[0].text!=='new') throw new Error('应念新消息m6on,实际 '+speakCalls[0].text);
+  });
+  // 5. gender→pitch 映射(voice 匹配时:voicesMock 里有 Kangkang/Huihui)
+  await check('speakChatMessage: male→pitch 0.8 / female→pitch 1.2（voice 匹配时）', function(){
     speakCalls.length = 0;
     vm.runInContext('speakChatMessage', sandbox)('男声', 'male');
     vm.runInContext('speakChatMessage', sandbox)('女声', 'female');
+    if(speakCalls[0].pitch!==0.8) throw new Error('male应pitch0.8,实际 '+speakCalls[0].pitch);
+    if(speakCalls[1].pitch!==1.2) throw new Error('female应pitch1.2,实际 '+speakCalls[1].pitch);
+  });
+  // 5b. getVoices 返回空(voice 匹配失败→null)时 fallback pitch 仍生效
+  await check('speakChatMessage: getVoices空→voice null 但 pitch 仍生效', function(){
+    speakCalls.length = 0;
+    const origGetVoices = sandbox.window.speechSynthesis.getVoices;
+    sandbox.window.speechSynthesis.getVoices = function(){ return []; };
+    vm.runInContext('speakChatMessage', sandbox)('男声', 'male');
+    vm.runInContext('speakChatMessage', sandbox)('女声', 'female');
+    sandbox.window.speechSynthesis.getVoices = origGetVoices;
+    if(speakCalls[0].voice!==null) throw new Error('getVoices空时应voice null,实际 '+speakCalls[0].voice);
     if(speakCalls[0].pitch!==0.8) throw new Error('male应pitch0.8,实际 '+speakCalls[0].pitch);
     if(speakCalls[1].pitch!==1.2) throw new Error('female应pitch1.2,实际 '+speakCalls[1].pitch);
   });
@@ -73,6 +100,24 @@ function check(name, fn){
     const vm2 = vm.runInContext('pickChatVoice', sandbox)('male');
     if(!vf || vf.name.indexOf('Huihui')<0) throw new Error('female应选Huihui,实际 '+(vf&&vf.name));
     if(!vm2 || vm2.name.indexOf('Kangkang')<0) throw new Error('male应选Kangkang,实际 '+(vm2&&vm2.name));
+  });
+  // 7. M-1 真实持久化:关闭后 localStorage 存 sgs_chat_voice='0'
+  await check('toggleChatVoice: 关闭后 localStorage 存 sgs_chat_voice=0', function(){
+    vm.runInContext('toggleChatVoice', sandbox)(); // 当前默认开→关
+    const v = vm.runInContext('localStorage.getItem("sgs_chat_voice")', sandbox);
+    if(v!=='0') throw new Error('关闭后应存 \'0\',实际 '+v);
+    vm.runInContext('toggleChatVoice', sandbox)(); // 关→开(恢复,存'1')
+    const v1 = vm.runInContext('localStorage.getItem("sgs_chat_voice")', sandbox);
+    if(v1!=='1') throw new Error('重开后应存 \'1\',实际 '+v1);
+  });
+  // 8. M-1 IIFE 读取路径:存'0'后重新求值开关默认关闭(模拟"存0后重载模块")
+  await check('chatVoiceEnabled IIFE: localStorage 存0后重载默认关闭', function(){
+    vm.runInContext("localStorage.setItem('sgs_chat_voice','0')", sandbox);
+    const v = vm.runInContext("(function(){ try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); } catch(e){ return true; } })()", sandbox);
+    if(v!==false) throw new Error('存0后IIFE应返回false(默认关闭),实际 '+v);
+    vm.runInContext("localStorage.setItem('sgs_chat_voice','1')", sandbox);
+    const v2 = vm.runInContext("(function(){ try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); } catch(e){ return true; } })()", sandbox);
+    if(v2!==true) throw new Error('恢复1后IIFE应返回true(默认开),实际 '+v2);
   });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);

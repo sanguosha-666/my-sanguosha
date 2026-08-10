@@ -243,7 +243,7 @@ let chatVoiceEnabled = (function(){
   try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); }
   catch(e){ return true; }
 })();
-const spokenChatIds = new Set(); // 已念消息 id 去重;enterGame 每次执行时重置(见 room-lifecycle)
+const spokenChatIds = new Set(); // 已念消息 id 去重(跨同步累积,不全量clear);enterGame 重进房间时重置(room-lifecycle.js 接入点)
 function toggleChatVoice(){
   chatVoiceEnabled = !chatVoiceEnabled;
   try{ localStorage.setItem('sgs_chat_voice', chatVoiceEnabled?'1':'0'); }catch(e){}
@@ -275,12 +275,17 @@ function speakChatMessage(text, gender){
   }catch(e){ /* 语音失败静默忽略 */ }
 }
 // detectAndSpeakNewChat:遍历聊天消息,念"新且非emoji"的。性别来源:消息 general 字段→getGeneral。
+// M-6:标记 id 与"念不念"解耦——先遍历把"新 id"全部记入 spokenChatIds(含关闭语音时),
+// 再按 chatVoiceEnabled 决定是否真的念。这样开关关闭期间到达的消息也被标记为"已见",
+// 重开语音后不会把旧消息重新念一遍(只念真正新到达的)。emoji 跳过/空文本跳过行为保持。
 function detectAndSpeakNewChat(messages){
-  if(!chatVoiceEnabled || !Array.isArray(messages)) return;
+  if(!Array.isArray(messages)) return;
+  const shouldSpeak = chatVoiceEnabled;
   messages.forEach(function(m){
     if(!m || typeof m!=='object') return;
     if(m.id!=null && spokenChatIds.has(m.id)) return; // 已念过去重
     if(m.id!=null) spokenChatIds.add(m.id);
+    if(!shouldSpeak) return; // 关闭语音:只标记 id 不念(M-6)
     if(m.type==='emoji') return; // 表情不念
     const text = (m.text!=null ? String(m.text) : '').trim();
     if(!text) return;
@@ -356,12 +361,14 @@ function renderLogPanel(g){
   }).join('');
   const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
   const emojiPicker='<div id="emojiPicker" class="emoji-picker hidden">'+CHAT_EMOJIS.map(e=>'<button type="button" onclick="sendChatEmoji(\''+e+'\')">'+e+'</button>').join('')+'</div>';
+  // 语音开关按钮:emojiPicker 前插入(聊天语音核心在 Task 1 已就位,开关状态存 localStorage)
+  const voiceBtn = '<button type="button" id="chatVoiceBtn" class="emoji-toggle" onclick="toggleChatVoice()" title="聊天语音开关" style="font-size:15px;">'+(chatVoiceEnabled?'🔊':'🔇')+'</button>';
   // 输入区只在首次进入房间时创建。之后的实时状态刷新仅更新两个滚动区，避免重建
   // #chatInput 导致正在输入的文字、输入法组合状态和光标位置被清空。
   if(!el.querySelector('.log-panel-section') || !el.querySelector('.chat-panel-section')){
     el.innerHTML = '<section class="log-panel-section"><div class="log-panel-head"></div><div class="log-panel-scroll"></div></section>'
       + '<section class="chat-panel-section"><div class="chat-panel-head"></div><div class="chat-panel-scroll"></div>'
-      + '<div class="chat-compose">'+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div></section>';
+      + '<div class="chat-compose">'+voiceBtn+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div></section>';
   }
   const logBody=el.querySelector('.log-panel-scroll');
   const chatBody=el.querySelector('.chat-panel-scroll');

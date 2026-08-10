@@ -59,6 +59,10 @@ function joinRoom(){
 }
 
 function enterGame(){
+  // 重进房间重置聊天语音"已念消息"集合(跨同步累积的 Set 在此清零,避免重进后旧消息
+  // 因 id 已不在集合里被误判为"新消息"重念一遍)。render-log.js 加载晚于本文件,
+  // spokenChatIds 运行时已存在,仍用 typeof 防御(CLAUDE.md 跨文件惯例)。
+  if(typeof spokenChatIds!=='undefined' && spokenChatIds.clear) spokenChatIds.clear();
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('configWarn').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
@@ -69,6 +73,8 @@ function enterGame(){
     const raw=snap.val()||{};
     chatMessages=Object.keys(raw).map(k=>Object.assign({id:k},raw[k]||{}))
       .sort((a,b)=>(a.ts||0)-(b.ts||0));
+    // 聊天同步即语音播报入口:检测"新且非emoji"消息并念出(自己发的也念,统一走同步回调)
+    if(currentG) detectAndSpeakNewChat(chatMessages);
     if(currentG) renderLogPanel(currentG);
   });
 }
