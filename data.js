@@ -48,6 +48,22 @@ function canSeeRole(g, viewerSeat, targetSeat){
   return false;
 }
 
+// ---------- 组队模式(team)队伍归属判断 ----------
+// sameTeam(g,seatA,seatB):唯一的"是否同队"判断入口,业务代码(机器人打分/未来任何需要
+// 判断队友关系的逻辑)一律经这里查,不各处手写 `p.team===p2.team` 这类判断——normalize()
+// 已经保证非 team 模式下 p.team 恒为 null,这里只需要再检查一次 gameMode 防御性收口
+// (万一某处直接传了未经过 normalize 的 g),不需要重复关心"team 字段本身合不合法"这件事。
+// seatA===seatB(自己和自己)算同队(约定和 canSeeRole 的 viewerSeat===targetSeat 分支
+// 同一直觉:自己人不含糊),调用方如果需要排除自己,自行在外层判断。
+function sameTeam(g, seatA, seatB){
+  if(!g || g.gameMode!=='team') return false;
+  const a = g.players && g.players[seatA];
+  const b = g.players && g.players[seatB];
+  if(!a || !b) return false;
+  if(!Number.isInteger(a.team) || !Number.isInteger(b.team)) return false;
+  return a.team === b.team;
+}
+
 // ---------- 装备区(地基:只搭容器+显示;派生属性/距离/射程/效果一律后续经 EQUIPS 常量表 + getEquip 实现,不写进 Firebase) ----------
 // 四槽:weapon 武器 / armor 防具 / plus1 +1马(防御马) / minus1 -1马(进攻马);每槽存一张装备牌对象 {id,name} 或 null(空)。
 const EQUIP_SLOTS = ['weapon','armor','plus1','minus1'];
@@ -1068,7 +1084,7 @@ if (typeof module !== 'undefined' && module.exports) {
     GENERALS, GENERAL_IDS, getGeneral, generalMaxHp, hasCap, HUASHEN_SKILL_TABLE,
     EQUIPS, EQUIP_SLOTS, emptyEquips, getEquip,
     SEATS, MIN_PLAYERS, MAX_HP, START_HAND, BASIC_CARDS,
-    IDENTITY_TABLE, ROLE_LABEL, assignIdentities, getLordSeat, canSeeRole,
+    IDENTITY_TABLE, ROLE_LABEL, assignIdentities, getLordSeat, canSeeRole, sameTeam,
     DELAY_TRICKS,
     buildDeck, cardSuitForPlayer, isRed, isRedForPlayer, cardColor, cardColorForPlayer,
     isShaName, singleCardShaColor, combinedShaColor, rankText, cardFace,

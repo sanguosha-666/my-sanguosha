@@ -228,6 +228,147 @@ function check(name, fn){
       }
     }
   });
+  // ================= 机器人"打队友"修复(防误伤 + 主动助攻) =================
+  // 根因:botTargetScore/botCanSave 只按身份局role分支(zhong/fan/zhu/nei),组队模式
+  // p.role恒为null,落进兜底分支——同队/敌队完全等价。这里逐条验证修复后的行为。
+  function mkTeamPlayer(name, team, opt){
+    opt = opt || {};
+    return { name: name, team: team, alive: opt.alive!==false, hp: opt.hp!==undefined?opt.hp:3, maxHp: 4,
+      hand: opt.hand || [], equips: opt.equips || vm.runInContext('emptyEquips', sandbox)(), delays: [],
+      role: null, isBot: true };
+  }
+  const card = function(name, id, suit, rank){ return { id: id||name, name: name, suit: suit||'♠', rank: rank||5 }; };
+
+  await check('botTargetScore: 组队模式同队目标恒为-Infinity(不可选)', function(){
+    const botTargetScore = vm.runInContext('botTargetScore', sandbox);
+    const g = { players:[ mkTeamPlayer('a',0), mkTeamPlayer('b',0,{hp:1}), mkTeamPlayer('c',1,{hp:1}) ], gameMode:'team' };
+    const sameScore = botTargetScore(g, 0, 1, 'damage'); // 0和1同队
+    const enemyScore = botTargetScore(g, 0, 2, 'damage'); // 0和2敌队
+    if(sameScore !== -Infinity) throw new Error('同队目标应-Infinity,实际 '+sameScore);
+    if(enemyScore === -Infinity || !(enemyScore > 0)) throw new Error('敌队目标应正常参与评分(>0),实际 '+enemyScore);
+  });
+
+  await check('botTargetScore: 身份局(identity)既有role分支不受影响(回归)', function(){
+    const botTargetScore = vm.runInContext('botTargetScore', sandbox);
+    const g = { players:[
+      { name:'a', role:'zhong', hp:3, maxHp:4, hand:[], alive:true },
+      { name:'b', role:'fan', roleRevealed:true, hp:1, maxHp:4, hand:[], alive:true },
+      { name:'c', role:'zhu', hp:3, maxHp:4, hand:[], alive:true }
+    ], gameMode:'identity' };
+    const scoreFan = botTargetScore(g, 0, 1, 'damage'); // 忠臣打已翻反贼,应该是正分
+    const scoreZhu = botTargetScore(g, 0, 2, 'damage'); // 忠臣打主公,应-Infinity
+    if(!(scoreFan > 0)) throw new Error('身份局忠臣打反贼应正常评分,实际 '+scoreFan);
+    if(scoreZhu !== -Infinity) throw new Error('身份局忠臣打主公应-Infinity(回归),实际 '+scoreZhu);
+  });
+
+  await check('botTargetScore: 乱斗(ffa)模式既有默认分支不受影响(回归,谁都能打)', function(){
+    const botTargetScore = vm.runInContext('botTargetScore', sandbox);
+    const g = { players:[ mkTeamPlayer('a',null), mkTeamPlayer('b',null,{hp:1}) ], gameMode:'ffa' };
+    const score = botTargetScore(g, 0, 1, 'damage');
+    if(score === -Infinity) throw new Error('乱斗模式默认分支应可选,实际 '+score);
+  });
+
+  await check('jiedaoTwoStep: 阶段A排除"唯一合法B是队友"的候选(hasSomeB要求非同队)', function(){
+    const BOT_DECISIONS = vm.runInContext('BOT_DECISIONS', sandbox);
+    vm.runInContext('botTwoStepA = null;', sandbox);
+    // 座位0(自己)、1(有武器,队友,攻击范围内的合法B只有队友2)、2(队友,武器都没有,只是B候选)
+    // 、3(敌队,武器都没有,B候选)——1的唯一可及B是2(同队),应该被hasSomeB过滤掉,不出现
+    // 在阶段A候选里;若3也在1的攻击范围内则1仍应出现——这里刻意让1只够得着2,不够3
+    // (通过给1装武器射程1、3不给装备制造距离差异不现实,直接用两名玩家分别测更清晰:
+    // 拆成两个座位1a/1b分别测试"唯一B是队友"与"唯在B含敌队"两种情形)。
+    const g1 = { players:[
+      mkTeamPlayer('me',0),
+      Object.assign(mkTeamPlayer('onlyTeammateInRange',0,{equips:{weapon:{name:'我武器'},armor:null,plus1:null,minus1:null}})),
+      mkTeamPlayer('teammateVictim',0),
+    ], gameMode:'team', phase:'play', turn:0 };
+    const candA1 = BOT_DECISIONS.jiedaoTwoStep.buildCandidates(g1, 0);
+    if(candA1.some(function(c){ return c.a===1; })) throw new Error('唯一合法B(座位2)是队友,座位1不应出现在阶段A候选里,实际 '+JSON.stringify(candA1));
+
+    const g2 = { players:[
+      mkTeamPlayer('me',0),
+      Object.assign(mkTeamPlayer('hasEnemyInRange',0,{equips:{weapon:{name:'我武器'},armor:null,plus1:null,minus1:null}})),
+      mkTeamPlayer('enemyVictim',1),
+    ], gameMode:'team', phase:'play', turn:0 };
+    const candA2 = BOT_DECISIONS.jiedaoTwoStep.buildCandidates(g2, 0);
+    if(!candA2.some(function(c){ return c.a===1; })) throw new Error('存在敌队合法B(座位2)时座位1应出现在阶段A候选里,实际 '+JSON.stringify(candA2));
+  });
+
+  await check('jiedaoTwoStep: 阶段B过滤掉与A同队的候选', function(){
+    // 注意:distance按存活玩家环形最近间隔计算,4人局座位1到座位3的距离是2(超出默认
+    // 射程1)——这里刻意拆成两个3人局各自验证"同队候选被过滤"/"敌队候选被保留",避免
+    // 环形距离差异干扰(和上面阶段A测试同一处理方式),不是真正的bug。
+    const BOT_DECISIONS = vm.runInContext('BOT_DECISIONS', sandbox);
+    vm.runInContext("botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };", sandbox);
+    const gTeammate = { players:[
+      mkTeamPlayer('me',0),
+      mkTeamPlayer('A',0),
+      mkTeamPlayer('teammateOfA',0), // 和A同队,应被过滤
+    ], gameMode:'team', phase:'play', turn:0 };
+    const candTeammate = BOT_DECISIONS.jiedaoTwoStep.buildCandidates(gTeammate, 0);
+    if(candTeammate.some(function(c){ return c.seatB===2; })) throw new Error('座位2和A(座位1)同队,不应出现在阶段B候选里,实际 '+JSON.stringify(candTeammate));
+
+    const gEnemy = { players:[
+      mkTeamPlayer('me',0),
+      mkTeamPlayer('A',0),
+      mkTeamPlayer('enemyOfA',1), // 和A不同队,应保留
+    ], gameMode:'team', phase:'play', turn:0 };
+    const candEnemy = BOT_DECISIONS.jiedaoTwoStep.buildCandidates(gEnemy, 0);
+    if(!candEnemy.some(function(c){ return c.seatB===2; })) throw new Error('座位2和A不同队,应出现在阶段B候选里,实际 '+JSON.stringify(candEnemy));
+    vm.runInContext('botTwoStepA = null;', sandbox);
+  });
+
+  await check('lijianTwoStep: 阶段A/B同样排除队友组合(和jiedao同一套过滤)', function(){
+    const BOT_DECISIONS = vm.runInContext('BOT_DECISIONS', sandbox);
+    vm.runInContext('isMale', sandbox); // 确认isMale已加载(male判定见generalGender,这里用假武将测不到,直接构造players.general走真实isMale)
+    function malePlayer(name, team, general){
+      return { name:name, team:team, alive:true, hp:3, maxHp:4, hand:[], equips: vm.runInContext('emptyEquips', sandbox)(), delays:[], role:null, general: general||'zhangfei' };
+    }
+    vm.runInContext('botTwoStepA = null;', sandbox);
+    // 张飞/关羽/曹操都是男性武将(项目data.js既有设定),用真实isMale判定而不是硬编码性别字段
+    const g1 = { players:[ malePlayer('me',0), malePlayer('onlyTeammateB',0), malePlayer('teammateVictim',0) ], gameMode:'team', phase:'play', turn:0 };
+    const candA1 = BOT_DECISIONS.lijianTwoStep.buildCandidates(g1, 0);
+    if(candA1.some(function(c){ return c.a===1; })) throw new Error('座位1唯一合法B(座位2)是队友,不应出现在阶段A候选里,实际 '+JSON.stringify(candA1));
+
+    const g2 = { players:[ malePlayer('me',0), malePlayer('hasEnemyB',0), malePlayer('enemyVictim',1) ], gameMode:'team', phase:'play', turn:0 };
+    const candA2 = BOT_DECISIONS.lijianTwoStep.buildCandidates(g2, 0);
+    if(!candA2.some(function(c){ return c.a===1; })) throw new Error('存在敌队合法B时座位1应出现在阶段A候选里,实际 '+JSON.stringify(candA2));
+
+    vm.runInContext("botTwoStepA = { decisionId: 'lijianTwoStep', a: 1 };", sandbox);
+    const g3 = { players:[ malePlayer('me',0), malePlayer('A',0), malePlayer('teammateOfA',0), malePlayer('enemyOfA',1) ], gameMode:'team', phase:'play', turn:0 };
+    const candB = BOT_DECISIONS.lijianTwoStep.buildCandidates(g3, 0);
+    if(candB.some(function(c){ return c.toSeat===2; })) throw new Error('座位2和A同队,不应出现在阶段B候选里,实际 '+JSON.stringify(candB));
+    if(!candB.some(function(c){ return c.toSeat===3; })) throw new Error('座位3和A不同队,应出现在阶段B候选里,实际 '+JSON.stringify(candB));
+    vm.runInContext('botTwoStepA = null;', sandbox);
+  });
+
+  await check('sameTeam: 唯一判队友入口——同队true/敌队false/非team模式恒false/座位不存在false', function(){
+    const sameTeam = vm.runInContext('sameTeam', sandbox);
+    const g = { players:[ mkTeamPlayer('a',0), mkTeamPlayer('b',0), mkTeamPlayer('c',1) ], gameMode:'team' };
+    if(sameTeam(g,0,1)!==true) throw new Error('同队应true');
+    if(sameTeam(g,0,2)!==false) throw new Error('敌队应false');
+    if(sameTeam({players:g.players, gameMode:'ffa'},0,1)!==false) throw new Error('非team模式应恒false');
+    if(sameTeam(g,0,99)!==false) throw new Error('座位不存在应false,不应抛异常');
+  });
+
+  await check('botCanSave: 组队模式主动助攻——队友濒死应救,敌方濒死不救,自己濒死恒自救', function(){
+    const botCanSave = vm.runInContext('botCanSave', sandbox);
+    const g = { players:[ mkTeamPlayer('me',0), mkTeamPlayer('teammate',0), mkTeamPlayer('enemy',1) ], gameMode:'team' };
+    if(botCanSave(g,0,1)!==true) throw new Error('队友濒死应救(botCanSave应true),实际 '+botCanSave(g,0,1));
+    if(botCanSave(g,0,2)!==false) throw new Error('敌方濒死不应救,实际 '+botCanSave(g,0,2));
+    if(botCanSave(g,0,0)!==true) throw new Error('自己濒死恒自救,实际 '+botCanSave(g,0,0));
+  });
+
+  await check('botCanSave: 身份局(identity)既有role分支不受影响(回归)', function(){
+    const botCanSave = vm.runInContext('botCanSave', sandbox);
+    const g = { players:[
+      { name:'a', role:'zhong' },
+      { name:'b', role:'zhu', roleRevealed:true },
+      { name:'c', role:'fan', roleRevealed:true }
+    ], gameMode:'identity' };
+    if(botCanSave(g,0,1)!==true) throw new Error('忠臣应救已翻主公(回归),实际 '+botCanSave(g,0,1));
+    if(botCanSave(g,0,2)!==false) throw new Error('忠臣不应救已翻反贼(回归),实际 '+botCanSave(g,0,2));
+  });
+
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
 })();

@@ -525,10 +525,23 @@ function recordBotRescueEvidence(g,rescuerSeat,dyingSeat){
 function botTargetScore(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return -Infinity;
+  // 【组队模式修复】这个函数所有实际调用点传的kind('damage'/'steal'/或杀/决斗/火攻/
+  // 铁索连环/顺手牵羊/过河拆桥这类action名)全部是有害/需要谨慎对待自己人的操作,没有
+  // 任何一处走这里去"帮"目标——组队模式下同队目标一律当作不可选(-Infinity),不参与
+  // 后面按身份局role分支打分。这个判断必须放在role分支之前:组队模式下p.role恒为null
+  // (normalize()保证),不加这条会落进最后的兜底else分支,把队友当成和敌人一样的普通
+  // 目标,只是加个随机数——这正是"机器人会打队友"的根因。sameTeam(data.js)是唯一的
+  // 判队友入口,不在这里重复手写team比较。
+  if(g.gameMode==='team' && sameTeam(g,seat,targetSeat)) return -Infinity;
   const known=botKnownRole(g,seat,targetSeat);
   const suspicion=botSuspicion(g,targetSeat);
   let score=(target.maxHp-target.hp)*8+(4-target.hp)*7+(target.hand||[]).length*2;
-  if(me.role==='zhong'){
+  if(g.gameMode==='team'){
+    // 组队模式没有身份局那套role/suspicion语义,不生搬硬套——保留和乱斗模式一样的
+    // 默认打分风格(优先打体力低/手牌多的敌方目标),只是多了"排除同队"这一步(已在上面
+    // 处理)。kind==='steal'的额外加成在函数末尾统一处理,这里不用重复。
+    score+=Math.random()*10;
+  } else if(me.role==='zhong'){
     if(known==='zhu'||known==='zhong') return -Infinity;
     if(known==='fan') score+=180;
     else if(known==='nei') score+=55;
@@ -2673,23 +2686,31 @@ BOT_DECISIONS.jiedaoTwoStep = {
     const jiedaoIdx = (me.hand||[]).findIndex(function(c){ return c.name==='借刀杀人'; });
     const out = [];
     if(botTwoStepA && botTwoStepA.decisionId==='jiedaoTwoStep'){
-      // 阶段 B:镜像 render.js 1473 —— A 攻击范围内、非A、非空城的存活者
+      // 阶段 B:镜像 render.js 1473 —— A 攻击范围内、非A、非空城的存活者。
+      // 【组队模式修复】额外排除"B和A同队"——借刀杀人是"逼A打B",A/B同队等于逼队友互相
+      // 伤害,不能选。阶段A的hasSomeB已经保证选中的A至少有一个非同队的合法B,这里正常
+      // 情况下不会因为这条过滤导致候选变空;万一状态变化(比如B临时变成同队)真的导致
+      // 候选为空,交给下面execute阶段处理(不会卡住,见execute注释)。
       const A = botTwoStepA.a;
       g.players.forEach(function(p, i){
         if(!p || !p.alive || i===A) return;
         if(!canReachSha(g, A, i)) return;
         if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
+        if(sameTeam(g, A, i)) return;
         out.push({ index: 0, label: '借刀:令 '+g.players[A].name+' 杀 '+p.name, step:'B', seatA: A, seatB: i, jiedaoIdx: jiedaoIdx });
       });
       return out;
     }
-    // 阶段 A:镜像 render.js 1467-1468 —— 有武器且存在合法B(hasSomeB)的存活其他角色
+    // 阶段 A:镜像 render.js 1467-1468 —— 有武器且存在合法B(hasSomeB)的存活其他角色。
+    // 【组队模式修复】hasSomeB 额外要求"至少一个B和A不同队",保证阶段A选中的A在阶段B
+    // 一定能找到合法的非同队B(不会出现"选完A才发现B全是队友"的空候选场景)。
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
       if(!p.equips || !p.equips.weapon) return;
       const hasSomeB = g.players.some(function(B, bi){
         return B && B.alive && bi!==i && canReachSha(g, i, bi)
-          && !(hasCap(B,'kongcheng') && (B.hand||[]).length===0);
+          && !(hasCap(B,'kongcheng') && (B.hand||[]).length===0)
+          && !sameTeam(g, i, bi);
       });
       if(!hasSomeB) return;
       out.push({ index: 0, label: '借刀:选 '+p.name, step:'A', a: i, jiedaoIdx: jiedaoIdx });
@@ -2700,6 +2721,14 @@ BOT_DECISIONS.jiedaoTwoStep = {
     if(!candidates.length) return null;
     return candidates[0];
   },
+  // 【组队模式修复,曾经加过onEmpty又移除】阶段A的hasSomeB已经保证选中的A至少有一个
+  // 非同队的合法B,阶段B正常不会出现候选为空——万一因为状态变化(极端边界,如B恰好在
+  // 两次调度之间阵亡)真的遇到候选为空,和"完全没有武器持有者"这种阶段A候选为空的既有
+  // 场景走的是同一条路(botDecide返回false,runBotDecision继续走runBotActionWindow,
+  // 不会卡死,run_ai_bus_l3_test.js"候选空应返回false"那两条既有测试锁定的就是这个
+  // 契约)——不需要额外加onEmpty去主动resetBotTwoStep,那样反而会改变"候选空→false→
+  // 继续走其它决策"这个既有约定,导致这一轮什么都不做。botTwoStepA留着等下一次调度
+  // 重新判断即可,不是卡死,只是这一步"什么都不选"。
   execute: function(g, seat, choice){
     if(!choice) return;
     if(choice.step==='A'){
@@ -2733,15 +2762,24 @@ BOT_DECISIONS.lijianTwoStep = {
   buildCandidates: function(g, seat){
     const out = [];
     if(botTwoStepA && botTwoStepA.decisionId==='lijianTwoStep'){
+      // 【组队模式修复】排除"B和A同队"——离间是"逼A对B使用决斗",A/B同队等于逼队友互相
+      // 伤害。阶段A的hasSomeB已经保证选中的A至少有一个非同队的合法B。
       const from = botTwoStepA.a;
       g.players.forEach(function(p, i){
         if(!p || !p.alive || i===from || !isMale(p)) return;
+        if(sameTeam(g, from, i)) return;
         out.push({ index: 0, label: '离间:令 '+g.players[from].name+' 对 '+p.name+' 使用【决斗】', step:'B', fromSeat: from, toSeat: i });
       });
       return out;
     }
+    // 【组队模式修复】hasSomeB 额外要求"至少一个B和A不同队",保证阶段A选中的A在阶段B
+    // 一定能找到合法的非同队B。
     g.players.forEach(function(p, i){
       if(!p || !p.alive || !isMale(p)) return;
+      const hasSomeB = g.players.some(function(B, bi){
+        return B && B.alive && bi!==i && isMale(B) && !sameTeam(g, i, bi);
+      });
+      if(!hasSomeB) return;
       out.push({ index: 0, label: '离间:选 '+p.name+' 为【决斗】使用者', step:'A', a: i });
     });
     return out;
@@ -2749,6 +2787,7 @@ BOT_DECISIONS.lijianTwoStep = {
   localFallback: function(g, seat, candidates){
     return candidates.length ? candidates[0] : null;
   },
+  // 【组队模式修复,同jiedaoTwoStep同一处理】不加onEmpty——理由见jiedaoTwoStep同位置注释。
   execute: function(g, seat, choice){
     if(!choice) return;
     if(choice.step==='A'){
@@ -3623,6 +3662,11 @@ function canBotUseTaoForDying(g, seat, dyingSeat){
 function botCanSave(g,seat,dyingSeat){
   const me=g.players[seat], dying=g.players[dyingSeat];
   if(seat===dyingSeat) return true;
+  // 【组队模式修复,主动助攻第一项】自救之外的"该不该救"判断此前完全按身份局role分支
+  // 走,组队模式没有role(恒null),落进最后的return false——机器人永远不会用桃救队友,
+  // 只能自救。加一条team分支:队友无条件救(和sameTeam同一个唯一判队友入口),敌方不救
+  // (团队对抗里没有"内奸/反贼"这类中间身份需要权衡,直接二元判断)。
+  if(g.gameMode==='team') return sameTeam(g,seat,dyingSeat);
   if(me.role==='zhong') return dying.role==='zhu'||(dying.roleRevealed&&dying.role==='zhong');
   if(me.role==='zhu') return dying.roleRevealed&&dying.role==='zhong';
   if(me.role==='fan') return dying.roleRevealed&&dying.role==='fan';
