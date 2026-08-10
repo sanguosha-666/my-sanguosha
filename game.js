@@ -4182,7 +4182,7 @@ function respondDying(useTao, jijiuChoice){
       return g;
     }
     g.log=pushLog(g.log, me.name+'：不使用【桃】');
-    const nxt=nextAskee(g, g.pending.seat, mySeat);
+    const nxt=nextDyingAskee(g, g.pending.seat, mySeat);
     if(nxt===null){ finishDying(g, true); return g; }
     g.pending.asking=nxt;
     setResponseAskedAt(g.pending); // A1:切换被问者即重新计时
@@ -4899,6 +4899,22 @@ function nextAskee(g, from, current){
     if(g.players[s] && g.players[s].alive) return s; // 跳过阵亡者
   }
   return null;
+}
+// nextDyingAskee: 濒死轮询专用的 nextAskee 包装——贾诩【完杀】生效期间(g.wanshaActive
+// 且当前濒死者是 g.wanshaDyingSeat),只有贾诩本人和濒死者本人能被问是否用桃,中间那些
+// "问了也白问"(respondDying 会直接拒绝)的座位直接跳过、不产生等待响应的 pending,
+// 等价于他们自动选择不救。非完杀场景(或完杀未命中当前濒死者)行为与 nextAskee 完全一致。
+function nextDyingAskee(g, dyingSeat, current){
+  let nxt = nextAskee(g, dyingSeat, current);
+  if(g.wanshaActive && g.wanshaDyingSeat === dyingSeat){
+    const jiaxuSeat = findPlayerWithCap(g, 'wansha');
+    if(jiaxuSeat !== null && jiaxuSeat === g.turn){
+      while(nxt !== null && nxt !== jiaxuSeat && nxt !== dyingSeat){
+        nxt = nextAskee(g, dyingSeat, nxt);
+      }
+    }
+  }
+  return nxt;
 }
 // startTrick: 锦囊牌已进弃牌堆后调用。初始化无懈询问轮次(exclude/depth 见 openWuxieRound 注释),
 // 交给 openWuxieRound 统一处理"算下一个问谁/问不到人就直接收尾"。
