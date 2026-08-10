@@ -64,6 +64,42 @@ let aiPromptDismissed = false;
 // 天然兜底,不需要为"用户没选模型"这个最常见情形写任何特殊分支。
 let aiApiModel = '';
 
+// ===== 多模型轮换(2026-08):groq 免费层各模型限额独立池(org×model),输入密钥后默认勾选
+// 多模型、每次调用 round-robin 轮换,撞 429 时按响应冷却跳过该模型,绕过单模型 TPM/TPD 墙。
+// 优先级:手动单选(aiApiModel 非空) > 多选轮换(aiApiModels 非空且 aiApiModel 空) > 默认档位。
+const AI_MODELS_STORAGE_KEY = 'sgsAiModels';
+// 默认勾选(groq 免费层独立池模型,用户确认)
+const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b'];
+let aiApiModels = [];
+let _modelRotateIdx = 0;          // round-robin 指针
+let _modelCooldowns = {};         // modelId → retryAt(时间戳);会话内有效,不持久化
+
+// parseGroqRetrySeconds:从 429 错误体解析 "try again in Xm Ys",失败返回 null(调用方给默认)。
+function parseGroqRetrySeconds(text){
+  if(typeof text!=='string') return null;
+  const m = text.match(/try again in (\d+)m([\d.]+)?s/);
+  if(!m) return null;
+  const sec = parseInt(m[1],10) * 60 + (m[2] ? Math.round(parseFloat(m[2])) : 0);
+  return (Number.isFinite(sec) && sec>0) ? sec : null;
+}
+// resolveAiModel:轮换选模型。非groq/无多选/手动单选 → aiApiModel||undefined(零变化)。
+function resolveAiModel(provider){
+  if(provider!=='groq') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
+  if(typeof aiApiModel==='string' && aiApiModel) return aiApiModel;   // 手动单选优先
+  const list = (Array.isArray(aiApiModels) && aiApiModels.length) ? aiApiModels : null;
+  if(!list) return undefined;
+  const now = Date.now();
+  // 找下一个未冷却的
+  for(let i=0;i<list.length;i++){
+    const idx = (_modelRotateIdx + i) % list.length;
+    const model = list[idx];
+    if(_modelCooldowns[model] && _modelCooldowns[model] > now) continue; // 冷却中跳过
+    _modelRotateIdx = (idx + 1) % list.length; // 指针前进
+    return model;
+  }
+  return list[0]; // 全部冷却中 → 返回第一个(本次注定429,走本地兜底)
+}
+
 // ===== AI托管(纯客户端本地状态,不写入Firebase) =====
 // active:托管开关;seat:被托管的座位(当前浏览器玩家的 mySeat);records:本次托管期间
 // 的决策记录(供信息窗展示,关闭弹窗不清空、刷新即丢)。
@@ -75,11 +111,16 @@ let aiTestAutopilot = { active:false, seat:null, records:[] };
     aiProvider = sessionStorage.getItem(AI_PROVIDER_STORAGE_KEY) || null;
     aiPromptDismissed = sessionStorage.getItem(AI_PROMPT_DISMISSED_STORAGE_KEY) === '1';
     aiApiModel = sessionStorage.getItem(AI_MODEL_STORAGE_KEY) || '';
+    try{
+      const rawModels = sessionStorage.getItem(AI_MODELS_STORAGE_KEY);
+      aiApiModels = rawModels ? JSON.parse(rawModels) : [];
+      if(!Array.isArray(aiApiModels)) aiApiModels = [];
+    }catch(e){ aiApiModels = []; }
   }catch(e){
     // 隐私模式等场景下 sessionStorage 可能整体不可用——静默回退到空值,不影响
     // 本次会话内内存里正常使用,只是刷新后无法恢复(每次刷新都会重新弹一次询问框,
     // 这是这种环境下唯一的合理退化,不算 bug)。
-    aiApiKey = ''; aiProvider = null; aiPromptDismissed = false; aiApiModel = '';
+    aiApiKey = ''; aiProvider = null; aiPromptDismissed = false; aiApiModel = ''; aiApiModels = [];
   }
 })();
 
@@ -93,6 +134,8 @@ function persistAiState(){
     else sessionStorage.removeItem(AI_PROMPT_DISMISSED_STORAGE_KEY);
     if(aiApiModel) sessionStorage.setItem(AI_MODEL_STORAGE_KEY, aiApiModel);
     else sessionStorage.removeItem(AI_MODEL_STORAGE_KEY);
+    if(Array.isArray(aiApiModels) && aiApiModels.length) sessionStorage.setItem(AI_MODELS_STORAGE_KEY, JSON.stringify(aiApiModels));
+    else sessionStorage.removeItem(AI_MODELS_STORAGE_KEY);
   }catch(e){ /* 同上,静默忽略 */ }
 }
 
@@ -270,7 +313,15 @@ function callAI(provider, apiKey, opts){
       return res.text().then(t=>({ ok:false, reason:'auth', detail:'密钥无效或无权限('+res.status+'): '+t.slice(0,200) }));
     }
     if(!res.ok){
-      return res.text().then(t=>({ ok:false, reason:'other', detail:'HTTP '+res.status+': '+t.slice(0,200) }));
+      return res.text().then(t=>{
+        if(res.status===429 && provider==='groq' && opts && typeof opts.model==='string'){
+          const sec = parseGroqRetrySeconds(t);
+          const retryAt = Date.now() + ((sec!==null ? sec : 60) * 1000);
+          _modelCooldowns[opts.model] = retryAt;
+          console.warn('[AI] 模型 '+opts.model+' 触发限流,冷却 '+(sec!==null?sec:60)+'s(到 '+new Date(retryAt).toTimeString().slice(0,8)+')');
+        }
+        return { ok:false, reason:'other', detail:'HTTP '+res.status+': '+t.slice(0,200) };
+      });
     }
     return res.json().then(json=>{
       try{
