@@ -7,7 +7,8 @@ const voicesMock = [
   { name: 'Microsoft Huihui - Chinese (Simplified)', lang: 'zh-CN' },   // 女
   { name: 'Microsoft Kangkang - Chinese (Simplified)', lang: 'zh-CN' }, // 男
   { name: 'Google US English', lang: 'en-US' },
-  { name: 'Microsoft Heami - Korean', lang: 'ko-KR' }
+  { name: 'Microsoft Heami - Korean', lang: 'ko-KR' },
+  { name: 'Microsoft Haruka - Japanese', lang: 'ja-JP' }
 ];
 const context = {
   gameRef: { transaction: function(fn){ return fn(context.g || {}); } },
@@ -111,7 +112,11 @@ function check(name, fn){
     const v = vm.runInContext('pickChatVoice', sandbox)('female', 'ko-KR');
     if(!v || v.lang.indexOf('ko')!==0) throw new Error('ko-KR应选韩文voice,实际 '+(v&&v.name)+' lang='+(v&&v.lang));
   });
-  // 9. detectChatLang:按字符集判断语言——中文/英文/韩文/混合(按主要语言,中文优先命中)
+  await check('pickChatVoice: lang=ja-JP 时选中日文voice', function(){
+    const v = vm.runInContext('pickChatVoice', sandbox)('female', 'ja-JP');
+    if(!v || v.lang.indexOf('ja')!==0) throw new Error('ja-JP应选日文voice,实际 '+(v&&v.name)+' lang='+(v&&v.lang));
+  });
+  // 9. detectChatLang:按字符集判断语言——中文/英文/韩文/日文/混合(按主要语言,中文优先命中)
   await check('detectChatLang: 中文→zh-CN, 英文→en-US, 韩文→ko-KR', function(){
     const zh = vm.runInContext('detectChatLang', sandbox)('这波啊这波是天命');
     const en = vm.runInContext('detectChatLang', sandbox)('Hello world nice game');
@@ -120,15 +125,32 @@ function check(name, fn){
     if(en!=='en-US') throw new Error('英文应判en-US,实际 '+en);
     if(ko!=='ko-KR') throw new Error('韩文应判ko-KR,实际 '+ko);
   });
+  // 9b. detectChatLang: 日语——纯假名、假名+汉字混合(优先判日语而非中文)
+  await check('detectChatLang: 纯假名→ja-JP, 假名+汉字混合→ja-JP(不误判中文)', function(){
+    const hiragana = vm.runInContext('detectChatLang', sandbox)('こんにちは');
+    const katakana = vm.runInContext('detectChatLang', sandbox)('コンニチハ');
+    const mixed = vm.runInContext('detectChatLang', sandbox)('今日はいい天気ですね');
+    if(hiragana!=='ja-JP') throw new Error('纯平假名应判ja-JP,实际 '+hiragana);
+    if(katakana!=='ja-JP') throw new Error('纯片假名应判ja-JP,实际 '+katakana);
+    if(mixed!=='ja-JP') throw new Error('假名+汉字混合应判ja-JP(不应误判zh-CN),实际 '+mixed);
+  });
+  // 9c. detectChatLang: 纯汉字日语句子的固有局限——无假名特征字符时无法与中文区分,
+  // 按现有优先级规则回退判为zh-CN,是字符区间判断法的已知边界,不强求解决
+  await check('detectChatLang: 纯汉字日语句子(无假名)按现有规则回退zh-CN(已知局限)', function(){
+    const pureKanji = vm.runInContext('detectChatLang', sandbox)('今日天気'); // 纯汉字,无假名特征
+    if(pureKanji!=='zh-CN') throw new Error('纯汉字场景预期回退zh-CN(固有局限),实际 '+pureKanji);
+  });
   // 10. speakChatMessage: 根因修复验证——u.lang 按文本内容检测,而非写死zh-CN
-  await check('speakChatMessage: u.lang 按文本语言检测(中/英/韩三种消息分别对应zh-CN/en-US/ko-KR)', function(){
+  await check('speakChatMessage: u.lang 按文本语言检测(中/英/韩/日四种消息分别对应zh-CN/en-US/ko-KR/ja-JP)', function(){
     speakCalls.length = 0;
     vm.runInContext('speakChatMessage', sandbox)('这波啊这波是天命', 'male');
     vm.runInContext('speakChatMessage', sandbox)('Hello world nice game', 'male');
     vm.runInContext('speakChatMessage', sandbox)('안녕하세요 반갑습니다', 'male');
+    vm.runInContext('speakChatMessage', sandbox)('こんにちは、いい天気ですね', 'male');
     if(speakCalls[0].lang!=='zh-CN') throw new Error('中文消息u.lang应为zh-CN,实际 '+speakCalls[0].lang);
     if(speakCalls[1].lang!=='en-US') throw new Error('英文消息u.lang应为en-US,实际 '+speakCalls[1].lang);
     if(speakCalls[2].lang!=='ko-KR') throw new Error('韩文消息u.lang应为ko-KR,实际 '+speakCalls[2].lang);
+    if(speakCalls[3].lang!=='ja-JP') throw new Error('日文消息u.lang应为ja-JP,实际 '+speakCalls[3].lang);
   });
   // 7. M-1 真实持久化:关闭后 localStorage 存 sgs_chat_voice='0'
   await check('toggleChatVoice: 关闭后 localStorage 存 sgs_chat_voice=0', function(){
