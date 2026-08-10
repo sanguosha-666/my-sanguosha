@@ -116,6 +116,11 @@ let aiTestAutopilot = { active:false, seat:null, records:[] };
       aiApiModels = rawModels ? JSON.parse(rawModels) : [];
       if(!Array.isArray(aiApiModels)) aiApiModels = [];
     }catch(e){ aiApiModels = []; }
+    // 【多模型轮换】groq 密钥下若用户从未配置过多选,默认勾选 DEFAULT_GROQ_MODELS
+    // (只内存生效、不写 sessionStorage——默认值随列表改动自动跟进,见 renderModelPicker)。
+    if(aiProvider==='groq' && aiApiModels.length===0){
+      aiApiModels = DEFAULT_GROQ_MODELS.slice();
+    }
   }catch(e){
     // 隐私模式等场景下 sessionStorage 可能整体不可用——静默回退到空值,不影响
     // 本次会话内内存里正常使用,只是刷新后无法恢复(每次刷新都会重新弹一次询问框,
@@ -419,18 +424,26 @@ function fetchProviderModels(provider, apiKey){
 // ---------- 模型列表渲染(顶层可测函数) ----------
 // renderModelPicker 把"搜索框 + 过滤按钮列表 + 自定义入口"这一整块抽成顶层函数,
 // 便于 vm 测试直接调用(renderModelPicker 本身是 showAiKeyModal 的闭包,测试够不到)。
-// opts = { selectedId, defaultValueId, onPick }:
+// opts = { selectedId, defaultValueId, onPick, multi, selectedIds }:
 //   selectedId     —— 当前 aiApiModel(可能为空;为空时默认项视觉高亮但不写入,语义
 //                     见 renderModelPicker 的注释,和旧版"预选第一项不写入"等价)
 //   defaultValueId —— 该 provider 内置默认档位,匹配的项 label 追加「(默认)」
-//   onPick(id)     —— 点击列表项/自定义项后的回调(写入 aiApiModel + persistAiState)
+//   onPick(id, checked) —— 点击列表项/自定义项后的回调(单选:写入 aiApiModel +
+//                     persistAiState;多选:写入 aiApiModels + persistAiState。
+//                     checked 仅多选模式传:该次点击后该项是否处于选中态)
+//   multi          —— true 时进入多选模式(groq 轮换用):点击项 toggle 进/出选集,
+//                     高亮=在选集中,onPick 收到 toggle 结果;默认 false 保持单选行为
+//   selectedIds    —— 多选模式下的当前选集(数组),用于初始高亮
 // 搜索框的 input 事件只重建 #aiModelList 容器、不重建搜索框自身 → 打字不丢焦点;
-// 点击选项后清空搜索框并重建列表,选中态高亮由内部 curSel 维护,不依赖调用方重渲染。
+// 点击选项后清空搜索框并重建列表,选中态高亮由内部 curSel/curSelSet 维护,
+// 不依赖调用方重渲染。
 function renderModelListInto(modelWrap, list, opts){
   opts = opts || {};
   const defaultValueId = opts.defaultValueId || null;
   const onPick = opts.onPick || function(){};
+  const multi = !!opts.multi;
   let curSel = opts.selectedId || '';
+  let curSelSet = new Set(Array.isArray(opts.selectedIds) ? opts.selectedIds : []);
 
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
@@ -451,22 +464,41 @@ function renderModelListInto(modelWrap, list, opts){
     const shown = kw ? list.filter(function(m){
       return m.id.indexOf(kw) >= 0 || m.label.indexOf(kw) >= 0;
     }) : list;
-    // aiApiModel 为空 → 视觉预选默认项(不写入,见函数头注释)
-    const effectiveSel = curSel || defaultValueId;
-    shown.forEach(function(m){
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = m.label + (m.id === defaultValueId ? '(默认)' : '');
-      if(m.id === effectiveSel) b.classList.add('selected');
-      b.onclick = function(){
-        searchInput.value = '';
-        curSel = m.id;
-        onPick(m.id);
-        renderList();
-      };
-      listWrap.appendChild(b);
-    });
-    // 固定排在列表末尾的"自定义"入口:当前模型ID不在列表里(自定义遗留)时高亮
+    if(multi){
+      // 多选模式(groq 轮换):点击 toggle 选集,高亮=在选集中
+      shown.forEach(function(m){
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = m.label + (m.id === defaultValueId ? '(默认)' : '');
+        const inSel = curSelSet.has(m.id);
+        if(inSel) b.classList.add('selected');
+        b.onclick = function(){
+          searchInput.value = '';
+          if(inSel) curSelSet.delete(m.id); else curSelSet.add(m.id);
+          onPick(m.id, !inSel);
+          renderList();
+        };
+        listWrap.appendChild(b);
+      });
+    } else {
+      // 单选模式(claude/openrouter):既有逻辑一字不变
+      const effectiveSel = curSel || defaultValueId;
+      shown.forEach(function(m){
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = m.label + (m.id === defaultValueId ? '(默认)' : '');
+        if(m.id === effectiveSel) b.classList.add('selected');
+        b.onclick = function(){
+          searchInput.value = '';
+          curSel = m.id;
+          onPick(m.id);
+          renderList();
+        };
+        listWrap.appendChild(b);
+      });
+    }
+    // 固定排在列表末尾的"自定义"入口:当前模型ID不在列表里(自定义遗留)时高亮。
+    // 多选模式下仍是"手动单选"入口(写 aiApiModel,优先级高于轮换,见 resolveAiModel)。
     const isCustom = !!curSel && !list.some(function(m){ return m.id === curSel; });
     const customBtn = document.createElement('button');
     customBtn.type = 'button';
@@ -594,6 +626,14 @@ function showAiKeyModal(onDone){
     modelWrap.innerHTML = '';
     if(!aiProvider) return;
     const provider = aiProvider;
+    // 【多模型轮换】groq 密钥下默认勾选免费层 4 模型(用户从未配置过多选时自动填入,
+    // 只在内存生效、不写 sessionStorage——默认值随 DEFAULT_GROQ_MODELS 改动自动跟进;
+    // 用户主动勾选/取消勾选时由 onPick → persistAiState 持久化真实选择)。
+    // 用户全部取消勾选后 aiApiModels 为空,下次进设置会恢复默认勾选——想彻底不用轮换
+    // 可用自定义入口写手动单选(aiApiModel,优先级高于多选,见 resolveAiModel)。
+    if(provider==='groq' && (!Array.isArray(aiApiModels) || aiApiModels.length===0)){
+      aiApiModels = DEFAULT_GROQ_MODELS.slice();
+    }
 
     const label = document.createElement('label');
     label.textContent = '模型';
@@ -606,8 +646,10 @@ function showAiKeyModal(onDone){
     statusNote.style.cssText = 'margin-top:4px;';
     modelWrap.appendChild(statusNote);
 
+    const isGroq = provider==='groq';
     function applyList(list, fromFallback){
-      statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型');
+      statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型')
+        + (isGroq ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入' : '');
       // 自定义遗留(aiApiModel 非空且不在列表)→ 显示文本框并预填
       const isCustom = !!aiApiModel && !list.some(function(m){ return m.id === aiApiModel; });
       const customInput = document.createElement('input');
@@ -627,11 +669,22 @@ function showAiKeyModal(onDone){
       // 先渲染搜索框+列表;自定义文本框跟在列表末尾的"自定义"按钮下方,超时提示垫底
       renderModelListInto(modelWrap, list, {
         selectedId: aiApiModel,
+        selectedIds: isGroq ? aiApiModels : undefined,
+        multi: isGroq,
         defaultValueId: AI_DEFAULT_MODEL[provider] || null,
-        onPick: function(id){
+        onPick: function(id, checked){
           if(id === AI_MODEL_CUSTOM_VALUE){
             customInput.style.display = 'inline-block';
             aiApiModel = customInput.value.trim(); // 可能是空字符串,commitCustomModel 会在用户真正输入后覆盖
+          } else if(isGroq){
+            // 多选 toggle:维护 aiApiModels(轮换池),不动 aiApiModel(手动单选优先级
+            // 留给自定义入口)。checked=本次点击后的选中态(由 renderModelListInto 计算)。
+            const arr = Array.isArray(aiApiModels) ? aiApiModels.slice() : [];
+            const i = arr.indexOf(id);
+            if(checked){ if(i<0) arr.push(id); } else { if(i>=0) arr.splice(i,1); }
+            aiApiModels = arr;
+            customInput.style.display = 'none';
+            customInput.value = '';
           } else {
             customInput.style.display = 'none';
             customInput.value = '';

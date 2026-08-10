@@ -129,7 +129,11 @@ async function updateAiSummary(g, seat){
       systemPrompt: buildSummaryPrompt(g, seat),
       userPrompt: userPrompt,
       maxTokens: 300,
-      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
+      // 多模型轮换:实际选中的模型由 resolveAiModel(provider) 决定(手动单选优先,
+      // 其次多选 round-robin,都无则 undefined 走默认档位)。typeof 防御跨文件加载
+      // 顺序(ai-bot.js 最后加载)。关键:opts.model 必须传实际模型不能 undefined 掉——
+      // callAI 的 429 分支靠它知道当前模型、写 _modelCooldowns 冷却。
+      model: (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined),
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
@@ -236,7 +240,8 @@ async function callAiChooseIndex(opts){
       systemPrompt: sysText,
       userPrompt: userPromptText,
       maxTokens: opts.maxTokens || 80,
-      model: (typeof aiApiModel!=='undefined' && aiApiModel) || undefined,
+      // 多模型轮换:同 updateAiSummary 的 callAI 调用点,见该处注释。
+      model: (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined),
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
