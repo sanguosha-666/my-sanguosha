@@ -59,10 +59,9 @@ function joinRoom(){
 }
 
 function enterGame(){
-  // 重进房间重置聊天语音"已念消息"集合(跨同步累积的 Set 在此清零,避免重进后旧消息
-  // 因 id 已不在集合里被误判为"新消息"重念一遍)。render-log.js 加载晚于本文件,
-  // spokenChatIds 运行时已存在,仍用 typeof 防御(CLAUDE.md 跨文件惯例)。
-  if(typeof spokenChatIds!=='undefined' && spokenChatIds.clear) spokenChatIds.clear();
+  // 聊天语音"已见消息"集合跨 enterGame 累积:退出重进同一房间不重念历史聊天,
+  // 只念退出期间新到的消息(id 去重);Firebase push key 跨房间不冲突,无需跨房间清;
+  // 页面刷新时 Set 自然重建。
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('configWarn').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');

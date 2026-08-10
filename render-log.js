@@ -243,7 +243,8 @@ let chatVoiceEnabled = (function(){
   try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); }
   catch(e){ return true; }
 })();
-const spokenChatIds = new Set(); // 已念消息 id 去重(跨同步累积,不全量clear);enterGame 重进房间时重置(room-lifecycle.js 接入点)
+const spokenChatIds = new Set(); // 已见消息 id 去重:跨同步累积、跨enterGame累积(重进不重念);
+                                 // 关闭语音期间的消息也标记(重开不重放);页面刷新时重建
 function toggleChatVoice(){
   chatVoiceEnabled = !chatVoiceEnabled;
   try{ localStorage.setItem('sgs_chat_voice', chatVoiceEnabled?'1':'0'); }catch(e){}
@@ -362,7 +363,7 @@ function renderLogPanel(g){
   const quick='<select class="quick-chat-select" onchange="sendQuickChat(this.value);this.value=\'\'"><option value="">快捷语</option>'+QUICK_CHAT_PHRASES.map(t=>'<option value="'+escapeHtml(t)+'">'+escapeHtml(t)+'</option>').join('')+'</select>';
   const emojiPicker='<div id="emojiPicker" class="emoji-picker hidden">'+CHAT_EMOJIS.map(e=>'<button type="button" onclick="sendChatEmoji(\''+e+'\')">'+e+'</button>').join('')+'</div>';
   // 语音开关按钮:emojiPicker 前插入(聊天语音核心在 Task 1 已就位,开关状态存 localStorage)
-  const voiceBtn = '<button type="button" id="chatVoiceBtn" class="emoji-toggle" onclick="toggleChatVoice()" title="聊天语音开关" style="font-size:15px;">'+(chatVoiceEnabled?'🔊':'🔇')+'</button>';
+  const voiceBtn = '<button type="button" id="chatVoiceBtn" class="emoji-toggle" onclick="toggleChatVoice()" title="聊天语音开关">'+(chatVoiceEnabled?'🔊':'🔇')+'</button>';
   // 输入区只在首次进入房间时创建。之后的实时状态刷新仅更新两个滚动区，避免重建
   // #chatInput 导致正在输入的文字、输入法组合状态和光标位置被清空。
   if(!el.querySelector('.log-panel-section') || !el.querySelector('.chat-panel-section')){
