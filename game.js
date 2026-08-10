@@ -968,6 +968,10 @@ function normalize(g){
     if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
       logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(buquAsk)');
       g.pending = null; g.phase = 'play';
+    } else if(!Number.isInteger(d.remaining) || d.remaining < 1) {
+      // remaining 是"这次伤害还需连续询问几次"的计数器,旧存档/防御性回退默认1次
+      // (等价于改动前"只问一次"的行为,不影响单点伤害场景)。
+      d.remaining = 1;
     }
   }
   // 陆逊【连营】询问
@@ -3892,6 +3896,7 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   // 现在的原则是【数据层说真话、渲染层负责好看】:这里保留真实的负数,显示钳制放在 render.js
   // 的血格公式里。凡是消费 hp 的地方(尤其是任何 maxHp-hp 形式的"已损失体力值")都必须自己
   // 考虑 hp<0 会让结果膨胀——完整点位清单见 CLAUDE.md。
+  const hpBeforeThisDamage = p.hp;
   p.hp = p.hp - amount;
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
@@ -3925,10 +3930,22 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
 
   // 致命优先:先不屈/濒死,再处理受伤后可选技能(恩怨/耀武等),避免 0 血僵尸
   if(p.hp<=0){
-    if(hasCap(p, 'buqu') && (g.deck || []).length > 0) {
-      g.pending = { type:'buquAsk', seat, resume:{type:srcType, sourceSeat, amount} };
+    // 周泰【不屈】触发次数:"体力降到0或以下"这个区间里,这一下伤害一共有几点落在
+    // 这个区间,就问几次(每点独立一次放置不屈牌的机会),不是"只要结算后≤0就问一次"。
+    // 推导:把 amount 点伤害看成 amount 次连续的-1,第 k 次(k=1..amount)扣完后的体力是
+    // hpBeforeThisDamage-k;落在"≤0"区间的次数 = amount 减去"结果仍>0"的次数。
+    // 结果>0 当且仅当 k<hpBeforeThisDamage,即 k 从 1 到 max(hpBeforeThisDamage-1,0) 共
+    // max(hpBeforeThisDamage-1,0) 次(hpBeforeThisDamage≤0 时打之前已经在区间内,这部分为0,
+    // 后面 amount 次全部计入,与"已经是0血再挨打全部N点都算"的要求一致)。
+    // 因此 overkillPoints = amount - max(hpBeforeThisDamage-1, 0),再夹到 [0, amount]。
+    // 验证:hp=0挨2点→0-max(-1,0)=2-0=2(两次都问);hp=1挨2点→2-max(0,0)=2(两次都问,
+    // 因为第1点刚好让体力到0、第2点让体力到-1,两次结果都≤0);hp=3挨2点→hp变1,不出现
+    // 这个分支(不触发);hp=1挨1点→1-0=1(单点伤害维持改动前"触发1次"的行为,零回归)。
+    const overkillPoints = Math.max(0, Math.min(amount, amount - Math.max(hpBeforeThisDamage-1, 0)));
+    if(hasCap(p, 'buqu') && overkillPoints > 0 && (g.deck || []).length > 0) {
+      g.pending = { type:'buquAsk', seat, resume:{type:srcType, sourceSeat, amount}, remaining: overkillPoints };
       g.phase = 'buquAsk';
-      g.log = pushLog(g.log, p.name+' 体力降到0,是否发动【不屈】,放置一张不屈牌…');
+      g.log = pushLog(g.log, p.name+' 体力降到0,是否发动【不屈】,放置一张不屈牌…'+(overkillPoints>1?'（本次伤害共需询问 '+overkillPoints+' 次）':''));
       return true;
     }
     startDying(g, seat, srcType, sourceSeat, amount);
@@ -4240,18 +4257,25 @@ function useNiepan(){
   });
 }
 // respondBuqu: 周泰【不屈】选择响应。选择放置或不放置不屈牌。
+// remaining:本次伤害"体力降到0或以下"一共触发了几次(见 dealDamage 的 overkillPoints
+// 推导),每次响应(不管选择放置还是不放置)只消耗一次机会——每一点独立算一次询问,不是
+// "选一次不发动就等于放弃剩下所有次数"。三种收尾路径:①放置后点数全部唯一→立即回复
+// 体力、接回原流程,不管 remaining 是否还有剩余,直接结束(体力已经回正,没有继续问的意义);
+// ②remaining 消耗完(减到0)仍未防死→进入 startDying 濒死流程;③期间牌堆耗尽(拿不出下一
+// 张不屈牌)→同样直接进入濒死流程,不强行继续问。
 function respondBuqu(useBuqu){
   tx(g=>{
     if(g.phase!=='buquAsk'||!g.pending||g.pending.type!=='buquAsk') return g;
     const me=g.players[mySeat];
     if(!me || !me.alive || g.pending.seat!==mySeat) return g;
-    
+
     const seat = g.pending.seat;
     const p = g.players[seat];
     // 走 hasCap,不硬编码武将 id(断肠后 skillsLost 也会正确失效)
     if(!p || !p.alive || !hasCap(p, 'buqu')) return g;
-    
+
     const resume = g.pending.resume || {type:'sha'};
+    const remaining = Number.isInteger(g.pending.remaining) ? g.pending.remaining : 1;
     if(useBuqu && (g.deck || []).length > 0) {
       // 从牌堆顶放置一张不屈牌
       ensureDeck(g);
@@ -4263,11 +4287,12 @@ function respondBuqu(useBuqu){
         p.buquCards.push(card);
         g.log = pushLog(g.log, p.name+' 发动【不屈】,放置了一张不屈牌（'+card.name+' '+card.suit+card.rank+'）');
         markSkillSound(g, '不屈');
-        
+
         // 检查防死条件:所有不屈牌点数都唯一
         const allUnique = checkBuquUnique(p);
         if(allUnique) {
           // 防止死亡：体力设置为0,接回原伤害流程(不可硬写 phase=play 丢 resume)
+          // 体力已经回正,不需要再问剩余的 remaining 次(即使这次伤害本该还问几次)。
           p.hp = 0;
           g.log = pushLog(g.log, p.name+' 所有不屈牌点数唯一,防止死亡（体力设为0）');
           g.pending = null;
@@ -4275,14 +4300,23 @@ function respondBuqu(useBuqu){
           resumeAfterInterrupt(g, resume, seat);
           return g;
         }
-        // 放置了不屈牌但防死条件不满足,继续进入濒死流程
-        g.log = pushLog(g.log, p.name+' 发动【不屈】但防死条件不满足,继续濒死流程');
+        // 放置了不屈牌但防死条件不满足,继续进入濒死流程(或继续问下一次,见下方)
+        g.log = pushLog(g.log, p.name+' 发动【不屈】但防死条件不满足');
       }
     } else {
       g.log = pushLog(g.log, p.name+' 选择不发动【不屈】');
     }
-    
-    // startDying 自己会写 g.pending=dying; 绝不可在其后 g.pending=null 覆盖掉
+
+    // 这一点没能防死(选择不发动 / 放置了但点数不唯一 / 牌堆空拿不出牌):这次伤害如果还有
+    // 剩余的"降到0以下"次数、且牌堆还有牌,继续问下一次;否则(次数问完或牌堆已耗尽)才真正
+    // 进入濒死流程——startDying 自己会写 g.pending=dying,绝不可在其后 g.pending=null 覆盖掉。
+    const remainingAfter = remaining - 1;
+    if(remainingAfter > 0 && (g.deck || []).length > 0) {
+      g.pending = { type:'buquAsk', seat, resume, remaining: remainingAfter };
+      g.phase = 'buquAsk';
+      g.log = pushLog(g.log, p.name+' 体力仍在0点以下,是否继续发动【不屈】,放置一张不屈牌…（还需询问 '+remainingAfter+' 次）');
+      return g;
+    }
     startDying(g, seat, resume.type, resume.sourceSeat, resume.amount);
     return g;
   });
