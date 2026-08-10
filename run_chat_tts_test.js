@@ -6,7 +6,8 @@ const speakCalls = [];
 const voicesMock = [
   { name: 'Microsoft Huihui - Chinese (Simplified)', lang: 'zh-CN' },   // 女
   { name: 'Microsoft Kangkang - Chinese (Simplified)', lang: 'zh-CN' }, // 男
-  { name: 'Google US English', lang: 'en-US' }
+  { name: 'Google US English', lang: 'en-US' },
+  { name: 'Microsoft Heami - Korean', lang: 'ko-KR' }
 ];
 const context = {
   gameRef: { transaction: function(fn){ return fn(context.g || {}); } },
@@ -94,12 +95,40 @@ function check(name, fn){
     if(speakCalls[0].pitch!==0.8) throw new Error('male应pitch0.8,实际 '+speakCalls[0].pitch);
     if(speakCalls[1].pitch!==1.2) throw new Error('female应pitch1.2,实际 '+speakCalls[1].pitch);
   });
-  // 6. voice 选择:列表里有女声 Huihui 时 female 选中它
-  await check('pickChatVoice: 女→Huihui, 男→Kangkang', function(){
-    const vf = vm.runInContext('pickChatVoice', sandbox)('female');
-    const vm2 = vm.runInContext('pickChatVoice', sandbox)('male');
+  // 6. voice 选择:列表里有女声 Huihui 时 female 选中它(lang传zh-CN,既有行为)
+  await check('pickChatVoice: 女→Huihui, 男→Kangkang(lang=zh-CN)', function(){
+    const vf = vm.runInContext('pickChatVoice', sandbox)('female', 'zh-CN');
+    const vm2 = vm.runInContext('pickChatVoice', sandbox)('male', 'zh-CN');
     if(!vf || vf.name.indexOf('Huihui')<0) throw new Error('female应选Huihui,实际 '+(vf&&vf.name));
     if(!vm2 || vm2.name.indexOf('Kangkang')<0) throw new Error('male应选Kangkang,实际 '+(vm2&&vm2.name));
+  });
+  // 6b. pickChatVoice: lang前缀不匹配时(en-US)不会选中文voice,退化为按语言前缀匹配
+  await check('pickChatVoice: lang=en-US 时选中英文voice(不是中文Huihui/Kangkang)', function(){
+    const v = vm.runInContext('pickChatVoice', sandbox)('male', 'en-US');
+    if(!v || v.lang.indexOf('en')!==0) throw new Error('en-US应选英文voice,实际 '+(v&&v.name)+' lang='+(v&&v.lang));
+  });
+  await check('pickChatVoice: lang=ko-KR 时选中韩文voice', function(){
+    const v = vm.runInContext('pickChatVoice', sandbox)('female', 'ko-KR');
+    if(!v || v.lang.indexOf('ko')!==0) throw new Error('ko-KR应选韩文voice,实际 '+(v&&v.name)+' lang='+(v&&v.lang));
+  });
+  // 9. detectChatLang:按字符集判断语言——中文/英文/韩文/混合(按主要语言,中文优先命中)
+  await check('detectChatLang: 中文→zh-CN, 英文→en-US, 韩文→ko-KR', function(){
+    const zh = vm.runInContext('detectChatLang', sandbox)('这波啊这波是天命');
+    const en = vm.runInContext('detectChatLang', sandbox)('Hello world nice game');
+    const ko = vm.runInContext('detectChatLang', sandbox)('안녕하세요 반갑습니다');
+    if(zh!=='zh-CN') throw new Error('中文应判zh-CN,实际 '+zh);
+    if(en!=='en-US') throw new Error('英文应判en-US,实际 '+en);
+    if(ko!=='ko-KR') throw new Error('韩文应判ko-KR,实际 '+ko);
+  });
+  // 10. speakChatMessage: 根因修复验证——u.lang 按文本内容检测,而非写死zh-CN
+  await check('speakChatMessage: u.lang 按文本语言检测(中/英/韩三种消息分别对应zh-CN/en-US/ko-KR)', function(){
+    speakCalls.length = 0;
+    vm.runInContext('speakChatMessage', sandbox)('这波啊这波是天命', 'male');
+    vm.runInContext('speakChatMessage', sandbox)('Hello world nice game', 'male');
+    vm.runInContext('speakChatMessage', sandbox)('안녕하세요 반갑습니다', 'male');
+    if(speakCalls[0].lang!=='zh-CN') throw new Error('中文消息u.lang应为zh-CN,实际 '+speakCalls[0].lang);
+    if(speakCalls[1].lang!=='en-US') throw new Error('英文消息u.lang应为en-US,实际 '+speakCalls[1].lang);
+    if(speakCalls[2].lang!=='ko-KR') throw new Error('韩文消息u.lang应为ko-KR,实际 '+speakCalls[2].lang);
   });
   // 7. M-1 真实持久化:关闭后 localStorage 存 sgs_chat_voice='0'
   await check('toggleChatVoice: 关闭后 localStorage 存 sgs_chat_voice=0', function(){

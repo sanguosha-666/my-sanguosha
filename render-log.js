@@ -252,23 +252,42 @@ function toggleChatVoice(){
   if(btn) btn.textContent = chatVoiceEnabled ? '🔊' : '🔇';
   return chatVoiceEnabled;
 }
-// pickChatVoice:按性别选中文 voice(名字关键词),列表为空/无匹配返回 null(调用方 fallback pitch)。
-function pickChatVoice(gender){
+// detectChatLang:按文本主要字符集判断语言,返回 BCP47 lang 标签。修复"英文/韩文消息
+// 不发声"问题的根因——SpeechSynthesisUtterance.lang 若与文本实际语言不匹配,很多浏览器
+// 的语音引擎会静默跳过整句、不报错也不出声。规则:先查韩文(谚文音节/字母/兼容字母区
+// U+AC00-D7A3/U+1100-11FF/U+3130-318F,和中文区间互斥,须先判断避免被中文规则截胡)、
+// 再查中文(CJK统一表意文字 U+4E00-9FFF),都不含则默认英文——简单字符区间判断,不引入
+// 语言检测库,够用即可。混合语言消息(一句话中英夹杂)按"整句判一次主要语言"处理,不做
+// 分段;真要分段需要按语言切分文本+逐段调用speak,复杂度明显超出这次修复范围,列后续优化项。
+function detectChatLang(text){
+  const s = String(text||'');
+  if(/[가-힣ᄀ-ᇿ㄰-㆏]/.test(s)) return 'ko-KR';
+  if(/[一-鿿]/.test(s)) return 'zh-CN';
+  return 'en-US';
+}
+// pickChatVoice:按性别选对应语言的 voice(名字关键词只覆盖中文声库命名习惯,英文/韩文
+// 声库无统一命名规则,退化为"只匹配语言前缀、忽略性别关键词");列表为空/无匹配返回 null
+// (调用方 fallback pitch,不影响是否发声——发声与否由 u.lang 是否匹配文本决定)。
+function pickChatVoice(gender, lang){
   try{
     if(!('speechSynthesis' in window)) return null;
     const voices = window.speechSynthesis.getVoices();
     if(!voices || !voices.length) return null;
     const isFemale = gender==='female';
     const kw = isFemale ? /female|女|huihui|xiaoxiao|xiaoyi/i : /male|男|kangkang|yunxi/i;
-    return voices.find(v => kw.test(v.name) && /zh/i.test(v.lang||'')) || null;
+    const prefix = (lang||'zh-CN').split('-')[0];
+    const langRe = new RegExp('^'+prefix, 'i');
+    return voices.find(v => kw.test(v.name) && langRe.test(v.lang||''))
+        || voices.find(v => langRe.test(v.lang||''))
+        || null;
   }catch(e){ return null; }
 }
 function speakChatMessage(text, gender){
   try{
     if(!('speechSynthesis' in window)) return;
     const u = new SpeechSynthesisUtterance(String(text||'').slice(0,60));
-    u.lang = 'zh-CN';
-    const v = pickChatVoice(gender);
+    u.lang = detectChatLang(text);
+    const v = pickChatVoice(gender, u.lang);
     if(v) u.voice = v;
     u.pitch = (gender==='female') ? 1.2 : 0.8;
     window.speechSynthesis.cancel(); // 防多次快速触发排队堆积
