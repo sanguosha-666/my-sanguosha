@@ -246,6 +246,25 @@
     70%{opacity:.85;}
     100%{opacity:0;}
   }
+  /* 实际扣血反馈:震动/红闪由卡片承担,剑痕和伤害数字用伪元素覆盖，不改变座位布局。 */
+  .seat.damage-hit{animation:damageHitShake .62s cubic-bezier(.36,.07,.19,.97);}
+  .seat.damage-hit::before{content:"";position:absolute;z-index:45;pointer-events:none;
+    left:-12%;top:47%;width:124%;height:5px;border-radius:50%;
+    background:linear-gradient(90deg,transparent 4%,#fff 30%,#ffd4b8 48%,#d4261b 55%,transparent 92%);
+    box-shadow:0 0 7px #fff,0 0 16px #d4261b;transform:rotate(-24deg) scaleX(0);
+    animation:damageSlash .5s ease-out forwards;}
+  .seat.damage-hit.damage-hit::after{content:"−" attr(data-damage-amount);position:absolute;z-index:46;
+    left:50%;top:40%;transform:translate(-50%,-50%);pointer-events:none;
+    color:#fff;font-size:clamp(28px,4vw,48px);font-weight:900;line-height:1;
+    text-shadow:0 2px 2px #510000,0 0 8px #ff2a1d,0 0 18px #b00000;
+    animation:damageNumber .7s ease-out forwards;}
+  @keyframes damageHitShake{
+    0%,100%{transform:translate(0,0);filter:none;} 12%{transform:translate(-7px,2px);filter:brightness(1.65) sepia(.7) saturate(3);}
+    25%{transform:translate(7px,-2px);} 38%{transform:translate(-5px,1px);} 52%{transform:translate(4px,-1px);}
+    68%{transform:translate(-2px,0);filter:brightness(1.15) sepia(.25) saturate(1.5);}
+  }
+  @keyframes damageSlash{0%{opacity:0;transform:rotate(-24deg) scaleX(0);}18%{opacity:1;}55%{transform:rotate(-24deg) scaleX(1);}100%{opacity:0;transform:rotate(-24deg) scaleX(1.08);}}
+  @keyframes damageNumber{0%{opacity:0;transform:translate(-50%,-20%) scale(.6);}18%{opacity:1;transform:translate(-50%,-50%) scale(1.18);}65%{opacity:1;}100%{opacity:0;transform:translate(-50%,-105%) scale(.92);}}
   /* ===== 座位卡片(第3次布局):武将立绘铺满整卡 + 文字叠加在图片上层 =====
      **这是本项目第三次采用"文字叠在武将立绘上"的设计。前两次(头像铺满整卡 / 头像居左
      固定大块)都因为"文字盖在可变内容图片上导致可读性差"而主动放弃(见CLAUDE.md两轮
@@ -2129,21 +2148,21 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=373"></script>
-<script src="data.js?v=373"></script>
-<script src="debug-log.js?v=373"></script>
-<script src="room-lifecycle.js?v=373"></script>
-<script src="game.js?v=373"></script>
-<script src="weapons.js?v=373"></script>
-<script src="skills.js?v=373"></script>
-<script src="bot-ai-bus.js?v=373"></script>
-<script src="bot.js?v=373"></script>
-<script src="ai-bot.js?v=373"></script>
-<script src="render.js?v=373"></script>
-<script src="render-table.js?v=373"></script>
-<script src="render-discard.js?v=373"></script>
-<script src="render-hand.js?v=373"></script>
-<script src="render-controls.js?v=373"></script>
-<script src="render-log.js?v=373"></script>
+<script src="config.js?v=374"></script>
+<script src="data.js?v=374"></script>
+<script src="debug-log.js?v=374"></script>
+<script src="room-lifecycle.js?v=374"></script>
+<script src="game.js?v=374"></script>
+<script src="weapons.js?v=374"></script>
+<script src="skills.js?v=374"></script>
+<script src="bot-ai-bus.js?v=374"></script>
+<script src="bot.js?v=374"></script>
+<script src="ai-bot.js?v=374"></script>
+<script src="render.js?v=374"></script>
+<script src="render-table.js?v=374"></script>
+<script src="render-discard.js?v=374"></script>
+<script src="render-hand.js?v=374"></script>
+<script src="render-controls.js?v=374"></script>
+<script src="render-log.js?v=374"></script>
 </body>
 </html>

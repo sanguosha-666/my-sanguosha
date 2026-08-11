@@ -116,6 +116,9 @@ function normalize(g){
   });
   // 出牌语音事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次出牌语音事件")
   if(g.lastCardSound===undefined) g.lastCardSound=null;
+  // 实际扣血事件:渲染端据此播放受击动画和音效。只保留最新一次,seq 用于各客户端去重。
+  if(g.lastDamageEffect===undefined) g.lastDamageEffect=null;
+  else if(g.lastDamageEffect!==null && (!Number.isInteger(g.lastDamageEffect.seq) || !Number.isInteger(g.lastDamageEffect.target) || !Number.isFinite(g.lastDamageEffect.amount) || g.lastDamageEffect.amount<=0)) g.lastDamageEffect=null;
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
   // 每一项的 targets 字段防御(原来只在单独的 g.tableCard.targets 上做,现在 g.tableCard 已经
   // 消灭、统一到 g.exchangeCards,防御要作用于数组里的每一项)。这条是纯粹的"数据形状防御"
@@ -3943,6 +3946,10 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
   // 考虑 hp<0 会让结果膨胀——完整点位清单见 CLAUDE.md。
   const hpBeforeThisDamage = p.hp;
   p.hp = p.hp - amount;
+  if(amount>0){
+    const damageSeq=(g.lastDamageEffect && Number.isInteger(g.lastDamageEffect.seq)) ? g.lastDamageEffect.seq : 0;
+    g.lastDamageEffect={seq:damageSeq+1,target:seat,amount:amount};
+  }
   const natureText=damageNatureText(cardDamageNature(sourceCard));
   g.log=logEvent(g.log, { kind:'damage', actor:(Number.isInteger(sourceSeat)?sourceSeat:undefined), targets:[seat], text: p.name+(reason?' '+reason+',':' ')+'受到'+amount+'点'+natureText+'伤害（体力'+p.hp+'）' });
   if(typeof recordBotDamageEvidence==='function') recordBotDamageEvidence(g,sourceSeat,seat,amount,srcType);

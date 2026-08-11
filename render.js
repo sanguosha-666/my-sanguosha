@@ -571,6 +571,42 @@ function maybePlaySkillSound(g){
   }catch(e){}
 }
 
+// ===== 实际扣血反馈:所有客户端共用 g.lastDamageEffect.seq 去重 =====
+// 视觉只落在受伤座位卡上；音效按受伤武将性别选择独立的剑击+受击声文件。
+let lastPlayedDamageSeq = undefined;
+function playDamageHitSound(g,targetSeat){
+  try{
+    const p=g.players && g.players[targetSeat];
+    const gen=p && typeof getGeneral==='function' ? getGeneral(p.general) : null;
+    const gender=(gen && gen.gender) || (p && p.gender);
+    const file=gender==='female'?'damage_female.wav':'damage_male.ogg';
+    const voice=new Audio('assets/audio/'+file);
+    const sword=new Audio('assets/audio/damage_sword.mp3');
+    voice.volume=.82; sword.volume=.58;
+    voice.play().catch(err=>console.warn('受击音效播放失败:',file,err && err.name,err));
+    sword.play().catch(err=>console.warn('剑击音效播放失败:',err && err.name,err));
+    // 游戏反馈只播放一次短促受击声；即使以后替换成较长源文件，也不会连续呻吟。
+    setTimeout(()=>{ [voice,sword].forEach(audio=>{ try{ audio.pause(); audio.currentTime=0; }catch(e){} }); },700);
+  }catch(e){ console.warn('受击音效播放失败:',e); }
+}
+function maybeShowDamageEffect(g){
+  const evt=g.lastDamageEffect;
+  if(!evt || !Number.isInteger(evt.seq)){ if(lastPlayedDamageSeq===undefined) lastPlayedDamageSeq=0; return; }
+  if(lastPlayedDamageSeq===undefined){ lastPlayedDamageSeq=evt.seq; return; } // 刷新不补播历史伤害
+  if(evt.seq===lastPlayedDamageSeq) return;
+  lastPlayedDamageSeq=evt.seq;
+  const seat=document.querySelector('.seat[data-seat="'+evt.target+'"]');
+  if(seat){
+    seat.dataset.damageAmount=String(Math.max(1,evt.amount||1));
+    seat.classList.remove('damage-hit');
+    void seat.offsetWidth;
+    seat.classList.add('damage-hit');
+    clearTimeout(seat._damageTimer);
+    seat._damageTimer=setTimeout(()=>seat.classList.remove('damage-hit'),720);
+  }
+  playDamageHitSound(g,evt.target);
+}
+
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
 function showConfirm(message, onOk, onCancel){
@@ -1621,6 +1657,7 @@ function render(g){
   // 这个顺序影响(它是持久节点,不会被座位重绘销毁),但它的目标座位高亮逻辑必须在这里、
   // 座位元素已经是"这一轮最终版本"之后执行。
   renderTableCard(g);
+  maybeShowDamageEffect(g);
   if(typeof observeDiscardReveal==='function') observeDiscardReveal(g);
   // 【updateLogPanelHeight() 的调用点已下移】——桌面自适应 步骤a 引入
   // updateDesktopSeatHeights() 之后,这里出现过一个真实的循环依赖 bug:原来
