@@ -472,6 +472,21 @@
     width:14px;height:14px;font-size:9px;
     z-index:2;
   }
+  /* 当前浏览器开启AI托管时，标在被托管武将卡上；独立底衬保证各种立绘上都清楚。 */
+  .seat-autopilot-badge{
+    position:absolute;top:22px;left:50%;transform:translateX(-50%);
+    width:24px;height:24px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--gold);border-radius:50%;background:#1a1410;
+    font-size:15px;line-height:1;z-index:7;pointer-events:none;
+    box-shadow:0 1px 4px rgba(0,0,0,.85);
+  }
+  .seat.me .seat-autopilot-badge{top:30px;width:30px;height:30px;font-size:19px;}
+  @container (max-width:130px){
+    .seat-autopilot-badge{top:18px;width:19px;height:19px;font-size:12px;}
+  }
+  @container (max-width:105px){
+    .seat-autopilot-badge{top:15px;width:16px;height:16px;font-size:10px;}
+  }
   /* 装备条(第5次微调:去掉不透明白底,改成白色文字直接叠在立绘下半部;
      第6次微调:4行放大到"撑满"阴影区;
      **第7次微调:撑满这个目标本身被取消——字号缩回到和标题栏/武将名/血量协调的比例,

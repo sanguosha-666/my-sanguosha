@@ -896,6 +896,22 @@ function updateAiTestStatus(){
   const stopBtn=document.getElementById('aiTestStopBtn');
   if(startBtn) startBtn.disabled=aiTestAutopilot.active;
   if(stopBtn) stopBtn.disabled=!aiTestAutopilot.active;
+  syncAiTestSeatBadge();
+}
+
+// 开始/结束托管不会修改 Firebase 游戏状态，也不一定触发 render；直接同步座位卡角标，
+// 让按钮操作后立即得到视觉反馈。后续正常 render 时 renderSeatCard 也会按同一状态重建。
+function syncAiTestSeatBadge(){
+  document.querySelectorAll('.seat-autopilot-badge').forEach(function(el){ el.remove(); });
+  if(!aiTestAutopilot.active || !Number.isInteger(aiTestAutopilot.seat)) return;
+  const seatEl=document.querySelector('.seat[data-seat="'+aiTestAutopilot.seat+'"]');
+  if(!seatEl) return;
+  const badge=document.createElement('div');
+  badge.className='seat-autopilot-badge';
+  badge.title='AI托管中';
+  badge.setAttribute('aria-label','AI托管中');
+  badge.textContent='🤖';
+  seatEl.appendChild(badge);
 }
 
 function openAiTestModal(){

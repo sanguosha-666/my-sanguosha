@@ -960,6 +960,11 @@ function renderSeatCard(g, seat, isSelf){
   const infoBadge = (avatarReady&&gen)
     ? '<span class="seat-info-badge info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>'
     : '';
+  // AI托管是当前浏览器的本地状态；只在实际被托管的座位卡上显示机器人标识。
+  // 不写入共享游戏状态，结束托管后由 updateAiTestStatus 立即移除。
+  const autopilotBadge = (typeof aiTestAutopilot!=='undefined' && aiTestAutopilot.active && aiTestAutopilot.seat===seat)
+    ? '<div class="seat-autopilot-badge" title="AI托管中" aria-label="AI托管中">🤖</div>'
+    : '';
   // 出牌顺序编号角标(右下角,常驻显示):死亡玩家不参与编号、不显示(orderMap 里没有
   // 它的座位号,下面这行天然拿到 undefined)。**位置冲突排查**:.seat-bottom(判定区+
   // 装备行)是 left:0;right:0;bottom:0 铺满整个底部的绝对定位容器,里面的不屈牌行/
@@ -1022,6 +1027,7 @@ function renderSeatCard(g, seat, isSelf){
       })()
     + teamBlock
     + infoBadge
+    + autopilotBadge
     + '<div class="seat-bottom">'+huashenLine+buquRow+delayRow+equipRow+'</div>'
     // orderBadge 排在 .seat-bottom 之后(DOM序=层叠序,后面的盖在前面上面)——两者本来
     // 就靠 .seat-bottom 的 right 收窄互不重叠(见上面注释),这里放在最后只是双重保险:
