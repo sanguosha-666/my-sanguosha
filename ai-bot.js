@@ -69,13 +69,20 @@ let aiApiModel = '';
 const AI_MODELS_STORAGE_KEY = 'sgsAiModels';
 // 默认勾选(groq 免费层独立池模型,用户确认)
 const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b'];
-// 默认勾选(hf:用户已在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,三家各取一个
-// 代表模型,id 自带 :provider 后缀——选谁 HF 就路由到谁、服务端自动换 custom key,
-// provider 直接计费,不消耗 HF credits)。
+// 默认勾选(hf:用户已在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,id 自带
+// :provider 后缀——选谁 HF 就路由到谁、服务端自动换 custom key,provider 直接计费,
+// 不消耗 HF credits)。用户指定(2026-08-11):groq 全部 4 个 + cerebras 全部 3 个 +
+// cohere command-a-reasoning-08-2025(用户原想用 command-a-plus-05-2026,但该模型
+// 未注册到 HF,实测 /api/partners/cohere/models 无此映射,换成已注册的 reasoning 版)。
 const DEFAULT_HF_MODELS = [
   'openai/gpt-oss-120b:groq',
-  'CohereLabs/c4ai-command-a-03-2025:cohere',
+  'openai/gpt-oss-20b:groq',
+  'meta-llama/Llama-3.3-70B-Instruct:groq',
+  'openai/gpt-oss-safeguard-20b:groq',
   'openai/gpt-oss-120b:cerebras',
+  'google/gemma-4-31B-it:cerebras',
+  'zai-org/GLM-4.7:cerebras',
+  'CohereLabs/command-a-reasoning-08-2025:cohere',
 ];
 let aiApiModels = [];
 let _modelRotateIdx = 0;          // round-robin 指针

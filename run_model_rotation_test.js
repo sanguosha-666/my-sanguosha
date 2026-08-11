@@ -31,11 +31,13 @@ async function check(name, fn){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
-  // 0b. hf 默认勾选(三家各一,id 都带 :provider 后缀——走 custom key 轮换)
-  await check('默认勾选: hf 三家 custom key 模型', function(){
+  // 0b. hf 默认勾选:groq 全部4个 + cerebras 全部3个 + cohere reasoning 1个(共8个)
+  await check('默认勾选: hf groq全部+cerebras全部+cohere reasoning', function(){
     const d = vm.runInContext('DEFAULT_HF_MODELS', sandbox);
-    if(!d || d.length!==3) throw new Error('应3个,实际 '+(d&&d.length));
-    ['openai/gpt-oss-120b:groq','CohereLabs/c4ai-command-a-03-2025:cohere','openai/gpt-oss-120b:cerebras'].forEach(function(m){
+    if(!d || d.length!==8) throw new Error('应8个,实际 '+(d&&d.length));
+    ['openai/gpt-oss-120b:groq','openai/gpt-oss-20b:groq','meta-llama/Llama-3.3-70B-Instruct:groq','openai/gpt-oss-safeguard-20b:groq',
+     'openai/gpt-oss-120b:cerebras','google/gemma-4-31B-it:cerebras','zai-org/GLM-4.7:cerebras',
+     'CohereLabs/command-a-reasoning-08-2025:cohere'].forEach(function(m){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
