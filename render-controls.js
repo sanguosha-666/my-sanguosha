@@ -3724,11 +3724,33 @@ function renderControls(g){
     } else if(rendeMode){
       setBanner(selectedCardIdx===null
         ? '【仁德】选择一张要交出的手牌。'
-        : '已选中一张手牌,点上方一名其他角色交给他（可继续发动）。');
+        : '已选中一张手牌,请选择一名其他角色交给他（可继续发动）。');
+      if(selectedCardIdx!==null){
+        g.players.forEach((p,seat)=>{
+          if(seat===mySeat || !p || !p.alive) return;
+          const idx=selectedCardIdx;
+          const targetSeat=seat;
+          const tb=document.createElement('button');
+          tb.className='primary';
+          tb.textContent='交给 '+p.name;
+          tb.onclick=()=>{ confirmAndPlay('将这张手牌交给 '+p.name+'，发动【仁德】？', ()=>renDe(idx, targetSeat)); };
+          c.appendChild(tb);
+        });
+      }
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ selectedCardIdx=null; resetRende(); render(g); }; c.appendChild(cb);
     } else if(jijiangMode){
-      setBanner('【激将】选择一名合法目标,然后请求其他蜀势力角色代你打出【杀】。');
+      setBanner('【激将】请选择一名合法目标,然后请求其他蜀势力角色代你打出【杀】。');
+      const virtualSha={name:'杀',suit:'',rank:'',id:'jijiang'};
+      g.players.forEach((p,seat)=>{
+        if(seat===mySeat || !p || !p.alive || !CARD_PLAYS['杀'].canTarget(g,me,virtualSha,seat)) return;
+        const targetSeat=seat;
+        const tb=document.createElement('button');
+        tb.className='primary';
+        tb.textContent='对 '+p.name+' 发动【激将】';
+        tb.onclick=()=>{ resetJijiang(); useJijiang(targetSeat); };
+        c.appendChild(tb);
+      });
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetJijiang(); render(g); }; c.appendChild(cb);
     } else if(zhihengMode){

@@ -38,14 +38,16 @@ function makeEl(){
   return {
     src:'', href:'', rel:'', type:'', textContent:'', innerHTML:'',
     onclick:null, onerror:null, onload:null, className:'', id:'', disabled:false,
-    style:{}, classList:{ add(){}, remove(){}, toggle(){}, contains(){ return false; } },
+    style:{}, dataset:{}, classList:{ add(){}, remove(){}, toggle(){}, contains(){ return false; } },
     setAttribute(){}, getAttribute(){ return null; },
+    addEventListener(){}, removeEventListener(){},
     appendChild(el){ if(!this.children) this.children = []; this.children.push(el); return el; },
     remove(){}, querySelector(){ return null; }, querySelectorAll(){ return []; }
   };
 }
 // 供 UI 测试:把 #controls 元素换成本地可追踪对象,renderControls 追加的按钮全部落在 children
 let __controlsEl = null;
+let __handEl = null;
 
 const context = {
   gameRef: { transaction(fn){ return fn(context._g || {}); } },
@@ -60,9 +62,14 @@ const context = {
   document: {
     getElementById(id){
       if(id === 'controls' && __controlsEl) return __controlsEl;
+      if(id === 'hand' && __handEl) return __handEl;
       return makeEl();
     },
-    createElement(){ return makeEl(); },
+    createElement(tag){
+      const el=makeEl();
+      if(tag==='canvas') el.getContext=()=>({ font:'', measureText(text){ return {width:String(text||'').length*16}; } });
+      return el;
+    },
     createTextNode(t){ return { textContent:t }; },
     createDocumentFragment(){ return { appendChild(){ return {}; } }; },
     querySelector(){ return null; }, querySelectorAll(){ return []; },
@@ -85,7 +92,7 @@ context.window.firebase = context.firebase;
 context.global = context;
 
 const sandbox = vm.createContext(context);
-const files = ['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js','ai-bot.js','render.js','render-controls.js'];
+const files = ['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js','ai-bot.js','render.js','render-hand.js','render-controls.js'];
 console.log('Loading B2a 主公技测试环境...\n');
 files.forEach(f=>{
   const code = fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -822,6 +829,36 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     const labels=R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
     assert.ok(labels.indexOf('发动【仁德】')>=0,'应有仁德入口,实际 '+JSON.stringify(labels));
     assert.ok(labels.indexOf('发动【激将】')>=0,'应有激将入口,实际 '+JSON.stringify(labels));
+
+    // 真实点击链:发动仁德 → 点击手牌 → 控制区出现明确目标按钮 → 确认后完成赠牌。
+    R('var __savedRender=render; render=function(g){ renderControls(g); renderHand(g); };');
+    R('(window.__controlsEl.children || []).find(function(el){ return el.textContent==="发动【仁德】"; }).onclick()');
+    assert.strictEqual(R('rendeMode'),true);
+    __handEl=makeEl(); context.window.__handEl=__handEl;
+    R('renderHand(_g)');
+    assert.ok(__handEl.children && __handEl.children[0] && typeof __handEl.children[0].onclick==='function','仁德模式下手牌应可点击');
+    __handEl.children[0].onclick();
+    assert.strictEqual(R('selectedCardIdx'),0);
+    const rendeLabels=R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
+    assert.ok(rendeLabels.indexOf('交给 角色1')>=0,'选牌后应有明确赠牌目标,实际 '+JSON.stringify(rendeLabels));
+    R('var __savedConfirmAndPlay=confirmAndPlay; confirmAndPlay=function(message,fn){ resetSelectionState(); fn(); };');
+    R('(window.__controlsEl.children || []).find(function(el){ return el.textContent==="交给 角色1"; }).onclick()');
+    R('confirmAndPlay=__savedConfirmAndPlay;');
+    assert.strictEqual(getG().players[0].hand.length,0);
+    assert.strictEqual(getG().players[1].hand.length,1);
+
+    // 重新构造局面验证激将入口点击后,合法目标也是明确按钮且点击会真正进入询问阶段。
+    const jg=mkG({phase:'play',turn:0,generals:{0:'liubei',1:'caocao',2:'zhaoyun'},hands:{0:[SH],2:[S]}});
+    setG(jg); R('resetSelectionState()');
+    __controlsEl=makeEl(); context.window.__controlsEl=__controlsEl;
+    R('renderControls(_g)');
+    R('(window.__controlsEl.children || []).find(function(el){ return el.textContent==="发动【激将】"; }).onclick()');
+    const jijiangLabels=R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
+    assert.ok(jijiangLabels.indexOf('对 角色1 发动【激将】')>=0,'激将应有明确合法目标,实际 '+JSON.stringify(jijiangLabels));
+    R('(window.__controlsEl.children || []).find(function(el){ return el.textContent==="对 角色1 发动【激将】"; }).onclick()');
+    assert.strictEqual(getG().phase,'jijiangAsk');
+    assert.strictEqual(getG().pending.asking,2);
+    R('render=__savedRender;');
   });
 
   await check('L8 主动激将:选择目标→蜀将代出杀→刘备成为使用者并消耗出杀次数', function(){

@@ -623,7 +623,7 @@ function showConfirm(message, onOk, onCancel){
 // 纯提取重构,行为零变化,只是让 confirmOwnOrSha(按原效果用/当杀 二选一弹窗)也能调用同一份
 // "清空全部客户端选牌/选目标状态"逻辑,不用另外复制一份 reset* 列表。
 function resetSelectionState(){
-  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetGuhuoJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); resetSanyao(); resetZhiba();
+  selectedCardIdx=null; forcedShaCardId=null; resetZhangba(); resetDuanliang(); resetQixi(); resetGuose(); resetLianhuan(); resetTiesuo(); resetQingnang(); resetRende(); resetJijiang(); resetZhiheng(); resetQiaobian(); resetJiedao(); resetGuhuoJiedao(); resetFangtian(); resetGanglie(); resetQuhu(); resetLijian(); resetFanjian(); resetLirang(); resetTiaoxin(); resetDimeng(); resetSanyao(); resetZhiba();
 }
 // confirmAndPlay: 出牌四类触发点(选目标/不选目标/丈八两张当杀)统一委托的包装——
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
@@ -1520,6 +1520,10 @@ function render(g){
       rb.style.margin='6px 14px 0';
       rb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>{ selectedCardIdx=null; renDe(idx, targetSeat); }); };
       d.appendChild(rb);
+      d.style.cursor='pointer';
+      d.style.outline='2px dashed var(--cinnabar-bright)';
+      d.title='选择为【仁德】的赠牌目标';
+      d.onclick=()=>{ confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>renDe(idx, targetSeat)); };
     }
     // 刘备【激将】:主动使用时先选合法的【杀】目标,再进入蜀势力角色依次响应流程。
     if(jijiangMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
