@@ -863,12 +863,46 @@ if (g && g.botServerActive && !aiTestSelf) return;   // Node 接管机器人座�
 
 ### 顺带发现、建议单独立项的既有 bug（都与迁移无关）
 
-| # | 问题 | 影响 |
-|---|---|---|
-| 1 | `guhuoTarget` 未登记 `BOT_PHASE_ACTOR` | 专用分支（bot.js:4590）是死代码，从未执行过 |
-| 2 | `quhuDamageChoice` 未登记 `BOT_PHASE_ACTOR` | 专用分支（bot.js:4596）是死代码，从未执行过 |
-| 3 | `wuxie` 阶段机器人会点出 `confirmAndPlay` 按钮 | 替机器人给真人弹确认框，决策被静默转交给人类 |
-| 4 | `zhimengPick` 的按钮 label 渲染成字面量 `"undefined"` | jsdom 比对时发现：`jsdom: ["undefined","undefined"]`，是 render-controls 自身的渲染缺陷，与 shim 无关 |
+| # | 问题 | 影响 | 状态 |
+|---|---|---|---|
+| 1 | `guhuoTarget` 未登记 `BOT_PHASE_ACTOR` | 专用分支（bot.js:4590）是死代码，从未执行过 | ✅ **已修复** |
+| 2 | `quhuDamageChoice` 未登记 `BOT_PHASE_ACTOR` | 专用分支（bot.js:4596）是死代码，从未执行过 | ✅ **已修复** |
+| 3 | `wuxie` 阶段机器人会点出 `confirmAndPlay` 按钮 | 替机器人给真人弹确认框，决策被静默转交给人类 | ✅ **已修复** |
+| 4 | `zhimengPick` 的按钮 label 渲染成字面量 `"undefined"` | ~~render-controls 自身的渲染缺陷~~ | ❌ **假阳性，已撤回** |
+
+### 这 4 条的最终处理（修复批次）
+
+**Bug1/Bug2 —— 确认属实，按 `xuanfengPick` 的既有先例修复。** 两条各补一行
+`BOT_PHASE_ACTOR` 登记（`guhuoTarget:'sourceSeat'`、`quhuDamageChoice:'seat'`，字段名与
+服务端身份守卫逐一核对过）。修复过程中把严重程度查得更细了，比原报告写的「死代码」更糟：
+
+- `guhuoTarget` 在 `renderControls` 里**只渲染 banner + 座位卡高亮，不产生任何 `#controls`
+  按钮**，所以 `botSafePrompt` 一个按钮都点不到 → `runBotFallbackProbe` 只打一条
+  `console.warn` 就返回 → 状态一字不变、机器人不会改主意 → **真正的永久卡死**。
+- `quhuDamageChoice` 会渲染按钮，但文案「令 X 对 Y 造成1点伤害」既不命中 `botSafePrompt`
+  的安全正则也不命中必选正则，**只有「目标恰好只剩1个」时才靠「唯一按钮」兜底侥幸走通，
+  目标 ≥2 个时同样永久卡死**（和 `luanwuChoose` 当初的情况完全一样）。
+
+**Bug3 —— 确认属实，修法是给点击加来源标记。** 新增 `bot.js` 的模块级
+`botClickInProgress`，只在 `controlsChoiceExecute`（L1）和 `botSafePrompt`（兜底）**同步
+的 click 那一瞬**置位、`finally` 无条件复位；`render.js` 的 `confirmAndPlay` 读到该标志
+就跳过 `showConfirm` 直接执行 `actionFn`。刻意**不改** `renderControls` 里那 15 处
+`confirmAndPlay` 的按钮定义（真人的二次确认行为必须原样保留），也**不调**
+`resetSelectionState()`/`render()`（那是清理真人选牌状态、重绘真人界面的，机器人这次点击
+不该碰）。这不是 Node 迁移那套完整 headless confirm 机制，是给当前浏览器端生产环境的正式
+修复；迁移阶段2 仍需按原计划做 headless `showConfirm`。
+
+**Bug4 —— 复核为假阳性，撤回。** 原报告依据的是 jsdom 比对输出 `["undefined","undefined"]`，
+但那是**我自己的合成测试数据造成的**：C-4 harness 里把 `pending.options` 写成了裸字符串
+`['A','B']`，于是 `opt.label` 自然是 `undefined`。真实的 `getZhimengOptions()` 对三类候选
+（手牌／装备／判定区）**恒设置 `label`**，用真实服务端函数产出的 options 渲染，按钮文案是
+`["一张手牌","装备【青龙偃月刀】","判定区【乐不思蜀】"]`，不含 `undefined`。
+`run_bot_scheduling_gap_fix_test.js` 用两条对照断言把这个结论钉住了（真实数据不含
+`undefined` ／ 只有裸字符串 options 才会复现），防止以后再被误报成 bug。
+
+> 这条是本轮调查里第二个「我自己的测试数据制造的假象」——第一个是 C-4 首轮把 `huogong`
+> 误判成「一致」的假阴性。两次都指向同一条纪律：**合成 `g` 既会漏报也会误报，凡是靠合成
+> 数据得出的结论，下结论前必须再用真实代码路径产出的数据复核一遍。**
 
 ---
 

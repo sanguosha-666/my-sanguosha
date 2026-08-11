@@ -629,6 +629,21 @@ function resetSelectionState(){
 // 无论确定还是取消都先清空客户端选牌状态(selectedCardIdx/zhangba*),只有确定才真正执行 actionFn。
 // 只插在"UI 已决定要调用出牌函数"和"真正调用"之间一道用户复核,不碰 canPlay/canTarget 等校验。
 function confirmAndPlay(message, actionFn){
+  // 【机器人点击不弹确认框】二次确认是给真人防误触的 UI 流程;机器人走 L1
+  // (collectControlsCandidates→click)或 botSafePrompt 点到这类按钮时,原来会把确认框
+  // 弹到"担任机器人控制者的那名真人"屏幕上,而机器人自己的 actionFn 永远不执行——决策被
+  // 静默转交给了人类(真实可达路径:wuxie 无懈询问 + 于吉【蛊惑】,无 AI 密钥也会命中,
+  // 见 bot.js 里 botClickInProgress 的声明处注释与 run_bot_domhost_probe_test.js)。
+  // 这里直接执行 actionFn,不走 showConfirm:机器人是"已经做完决策才点的",确认框对它
+  // 没有语义。也刻意不调 resetSelectionState()/render() —— 那两个是清理【真人】的选牌
+  // 状态和重绘真人界面的,机器人这次点击不该碰真人的 UI 状态(机器人按钮的 actionFn 都是
+  // 闭包里冻结好的参数,不依赖任何选牌状态)。
+  // typeof 守卫:botClickInProgress 声明在 bot.js(加载顺序早于 render.js);测试沙箱
+  // 若未加载 bot.js 则回退成原来的真人路径,行为零变化。
+  if(typeof botClickInProgress !== 'undefined' && botClickInProgress){
+    actionFn();
+    return;
+  }
   showConfirm(message,
     // 确定后也立即 render(currentG):cleanup 清空的是 JS 变量,不会自动重绘 DOM——网络往返
     // (playCard 的 tx)完成前,旧的座位/手牌节点(连同其 onclick)会一直留在页面上可点。

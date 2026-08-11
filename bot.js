@@ -111,6 +111,27 @@ const BOT_PHASE_ACTOR = {
   // 分支)——但这条接线全程都是死代码，因为 xuanfengPick 没登记进这张表，调度请求根本
   // 到不了 runBotDecision。登记后这套已经写好的 AI 接入立刻生效，不需要再补新代码。
   xuanfengPick:'from',
+  // 【本地机器人服务阶段0调查顺带发现,和 xuanfengPick 同一类漏登记】于吉【蛊惑】选目标:
+  // 行动者是 pending.sourceSeat(蛊惑发动者本人,服务端 guhuoChooseTarget/guhuoJiedaoPick/
+  // guhuoJiedaoConfirm 三个函数守卫都是 g.pending.sourceSeat!==mySeat)。
+  // BOT_SEAT_PICKS.guhuoTarget 四件套早就写好、runBotDecision 里也接了线(bot.js 下方
+  // g.phase==='guhuoTarget' 分支),但因为没登记进这张表,botSeatForState 恒返回 -1,
+  // 那条接线全程是死代码。
+  // 【比 xuanfengPick 更严重】xuanfengPick 至少还渲染按钮,漏登记时能靠 botSafePrompt
+  // 侥幸点掉;guhuoTarget 在 renderControls 里【只渲染 banner + 座位卡高亮,不产生任何
+  // #controls 按钮】(见 render-controls.js:3544 段),botSafePrompt 一个按钮都找不到 →
+  // runBotFallbackProbe 只打一条 console.warn 就返回 false → 状态一字不变、机器人不会
+  // 改主意 → 真正的永久卡死(CLAUDE.md 第26条描述的那类"对真人只是卡一下、对机器人是
+  // 永久卡死")。登记后走专用分支,已写好的 seatPick 接入立刻生效。
+  guhuoTarget:'sourceSeat',
+  // 【同上,同一批发现】荀彧【驱虎】拼点赢后选伤害目标:行动者是 pending.seat(荀彧本人,
+  // 服务端 respondQuhuDamage 守卫 g.pending.seat!==mySeat)。同样早已写好
+  // BOT_SEAT_PICKS.quhuDamage + runBotDecision 接线,同样因为漏登记而全程死代码。
+  // 这个会渲染按钮("令 X 对 Y 造成1点伤害"),但文案既不命中 botSafePrompt 的安全正则
+  // (/不发动|不使用|不出|不获得|取消|跳过|放弃|结束/)也不命中必选正则(/选择|交给|弃置|
+  // 摸牌|回复|打出/)——只有"目标恰好只剩1个"时才能靠"唯一按钮"这条最后兜底侥幸走通,
+  // 目标≥2个时同样永久卡死。和 luanwuChoose 当初的情况一模一样。
+  quhuDamageChoice:'seat',
   // 【系统性扫描发现的紧急盲区】祝融【烈刃】拼点响应:行动者是 pending.targetSeat(被拼点
   // 的目标本人,服务端 respondLieRen 守卫 g.pending.targetSeat!==mySeat)。真实dump确认过
   // 这个不只是"没有智能判断"——目标手牌数>1时,按钮文案是"【牌名】♠5"这种纯牌面拼接,不
@@ -1134,6 +1155,21 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
 ]);
 // collect 与 execute 之间跨 AI await 传递的 DOM 上下文(box 必须在点击后才销毁)
 let controlsChoiceCtx = null;
+// botClickInProgress:"当前这一次按钮点击是机器人发出的,不是真人点的"。
+// 【为什么需要】renderControls 里有一批按钮的 onclick 是 confirmAndPlay(msg, fn) ——
+// 它先弹一个确认框、等真人点"确定"才执行 fn。这套二次确认是给真人防误触用的,机器人
+// 走 L1(collectControlsCandidates→click)或 botSafePrompt 时会把这类按钮一起点掉,
+// 结果就是:确认框弹出来了(弹在担任机器人控制者的那名真人屏幕上),而机器人自己的
+// 动作 fn 永远没执行 —— 机器人的决策被静默转交给了人类。
+// 真实可达路径(已由 run_bot_domhost_probe_test.js 复现):wuxie 无懈询问阶段 +
+// 于吉【蛊惑】。wuxie 在 CONTROLS_CHOICE_ALLOWLIST 里且不在 EXCLUDE 里,所以【即使
+// 没有 AI 密钥】L1 也会接管它;而 addGuhuoResponseButtons 挂的按钮 onclick 正是
+// confirmAndPlay。
+// 【修法】不改 renderControls 的按钮定义(那 15 处 confirmAndPlay 对真人的行为必须
+// 原样保留),只在"点击来自机器人"这一刻让 confirmAndPlay 跳过确认框直接执行 ——
+// 由 confirmAndPlay(render.js) 读这个标志。置位范围严格限制在同步的 click() 那一瞬,
+// finally 里无条件复位,不跨 await、不影响真人的任何一次点击。
+let botClickInProgress = false;
 
 function collectControlsCandidates(g, seat){
   const real = document.getElementById('controls');
@@ -1202,8 +1238,11 @@ function controlsChoiceLocalFallback(g, seat, candidates){
 function controlsChoiceExecute(g, seat, choice){
   const ctx = controlsChoiceCtx;
   try{
+    // botClickInProgress:见其声明处注释——让 confirmAndPlay 类按钮直接执行而不是弹确认框
+    botClickInProgress = true;
     botInvoke(seat, ()=>{ if(choice && typeof choice.invoke==='function') choice.invoke(); });
   } finally {
+    botClickInProgress = false;
     if(ctx && ctx.dispose) ctx.dispose();
     controlsChoiceCtx = null;
   }
@@ -3679,10 +3718,17 @@ function botSafePrompt(g,seat){
     const safe=buttons.find(b=>/不发动|不使用|不出|不获得|取消|跳过|放弃|结束/.test(b.textContent||''));
     const mandatory=buttons.find(b=>!/发动/.test(b.textContent||'')&&/选择|交给|弃置|摸牌|回复|打出/.test(b.textContent||''));
     const chosen=safe||mandatory||(buttons.length===1?buttons[0]:null);
-    if(chosen){ chosen.click(); return true; }
+    // botClickInProgress:见其声明处注释——和 L1 的 controlsChoiceExecute 同一约定,
+    // 兜底点击同样不该弹真人专属的确认框。
+    if(chosen){
+      botClickInProgress = true;
+      try{ chosen.click(); } finally { botClickInProgress = false; }
+      return true;
+    }
   } catch(e) {
     console.warn('bot fallback',e);
   } finally {
+    botClickInProgress = false;
     mySeat=humanSeat; box.remove(); real.id=oldId;
     if(typeof currentG!=='undefined'&&currentG) renderControls(currentG);
   }

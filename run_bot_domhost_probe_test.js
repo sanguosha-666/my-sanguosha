@@ -6,6 +6,13 @@
  * 单房间是否安全" 的三个复现场景固化下来,供后续阶段2/3 验收时对照。
  *
  * 详见 docs/local-bot-server-feasibility.md「阶段0 调查补全」一节。
+ *
+ * 【断言状态更新】文件初版有3条断言锁定的是"缺陷存在"这个现状。其中
+ * confirmAndPlay 那条对应的缺陷已经在「调查顺带发现的既有bug」批次里修掉了
+ * (bot.js 新增 botClickInProgress + render.js confirmAndPlay 旁路),该条断言
+ * 已相应反转成修复后的正确命题,并补了一条"真人路径未被波及"的对照。
+ * 剩余两条(shim 缺口 P1/P2)锁定的是 Node 最小 DOM shim 的语义缺口,属于
+ * 迁移工程阶段3 的范围,尚未修复,断言维持"锁定缺陷"语义不变。
  */
 const vm=require('vm'), fs=require('fs'), path=require('path');
 const ROOT=__dirname;
@@ -61,6 +68,8 @@ function makeEnv(){
     __confirmCalls=0;
     function showConfirm(message,onOk,onCancel){ __confirmCalls++; /* 等人点确定,不自动调 onOk */ }
     function confirmAndPlay(message, actionFn){
+      // 与 render.js 现状一致:机器人点击直接执行,不走确认框(既有bug修复批次)
+      if(typeof botClickInProgress !== 'undefined' && botClickInProgress){ actionFn(); return; }
       showConfirm(message, function(){ actionFn(); }, function(){});
     }
     function resetSelectionState(){}
@@ -101,7 +110,7 @@ check('confirmAndPlay 可达性:wuxie 阶段 + 于吉【蛊惑】,L1 确实收�
   console.log('        └ 收集到的蛊惑按钮:', JSON.stringify(guhuo));
 });
 
-check('confirmAndPlay 后果:点击该按钮只弹确认框,真实动作 startGuhuoResponse 不会执行', ()=>{
+check('confirmAndPlay 后果【已修复,断言已反转】:机器人点击直接执行动作、不弹确认框;真人点击仍弹框', ()=>{
   const env=makeEnv();
   const g=baseG(env.sb,'wuxie',['yuji','zhangfei','zhangfei']);
   g.pending={type:'wuxie',asking:0,from:1,to:1,trick:'过河拆桥',depth:0,exclude:[],resume:{type:'sha'}};
@@ -116,16 +125,33 @@ check('confirmAndPlay 后果:点击该按钮只弹确认框,真实动作 startGu
     var r=collectControlsCandidates(__g,0);
     var g1=r.candidates.filter(function(c){return /蛊惑/.test(c.label);})[0];
     __hadBtn = !!g1;
-    if(g1) g1.invoke();
+    // 走机器人路径(controlsChoiceExecute 会置这个标志位)
+    botClickInProgress = true;
+    try{ if(g1) g1.invoke(); } finally { botClickInProgress = false; }
     if(r.dispose) r.dispose();
   `,env.sb);
   const hadBtn=vm.runInContext('__hadBtn',env.sb);
   const confirms=vm.runInContext('__confirmCalls',env.sb);
   const actions=vm.runInContext('__actionCalls',env.sb);
   if(!hadBtn) throw new Error('前提不成立:没有蛊惑按钮可点');
-  if(confirms!==1) throw new Error('应弹出1次确认框,实际 '+confirms);
-  if(actions!==0) throw new Error('确认框未确认时动作不应执行,实际执行了 '+actions+' 次');
-  console.log('        └ 确认框弹出 '+confirms+' 次,真实动作执行 '+actions+' 次 → headless 下必然静默失效');
+  // 【断言已反转】原来这里锁定的是缺陷现状(confirms===1 && actions===0)。
+  // 既有bug修复批次引入 botClickInProgress 之后,机器人点击不再弹确认框、动作直接执行,
+  // 所以这条命题必须跟着改——不能让它继续"静静通过"(CLAUDE.md 第20条)。
+  if(confirms!==0) throw new Error('机器人点击不应再弹确认框,实际弹了 '+confirms+' 次');
+  if(actions!==1) throw new Error('机器人点击应直接执行动作1次,实际 '+actions+' 次');
+  console.log('        └ 机器人点击:确认框 '+confirms+' 次、动作执行 '+actions+' 次(修复后的正确行为)');
+  // 同一环境下再验真人路径未被波及:标志位为 false 时仍然只弹框、不执行
+  vm.runInContext(`
+    __confirmCalls=0; __actionCalls=0;
+    var r2=collectControlsCandidates(__g,0);
+    var p2=r2.candidates.filter(function(c){return /蛊惑/.test(c.label);})[0];
+    botClickInProgress=false;
+    if(p2) p2.invoke();
+    if(r2.dispose) r2.dispose();
+  `,env.sb);
+  const hc=vm.runInContext('__confirmCalls',env.sb), ha=vm.runInContext('__actionCalls',env.sb);
+  if(hc!==1 || ha!==0) throw new Error('真人路径应仍为"弹框1次/动作0次",实际 '+hc+'/'+ha);
+  console.log('        └ 真人点击:确认框 '+hc+' 次、动作执行 '+ha+' 次(未被波及)');
 });
 
 // ---------- 场景2:controlsChoiceCtx 跨 await 期间,单房间内是否真的安全 ----------
