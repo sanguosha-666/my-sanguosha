@@ -89,17 +89,45 @@ function parseGroqRetrySeconds(text){
   const sec = parseInt(m[1],10) * 60 + (m[2] ? Math.round(parseFloat(m[2])) : 0);
   return (Number.isFinite(sec) && sec>0) ? sec : null;
 }
+// HF_PROVIDER_PRIORITY:用户指定的 hf 轮换优先级(2026-08-11)——优先使用 cerebras,
+// 其次 groq,再次 cohere。resolveAiModel 对 hf 按这个顺序扫描选中池,冷却中的 provider
+// 自动跳过(降级到下一优先级);同 provider 内按勾选顺序取第一个未冷却的。
+// 优先级数值越小越优先,未列出的 provider(理论上 hf 池不会出现)排最后。
+const HF_PROVIDER_PRIORITY = { cerebras: 0, groq: 1, cohere: 2 };
+function hfProviderOf(modelId){
+  // 从 HF 模型条目 id 提取 provider:格式 {HF模型ID}:{provider}(如 openai/gpt-oss-120b:cerebras)。
+  const idx = String(modelId||'').lastIndexOf(':');
+  return idx>=0 ? String(modelId).slice(idx+1) : '';
+}
 // resolveAiModel:轮换选模型。非groq/hf/无多选/手动单选 → aiApiModel||undefined(零变化)。
-// groq 与 hf 共用多选轮换:groq 是"免费层各模型独立配额池"绕过 TPD/TPM 墙,hf 是
-// "用户在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,轮换选 provider 对应的
-// 模型条目"(条目 id 自带 :provider 后缀,选谁就等于路由到谁,HF 服务端自动换 custom key)。
+// groq 与 hf 都走多选,但策略不同:groq 是"免费层各模型独立配额池"用 round-robin 均匀
+// 分散绕过 TPD/TPM 墙;hf 是"用户在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,
+// 按用户指定的 provider 优先级选模型条目"(条目 id 自带 :provider 后缀,选谁就等于路由
+// 到谁,HF 服务端自动换 custom key)。hf 不用 round-robin——用户要求固定优先级,
+// 冷却降级天然实现"cerebras 挂了才用 groq、再挂才用 cohere"。
 function resolveAiModel(provider){
   if(provider!=='groq' && provider!=='hf') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
   if(typeof aiApiModel==='string' && aiApiModel) return aiApiModel;   // 手动单选优先
   const list = (Array.isArray(aiApiModels) && aiApiModels.length) ? aiApiModels : null;
   if(!list) return undefined;
   const now = Date.now();
-  // 找下一个未冷却的
+  if(provider==='hf'){
+    // hf 优先级策略:按 HF_PROVIDER_PRIORITY 顺序扫描,每次从头选最高优先级的未冷却模型。
+    // 不记 round-robin 指针——"优先使用 cerebras"要求可用时永远选它,而不是轮流。
+    const order = Object.keys(HF_PROVIDER_PRIORITY).sort(function(a,b){ return HF_PROVIDER_PRIORITY[a]-HF_PROVIDER_PRIORITY[b]; });
+    for(let pi=0; pi<order.length; pi++){
+      const prov = order[pi];
+      for(let i=0;i<list.length;i++){
+        const model = list[i];
+        if(hfProviderOf(model) !== prov) continue;                    // 只要当前优先级的
+        if(_modelCooldowns[model] && _modelCooldowns[model] > now) continue; // 冷却中跳过
+        return model;
+      }
+    }
+    // 全部冷却中 → 返回空串哨兵:调用点据此短路,不再发起注定失败的请求
+    return '';
+  }
+  // groq:round-robin(免费层独立池,均匀分散)
   for(let i=0;i<list.length;i++){
     const idx = (_modelRotateIdx + i) % list.length;
     const model = list[idx];
