@@ -942,41 +942,6 @@
     align-items:center;justify-content:center;pointer-events:auto;z-index:3;cursor:pointer;}
   .card .info-badge-hit .info-badge{width:calc(var(--badge) - 8px);height:calc(var(--badge) - 8px);font-size:calc(var(--badge) * 0.35);}
 
-  /* ===== 日志 toast:"刚刚发生了什么"的瞬时提示,和 .banner("当前该谁做什么")信息类型不同,
-     不共用元素/不共用配色——banner 是朱红(行动焦点),这里用金色(氛围提示,呼应 .phase-pill)。
-     position:fixed 独立于文档流,不占位、不推挤座位卡片/按钮。纯 CSS 动画做"淡入-停留-淡出",
-     不需要 JS 计时器把它关掉——render.js 只负责在有新日志时重新触发 .show 类。
-     pointer-events:none 全程生效,不会挡住点击(哪怕还没淡出完)。
-     基础规则必须放在下面两个 @media 断点之前(和上面 info-badge 那次踩过的坑同一条教训),
-     否则断点里对 font-size/padding 的覆盖会被这条无条件规则重新盖掉,断点形同虚设。
-     定位在正屏幕中央(translate(-50%,-50%) 天然按元素实际渲染尺寸居中,不需要为换行后
-     可能变成两行手动算高度):**刻意接受**这会和 .banner/.controls 短暂重叠(决斗/无懈可击
-     这类需要看清按钮的场景也不例外)——不做"检测 banner 位置再避让"这类防碰撞工程,原因见
-     CLAUDE.md(概括:pointer-events:none 保证不会挡住点击,响应阶段本来就没有超时,等
-     ~2.6 秒它自己淡出就行,不构成任何操作损失)。
-     max-width 从固定不换行改成允许换行(min(90vw,480px)):90vw 保证任何屏宽下左右都至少
-     留 5% 边距,不会贴到屏幕边缘;换行后不再需要 text-overflow 截断,圆角也从纯药丸形的
-     999px 收成 16px 的圆角矩形,两行文字撑高后不会显得比例怪异。 */
-  #logToast{
-    position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-    max-width:min(90vw,480px);
-    background:#1a1410;border:1px solid var(--gold);color:var(--gold);
-    padding:9px 18px;border-radius:16px;font-size:16px;line-height:1.4;text-align:center;
-    z-index:60;pointer-events:none;opacity:0;box-shadow:0 2px 6px rgba(0,0,0,.4);
-  }
-  #logToast span{font-weight:700;} /* 染色的玩家名字额外加粗,配合颜色更好辨认,和座位卡片姓名的粗体呼应 */
-  /* 按事件类型(kind)给 toast 强调色:仅改边框/非姓名文字色,姓名仍保留座位色(inline color 优先级更高)。
-     未打标签或未定义样式的 kind 保持默认金色。以后新增可弹 kind 时在这里补对应配色即可。 */
-  #logToast.toast-damage{border-color:#c0392b;color:#e57368;}
-  #logToast.toast-sha{border-color:#d98a3d;color:#e6a664;}
-  #logToast.show{animation:logToastFade 2.5s ease forwards;}
-  @keyframes logToastFade{
-    0%{opacity:0;transform:translate(-50%,calc(-50% + 8px));}
-    10%{opacity:1;transform:translate(-50%,-50%);}
-    80%{opacity:1;}
-    100%{opacity:0;}
-  }
-
   /* ===== "轮到你了"大字提示:语音提示(可能被浏览器自动播放策略拦截而静默失败)的视觉兜底,
      即使听不到声音也能看到。刻意不复用 .banner——.banner 是常驻的"当前该谁做什么"提示条,
      被决斗/技能询问等很多场景复用,改大会影响那些场景;这是独立的、短暂出现自动消失的
@@ -1014,7 +979,6 @@
       和 .info-badge-hit 的尺寸/字号靠 calc() 公式自动跟着算,不用再分别写死两套数值。
       .card-title 的字号也不需要在这里覆盖——fitFontSize(render.js)按这一档实际
       的卡片宽度/--badge值实测计算,inline style 100%覆盖,这里写CSS字号也不会生效。 */
-    #logToast{font-size:15px;padding:8px 16px;}
     .table-strip{min-height:52px;padding:3px 6px;}
     .table-card-who{font-size:11px;}
     .table-card-name{font-size:17px;}
@@ -1043,7 +1007,6 @@
     .card{width:52px;height:76px;--badge:14px;} /* 再收紧一档,.corner/.info-badge-hit
       跟着 --badge 自动缩小,不用逐处对齐;.card-title 字号同上由 fitFontSize 实测,
       这里不需要再覆盖。 */
-    #logToast{font-size:14px;padding:7px 14px;}
     .table-strip{min-height:44px;padding:2px 4px;}
     .table-card-who{font-size:10px;}
     .table-card-name{font-size:14px;}
@@ -2036,7 +1999,6 @@
 <button id="closeRoomBtn" class="icon-btn" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
 <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
 <button id="aiTestBtn" class="icon-btn" title="AI托管:由AI托管当前玩家并显示决策信息" onclick="toggleAiTestAutopilot()">🤖</button>
-<div id="logToast"></div>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
@@ -2139,21 +2101,21 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=369"></script>
-<script src="data.js?v=369"></script>
-<script src="debug-log.js?v=369"></script>
-<script src="room-lifecycle.js?v=369"></script>
-<script src="game.js?v=369"></script>
-<script src="weapons.js?v=369"></script>
-<script src="skills.js?v=369"></script>
-<script src="bot-ai-bus.js?v=369"></script>
-<script src="bot.js?v=369"></script>
-<script src="ai-bot.js?v=369"></script>
-<script src="render.js?v=369"></script>
-<script src="render-table.js?v=369"></script>
-<script src="render-discard.js?v=369"></script>
-<script src="render-hand.js?v=369"></script>
-<script src="render-controls.js?v=369"></script>
-<script src="render-log.js?v=369"></script>
+<script src="config.js?v=370"></script>
+<script src="data.js?v=370"></script>
+<script src="debug-log.js?v=370"></script>
+<script src="room-lifecycle.js?v=370"></script>
+<script src="game.js?v=370"></script>
+<script src="weapons.js?v=370"></script>
+<script src="skills.js?v=370"></script>
+<script src="bot-ai-bus.js?v=370"></script>
+<script src="bot.js?v=370"></script>
+<script src="ai-bot.js?v=370"></script>
+<script src="render.js?v=370"></script>
+<script src="render-table.js?v=370"></script>
+<script src="render-discard.js?v=370"></script>
+<script src="render-hand.js?v=370"></script>
+<script src="render-controls.js?v=370"></script>
+<script src="render-log.js?v=370"></script>
 </body>
 </html>

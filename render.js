@@ -1634,23 +1634,6 @@ function render(g){
   // (Firebase 是实时推送,面板开着的时候底下状态可能还在变,不刷新就会显示过期日志)。
   if(logModalOpen) renderLogModal(g);
 
-  // 日志 toast:有新日志才弹,把本次新增的日志(可能不止一条,比如延时锦囊判定这类一次事务
-  // 里连续 pushLog 好几次)排队依次展示——早期版本"只弹最新一条"会把中间结果(比如判定牌本身
-  // 生效/无效那条)淹没掉,只看到判定后紧跟着的下一条日志,看不出判定过程发生了什么。
-  // 定位新增日志:直接用每条元素自带的 seq 过滤(> 上次已弹的 seq)即可,不用再"从数组末尾
-  // 回溯匹配文本"——seq 单调递增且跨读取稳定,不受 slice(-40) 长度封顶影响,详见上面
-  // lastToastedSeq 声明处的说明。
-  const log = g.log||[];
-  if(lastToastedSeq===undefined){
-    lastToastedSeq = log.length ? log[log.length-1].seq : 0; // 第一次 render:只记当前最新 seq,不弹历史
-  } else if(log.length){
-    const newEntries = log.filter(e => e && Number.isInteger(e.seq) && e.seq > lastToastedSeq);
-    if(newEntries.length){
-      queueLogToasts(g, newEntries); // 直接传整条目(含 kind),由 queueLogToasts/showLogToast 内部取 text 与 kind
-      lastToastedSeq = log[log.length-1].seq;
-    }
-  }
-
   // 桌面自适应 步骤a:renderControls/renderHand(上面已执行完)渲染出的 tableStrip/
   // panel.table/myGeneral/hand-label/meSeat/hand 都已是这一轮最终状态,现在才能正确
   // 测量"对手区之外占用了多少高度",据此算出对手区座位卡该有多高。
