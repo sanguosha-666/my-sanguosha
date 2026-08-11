@@ -2,10 +2,11 @@
   "name": "sgs-local-bot-server",
   "version": "0.1.0",
   "private": true,
-  "description": "阶段1骨架:独立 Node 进程订阅 Firebase RTDB 房间状态并打印,不写入、不含任何机器人决策逻辑。详见 docs/local-bot-server-feasibility.md。",
+  "description": "独立 Node 进程直连 Firebase RTDB:watch.js(阶段1,只订阅只打印,不写入)+ run.js(阶段2,接管无密钥模式下的结构化机器人决策并写入)。详见 docs/local-bot-server-feasibility.md。",
   "main": "watch.js",
   "scripts": {
-    "start": "node watch.js"
+    "start": "node watch.js",
+    "bot": "node run.js"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0"

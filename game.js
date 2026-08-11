@@ -293,6 +293,12 @@ function normalize(g){
     }
   }
 
+  // 本地机器人服务(local-bot-server 阶段2)并发控制开关:true 表示 Node 进程已接管
+  // "该由机器人/AI托管座位行动"的决策与写入,浏览器端 scheduleBotTurn 据此让路
+  // (真人托管座位不受影响,见 scheduleBotTurn 里的 aiTestSelf 例外)。只由 Node 进程写入,
+  // 浏览器端从不主动置位;Node 进程用 onDisconnect() 保证异常退出时自动回落为 false。
+  if(typeof g.botServerActive!=='boolean') g.botServerActive=false;
+
   // 贾诩【完杀】:回合内濒死状态标记
   if(typeof g.wanshaActive!=='boolean') g.wanshaActive=false;
   if(typeof g.wanshaDyingSeat!=='number') g.wanshaDyingSeat=null;

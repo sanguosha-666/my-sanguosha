@@ -414,6 +414,10 @@ function scheduleBotTurn(g){
   // (isBotController 判定)。
   const aiTestSelf = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
     && aiTestAutopilot.seat===mySeat;
+  // 【local-bot-server 阶段2】Node 进程已接管本房间的机器人决策时,浏览器端整体让路
+  // (不影响真人托管座位——aiTestSelf 是"我在托管自己的座位",和"谁控制机器人座位"是两件事,
+  // botServerActive 只接管机器人座位,不接管任何真人托管)。
+  if(g.botServerActive && !aiTestSelf) return;
   if(!isBotController(g)&&!aiTestSelf) return;
   // 【AI摘要】游戏结束清空记忆;回合变化(roundNum/turn)且已有摘要时,异步更新记忆
   // (fire-and-forget,不阻塞决策;更新完成后的下一轮决策才带上新摘要)
@@ -456,6 +460,8 @@ function scheduleBotTurn(g){
     // 时放行,否则 return(不执行决策);控制器浏览器行为与原来完全一致。
     const aiTestSelfNow = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
       && aiTestAutopilot.seat===mySeat;
+    // 【local-bot-server 阶段2】和入口门同一口径的第二道检查(见上方注释)。
+    if(latest.botServerActive && !aiTestSelfNow) return;
     if(!isBotController(latest) && !(aiTestSelfNow && nowSeat===aiTestAutopilot.seat)) return;
     if(botStateKey(latest,nowSeat)!==key) return;
     botDecisionInFlight=true;
