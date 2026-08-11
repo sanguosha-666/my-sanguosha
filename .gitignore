@@ -19,3 +19,14 @@ Desktop.ini
 
 # 会话进度文件(不入库)
 TASKS.md
+
+# ==== local-bot-server(本地机器人决策服务,Node进程直连Firebase Admin SDK) ====
+# 服务账号密钥:Firebase Admin SDK 拥有无条件读写权限,完全绕过RTDB安全规则,
+# 一旦泄露等于把整个数据库交出去(这个仓库是公开GitHub仓库+GitHub Pages部署)。
+# 命名/路径约定见 local-bot-server/README.md ——这条规则必须在任何密钥文件被
+# 创建之前先生效,不能等密钥文件已经落地了再补。
+local-bot-server/serviceAccountKey*.json
+local-bot-server/*.key.json
+local-bot-server/.env
+local-bot-server/.env.*
+local-bot-server/node_modules/
