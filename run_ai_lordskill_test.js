@@ -814,6 +814,35 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     assert.strictEqual(getG().pending.asking,2);
   });
 
+  await check('L7 刘备出牌阶段有明确【仁德】【激将】按钮', function(){
+    const g=mkG({phase:'play',turn:0,generals:{0:'liubei',1:'caocao',2:'zhaoyun'},hands:{0:[SH],2:[S]}});
+    setG(g); seat(0);
+    __controlsEl=makeEl(); context.window.__controlsEl=__controlsEl;
+    R('renderControls(_g)');
+    const labels=R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
+    assert.ok(labels.indexOf('发动【仁德】')>=0,'应有仁德入口,实际 '+JSON.stringify(labels));
+    assert.ok(labels.indexOf('发动【激将】')>=0,'应有激将入口,实际 '+JSON.stringify(labels));
+  });
+
+  await check('L8 主动激将:选择目标→蜀将代出杀→刘备成为使用者并消耗出杀次数', function(){
+    const g=mkG({phase:'play',turn:0,generals:{0:'liubei',1:'caocao',2:'zhaoyun'},hands:{0:[SH],2:[S]}});
+    setG(g); seat(0); R('useJijiang(1)');
+    let gg=getG();
+    assert.strictEqual(gg.phase,'jijiangAsk');
+    assert.strictEqual(gg.pending.asking,2);
+    seat(2);
+    assert.strictEqual(R('mySeat'),2);
+    assert.strictEqual(R('canUseAs(_g.players[2],_g.players[2].hand[0],"杀")'),true);
+    // 前面的 UI 接线用例会把公开包装函数替换成 spy；这里直接验证真实共用内核。
+    R('respondLordAskCore(true,0)');
+    gg=getG();
+    assert.strictEqual(gg.phase,'respond','激将响应后状态 '+JSON.stringify({phase:gg.phase,pending:gg.pending,hand:gg.players[2].hand}));
+    assert.strictEqual(gg.pending.from,0);
+    assert.strictEqual(gg.pending.to,1);
+    assert.strictEqual(gg.shaUsed,true);
+    assert.strictEqual(gg.players[2].hand.length,0);
+  });
+
   // ===== M. 无密钥零变化 =====
 
   await check('M1 无密钥零变化:ffa 主公弃牌阶段不受脏 lordHandCap 影响(上限仍=hp)', function(){

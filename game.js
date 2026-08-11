@@ -5604,10 +5604,10 @@ function nextLordAskee(g, lordSeat, current, cap){
   }
   return null;
 }
-function startLordAsk(g, lordSeat, need, cap){
+function startLordAsk(g, lordSeat, need, cap, resumeOverride){
   const first=nextLordAskee(g, lordSeat, lordSeat, cap);
   if(first===null) return; // 无人可求助(守卫已排除,这里兜底)
-  const resume={phase:g.phase, pending:g.pending};
+  const resume=resumeOverride || {phase:g.phase, pending:g.pending};
   if(cap==='jijiang') g.jijiangUsed=true; else g.hujiaUsed=true;
   const type=cap==='jijiang'?'jijiangAsk':'hujiaAsk';
   g.pending=setResponseAskedAt({type, lordSeat, need, asking:first, resume});
@@ -5654,6 +5654,14 @@ function completeLordAsk(g, ask, card){
     }
   }
   if(ask.need==='杀'){
+    if(ask.resume && Number.isInteger(ask.resume.jijiangTarget)){
+      const targetSeat=ask.resume.jijiangTarget;
+      g.discard.push(card);
+      g.log=pushLog(g.log, lord.name+' 发动【激将】,'+g.players[helper].name+' 代其打出【杀】');
+      markCardSound(g, '杀', lordSeat, card, targetSeat);
+      CARD_PLAYS['杀'].effect(g, lord, card, targetSeat);
+      return;
+    }
     if(g.phase==='duel' && g.pending && g.pending.active===lordSeat){
       // 决斗响应:与 duelResponse 出杀分支同款换人
       const opp=(lordSeat===g.pending.from)?g.pending.to:g.pending.from;
@@ -5677,6 +5685,22 @@ function completeLordAsk(g, ask, card){
       return;
     }
   }
+}
+
+// 刘备【激将】的出牌阶段主动入口:先选定【杀】的合法目标,再依次询问蜀势力角色。
+// 响应者提供的是实体【杀】,但使用者、伤害来源和出杀次数均属于刘备。
+function useJijiang(targetSeat){
+  tx(g=>{
+    if(g.phase!=='play' || g.turn!==mySeat) return g;
+    const me=g.players[mySeat];
+    if(!canTriggerLordAsk(g,mySeat,'jijiang')) return g;
+    const virtualSha={name:'杀',suit:'',rank:'',id:'jijiang'};
+    if(!CARD_PLAYS['杀'].canPlay(g,me,virtualSha)) return g;
+    if(targetSeat===mySeat || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
+    if(!CARD_PLAYS['杀'].canTarget(g,me,virtualSha,targetSeat)) return g;
+    startLordAsk(g,mySeat,'杀','jijiang',{phase:'play',pending:null,jijiangTarget:targetSeat});
+    return g;
+  });
 }
 // respondJijiangAsk/respondHujiaAsk:被求助者(asking===mySeat)响应。出牌=替主公认出这张
 // 牌并完成原响应;不出=按 nextAskee 问下一个人,问完一圈无人 → 恢复原 pending。

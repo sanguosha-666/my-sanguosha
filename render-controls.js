@@ -113,6 +113,13 @@ function resetTiesuo(){ tiesuoTargets=[]; }
 let qingnangMode = false;
 let qingnangCardIdx = null;
 function resetQingnang(){ qingnangMode=false; qingnangCardIdx=null; }
+// 刘备【仁德】:先明确点击技能入口,再选择手牌和受赠角色。
+// 不再把“任意点牌后可能出现仁德小按钮”当作唯一入口,避免玩家误以为技能未实现。
+let rendeMode = false;
+function resetRende(){ rendeMode=false; }
+// 刘备【激将】:出牌阶段主动请求蜀势力角色代为出【杀】前,先选择杀的目标。
+let jijiangMode = false;
+function resetJijiang(){ jijiangMode=false; }
 let zhihengMode = false;
 let zhihengPicks = [];
 function resetZhiheng(){ zhihengMode=false; zhihengPicks=[]; }
@@ -3714,6 +3721,16 @@ function renderControls(g){
         : '已选中,点上方一名已受伤角色令其回复1点体力(或点牌取消选中)。');
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetQingnang(); render(g); }; c.appendChild(cb);
+    } else if(rendeMode){
+      setBanner(selectedCardIdx===null
+        ? '【仁德】选择一张要交出的手牌。'
+        : '已选中一张手牌,点上方一名其他角色交给他（可继续发动）。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ selectedCardIdx=null; resetRende(); render(g); }; c.appendChild(cb);
+    } else if(jijiangMode){
+      setBanner('【激将】选择一名合法目标,然后请求其他蜀势力角色代你打出【杀】。');
+      const cb=document.createElement('button'); cb.className='ghost';
+      cb.textContent='取消'; cb.onclick=()=>{ resetJijiang(); render(g); }; c.appendChild(cb);
     } else if(zhihengMode){
       setBanner('【制衡】选择任意张手牌弃置,然后摸等量牌(已选 '+zhihengPicks.length+' 张)。');
       if(zhihengPicks.length>=1){
@@ -3856,7 +3873,15 @@ function renderControls(g){
     }
     // 丈八蛇矛入口:装丈八(twoAsSha)、手牌≥2、且本回合还能出杀(canSha,与单张杀同口径)时才出现——
     // 否则普通武将出过一张杀后仍白进选牌流程。张飞等无限杀者 canSha 恒真,可继续用丈八。
-    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode && !sanyaoMode && !zhibaMode;
+    const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !rendeMode && !jijiangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode && !sanyaoMode && !zhibaMode;
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'rende') && (me.hand||[]).length>0){
+      const rb=document.createElement('button'); rb.className='ghost';
+      rb.textContent='发动【仁德】'; rb.onclick=()=>{ selectedCardIdx=null; rendeMode=true; render(g); }; c.appendChild(rb);
+    }
+    if(noLocalMode && selectedCardIdx===null && canTriggerLordAsk(g,mySeat,'jijiang') && canSha){
+      const jb=document.createElement('button'); jb.className='ghost';
+      jb.textContent='发动【激将】'; jb.onclick=()=>{ selectedCardIdx=null; jijiangMode=true; render(g); }; c.appendChild(jb);
+    }
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'kurou')){
       const kb=document.createElement('button'); kb.className='ghost';
       kb.textContent='发动【苦肉】'; kb.onclick=()=>{ confirmAndPlay('发动【苦肉】:失去1点体力,然后摸两张牌？', ()=>kuRou()); };
@@ -4016,7 +4041,7 @@ function renderControls(g){
     }
     
     const b=document.createElement('button'); b.className='ghost';
-    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetZhiheng();resetQiaobian();resetJiedao();resetGuhuoJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetZhiba();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
+    b.textContent='结束出牌'; b.onclick=()=>{selectedCardIdx=null;resetZhangba();resetDuanliang();resetQixi();resetGuose();resetLianhuan();resetTiesuo();resetLijian();resetFanjian();resetRende();resetJijiang();resetZhiheng();resetQiaobian();resetJiedao();resetGuhuoJiedao();resetFangtian();resetGanglie();resetQuhu();resetTiaoxin();resetDimeng();resetTianyi();resetZhiba();resetMingce();resetFenxun();resetSanyao();endPlay();}; c.appendChild(b);
     
     // 丁奉【奋迅】:弃牌选择阶段
     if(g.pending && g.pending.type==='fenxunDiscard' && g.pending.seat===mySeat) {

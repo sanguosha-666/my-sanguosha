@@ -1474,18 +1474,27 @@ function render(g){
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">未受伤</span>';
       }
     }
-    // 刘备【仁德】:出牌阶段选中任意一张手牌后,可直接交给一名其他存活角色。
-    // 这里不覆盖座位本身原有的"使用这张牌"onclick,而是在座位卡上追加一个小按钮,
-    // 让"正常出牌"和"仁德给牌"作为两个明确选项并存。
-    if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && hasCap(meP,'rende') && i!==mySeat && p.alive){
+    // 刘备【仁德】:从明确的技能入口进入后,选择手牌并交给其他角色。
+    if(rendeMode && selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && hasCap(meP,'rende') && i!==mySeat && p.alive){
       const idx=selectedCardIdx;
       const targetSeat=i;
       const rb=document.createElement('button');
       rb.className='ghost';
       rb.textContent='仁德:交给此人';
       rb.style.margin='6px 14px 0';
-      rb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>renDe(idx, targetSeat)); };
+      rb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>{ selectedCardIdx=null; renDe(idx, targetSeat); }); };
       d.appendChild(rb);
+    }
+    // 刘备【激将】:主动使用时先选合法的【杀】目标,再进入蜀势力角色依次响应流程。
+    if(jijiangMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
+      const virtualSha={name:'杀',suit:'',rank:'',id:'jijiang'};
+      if(CARD_PLAYS['杀'].canTarget(g, meP, virtualSha, i)){
+        d.style.cursor='pointer';
+        d.style.outline='2px dashed var(--cinnabar-bright)';
+        d.title='选择为【激将】的【杀】目标';
+        const targetSeat=i;
+        d.onclick=()=>{ resetJijiang(); useJijiang(targetSeat); };
+      }
     }
     // 颜良文丑【双雄】:选中一张与判定牌异色的手牌后,可明确选择"当【决斗】"使用。
     // 用座位上的独立按钮,避免覆盖这张牌原本自己的出牌效果。

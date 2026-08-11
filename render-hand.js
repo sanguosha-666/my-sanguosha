@@ -211,6 +211,10 @@ function renderHand(g){
     } else if(g.phase==='play'&&myTurn&&lijianMode){
       usable = true;
       if(usable) onClick=()=>{ lijianCardIdx = (lijianCardIdx===idx?null:idx); lijianFromSeat=null; render(g); };
+    } else if(g.phase==='play'&&myTurn&&rendeMode){
+      // 仁德模式只负责选择要交出的牌,不触发这张牌原本的使用效果。
+      usable = true;
+      onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g); };
     } else if(g.phase==='play'&&myTurn&&qingnangMode){
       // 青囊选牌模式:任意一张手牌都可弃置作为发动成本。
       usable = true;
@@ -261,7 +265,6 @@ function renderHand(g){
       // actionId:优先这张牌自己的效果,没有独立入口(如闪)才转化为杀;查 CARD_PLAYS 决定可用性与点击行为
       const actionId = resolveActionId(g, me, card);
       const spec = CARD_PLAYS[actionId];
-      const canRende = hasCap(me,'rende');
       const canShuangxiong = canShuangxiongDuelCard(me, card);
       const canGuhuoActive = hasCap(me,'guhuo') && !g.guhuoUsed && guhuoClaimableNames().some(name=>{
         const action=guhuoActionId(name);
@@ -273,10 +276,10 @@ function renderHand(g){
       });
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
-        if(spec.target || canRende || canShuangxiong || canGuhuoActive){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/刘备仁德/双雄/蛊惑:点=选中
+        if(spec.target || canShuangxiong || canGuhuoActive){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/双雄/蛊惑:点=选中
         else { onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card), ()=>playCard(idx, actionId)); } // 桃/无中生有/AOE/装备:确认后出牌
-      } else if(canRende || canShuangxiong || canGuhuoActive){
-        // 刘备【仁德】可交出任意手牌;颜良文丑【双雄】可把异色手牌当【决斗】使用;于吉【蛊惑】可扣置任意手牌声明合法牌名。
+      } else if(canShuangxiong || canGuhuoActive){
+        // 颜良文丑【双雄】可把异色手牌当【决斗】使用;于吉【蛊惑】可扣置任意手牌声明合法牌名。
         usable=true;
         onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g); };
       }
