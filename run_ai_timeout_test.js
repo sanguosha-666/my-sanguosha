@@ -416,6 +416,139 @@ const testCode = String.raw`
     if(g15.pending && g15.pending.type === 'huashenChangePickEnd') throw new Error('pending 不应仍是 huashenChangePickEnd(安全网对这个边界依然无效)');
   });
 
+  // ============================================================
+  // guhuoTarget / quhuDamageChoice 超时兜底(两个新登记 phase)
+  // 这两个阶段【没有"不发动"选项】——牌已扣置/拼点已赢,代价都付掉了,悬着不动是纯损失,
+  // 所以默认动作是"把它完成掉":直接复用 BOT_SEAT_PICKS 里已经写好的 fallbackSeat 评分
+  // (都是 pickBestCandidateSeat(...,'damage')),不另发明"超时专用"规则。
+  // ============================================================
+  function mkG4(extra){
+    var mk = function(name, hp){ return { name:name, alive:true, hp:hp==null?3:hp, maxHp:4,
+      hand:[], equips:{weapon:null,armor:null,plus1:null,minus1:null}, delays:[],
+      general:'zhangfei', role:null, buquCards:[] }; };
+    var g = { started:true, roundNum:1, phase:'play', turn:0, gameMode:'ffa',
+      deck:[], discard:[], log:[], exchangeCards:[], pending:null, aoe:null,
+      players:[ mk('甲'), mk('乙',1), mk('丙',3) ] };
+    for (var k in (extra||{})) g[k] = extra[k];
+    return g;
+  }
+
+  // --- guhuoTarget:普通声明(非借刀),超时应按 fallbackSeat 的评分选一个目标提交 ---
+  var guhuoPicked = null, guhuoCancelled = 0;
+  guhuoChooseTarget = function(t){ guhuoPicked = t; };
+  cancelGuhuoTarget = function(){ guhuoCancelled++; };
+  var gA = mkG4({ phase:'guhuoTarget', pending:{ type:'guhuoTarget', sourceSeat:0,
+    actualCard:{id:'a1',name:'闪',suit:'♦',rank:2},
+    claimedCard:{id:'a1',name:'杀',suit:'♦',rank:2},
+    askedAt: Date.now() - 31000 } });
+  window.__g = gA; mySeat = 0;
+  var retA = maybeAutoRespondTimeout(gA);
+  await check('guhuoTarget 超时:提交了目标(不再是 timeout_stuck 静默悬着)', function(){
+    if(retA !== true) throw new Error('maybeAutoRespondTimeout 应返回 true(表示已提交),实际 ' + retA);
+    if(guhuoPicked === null) throw new Error('应调用 guhuoChooseTarget 选一个目标');
+    if(guhuoCancelled !== 0) throw new Error('普通声明不该走 cancel,实际 cancel ' + guhuoCancelled + ' 次');
+  });
+  await check('guhuoTarget 超时默认值 === BOT_SEAT_PICKS.guhuoTarget.fallbackSeat 的结果(复用同一套评分)', function(){
+    var expect = BOT_SEAT_PICKS.guhuoTarget.fallbackSeat(gA, 0);
+    if(guhuoPicked !== expect) throw new Error('应与 fallbackSeat 一致(' + expect + '),实际 ' + guhuoPicked);
+    if(guhuoPicked === 0) throw new Error('不应选自己(杀不能对自己使用)');
+  });
+
+  // --- guhuoTarget:声明为【借刀杀人】是 A/B 两目标流程,单目标提交会被服务端拒绝 ---
+  guhuoPicked = null; guhuoCancelled = 0;
+  var gB = mkG4({ phase:'guhuoTarget', pending:{ type:'guhuoTarget', sourceSeat:0,
+    actualCard:{id:'b1',name:'闪',suit:'♦',rank:2},
+    claimedCard:{id:'b1',name:'借刀杀人',suit:'♦',rank:2},
+    askedAt: Date.now() - 31000 } });
+  window.__g = gB; mySeat = 0;
+  var retB = maybeAutoRespondTimeout(gB);
+  await check('guhuoTarget 超时:声明为【借刀杀人】时走 cancelGuhuoTarget(不硬塞单目标)', function(){
+    if(retB !== true) throw new Error('应返回 true,实际 ' + retB);
+    if(guhuoCancelled !== 1) throw new Error('应调用 cancelGuhuoTarget 1 次,实际 ' + guhuoCancelled);
+    if(guhuoPicked !== null) throw new Error('不应调用 guhuoChooseTarget(服务端会拒绝),实际选了 ' + guhuoPicked);
+  });
+
+  // --- quhuDamageChoice:超时应按 fallbackSeat 评分在 targets 里挑一个 ---
+  var quhuPicked = null;
+  respondQuhuDamage = function(t){ quhuPicked = t; };
+  var gC = mkG4({ phase:'quhuDamageChoice', pending:{ type:'quhuDamageChoice',
+    seat:0, targetSeat:1, targets:[1,2], askedAt: Date.now() - 31000 } });
+  window.__g = gC; mySeat = 0;
+  var retC = maybeAutoRespondTimeout(gC);
+  await check('quhuDamageChoice 超时:提交了伤害目标(不再是 timeout_stuck 静默悬着)', function(){
+    if(retC !== true) throw new Error('应返回 true,实际 ' + retC);
+    if(quhuPicked === null) throw new Error('应调用 respondQuhuDamage');
+    if([1,2].indexOf(quhuPicked) < 0) throw new Error('应从 targets=[1,2] 里选,实际 ' + quhuPicked);
+  });
+  await check('quhuDamageChoice 超时默认值 === BOT_SEAT_PICKS.quhuDamage.fallbackSeat 的结果', function(){
+    var expect = BOT_SEAT_PICKS.quhuDamage.fallbackSeat(gC, 0);
+    if(quhuPicked !== expect) throw new Error('应与 fallbackSeat 一致(' + expect + '),实际 ' + quhuPicked);
+  });
+
+  // --- 边界:候选全部阵亡时,传 targets[0] 触发服务端自愈分支,不静默悬着 ---
+  quhuPicked = null;
+  var gD = mkG4({ phase:'quhuDamageChoice', pending:{ type:'quhuDamageChoice',
+    seat:0, targetSeat:1, targets:[1,2], askedAt: Date.now() - 31000 } });
+  gD.players[1].alive = false; gD.players[2].alive = false;
+  window.__g = gD; mySeat = 0;
+  maybeAutoRespondTimeout(gD);
+  await check('quhuDamageChoice 边界:候选全阵亡时仍提交(交给服务端 finishQuhu 自愈)', function(){
+    if(quhuPicked === null) throw new Error('仍应提交一个 targets 里的座位,实际没提交');
+  });
+
+  // --- 直接验证"不再记录 timeout_stuck" ---
+  // maybeAutoRespondTimeout 在 autoRespondAction 返回 null 时会写一条 timeout_stuck 调试日志
+  // (那正是这两个 phase 补兜底之前的行为)。debug-log.js 不在本测试的加载清单里,所以
+  // writeDebugLog 本来是 undefined、被 typeof 守卫跳过;这里显式定义成 spy 来观测。
+  var stuckEvents = [];
+  writeDebugLog = function(room, kind, payload){ stuckEvents.push({kind:kind, phase:payload&&payload.phase}); };
+
+  stuckEvents = [];
+  var gS1 = mkG4({ phase:'guhuoTarget', pending:{ type:'guhuoTarget', sourceSeat:0,
+    actualCard:{id:'s1',name:'闪',suit:'♦',rank:2},
+    claimedCard:{id:'s1',name:'杀',suit:'♦',rank:2},
+    askedAt: Date.now() - 31000 } });
+  window.__g = gS1; mySeat = 0;
+  maybeAutoRespondTimeout(gS1);
+  await check('guhuoTarget 超时不再写 timeout_stuck', function(){
+    var st = stuckEvents.filter(function(e){ return e.kind==='timeout_stuck'; });
+    if(st.length !== 0) throw new Error('不应写 timeout_stuck,实际写了 ' + st.length + ' 条');
+  });
+
+  stuckEvents = [];
+  var gS2 = mkG4({ phase:'quhuDamageChoice', pending:{ type:'quhuDamageChoice',
+    seat:0, targetSeat:1, targets:[1,2], askedAt: Date.now() - 31000 } });
+  window.__g = gS2; mySeat = 0;
+  maybeAutoRespondTimeout(gS2);
+  await check('quhuDamageChoice 超时不再写 timeout_stuck', function(){
+    var st = stuckEvents.filter(function(e){ return e.kind==='timeout_stuck'; });
+    if(st.length !== 0) throw new Error('不应写 timeout_stuck,实际写了 ' + st.length + ' 条');
+  });
+
+  // 对照组:一个确实没有保守动作的 pending —— 必须仍然写 timeout_stuck。
+  // 没有这条对照,上面两条"没写 timeout_stuck"可能只是因为 spy 根本没接上(永远绿)。
+  stuckEvents = [];
+  var gS3 = mkG4({ phase:'__nosuchphase__', pending:{ type:'__nosuchphase__', seat:0,
+    askedAt: Date.now() - 31000 } });
+  window.__g = gS3; mySeat = 0;
+  maybeAutoRespondTimeout(gS3);
+  await check('对照组:无保守动作的 pending 仍会写 timeout_stuck(证明上面两条 spy 真的接上了)', function(){
+    var st = stuckEvents.filter(function(e){ return e.kind==='timeout_stuck'; });
+    if(st.length !== 1) throw new Error('对照组应写 1 条 timeout_stuck,实际 ' + st.length + ' 条');
+  });
+
+  // --- 未超时不应提交(和既有用例同口径,证明新增分支没绕过超时判定) ---
+  guhuoPicked = null; quhuPicked = null;
+  var gE = mkG4({ phase:'guhuoTarget', pending:{ type:'guhuoTarget', sourceSeat:0,
+    actualCard:{id:'e1',name:'闪',suit:'♦',rank:2},
+    claimedCard:{id:'e1',name:'杀',suit:'♦',rank:2},
+    askedAt: Date.now() } });
+  window.__g = gE; mySeat = 0;
+  maybeAutoRespondTimeout(gE);
+  await check('guhuoTarget 未超时 -> 不提交', function(){
+    if(guhuoPicked !== null) throw new Error('未超时不该提交,实际选了 ' + guhuoPicked);
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');

@@ -477,6 +477,38 @@ function autoRespondAction(g){
   if(type==='shensuChoose1') return function(){ skipShensu1(); };
   if(type==='shensuChoose2') return function(){ skipShensu2(); };
   if(type==='qiaobianTurnStart') return function(){ qiaobianDecline(); };
+  // 【补齐两个新登记 phase 的超时兜底】guhuoTarget/quhuDamageChoice 这两个阶段此前连
+  // BOT_PHASE_ACTOR 都没登记(已在"调查顺带发现的既有bug"批次补上),所以超时检测器连
+  // 行动者都解析不出来,30秒后只会记一条 timeout_stuck 然后继续悬着。这里补上默认动作。
+  // 【为什么不是"不发动"】和上面那批不同,这两个阶段【没有"不发动"这个选项】——蛊惑的牌
+  // 已经扣置且质疑已经过关、驱虎的拼点已经赢了,代价都已经付掉了,悬着不动是纯粹的损失。
+  // 所以默认动作是"把它完成掉",而不是"保守地不做"。
+  // 【为什么直接复用 fallbackSeat】BOT_SEAT_PICKS 里这两项的 fallbackSeat 已经各自写好了
+  // 选目标的评分(都是 pickBestCandidateSeat(...,'damage')),那就是这两个阶段"没有更多
+  // 信息时该选谁"的既有答案,超时场景没有任何理由给出不同答案——不另发明一套"超时专用"
+  // 规则,和 lieRenPickCard"已经决定拼点就固定收尾、不重新判断"同一思路。
+  if(type==='guhuoTarget') return function(){
+    const d = g.pending || {};
+    // 声明为【借刀杀人】时目标是 A/B 两个不同角色,不是单目标流程能表达的
+    // (guhuoChooseTarget 服务端会显式拒绝,见 skills.js 那段注释),超时不替玩家做这种
+    // 两段式决策,走该阶段本来就设计好的合法退出 cancelGuhuoTarget(扣置牌作废)。
+    if(d.claimedCard && d.claimedCard.name==='借刀杀人'){ cancelGuhuoTarget(); return; }
+    const picks = (typeof BOT_SEAT_PICKS!=='undefined' && BOT_SEAT_PICKS) ? BOT_SEAT_PICKS.guhuoTarget : null;
+    const seat = (picks && typeof picks.fallbackSeat==='function') ? picks.fallbackSeat(g, d.sourceSeat) : null;
+    if(typeof seat==='number') guhuoChooseTarget(seat);
+    else cancelGuhuoTarget();   // 一个合法目标都没有:扣置牌作废,但至少不把整局卡死
+  };
+  if(type==='quhuDamageChoice') return function(){
+    const d = g.pending || {};
+    const picks = (typeof BOT_SEAT_PICKS!=='undefined' && BOT_SEAT_PICKS) ? BOT_SEAT_PICKS.quhuDamage : null;
+    const seat = (picks && typeof picks.fallbackSeat==='function') ? picks.fallbackSeat(g, d.seat) : null;
+    if(typeof seat==='number'){ respondQuhuDamage(seat); return; }
+    // 候选全部阵亡导致挑不出人:随便传一个原始 targets 里的座位,让服务端自己那条
+    // "source/target 已阵亡 → finishQuhu(g)" 的自愈分支把这个 pending 收掉(见
+    // skills.js respondQuhuDamage),不需要在这里另写一套收尾。
+    const t = (d.targets||[])[0];
+    if(typeof t==='number') respondQuhuDamage(t);
+  };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且
