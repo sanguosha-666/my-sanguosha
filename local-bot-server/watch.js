@@ -82,12 +82,92 @@ const gameRef = db.ref('rooms/' + ROOM_ID + '/game');
 
 // ---------- 打印:参照 debugLogs 的字段设计风格(phase/pending/turn/roundNum 这类结构性
 // 摘要 + 白名单化的 pending 快照),不打印任何隐藏信息(手牌内容/判定牌/身份等)。----------
-function printSnapshot(g) {
+//
+// 【VERBOSE 开关】环境变量 VERBOSE=1 时,完全恢复成改动前的"每次回调都打印完整 JSON"
+// 打印方式(不做单行摘要压缩、不做去重),用于需要深入排查时切回完整信息。
+const VERBOSE = process.env.VERBOSE === '1' || process.env.VERBOSE === 'true';
+
+function timeOfDay(d) {
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(function (n) { return String(n).padStart(2, '0'); })
+    .join(':');
+}
+
+function playersOneLine(players) {
+  if (!Array.isArray(players)) return '';
+  return players.map(function (p, i) {
+    if (!p) return '座位' + i + '(空)';
+    return '座位' + i + '(' + (p.name || '?') + ',hp' + (p.hp == null ? '?' : p.hp)
+      + ',' + (p.alive ? '存活' : '阵亡') + ')';
+  }).join(' ');
+}
+
+// 只取"决定要不要重复打印/要不要展开"的关键字段做签名,忽略其余字段(比如具体 pending
+// 内部进度、日志数组等)的变化——避免 Firebase 因为无关字段触发回调时刷屏。
+function keySignature(summary) {
+  return JSON.stringify({
+    phase: summary.phase,
+    pendingType: summary.pendingType,
+    turn: summary.turn,
+    roundNum: summary.roundNum,
+    players: (summary.players || []).map(function (p) {
+      return p && { hp: p.hp, alive: p.alive };
+    }),
+  });
+}
+
+// 完整 JSON 打印(VERBOSE 模式,或者从未打印过完整信息时打印一次首帧)。
+function printFullJson(g, summary) {
   const ts = new Date().toISOString();
+  console.log('[' + ts + '] --- 房间 ' + ROOM_ID + ' 状态更新 ---');
+  console.log(JSON.stringify(summary, null, 2));
+  if (g.pending) {
+    const pendingSafe = sanitizePendingForLog(g.pending);
+    console.log('pending(白名单脱敏后):', JSON.stringify(pendingSafe, null, 2));
+  }
+}
+
+// 精简单行摘要:普通 phase 流转 / 非 pending 字段变化 / 同一个 pendingType 的后续进展。
+function printCompactLine(summary) {
+  const now = new Date();
+  const phaseDisplay = (lastPrintedPhase && lastPrintedPhase !== summary.phase)
+    ? (lastPrintedPhase + ' → ' + summary.phase)
+    : String(summary.phase);
+  const turnRound = 'turn' + (summary.turn == null ? '?' : summary.turn)
+    + '/round' + (summary.roundNum == null ? '?' : summary.roundNum);
+  console.log(
+    timeOfDay(now) + ' [' + ROOM_ID + '] ' + phaseDisplay + ' ' + turnRound
+    + ' ' + playersOneLine(summary.players)
+  );
+}
+
+// 醒目展开:新出现的 pending(和上一次打印的 pendingType 不同)。
+function printPendingExpanded(g, summary) {
+  const now = new Date();
+  const bar = '⚠️ ============================================================';
+  console.log(bar);
+  console.log(timeOfDay(now) + ' [' + ROOM_ID + '] ⚠️ 新的待响应状态: ' + summary.pendingType);
+  console.log(bar);
+  const pendingSafe = sanitizePendingForLog(g.pending);
+  console.log('pending(白名单脱敏后):', JSON.stringify(pendingSafe, null, 2));
+}
+
+let lastKeySig = null; // 上一次实际打印过的关键字段签名,用于去重
+let lastPendingType = undefined; // 上一次打印过的 pendingType(含 null),用于判断"是不是新出现的 pending"
+let lastPrintedPhase = null; // 上一次打印过的 phase,用于画 phase 变化箭头
+
+function printSnapshot(g) {
   if (g === null) {
+    const ts = new Date().toISOString();
+    const sig = 'ROOM_ABSENT';
+    if (!VERBOSE && sig === lastKeySig) return;
     console.log('[' + ts + '] 房间 ' + ROOM_ID + ' 当前不存在(rooms/' + ROOM_ID + '/game 为空)');
+    lastKeySig = sig;
+    lastPendingType = undefined;
+    lastPrintedPhase = null;
     return;
   }
+
   const summary = {
     phase: g.phase || null,
     turn: (typeof g.turn === 'number' ? g.turn : null),
@@ -97,12 +177,25 @@ function printSnapshot(g) {
     pendingType: (g.pending && g.pending.type) || null,
     players: playersSummary(g),
   };
-  console.log('[' + ts + '] --- 房间 ' + ROOM_ID + ' 状态更新 ---');
-  console.log(JSON.stringify(summary, null, 2));
-  if (g.pending) {
-    const pendingSafe = sanitizePendingForLog(g.pending);
-    console.log('pending(白名单脱敏后):', JSON.stringify(pendingSafe, null, 2));
+
+  if (VERBOSE) {
+    printFullJson(g, summary);
+    return;
   }
+
+  const sig = keySignature(summary);
+  if (sig === lastKeySig) return; // 关键字段完全没变,跳过(避免无关字段变化刷屏)
+
+  const isNewPending = summary.pendingType !== null && summary.pendingType !== lastPendingType;
+  if (isNewPending) {
+    printPendingExpanded(g, summary);
+  } else {
+    printCompactLine(summary);
+  }
+
+  lastKeySig = sig;
+  lastPendingType = summary.pendingType;
+  lastPrintedPhase = summary.phase;
 }
 
 console.log('==============================================');

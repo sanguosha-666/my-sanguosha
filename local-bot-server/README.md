@@ -16,11 +16,23 @@
 
 1. 打开 [Firebase 控制台](https://console.firebase.google.com/) → 选择这个项目
    （项目 ID 见 `config.js` 里的 `projectId`,目前是 `sgs666-733bf`）→
-   齿轮图标「项目设置」→「服务账号」标签页 → 点击「生成新的私钥」,会下载一个
-   `xxxxx-firebase-adminsdk-xxxxx.json` 文件。
-2. 把这个文件**改名**为 `serviceAccountKey.json`,放到
+   齿轮图标「项目设置」→「服务账号」标签页 → 点击「生成新的私钥」,浏览器（大概率
+   跑在 Windows 侧）会把 `xxxxx-firebase-adminsdk-xxxxx.json` 下载到 Windows 的
+   下载目录。
+2. 把这个文件**改名**为 `serviceAccountKey.json`,拷贝到
    **`local-bot-server/serviceAccountKey.json`**（就是本 README 所在的目录下,
-   和 `watch.js`/`package.json` 同级）。
+   和 `watch.js`/`package.json` 同级——这是一条 WSL/Linux 风格路径,不是
+   `C:\...`）。从 Windows 下载目录拷进 WSL,可以在 WSL 终端里用类似这样的命令
+   （按你实际的 Windows 用户名替换 `<Windows用户名>`,WSL 下 Windows 盘符挂载在
+   `/mnt/c/`)：
+
+   ```bash
+   cp "/mnt/c/Users/<Windows用户名>/Downloads/xxxxx-firebase-adminsdk-xxxxx.json" \
+      local-bot-server/serviceAccountKey.json
+   ```
+
+   拷完之后密钥文件本体就完全在 WSL 文件系统内了,后续 `watch.js` 读取它不会跨
+   文件系统,也符合上一节「项目代码放在 WSL 文件系统内」的要求。
 3. 这个路径已经被 `.gitignore` 排除（根目录 `.gitignore` 新增的
    `local-bot-server/serviceAccountKey*.json` 规则,任何以 `serviceAccountKey`
    开头的 `.json` 文件都不会被 git 跟踪）,`git status` 不会显示它、`git add -A`
@@ -35,12 +47,18 @@
 
 ## 二、环境准备
 
-需要 Node.js（建议 18 及以上;这台开发机是 v22,Windows 上装 [nodejs.org](https://nodejs.org/)
-的 LTS 版本即可）。
+执行环境是 **Windows 上的 WSL2**（Linux 子系统),Node.js 通过 `nvm` 安装(建议
+18 及以上;可以用 `node -v` 确认当前版本)。
 
-### 在你的 Windows 笔记本上
+**⚠️ 项目代码必须放在 WSL 自己的文件系统内**（比如 `/home/你的用户名/...`),
+**不要**放在 `/mnt/c/...` 这类挂载的 Windows 盘符路径下——跨文件系统 I/O（尤其是
+`node_modules` 里成百上千个小文件的读写)在 WSL2 里会明显变慢,`npm install`、
+`node watch.js` 启动都会受影响。这个仓库当前的路径
+（`/home/admin2/my-project/sanguosha`)已经在 WSL 文件系统内,符合要求,不需要挪动。
 
-```powershell
+### 在 WSL 终端里
+
+```bash
 cd local-bot-server
 npm install
 ```
@@ -52,8 +70,7 @@ npm install
 
 ## 三、配置:三个必需值
 
-除了密钥文件本身,还需要三个配置项。**推荐用 `.env` 文件**（比每次在命令行敲环境变量方便,
-尤其是 Windows）：
+除了密钥文件本身,还需要三个配置项。**推荐用 `.env` 文件**（比每次在命令行敲环境变量方便）：
 
 在 `local-bot-server/` 目录下新建一个文件,命名为 `.env`（同样已被 `.gitignore` 排除)，内容:
 
@@ -68,11 +85,11 @@ ROOM_ID=你要观察的房间号
 - `FIREBASE_SERVICE_ACCOUNT_PATH`（可选)：只有当密钥文件没放在默认路径
   `local-bot-server/serviceAccountKey.json` 时才需要设置,填密钥文件的绝对路径。
 
-如果不想用 `.env` 文件,也可以直接在命令行里设置环境变量后再启动（Windows PowerShell 示例）：
+如果不想用 `.env` 文件,也可以直接在命令行里设置环境变量后再启动（bash 示例）：
 
-```powershell
-$env:FIREBASE_DATABASE_URL="https://sgs666-733bf-default-rtdb.firebaseio.com"
-$env:ROOM_ID="你的房间号"
+```bash
+FIREBASE_DATABASE_URL="https://sgs666-733bf-default-rtdb.firebaseio.com" \
+ROOM_ID="你的房间号" \
 node watch.js
 ```
 
@@ -82,7 +99,7 @@ node watch.js
 
 ## 四、运行
 
-```powershell
+```bash
 cd local-bot-server
 npm start
 ```
@@ -96,7 +113,7 @@ npm start
  本地机器人服务 阶段1骨架 —— 只订阅只打印,不写入
  房间号     : abc123
  数据库地址 : https://sgs666-733bf-default-rtdb.firebaseio.com
- 密钥文件   : ...\local-bot-server\serviceAccountKey.json
+ 密钥文件   : .../local-bot-server/serviceAccountKey.json
 ==============================================
 
 正在订阅 rooms/abc123/game ,等待状态变化...
@@ -106,6 +123,47 @@ npm start
 和排查方向,不会是一堆看不懂的堆栈。
 
 按 `Ctrl+C` 可以随时安全退出。
+
+### 打印格式:精简摘要 / pending 展开 / VERBOSE 完整模式
+
+默认打印是**精简过的**,目的是减少刷屏、让真正需要关注的信息（新出现的待响应状态)
+醒目突出。具体分两种情形（判断依据只是 `phase`/`pendingType`/`turn`/`roundNum`/每个
+玩家的 `hp`/`alive` 这几个关键字段有没有变化,和 Firebase 订阅本身的推送频率无关——
+如果这几个关键字段和上一次打印时完全一样,这次回调**不会**打印任何东西,避免无关字段
+变化刷屏)：
+
+**普通 phase 流转 / 非 pending 字段变化**（没有 pending,或者 pending 类型和上一次打印
+的还是同一种、没有新的待响应状态出现),打印精简单行摘要,phase 有变化时用 `→` 标出
+「从什么变成什么」：
+
+```
+23:38:15 [chibi] play → discard turn2/round1 座位0(8984,hp2,存活) 座位1(机器人1,hp3,存活) 座位2(机器人2,hp4,存活)
+```
+
+**出现新的待响应状态**（`pending.type` 不为空,且和上一次打印过的 `pendingType` 不同——
+说明这是一次新出现的、值得关注的询问),用 `⚠️` 分隔线展开打印,并附上脱敏后的完整
+`pending` 内容（脱敏规则不变,牌面相关字段一律替换成占位符)：
+
+```
+⚠️ ============================================================
+23:38:20 [chibi] ⚠️ 新的待响应状态: wuxie
+⚠️ ============================================================
+pending(白名单脱敏后): {
+  "type": "wuxie",
+  "seat": 1,
+  "card": "[已隐藏:可能含具体牌面/手牌内容,不写入日志]"
+}
+```
+
+**VERBOSE 详细模式**：设置环境变量 `VERBOSE=1`（或 `VERBOSE=true`)启动,会完全恢复成
+改动前"每次订阅回调都打印完整 JSON、不做单行摘要压缩、不做去重"的方式,用于需要深入
+排查时切回完整信息：
+
+```bash
+VERBOSE=1 node watch.js
+```
+
+或者写进 `.env` 文件里一行 `VERBOSE=1`。
 
 ---
 
@@ -117,21 +175,26 @@ npm start
    停在「正在订阅...等待状态变化...」这一行。
 
 2. **开一局游戏观察初次快照**：用浏览器打开这个项目的网页,加入你在 `.env` 里配置的
-   那个 `ROOM_ID` 房间号（新房间或已有房间都行)。回到终端,应该立刻看到一条
-   `--- 房间 xxx 状态更新 ---` 的打印,里面的 `phase` 字段应该和浏览器里当前所在的阶段
-   一致（比如还没开始游戏是 `"lobby"` 或 `null`，具体看当前房间状态)。
+   那个 `ROOM_ID` 房间号（新房间或已有房间都行)。回到终端,应该立刻看到一条精简单行
+   摘要（见上面「打印格式」一节),里面的 phase 应该和浏览器里当前所在的阶段一致
+   （比如还没开始游戏是 `lobby` 或 `null`，具体看当前房间状态)。
 
 3. **验证状态变化能被实时推送到终端**：在浏览器里做一个会改变游戏状态的操作
    （比如点「开始游戏」、选武将、出一张牌、结束回合)。**每做一次操作,终端应该立刻打印
-   一条新的状态更新**（不需要刷新终端、不需要重启脚本——这是 Firebase 的实时订阅,
-   状态一变就推送)。检查打印出的 `phase`/`turn`/`roundNum` 是否和浏览器界面显示的一致。
+   一条新的单行摘要**（不需要刷新终端、不需要重启脚本——这是 Firebase 的实时订阅,
+   状态一变就推送;如果这次操作没有改变 phase/pendingType/turn/roundNum/任何玩家的
+   hp/alive,则不会有新打印,这是预期的去重行为,不是没收到推送)。检查打印出的
+   `turnN/roundN` 和座位摘要是否和浏览器界面显示的一致。
 
-4. **验证 pending 阶段的打印**：让游戏进行到某个需要人响应的阶段（比如有人被出杀、
-   需要出闪;或者用南蛮入侵/万箭齐发这类需要多人响应的锦囊)。此时终端除了状态更新,
-   应该额外打印一段 `pending(白名单脱敏后): {...}`，里面能看到 `type`（比如 `"respond"`）、
-   `from`/`to` 这类座位号字段,但**不应该出现任何具体的牌名/花色/点数**
-   （凡是牌面相关字段,应该显示成 `"[已隐藏:可能含具体牌面/手牌内容,不写入日志]"`
-   这样的占位符，而不是真实牌面)。这一步是在验证隐私脱敏白名单确实生效。
+4. **验证 pending 展开打印**：让游戏进行到某个需要人响应的阶段（比如有人被出杀、
+   需要出闪;或者用南蛮入侵/万箭齐发这类需要多人响应的锦囊)。此时终端应该打印一段
+   `⚠️` 分隔线展开的「新的待响应状态」块,附带 `pending(白名单脱敏后): {...}`，里面能
+   看到 `type`（比如 `"wuxie"`）、`from`/`to` 这类座位号字段,但**不应该出现任何具体的
+   牌名/花色/点数**（凡是牌面相关字段,应该显示成
+   `"[已隐藏:可能含具体牌面/手牌内容,不写入日志]"` 这样的占位符，而不是真实牌面)。这一步
+   是在验证隐私脱敏白名单确实生效。如果需要连续追踪同一个 pending 内部的进展细节
+   （比如南蛮入侵依次问到了哪个座位),可以用 `VERBOSE=1` 启动,切回每次回调都打印完整
+   JSON 的模式。
 
 5. **验证只读、不影响游戏**：这个脚本运行期间,正常在浏览器里继续把这一局玩完
    （或玩几个回合)。游戏应该完全正常进行,不应该出现任何异常行为、卡顿、或状态被
