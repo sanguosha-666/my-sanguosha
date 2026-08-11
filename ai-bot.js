@@ -201,8 +201,12 @@ function persistAiState(){
 
 // ---------- 密钥格式识别(纯函数) ----------
 // Claude 密钥固定 sk-ant- 前缀(Anthropic 官方格式);OpenRouter 密钥固定 sk-or- 前缀;
-// Groq 密钥固定 gsk_ 前缀(三者互不冲突,不需要考虑优先级顺序)。都识别不出时返回
-// null,由 UI 侧退化成手动选择下拉框。
+// 密钥格式识别(纯函数):Claude 密钥固定 sk-ant- 前缀;OpenRouter 固定 sk-or-;
+// Groq 固定 gsk_;HF 固定 hf_;Cohere 固定 co-(Trial key);Cerebras 固定 csk-
+// (2026-08-11 用户确认,此前调研猜的 cerebras- 前缀一并保留兼容)。
+// 各家前缀互不冲突,不需要考虑优先级顺序。空字符串返回 null(没填密钥不算任何
+// provider);其余识别不出的密钥一律 fallback 到 cohere(2026-08-11 用户要求——
+// "其他未被识别的密钥则分配到cohere",所以正常情况不再返回 null)。
 function detectAiProvider(key){
   const k = (key||'').trim();
   if(!k) return null;
@@ -211,8 +215,9 @@ function detectAiProvider(key){
   if(/^gsk_/.test(k)) return 'groq';
   if(/^hf_/.test(k)) return 'hf';
   if(/^co-/i.test(k)) return 'cohere';
-  if(/^cerebras-/i.test(k)) return 'cerebras';
-  return null;
+  if(/^csk-/.test(k)) return 'cerebras';
+  if(/^cerebras-/.test(k)) return 'cerebras';
+  return 'cohere'; // 未识别 → 默认分配到 cohere(用户要求)
 }
 
 // ---------- Provider 适配层 ----------

@@ -45,8 +45,15 @@ const context = {
   window: {
     aiConversations: {},
     addEventListener: function(){},
-    location: { search: '', href: 'http://localhost', reload: function(){} }
-  }
+    location: { search: '', href: 'http://localhost', reload: function(){} },
+    // detectAiProvider 会把未识别的密钥 fallback 到 cohere(2026-08-11 起),
+    // test-key 触发 showAiKeyModal → renderModelPicker → fetchProviderModels('cohere')。
+    // 沙箱没有真网络,给 fetch stub 返回 null(走静态表回退),保证弹窗用例不炸。
+    fetch: function(){ return Promise.resolve(null); }
+  },
+  // fetchProviderModels 内部用裸 fetch(不是 window.fetch)——和 run_ai_model_picker_test.js
+  // 同款处理:context 顶层也要有 fetch,否则裸标识符在沙箱里 ReferenceError。
+  fetch: function(){ return Promise.resolve(null); }
 };
 // 沙箱内裸 sessionStorage 与 window.sessionStorage 同源指向上面这个 stub
 context.window.sessionStorage = context.sessionStorage;
@@ -359,8 +366,10 @@ const testCode = String.raw`
   });
 
   // 11. showAiKeyModal 弹窗按钮区含 #aiMemoryClearBtn(结构性断言)
+  //     注意:detectAiProvider 已把未识别密钥 fallback 到 cohere(2026-08-11 起),
+  //     test-key 会识别为 cohere;用 co-test 保持语义明确。
   await check('11 弹窗含清除AI记忆按钮 #aiMemoryClearBtn', async function(){
-    aiApiKey = 'test-key'; aiProvider = null; aiApiModel = '';
+    aiApiKey = 'co-test'; aiProvider = 'cohere'; aiApiModel = '';
     showAiKeyModal();
     var clearBtn = document.getElementById('aiMemoryClearBtn');
     if(!clearBtn) throw new Error('btnRow 应含 #aiMemoryClearBtn');
@@ -370,7 +379,9 @@ const testCode = String.raw`
   // 12. 点击清除按钮 → aiSummary 清空、aiSummarySeat=null;密钥/模型不受影响;
   //     弹窗不关闭(#aiKeyModal 未加 hidden);就地提示出现
   await check('12 点击清除按钮清空摘要且不关弹窗', async function(){
-    aiApiKey = 'test-key'; aiProvider = null; aiApiModel = 'keep-model';
+    // provider 必须是已识别的 cohere(不能让 provider 从 null 变成 cohere——那会触发
+    // "换 provider 清模型"逻辑,把 aiApiModel 清掉,干扰本条"清除记忆不动模型"的语义)。
+    aiApiKey = 'co-test'; aiProvider = 'cohere'; aiApiModel = 'keep-model';
     aiSummary = '旧记忆'; aiSummarySeat = 1;
     showAiKeyModal();
     var clearBtn = document.getElementById('aiMemoryClearBtn');
@@ -378,7 +389,7 @@ const testCode = String.raw`
     clearBtn.click();
     if(aiSummary !== '') throw new Error('点击后 aiSummary 应为空,实际 "' + aiSummary + '"');
     if(aiSummarySeat !== null) throw new Error('点击后 aiSummarySeat 应为 null,实际 ' + aiSummarySeat);
-    if(aiApiKey !== 'test-key') throw new Error('密钥不应被清除,实际 "' + aiApiKey + '"');
+    if(aiApiKey !== 'co-test') throw new Error('密钥不应被清除,实际 "' + aiApiKey + '"');
     if(aiApiModel !== 'keep-model') throw new Error('模型选择不应被清除,实际 "' + aiApiModel + '"');
     var m = document.getElementById('aiKeyModal');
     if(!m) throw new Error('#aiKeyModal 应存在');
