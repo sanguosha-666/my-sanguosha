@@ -473,29 +473,30 @@
     z-index:2;
   }
   /* 托管是公开状态：立绘变灰，所有玩家都能看到机器人和“在偷懒”标识。 */
-  .seat.autopilot .seat-art .avatar{filter:grayscale(.9) brightness(.62);}
-  .seat.autopilot .seat-art .avatar-placeholder{filter:grayscale(1) brightness(.62);}
+  /* 只做轻度灰化，不降低整卡透明度；避免和 .seat.dead 的阵亡效果混淆。 */
+  .seat.autopilot .seat-art .avatar{filter:grayscale(.55) brightness(.88) contrast(.95);}
+  .seat.autopilot .seat-art .avatar-placeholder{filter:grayscale(.55) brightness(.88);}
   .seat-autopilot-badge{
-    position:absolute;top:25%;left:50%;transform:translate(-50%,-50%);
-    min-width:76px;padding:6px 9px;display:flex;align-items:center;justify-content:center;
+    position:absolute;top:30%;left:14%;right:14%;transform:translateY(-50%);
+    box-sizing:border-box;padding:8px 10px;display:flex;align-items:center;justify-content:center;
     column-gap:4px;border:1px solid var(--gold);border-radius:7px;background:#1a1410;
     color:var(--paper);line-height:1;z-index:7;pointer-events:none;text-align:center;
     box-shadow:0 2px 6px rgba(0,0,0,.9);
   }
-  .seat-autopilot-robot{font-size:19px;}
-  .seat-autopilot-lazy{font-size:17px;font-weight:700;color:var(--gold);white-space:nowrap;}
-  .seat.me .seat-autopilot-badge{min-width:96px;padding:7px 11px;column-gap:7px;}
-  .seat.me .seat-autopilot-robot{font-size:24px;}
-  .seat.me .seat-autopilot-lazy{font-size:22px;}
+  .seat-autopilot-robot{font-size:23px;}
+  .seat-autopilot-lazy{font-size:21px;font-weight:700;color:var(--gold);white-space:nowrap;}
+  .seat.me .seat-autopilot-badge{left:12%;right:12%;padding:10px 12px;column-gap:8px;}
+  .seat.me .seat-autopilot-robot{font-size:29px;}
+  .seat.me .seat-autopilot-lazy{font-size:27px;}
   @container (max-width:130px){
-    .seat-autopilot-badge{min-width:61px;padding:4px 6px;column-gap:3px;}
-    .seat-autopilot-robot{font-size:15px;}
-    .seat-autopilot-lazy{font-size:12px;}
+    .seat-autopilot-badge{left:10%;right:10%;padding:5px 6px;column-gap:3px;}
+    .seat-autopilot-robot{font-size:17px;}
+    .seat-autopilot-lazy{font-size:14px;}
   }
   @container (max-width:105px){
-    .seat-autopilot-badge{top:27%;min-width:52px;padding:3px 4px;column-gap:2px;}
-    .seat-autopilot-robot{font-size:12px;}
-    .seat-autopilot-lazy{font-size:10px;}
+    .seat-autopilot-badge{top:30%;left:7%;right:7%;padding:4px;column-gap:2px;}
+    .seat-autopilot-robot{font-size:14px;}
+    .seat-autopilot-lazy{font-size:12px;}
   }
   /* 装备条(第5次微调:去掉不透明白底,改成白色文字直接叠在立绘下半部;
      第6次微调:4行放大到"撑满"阴影区;
@@ -2128,21 +2129,21 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=372"></script>
-<script src="data.js?v=372"></script>
-<script src="debug-log.js?v=372"></script>
-<script src="room-lifecycle.js?v=372"></script>
-<script src="game.js?v=372"></script>
-<script src="weapons.js?v=372"></script>
-<script src="skills.js?v=372"></script>
-<script src="bot-ai-bus.js?v=372"></script>
-<script src="bot.js?v=372"></script>
-<script src="ai-bot.js?v=372"></script>
-<script src="render.js?v=372"></script>
-<script src="render-table.js?v=372"></script>
-<script src="render-discard.js?v=372"></script>
-<script src="render-hand.js?v=372"></script>
-<script src="render-controls.js?v=372"></script>
-<script src="render-log.js?v=372"></script>
+<script src="config.js?v=373"></script>
+<script src="data.js?v=373"></script>
+<script src="debug-log.js?v=373"></script>
+<script src="room-lifecycle.js?v=373"></script>
+<script src="game.js?v=373"></script>
+<script src="weapons.js?v=373"></script>
+<script src="skills.js?v=373"></script>
+<script src="bot-ai-bus.js?v=373"></script>
+<script src="bot.js?v=373"></script>
+<script src="ai-bot.js?v=373"></script>
+<script src="render.js?v=373"></script>
+<script src="render-table.js?v=373"></script>
+<script src="render-discard.js?v=373"></script>
+<script src="render-hand.js?v=373"></script>
+<script src="render-controls.js?v=373"></script>
+<script src="render-log.js?v=373"></script>
 </body>
 </html>
