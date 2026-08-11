@@ -211,7 +211,13 @@ function buildAutopilotUserPrompt(userPrompt){
 
 // callAiChooseIndex:一次"候选列表→索引"的AI询问,返回规范化后的合法下标或 null。
 // 守卫/超时/解析失败/越界全部收敛到这一处,与 tryAiBotPlay 同一套取舍:任何失败都
-// 返回 null 交给调用方回退本地逻辑,不重试、不阻塞、不抛异常。
+// 返回 null 交给调用方回退本地逻辑,不阻塞、不抛异常。
+// 【多模型轮换的失败自动换下一个】轮换模式(groq/hf 多选)下,一次调用失败(429/413
+// 限流、网络错误、超时、500 等任意 !ok)不会立刻放弃——尝试下一个被选中的模型,
+// 试完整个轮换池都失败才返回 null 走本地兜底。429/413 会写 _modelCooldowns,
+// 下一次 resolveAiModel 自然跳过该模型;非限流错误(网络/500)不写冷却,靠 round-robin
+// 指针前进换下一个。手动单选(aiApiModel 非空)与非轮换 provider(claude/openrouter)
+// 保持单次调用零变化(那两种场景重试只会重复打同一个模型)。
 async function callAiChooseIndex(opts){
   const candidates = opts.candidates || [];
   // 【AI托管】检测当前座位是否处于托管模式:命中则该次询问要求 AI 附理由,
@@ -239,24 +245,37 @@ async function callAiChooseIndex(opts){
     userPromptText = buildAutopilotUserPrompt(opts.userPrompt);
     aiTestLastCall = { prompt: sysText + '\n\n' + userPromptText, rawResponse: null };
   }
+  // 轮换模式判定:groq/hf 且走多选轮换(aiApiModel 为空 = 不是手动单选)。这两种场景
+  // 才有"换下一个模型"可言;手动单选/非轮换 provider 重试只会打同一个模型,维持单次。
+  const rotating = (aiProvider==='groq'||aiProvider==='hf')
+    && !(typeof aiApiModel==='string' && aiApiModel)
+    && Array.isArray(aiApiModels) && aiApiModels.length>0;
   showAiThinkingIndicator(g, seat);
   let result;
   try{
-    const model = (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined);
-    if(model === ''){
-      // 全池冷却(哨兵空串):不发注定失败的请求,直接走本地兜底(null)。
-      // 托管记录:本次没有实际发起 AI 调用,rawResponse 保持 null。
-      if(autopilotHit && aiTestLastCall) aiTestLastCall.rawResponse = null;
-      if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
-      return null;
+    // 轮换模式:最多试完整个池子(每个模型至多一次——429/413 写冷却后 resolveAiModel
+    // 会跳过,非限流错误靠指针前进换下一个,但池子只有一个模型时不无限重打它);
+    // 非轮换模式:单次调用(与改动前逐字一致)。
+    const maxAttempts = rotating ? aiApiModels.length : 1;
+    result = null;
+    for(let attempt=0; attempt<maxAttempts; attempt++){
+      const model = (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined);
+      if(model === ''){
+        // 全池冷却(哨兵空串):不发注定失败的请求,直接走本地兜底(null)。
+        result = null;
+        break;
+      }
+      result = await callAI(aiProvider, aiApiKey, {
+        systemPrompt: sysText,
+        userPrompt: userPromptText,
+        maxTokens: opts.maxTokens || 80,
+        // 多模型轮换:同 updateAiSummary 的 callAI 调用点,见该处注释。
+        model,
+      });
+      if(result && result.ok) break; // 成功:停止重试
+      // 失败:继续下一轮拿下一个未冷却的模型(429/413 已被 callAI 写入冷却,
+      // resolveAiModel 会跳过它;非限流错误不写冷却,靠 round-robin 指针前进)。
     }
-    result = await callAI(aiProvider, aiApiKey, {
-      systemPrompt: sysText,
-      userPrompt: userPromptText,
-      maxTokens: opts.maxTokens || 80,
-      // 多模型轮换:同 updateAiSummary 的 callAI 调用点,见该处注释。
-      model,
-    });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
   }finally{

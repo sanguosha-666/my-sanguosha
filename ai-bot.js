@@ -389,9 +389,11 @@ function callAI(provider, apiKey, opts){
     }
     if(!res.ok){
       return res.text().then(t=>{
-        if(provider==='groq' && opts && typeof opts.model==='string' && (res.status===429 || res.status===413)){
+        if((provider==='groq'||provider==='hf') && opts && typeof opts.model==='string' && (res.status===429 || res.status===413)){
           // 429=限流(解析 retry_after);413=请求过大——该模型不适合当前输入规模,
           // 冷却 300s 固定值(解析不到 retry_after),两种都写 _modelCooldowns 让轮换跳过。
+          // groq 与 hf 都接:groq 是免费层独立池、hf 是 custom key 路由,两家的 429/413
+          // 都要让轮换知道"这个模型暂时不可用",否则下次又选它。
           const is413 = res.status===413;
           const sec = is413 ? null : parseGroqRetrySeconds(t);
           const coolSec = is413 ? 300 : (sec!==null ? sec : 60);

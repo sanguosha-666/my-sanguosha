@@ -145,6 +145,74 @@ const testCode = String.raw`
     if(idx !== null) throw new Error('期望 null,实际 ' + idx);
   });
 
+  // 5b. 多模型轮换:轮换模式(groq/hf 多选)下第一次调用失败 → 自动换下一个模型重试,
+  //     第二个成功 → 返回成功结果,且两次调用的 model 分别是池子里第 1、2 个
+  await check('轮换模式:失败自动换下一个模型重试(第2个成功)', async function(){
+    aiProvider = 'groq';
+    aiApiModel = '';
+    aiApiModels = ['m1:groq', 'm2:cohere'];
+    _modelRotateIdx = 0;
+    _modelCooldowns = {};
+    var calls = [];
+    var origCallAI = callAI;
+    callAI = async function(provider, apiKey, opts){
+      calls.push(opts.model);
+      // 第一个模型失败(限流),第二个成功
+      if(calls.length === 1) return { ok:false, reason:'other', detail:'HTTP 429' };
+      return { ok:true, text:'{"choice":1}' };
+    };
+    try{
+      var idx = await callAiChooseIndex({ g: g, seat: 0, candidates: candidates3 });
+      if(idx !== 1) throw new Error('期望 1(第二个模型成功),实际 ' + idx);
+      if(calls.length !== 2) throw new Error('应调用 2 次(第1失败+第2成功),实际 ' + calls.length);
+      if(calls[0] !== 'm1:groq' || calls[1] !== 'm2:cohere') throw new Error('轮换顺序应 m1→m2,实际 ' + JSON.stringify(calls));
+    } finally {
+      callAI = origCallAI;
+    }
+  });
+
+  // 5c. 多模型轮换:池子里全部失败 → 试完整个池子后返回 null(不无限重试)
+  await check('轮换模式:全部模型失败 → 试完池子返回 null', async function(){
+    aiProvider = 'groq';
+    aiApiModel = '';
+    aiApiModels = ['m1:groq', 'm2:cohere', 'm3:cerebras'];
+    _modelRotateIdx = 0;
+    _modelCooldowns = {};
+    var calls = [];
+    var origCallAI = callAI;
+    callAI = async function(provider, apiKey, opts){
+      calls.push(opts.model);
+      return { ok:false, reason:'other', detail:'HTTP 500' };
+    };
+    try{
+      var idx = await callAiChooseIndex({ g: g, seat: 0, candidates: candidates3 });
+      if(idx !== null) throw new Error('全部失败应返回 null,实际 ' + idx);
+      if(calls.length !== 3) throw new Error('应试完整个池子(3次),实际 ' + calls.length);
+    } finally {
+      callAI = origCallAI;
+    }
+  });
+
+  // 5d. 非轮换模式(claude 单选):失败仍只调用 1 次(零变化,不重试)
+  await check('非轮换模式:失败只调用 1 次(零变化)', async function(){
+    aiProvider = 'claude';
+    aiApiModel = '';
+    aiApiModels = [];
+    var calls = [];
+    var origCallAI = callAI;
+    callAI = async function(provider, apiKey, opts){
+      calls.push(opts.model);
+      return { ok:false, reason:'other', detail:'HTTP 500' };
+    };
+    try{
+      var idx = await callAiChooseIndex({ g: g, seat: 0, candidates: candidates3 });
+      if(idx !== null) throw new Error('应返回 null,实际 ' + idx);
+      if(calls.length !== 1) throw new Error('非轮换应只调用 1 次,实际 ' + calls.length);
+    } finally {
+      callAI = origCallAI;
+    }
+  });
+
   // 6. callAiChooseIndex:aiApiKey 为空 → 不调用 callAI,直接 null(守卫短路)
   await check('aiApiKey 为空时不调用 callAI 返回 null', async function(){
     aiApiKey = '';
