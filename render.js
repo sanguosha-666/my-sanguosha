@@ -963,7 +963,9 @@ function renderSeatCard(g, seat, isSelf){
   // 托管标识读取房间共享状态，因此所有玩家都会在被托管座位卡上看到它。
   // 共享的只有这个布尔值；API密钥和托管记录仍然只存在托管者本机。
   const autopilotBadge = p.aiAutopilot
-    ? '<div class="seat-autopilot-badge" title="AI托管中" aria-label="AI托管中">🤖</div>'
+    ? '<div class="seat-autopilot-badge" title="AI托管中" aria-label="AI托管中">'
+      + '<span class="seat-autopilot-robot">🤖</span>'
+      + '<span class="seat-autopilot-lazy">在偷懒</span></div>'
     : '';
   // 出牌顺序编号角标(右下角,常驻显示):死亡玩家不参与编号、不显示(orderMap 里没有
   // 它的座位号,下面这行天然拿到 undefined)。**位置冲突排查**:.seat-bottom(判定区+
@@ -1191,7 +1193,7 @@ function render(g){
     if(!p) return null;
     const d=document.createElement('div');
     // 骨架级重建后不再用 seatSlot/slot-*；酒诗等翻面状态用 .flipped 标记
-    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+(p.faceup===false?' flipped':'');
+    d.className='seat'+(g.turn===i&&g.started?' active':'')+(p.alive?'':' dead')+(i===mySeat?' me':'')+(p.faceup===false?' flipped':'')+(p.aiAutopilot?' autopilot':'');
     d.dataset.seat = i; // 供中央出牌区(renderTableCard)按座位号选中,高亮出牌方/目标座位用
     if(zones){
       d.dataset.zone = zones[i];

@@ -932,15 +932,21 @@ function updateAiTestStatus(){
 // 开始/结束托管不会修改 Firebase 游戏状态，也不一定触发 render；直接同步座位卡角标，
 // 让按钮操作后立即得到视觉反馈。后续正常 render 时 renderSeatCard 也会按同一状态重建。
 function syncAiTestSeatBadge(){
-  document.querySelectorAll('.seat-autopilot-badge').forEach(function(el){ el.remove(); });
-  if(!aiTestAutopilot.active || !Number.isInteger(aiTestAutopilot.seat)) return;
+  if(!Number.isInteger(aiTestAutopilot.seat)) return;
   const seatEl=document.querySelector('.seat[data-seat="'+aiTestAutopilot.seat+'"]');
   if(!seatEl) return;
+  const oldBadge=seatEl.querySelector('.seat-autopilot-badge');
+  if(oldBadge) oldBadge.remove();
+  seatEl.classList.remove('autopilot');
+  // 这里只即时更新自己的座位；其他玩家的公开标识由 Firebase render 维护，不能误删。
+  if(!aiTestAutopilot.active) return;
   const badge=document.createElement('div');
   badge.className='seat-autopilot-badge';
   badge.title='AI托管中';
   badge.setAttribute('aria-label','AI托管中');
-  badge.textContent='🤖';
+  badge.innerHTML='<span class="seat-autopilot-robot">🤖</span>'
+    +'<span class="seat-autopilot-lazy">在偷懒</span>';
+  seatEl.classList.add('autopilot');
   seatEl.appendChild(badge);
 }
 
