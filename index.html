@@ -126,7 +126,20 @@
     border-top:1px solid var(--line);
     border-bottom:1px solid var(--line);
     padding:4px 8px;
-    box-sizing:border-box;
+    box-sizing:border-box;position:relative;
+  }
+  .discard-reveal{position:absolute;inset:0;z-index:8;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:4px;padding:5px 8px;box-sizing:border-box;
+    background:rgba(20,15,10,.94);opacity:0;pointer-events:none;overflow:hidden;}
+  .discard-reveal.show{animation:discardRevealFade var(--discard-reveal-ms,1500ms) ease forwards;}
+  .discard-reveal-title{font-size:13px;color:var(--paper-dim);}
+  .discard-reveal-cards{display:flex;align-items:flex-start;justify-content:center;gap:6px;flex-wrap:wrap;}
+  .discard-reveal-card{display:flex;flex-direction:column;align-items:center;gap:2px;}
+  .discard-reveal-card .table-card-mini{width:52px;height:72px;}
+  .table-strip:has(.discard-reveal.show){min-height:108px;}
+  @keyframes discardRevealFade{
+    0%{opacity:0;transform:scale(.96);} 8%{opacity:1;transform:scale(1);}
+    86%{opacity:1;} 100%{opacity:0;}
   }
   .table-card{
     display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -197,7 +210,8 @@
      不加 border-radius:.card 自己有 border-radius:10px + overflow:hidden,外侧圆角已经
      被卡片裁掉了;若在这里再加圆角,圆角外会漏出暗插画(实测会把角标区域的像素采样污染,
      一度把红色对比度误测成12.33)。 */
-  .table-card-mini .corner{transform:scale(.75);transform-origin:top left;background:#f1ead9;}
+  .table-card-mini .corner{font-size:12px;min-width:21px;height:21px;padding:0 2px;}
+  .table-card-mini .mount-role{width:20px;height:20px;right:2px;bottom:2px;font-size:12px;border-width:1px;}
   .exchange-card .table-card-mini{width:52px;height:72px;}
   /* #tableCard 默认是纯展示层(pointer-events:none)，五谷牌池则是真正的交互区；
      进入该模式时必须恢复命中测试，否则按钮看得见却永远收不到点击。 */
@@ -752,7 +766,7 @@
   .hand-label{font-size:12px;letter-spacing:.14em;color:var(--paper-dim);margin:14px 0 8px;}
   .hand{display:flex;gap:10px;flex-wrap:wrap;flex:1;min-width:0;}
   .card{
-    width:72px;height:104px;border-radius:10px;background:#f1ead9;color:#1a1410;
+    width:78px;height:112px;border-radius:10px;background:#f1ead9;color:#1a1410;
     border:1px solid #00000022;position:relative;cursor:pointer;overflow:hidden;
     display:flex;flex-direction:column;
     box-shadow:0 2px 0 rgba(0,0,0,.3);transition:transform .08s;user-select:none;
@@ -862,11 +876,17 @@
      或省略。 */
   .corner{
     position:absolute; top:0; left:0; z-index:2;
-    width:var(--badge); height:var(--badge);
+    min-width:var(--badge); height:var(--badge); padding:0 3px; box-sizing:border-box;
     display:flex; align-items:center; justify-content:center;
-    font-size:calc(var(--badge) * 0.42); font-weight:700;
-    color:#e8d5a8;
+    font-size:clamp(12px,calc(var(--badge) * 0.7),15px); font-weight:900;
+    color:#1a1410; background:#f1ead9;
+    border-right:1px solid rgba(0,0,0,.32); border-bottom:1px solid rgba(0,0,0,.32);
+    border-radius:0 0 6px 0;
   }
+  .mount-role{position:absolute;right:3px;bottom:3px;z-index:2;width:24px;height:24px;
+    display:flex;align-items:center;justify-content:center;border-radius:50%;
+    background:#f1ead9;color:#6f241d;border:2px solid #6f241d;font-size:15px;font-weight:900;
+    box-shadow:0 1px 3px rgba(0,0,0,.55);}
   /* 每种牌型都有和标题文字同色的2px inset描边(+原有2px投影),.sha(杀)不再是唯一带描边
      的牌型——统一视觉风格,五种牌型(杀/桃/闪/普通锦囊/顺手拆桥类)一眼就能通过卡片边框
      颜色分辨类别,不需要盯着标题文字看。 */
@@ -1868,8 +1888,8 @@
     /* Chrome 100%缩放是桌面端的设计基准。手牌不再沿用全局64×92的小尺寸；
        手牌过多时横向滚动，不通过缩小整排卡片来硬塞。 */
     #game.desktop-layout #hand .card{
-      width:108px;
-      height:154px;
+      width:118px;
+      height:168px;
       flex:0 0 auto;
       --badge:22px;
     }
@@ -1959,7 +1979,7 @@
       #game.desktop-layout #oppTopRow:has(> .seat:nth-child(5)) .seat{max-width:110px;}
       #game.desktop-layout #meSeat .seat{max-width:155px;}
       #game.desktop-layout #hand{padding-top:36px;}
-      #game.desktop-layout #hand .card{width:92px;height:132px;--badge:19px;}
+      #game.desktop-layout #hand .card{width:100px;height:143px;--badge:20px;}
       #game.desktop-layout #hand .card:hover{transform:translateY(-6px) scale(1.25);}
       #game.desktop-layout #tableStrip .table-card-mini{width:80px;height:114px;}
       #game.desktop-layout #tableStrip .exchange-card .table-card-mini{width:68px;height:98px;}
@@ -1977,7 +1997,7 @@
     .opp-row .seat{max-width:170px;}
     .bottom-row{gap:10px;}
     .hand{gap:8px;}
-    .hand .card{width:82px;height:118px;--badge:18px;}
+    .hand .card{width:88px;height:126px;--badge:19px;}
     .table-card-mini{width:76px;height:106px;}
     .exchange-card .table-card-mini{width:64px;height:90px;}
     .log-panel{
@@ -2083,6 +2103,7 @@
     <div class="opp-row" id="oppRow"></div>
     <div class="table-strip" id="tableStrip">
       <div id="tableCard" class="table-card"></div>
+      <div id="discardReveal" class="discard-reveal" aria-live="polite"></div>
     </div>
 
     <div class="panel table">
@@ -2118,20 +2139,21 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=365"></script>
-<script src="data.js?v=365"></script>
-<script src="debug-log.js?v=365"></script>
-<script src="room-lifecycle.js?v=365"></script>
-<script src="game.js?v=365"></script>
-<script src="weapons.js?v=365"></script>
-<script src="skills.js?v=365"></script>
-<script src="bot-ai-bus.js?v=365"></script>
-<script src="bot.js?v=365"></script>
-<script src="ai-bot.js?v=365"></script>
-<script src="render.js?v=365"></script>
-<script src="render-table.js?v=365"></script>
-<script src="render-hand.js?v=365"></script>
-<script src="render-controls.js?v=365"></script>
-<script src="render-log.js?v=365"></script>
+<script src="config.js?v=369"></script>
+<script src="data.js?v=369"></script>
+<script src="debug-log.js?v=369"></script>
+<script src="room-lifecycle.js?v=369"></script>
+<script src="game.js?v=369"></script>
+<script src="weapons.js?v=369"></script>
+<script src="skills.js?v=369"></script>
+<script src="bot-ai-bus.js?v=369"></script>
+<script src="bot.js?v=369"></script>
+<script src="ai-bot.js?v=369"></script>
+<script src="render.js?v=369"></script>
+<script src="render-table.js?v=369"></script>
+<script src="render-discard.js?v=369"></script>
+<script src="render-hand.js?v=369"></script>
+<script src="render-controls.js?v=369"></script>
+<script src="render-log.js?v=369"></script>
 </body>
 </html>

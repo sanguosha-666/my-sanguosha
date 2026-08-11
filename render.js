@@ -84,6 +84,10 @@ function cardImageSrc(name){
   const py = CARD_PINYIN[name];
   return py ? ('assets/cards/'+py+'.jpg') : null;
 }
+function mountRoleText(card){
+  const equip=card&&getEquip(card.name);
+  return equip&&equip.slot==='plus1'?'防':(equip&&equip.slot==='minus1'?'攻':'');
+}
 // CARD_FALLBACK_EXTS: 和 AVATAR_FALLBACK_EXTS 同款设计——默认 jpg 优先(cardImageSrc 已经
 // 直接返回 .jpg),这里只需要列出"jpg失败之后"还要依次重试的格式,不需要再包含jpg本身。
 const CARD_FALLBACK_EXTS = ['jpeg','png','webp','gif'];
@@ -1599,6 +1603,7 @@ function render(g){
   // 这个顺序影响(它是持久节点,不会被座位重绘销毁),但它的目标座位高亮逻辑必须在这里、
   // 座位元素已经是"这一轮最终版本"之后执行。
   renderTableCard(g);
+  if(typeof observeDiscardReveal==='function') observeDiscardReveal(g);
   // 【updateLogPanelHeight() 的调用点已下移】——桌面自适应 步骤a 引入
   // updateDesktopSeatHeights() 之后,这里出现过一个真实的循环依赖 bug:原来
   // updateLogPanelHeight() 在这里(renderControls/renderHand 之前)就跑了,它会读

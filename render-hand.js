@@ -128,6 +128,7 @@ function renderHand(g){
     const imgSrc = cardImageSrc(card.name);
     const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
     const cornerText = cardFace(card)||'';
+    const mountRole = mountRoleText(card);
     // 标题栏字号用 fitFontSize 实测自适应(取代早期"按牌名字数分档手动猜大小"的做法,
     // 那套只覆盖了4字/5字两档,任何新长度组合都要回来手动调整)。cardMetricsForViewport
     // 按当前视口宽度取这一档卡片的实际宽度/--badge值/标题栏最大字号。
@@ -147,7 +148,8 @@ function renderHand(g){
     el.innerHTML =
       '<div class="card-title" style="font-size:'+titleFontSize+'">'+card.name+'</div>'
       +'<div class="card-art-box">'+imgTag+'</div>'
-      +'<div class="corner">'+cornerText+'</div>';
+      +'<div class="corner">'+cornerText+'</div>'
+      +(mountRole?'<div class="mount-role">'+mountRole+'</div>':'');
     el.classList.toggle('no-art', !imgSrc); // no-art 现在只控制插画区域的占位底色,不再控制牌名文字的显示/隐藏
 
     let usable=false, onClick=null;
@@ -355,13 +357,13 @@ function cardMetricsForViewport(){
   const game = document.getElementById('game');
   const desktop = !!(game && game.classList.contains('desktop-layout'));
   if(desktop){
-    if(h<=760) return { cardWidth:92, badge:19, maxTitleFont:16 };
-    return { cardWidth:108, badge:22, maxTitleFont:18 };
+    if(h<=760) return { cardWidth:100, badge:20, maxTitleFont:17 };
+    return { cardWidth:118, badge:22, maxTitleFont:19 };
   }
   const coarse = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
   if(h<=520 && coarse) return { cardWidth:60, badge:15, maxTitleFont:13 };
   if(w<=480) return { cardWidth:52, badge:14, maxTitleFont:12 };
   if(w<=640) return { cardWidth:58, badge:15, maxTitleFont:13 };
-  if(w<=1199 || coarse) return { cardWidth:82, badge:18, maxTitleFont:15 };
-  return { cardWidth:72, badge:18, maxTitleFont:15 };
+  if(w<=1199 || coarse) return { cardWidth:88, badge:19, maxTitleFont:16 };
+  return { cardWidth:78, badge:20, maxTitleFont:16 };
 }

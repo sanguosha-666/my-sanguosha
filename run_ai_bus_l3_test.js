@@ -264,11 +264,11 @@ const testCode = String.raw`
   // 龙胆(赵云闪→杀)是候选真空扫描新补的注册,和武圣同级但谓词不同(见 isLongdanShaCard
   // 注释——闪没有 CARD_PLAYS 入口,resolveActionId 对闪恒定解析成'杀',不能复用武圣那条
   // "resolveActionId!=='杀'"的排除条件,否则会把所有闪都滤掉)。----
-  await check('BOT_SEAT_PICKS 存在且恰含 13 个技能;无命中时 botDecide 返回 false', async function(){
+  await check('BOT_SEAT_PICKS 存在且恰含 12 个选座技能;无命中时 botDecide 返回 false', async function(){
     if(typeof BOT_SEAT_PICKS === 'undefined') throw new Error('BOT_SEAT_PICKS 未定义');
     var keys = Object.keys(BOT_SEAT_PICKS).sort().join(',');
-    if(keys !== 'duanliang,fanjian,guhuoTarget,guose,longdan,qingnang,qixi,quhuDamage,shuangxiong,tiaoxin,wusheng,xuanfeng,zhiba')
-      throw new Error('注册表应恰为 13 项,实际 ' + keys);
+    if(keys !== 'duanliang,fanjian,guhuoTarget,guose,longdan,qingnang,qixi,quhuDamage,shuangxiong,tiaoxin,wusheng,xuanfeng')
+      throw new Error('注册表应恰为 12 项,实际 ' + keys);
     var g = mkSeatG({});
     var r = await botDecide('seatPick', g, 0);
     if(r !== false) throw new Error('无技能命中应返回 false(走旧分支),实际 ' + r);
@@ -3980,10 +3980,10 @@ const testCode = String.raw`
     if(window.__gsCalls.length !== 1) throw new Error('guoSe 应被调1次,实际 ' + JSON.stringify(window.__gsCalls));
   });
 
-  await check('无密钥解锁-zhiba:身份局主公制霸应主动选目标(startZhiba)', async function(){
-    var g = mkSeatG({ caps0: { zhiba: true }, myHand: [card('杀','zb1','♠')], hands: { 1: [card('杀','zb2')] } });
-    g.gameMode = 'identity'; g.players[0].role = 'zhu';
-    g.players[1].role = null; g.players[2].role = null;
+  await check('无密钥解锁-zhiba:吴势力角色应主动向主公孙策发起拼点(startZhiba)', async function(){
+    var g = mkSeatG({ myHand: [card('杀','zb1','♠')], hands: { 1: [card('杀','zb2')] } });
+    g.gameMode = 'identity'; g.players[0].general = 'lvmeng'; g.players[0].role = 'zhong';
+    g.players[1].general = 'sunce'; g.players[1].role = 'zhu'; g.players[2].role = 'fan';
     window.__zbCalls = [];
     startZhiba = function(s){ window.__zbCalls.push(s); };
     await runBotDecision(g, 0);

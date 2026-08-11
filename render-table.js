@@ -12,9 +12,11 @@ function tableCardFaceHtml(card){
   const imgSrc = cardImageSrc(card.name);
   const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
   const cornerText = cardFace(card)||'';
+  const mountRole = mountRoleText(card);
   return '<div class="card '+(imgSrc?'':'no-art')+' table-card-mini">'
     + '<div class="card-art-box">'+imgTag+'</div>'
     + '<div class="corner">'+cornerText+'</div>'
+    + (mountRole?'<div class="mount-role">'+mountRole+'</div>':'')
     + '</div>';
 }
 // 两个独立的 seq 去重,分别驱动完全不同的两件事,不要混在一起判断:

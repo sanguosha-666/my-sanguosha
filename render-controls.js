@@ -150,7 +150,8 @@ let tianyiTargetSeat = null;
 function resetTianyi(){ tianyiMode=false; tianyiCardIdx=null; tianyiTargetSeat=null; }
 // 孙策【制霸】:出牌阶段限一次,选目标后拼点(客户端本地模式,仿 tianyiMode 一套)
 let zhibaMode = false;
-function resetZhiba(){ zhibaMode=false; }
+let zhibaCardIdx = null;
+function resetZhiba(){ zhibaMode=false; zhibaCardIdx=null; }
 let lijianMode = false;
 let lijianCardIdx = null;
 let lijianFromSeat = null;
@@ -2379,22 +2380,49 @@ function renderControls(g){
     setBanner(escapeHtml(source?source.name:'太史慈')+' 发动【天义】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
     return;
   }
-  // 孙策【制霸】拼点响应(镜像天义同款:目标逐张列手牌按钮)
-  if(g.phase==='zhibaAsk' && g.pending && g.pending.type==='zhibaAsk' && g.pending.targetSeat===mySeat){
-    const lord = g.players[g.pending.lordSeat];
+  // 孙策【制霸】:被请求的主公选择拼点牌;魂姿觉醒后可以拒绝。
+  if(g.phase==='zhibaAsk' && g.pending && g.pending.type==='zhibaAsk' && g.pending.lordSeat===mySeat){
+    const challenger = g.players[g.pending.challengerSeat];
     (me.hand||[]).forEach((card, idx)=>{
       const b=document.createElement('button');
       b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);
       b.onclick=()=>respondZhiba(idx);
       c.appendChild(b);
     });
-    setBanner(escapeHtml(lord?lord.name:'孙策')+' 对你发动【制霸】,选择一张手牌拼点。');
+    if(me.hunziAwakened){
+      const refuse=document.createElement('button'); refuse.className='ghost';
+      refuse.textContent='拒绝拼点'; refuse.onclick=()=>respondZhiba(-1); c.appendChild(refuse);
+    }
+    setBanner(escapeHtml(challenger?challenger.name:'吴势力角色')+' 请求发动你的【制霸】,选择一张手牌拼点。');
     return;
   }
   if(g.phase==='zhibaAsk' && g.pending && g.pending.type==='zhibaAsk'){
-    const lord = g.players[g.pending.lordSeat], target = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(lord?lord.name:'孙策')+' 发动【制霸】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
+    const lord = g.players[g.pending.lordSeat], challenger = g.players[g.pending.challengerSeat];
+    setBanner(escapeHtml(challenger?challenger.name:'吴势力角色')+' 请求【制霸】,等待 '+escapeHtml(lord?lord.name:'孙策')+' 选择拼点牌…');
     return;
+  }
+  if(g.phase==='zhibaGain' && g.pending && g.pending.type==='zhibaGain' && g.pending.lordSeat===mySeat){
+    const yes=document.createElement('button'); yes.className='primary'; yes.textContent='获得两张拼点牌'; yes.onclick=()=>respondZhibaGain(true); c.appendChild(yes);
+    const no=document.createElement('button'); no.textContent='不获得'; no.onclick=()=>respondZhibaGain(false); c.appendChild(no);
+    setBanner('【制霸】拼点对方没赢,是否获得两张拼点牌?'); return;
+  }
+  if(g.phase==='yinghunTarget' && g.pending && g.pending.type==='yinghunTarget' && g.pending.seat===mySeat){
+    g.players.forEach((p,i)=>{ if(p && p.alive && i!==mySeat){
+      const b=document.createElement('button'); b.textContent='选择 '+p.name; b.onclick=()=>chooseYinghunTarget(i); c.appendChild(b);
+    }});
+    const cancel=document.createElement('button'); cancel.className='ghost'; cancel.textContent='不发动'; cancel.onclick=()=>cancelYinghun(); c.appendChild(cancel);
+    setBanner('【英魂】选择一名其他角色。'); return;
+  }
+  if(g.phase==='yinghunChoice' && g.pending && g.pending.type==='yinghunChoice' && g.pending.seat===mySeat){
+    const x=g.pending.x||1,target=g.players[g.pending.targetSeat];
+    const a=document.createElement('button'); a.textContent='摸1张，弃'+x+'张'; a.onclick=()=>respondYinghunChoice('draw1'); c.appendChild(a);
+    const b=document.createElement('button'); b.textContent='摸'+x+'张，弃1张'; b.onclick=()=>respondYinghunChoice('drawX'); c.appendChild(b);
+    setBanner('为 '+escapeHtml(target?target.name:'目标')+' 选择【英魂】效果。'); return;
+  }
+  if(g.phase==='yinghunDiscard' && g.pending && g.pending.type==='yinghunDiscard' && g.pending.targetSeat===mySeat){
+    (me.hand||[]).forEach((card,idx)=>{ const b=document.createElement('button'); b.textContent='弃置【'+card.name+'】'+card.suit+rankText(card.rank); b.onclick=()=>discardYinghunCard(idx); c.appendChild(b); });
+    EQUIP_SLOTS.forEach(slot=>{ const card=me.equips&&me.equips[slot]; if(card){ const b=document.createElement('button'); b.textContent='弃置装备【'+card.name+'】'; b.onclick=()=>discardYinghunCard({kind:'equip',slot}); c.appendChild(b); } });
+    setBanner('【英魂】请选择弃置的牌（还需 '+escapeHtml(String(g.pending.remaining||0))+' 张）。'); return;
   }
   if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice' && g.pending.seat===mySeat){
     const source=g.players[g.pending.targetSeat];
@@ -3607,15 +3635,14 @@ function renderControls(g){
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetTianyi(); render(g); }; c.appendChild(cb);
     } else if(zhibaMode){
-      // 孙策【制霸】:出牌阶段限一次,点一名有手牌的其他角色拼点(孙策自动出第一张手牌)
-      setBanner('【制霸】选择一名有手牌的其他角色拼点。');
-      g.players.forEach((p,i)=>{
-        if(!p || !p.alive || i===mySeat || (p.hand||[]).length===0) return;
-        const b=document.createElement('button');
-        b.textContent='与 '+p.name+' 拼点';
-        b.onclick=()=>{ resetZhiba(); startZhiba(i); };
-        c.appendChild(b);
+      setBanner('【制霸】选择一张手牌向主公孙策发起拼点。');
+      (me.hand||[]).forEach((card,idx)=>{
+        const picked=zhibaCardIdx===idx,b=document.createElement('button');
+        if(picked) b.className='primary';
+        b.textContent=(picked?'✓ ':'')+'拼【'+card.name+'】'+card.suit+rankText(card.rank);
+        b.onclick=()=>{ zhibaCardIdx=picked?null:idx; render(g); }; c.appendChild(b);
       });
+      if(zhibaCardIdx!==null){ const ok=document.createElement('button'); ok.className='primary'; ok.textContent='确认发起拼点'; ok.onclick=()=>{ const idx=zhibaCardIdx; resetZhiba(); startZhiba(idx); }; c.appendChild(ok); }
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetZhiba(); render(g); }; c.appendChild(cb);
     } else if(fangtianMode){
@@ -3918,11 +3945,16 @@ function renderControls(g){
       const tb=document.createElement('button'); tb.className='ghost';
       tb.textContent='发动【天义】'; tb.onclick=()=>{ selectedCardIdx=null; tianyiMode=true; tianyiCardIdx=null; tianyiTargetSeat=null; render(g); }; c.appendChild(tb);
     }
-    // 孙策【制霸】:主公技,出牌阶段限一次,选择一名其他角色拼点(仅身份局主公)
-    const hasZhibaTarget = g.players.some((p,i)=>p && p.alive && i!==mySeat && (p.hand||[]).length>=1);
-    if(noLocalMode && selectedCardIdx===null && g.gameMode==='identity' && me.role==='zhu' && hasCap(me,'zhiba') && !g.zhibaUsed && (me.hand||[]).length>=1 && hasZhibaTarget){
+    // 孙策【制霸】:其他吴势力角色在自己的出牌阶段发起。
+    if(noLocalMode && selectedCardIdx===null && canTriggerZhiba(g,mySeat)){
       const zbb=document.createElement('button'); zbb.className='ghost';
       zbb.textContent='发动【制霸】'; zbb.onclick=()=>{ selectedCardIdx=null; zhibaMode=true; render(g); }; c.appendChild(zbb);
+    }
+    // 张角【黄天】:其他群势力角色交给主公一张闪或闪电。
+    if(noLocalMode && selectedCardIdx===null && canUseHuangtian(g,mySeat)){
+      (me.hand||[]).forEach((card,idx)=>{ if(card.name==='闪'||card.name==='闪电'){
+        const hb=document.createElement('button'); hb.className='ghost'; hb.textContent='黄天:交【'+card.name+'】'; hb.onclick=()=>useHuangtian(idx); c.appendChild(hb);
+      }});
     }
     // 典韦【强袭】:出牌阶段限一次
     const canPayHp = me && me.alive && me.hp > 1;

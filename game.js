@@ -35,7 +35,7 @@ const RESPONSE_PENDING_TYPES = new Set([
   'wuxie', 'guicai', 'jiedaoChoice', 'ganglieChoice', 'guhuoQuestion', 'xiaoguo',
   'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
   'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick',
-  'jijiangAsk', 'hujiaAsk', 'zhibaAsk'
+  'jijiangAsk', 'hujiaAsk', 'zhibaAsk', 'zhibaGain', 'yinghunTarget', 'yinghunChoice', 'yinghunDiscard'
 ]);
 // setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
 // 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
@@ -609,14 +609,42 @@ function normalize(g){
     logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jijiangAsk/hujiaAsk)');
     g.pending=null; g.phase='play';
   }
-  // 孙策【制霸】拼点阶段:lordSeat/targetSeat 应是数字座位号、selfCard 是孙策已出的拼点牌、
+  // 孙策【制霸】拼点阶段:lordSeat/challengerSeat 应是数字座位号、challengerCard 是吴势力角色已出的拼点牌、
   // resume 是进入前的快照(play 阶段 pending 恒为 null,不要求 resume.pending 有值)。
-  if(g.pending && g.pending.type==='zhibaAsk' &&
-     (typeof g.pending.lordSeat!=='number' || typeof g.pending.targetSeat!=='number' ||
-      !g.pending.selfCard || !g.pending.resume ||
-      typeof g.pending.resume!=='object' || typeof g.pending.resume.phase!=='string')){
+  if(g.pending && g.pending.type==='zhibaAsk'){
+    const d=g.pending,lord=g.players[d.lordSeat],challenger=g.players[d.challengerSeat];
+    const invalid=!Number.isInteger(d.lordSeat) || !Number.isInteger(d.challengerSeat) || d.lordSeat===d.challengerSeat ||
+      !lord || !lord.alive || lord.role!=='zhu' || !hasCap(lord,'zhiba') ||
+      !challenger || !challenger.alive || generalFaction(challenger)!=='wu' || g.gameMode!=='identity' ||
+      !d.challengerCard || !d.resume || typeof d.resume!=='object' || typeof d.resume.phase!=='string';
+    if(invalid){
     logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhibaAsk)');
+    if(d.challengerCard) g.discard.push(d.challengerCard);
     g.pending=null; g.phase='play';
+    }
+  }
+  if(g.pending && g.pending.type==='zhibaGain'){
+    const d=g.pending,lord=g.players[d.lordSeat];
+    if(!Number.isInteger(d.lordSeat) || !lord || !lord.alive || lord.role!=='zhu' || !hasCap(lord,'zhiba') ||
+       !Array.isArray(d.cards) || d.cards.length!==2 || d.cards.some(card=>!card)){
+    logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhibaGain)');
+    if(Array.isArray(d.cards)) g.discard.push(...d.cards.filter(Boolean));
+    g.pending=null; g.phase='play';
+    }
+  }
+  // 孙策【英魂】:觉醒后准备阶段选择目标/效果,再由目标选择弃牌。
+  if(g.pending && (g.pending.type==='yinghunTarget' || g.pending.type==='yinghunChoice' || g.pending.type==='yinghunDiscard')){
+    const d=g.pending;
+    const ownerSeat=d.type==='yinghunDiscard'?d.ownerSeat:d.seat;
+    if(typeof ownerSeat!=='number' || !g.players[ownerSeat] || !g.players[ownerSeat].alive ||
+       ((d.type==='yinghunChoice'||d.type==='yinghunDiscard') && (typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive))){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(yinghunTarget/yinghunChoice/yinghunDiscard)');
+      g.pending=null;
+      if(Number.isInteger(ownerSeat) && g.players[ownerSeat] && g.players[ownerSeat].alive && g.turn===ownerSeat &&
+         typeof continueHuashenChangeCheckAtTurnStart==='function'){
+        g.phase='play'; continueHuashenChangeCheckAtTurnStart(g,ownerSeat);
+      }else g.phase='draw';
+    }
   }
   // 借刀杀人选择阶段:from/seatA/seatB 都应是数字座位号;不对就整体判无效
   if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
@@ -4196,9 +4224,10 @@ function respondDying(useTao, jijiuChoice){
         card=me.hand.splice(idx,1)[0]; g.discard.push(card);
         asText='打出【'+card.name+'】';
       }
-      dyingP.hp++;
+      const recovery=peachRecoveryAmount(g,mySeat,g.pending.seat);
+      dyingP.hp=Math.min(dyingP.maxHp,dyingP.hp+recovery);
       if(typeof recordBotRescueEvidence==='function') recordBotRescueEvidence(g,mySeat,g.pending.seat);
-      g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' '+asText+',回复1点体力（体力'+dyingP.hp+'）');
+      g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' '+asText+',回复'+recovery+'点体力（体力'+dyingP.hp+'）');
       // 周泰【不屈】:回复体力时移除一张不屈牌
       removeBuquCard(g, g.pending.seat);
       // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
@@ -5560,17 +5589,28 @@ function canTriggerLordAsk(g, seat, cap){
   if(!hasCap(p,cap)) return false;          // 能力声明在 GENERALS.caps,业务点查表
   if(cap==='jijiang' && g.jijiangUsed) return false;
   if(cap==='hujia' && g.hujiaUsed) return false;
-  return aliveCount(g)>1;                    // 场上还有其它存活角色可求助
+  const faction=cap==='jijiang'?'shu':'wei';
+  return g.players.some((q,i)=>i!==seat && q && q.alive && generalFaction(q)===faction);
+}
+function nextLordAskee(g, lordSeat, current, cap){
+  const faction=cap==='jijiang'?'shu':'wei',n=g.players.length;
+  for(let k=1;k<=n;k++){
+    const s=(current+k)%n;
+    if(s===lordSeat) return null;
+    const p=g.players[s];
+    if(p && p.alive && generalFaction(p)===faction) return s;
+  }
+  return null;
 }
 function startLordAsk(g, lordSeat, need, cap){
-  const first=nextAskee(g, lordSeat, lordSeat);
+  const first=nextLordAskee(g, lordSeat, lordSeat, cap);
   if(first===null) return; // 无人可求助(守卫已排除,这里兜底)
   const resume={phase:g.phase, pending:g.pending};
   if(cap==='jijiang') g.jijiangUsed=true; else g.hujiaUsed=true;
   const type=cap==='jijiang'?'jijiangAsk':'hujiaAsk';
   g.pending=setResponseAskedAt({type, lordSeat, need, asking:first, resume});
   g.phase=type;
-  g.log=pushLog(g.log, g.players[lordSeat].name+' 发动【'+(cap==='jijiang'?'激将':'护驾')+'】,向其他角色求助打出【'+need+'】…');
+  g.log=pushLog(g.log, g.players[lordSeat].name+' 发动【'+(cap==='jijiang'?'激将':'护驾')+'】,向同势力角色求助打出【'+need+'】…');
 }
 // 无人替出 → 恢复原 pending,主公回到正常响应
 function restoreLordAsk(g, ask){
@@ -5657,7 +5697,7 @@ function respondLordAskCore(useCard, cardIdx){
       completeLordAsk(g, ask, card);
       return g;
     }
-    const nxt=nextAskee(g, ask.lordSeat, mySeat);
+    const nxt=nextLordAskee(g, ask.lordSeat, mySeat, ask.need==='杀'?'jijiang':'hujia');
     if(nxt===null){
       restoreLordAsk(g, ask);
       return g;
@@ -5670,56 +5710,193 @@ function respondLordAskCore(useCard, cardIdx){
 function respondJijiangAsk(useCard, cardIdx){ respondLordAskCore(useCard, cardIdx); }
 function respondHujiaAsk(useCard, cardIdx){ respondLordAskCore(useCard, cardIdx); }
 
-// ===== 孙策【制霸】:出牌阶段限一次,与一名其他角色拼点(仅身份局主公) =====
-// 简化版:孙策选目标 → 孙策自动出第一张手牌 → 目标出一张手牌 → 比点,输赢均无额外
-// 效果,双方各弃一张,孙策记录 g.zhibaUsed(每回合限一次,startTurn 重置)。
-// 守卫用 hasCap(能力声明) + role==='zhu' + gameMode==='identity' 三重条件,不硬编码武将名。
+// ===== 张角【黄天】:其他群势力角色出牌阶段限一次,交给主公一张闪或闪电 =====
+function canUseHuangtian(g, seat){
+  const donor=g.players[seat];
+  if(!donor || !donor.alive || g.gameMode!=='identity' || g.phase!=='play' || g.turn!==seat) return false;
+  if(generalFaction(donor)!=='qun' || donor.huangtianUsed) return false;
+  const lord=g.players.find((p,i)=>i!==seat && p && p.alive && p.role==='zhu' && hasCap(p,'huangtian'));
+  if(!lord) return false;
+  return (donor.hand||[]).some(c=>c && (c.name==='闪' || c.name==='闪电'));
+}
+function useHuangtian(cardIdx){
+  tx(g=>{
+    if(!canUseHuangtian(g,mySeat)) return g;
+    const donor=g.players[mySeat];
+    const lordSeat=g.players.findIndex((p,i)=>i!==mySeat && p && p.alive && p.role==='zhu' && hasCap(p,'huangtian'));
+    const card=(donor.hand||[])[cardIdx];
+    if(lordSeat<0 || !card || (card.name!=='闪' && card.name!=='闪电')) return g;
+    donor.hand.splice(cardIdx,1);
+    g.players[lordSeat].hand.push(card);
+    donor.huangtianUsed=true;
+    g.log=pushLog(g.log, donor.name+' 发动【黄天】,交给 '+g.players[lordSeat].name+' 一张【'+card.name+'】');
+    markSkillSound(g,'黄天');
+    return g;
+  });
+}
+
+// 孙权【救援】:当前官网规则为锁定技,其他吴势力角色对主公使用桃时回复值+1。
+function peachRecoveryAmount(g, sourceSeat, targetSeat){
+  const source=g.players[sourceSeat], target=g.players[targetSeat];
+  if(g.gameMode==='identity' && sourceSeat!==targetSeat && source && target && target.alive &&
+     target.role==='zhu' && hasCap(target,'jiuyuan') && generalFaction(source)==='wu') return 2;
+  return 1;
+}
+
+// ===== 孙策【魂姿】觉醒后获得【英姿】【英魂】 =====
+function maybeAwakenHunzi(g, seat){
+  const p=g.players[seat];
+  if(!p || !p.alive || !hasCap(p,'hunzi') || p.hunziAwakened || p.hp!==1) return false;
+  p.hunziAwakened=true;
+  p.maxHp=Math.max(1,p.maxHp-1);
+  if(p.hp>p.maxHp) p.hp=p.maxHp;
+  p.caps=p.caps||{};
+  p.caps.extraDrawPhase=1;
+  p.caps.yinghun=true;
+  g.log=pushLog(g.log,p.name+' 发动【魂姿】觉醒,减1点体力上限并获得【英姿】和【英魂】');
+  markSkillSound(g,'魂姿');
+  return true;
+}
+function maybeStartYinghun(g, seat){
+  const p=g.players[seat];
+  if(!p || !p.alive || !hasCap(p,'yinghun')) return false;
+  const x=Math.max(0,p.maxHp-p.hp);
+  if(x<=0 || !g.players.some((q,i)=>i!==seat && q && q.alive)) return false;
+  g.pending=setResponseAskedAt({type:'yinghunTarget',seat,x});
+  g.phase='yinghunTarget';
+  g.log=pushLog(g.log,p.name+' 可以发动【英魂】,请选择一名其他角色…');
+  return true;
+}
+function chooseYinghunTarget(targetSeat){
+  tx(g=>{
+    if(g.phase!=='yinghunTarget'||!g.pending||g.pending.type!=='yinghunTarget'||g.pending.seat!==mySeat) return g;
+    const target=g.players[targetSeat];
+    if(!target||!target.alive||targetSeat===mySeat) return g;
+    g.pending=setResponseAskedAt({type:'yinghunChoice',seat:mySeat,targetSeat,x:g.pending.x});
+    g.phase='yinghunChoice';
+    return g;
+  });
+}
+function respondYinghunChoice(option){
+  tx(g=>{
+    if(g.phase!=='yinghunChoice'||!g.pending||g.pending.type!=='yinghunChoice'||g.pending.seat!==mySeat) return g;
+    const d=g.pending,target=g.players[d.targetSeat],x=Math.max(1,d.x||1);
+    if(!target||!target.alive) return g;
+    const drawCount=option==='drawX' ? x : 1;
+    const discardCount=option==='drawX' ? 1 : x;
+    ensureDeck(g); drawN(g,d.targetSeat,drawCount);
+    const discardable=(target.hand||[]).length+EQUIP_SLOTS.filter(slot=>target.equips&&target.equips[slot]).length;
+    const actualDiscard=Math.min(discardCount,discardable);
+    g.log=pushLog(g.log,g.players[d.seat].name+' 发动【英魂】,令 '+target.name+' 摸'+drawCount+'张牌并弃置'+actualDiscard+'张牌');
+    markSkillSound(g,'英魂');
+    if(actualDiscard>0){
+      g.pending=setResponseAskedAt({type:'yinghunDiscard',ownerSeat:d.seat,targetSeat:d.targetSeat,remaining:actualDiscard});
+      g.phase='yinghunDiscard';
+      return g;
+    }
+    g.pending=null; g.phase='play'; continueHuashenChangeCheckAtTurnStart(g,d.seat);
+    return g;
+  });
+}
+function discardYinghunCard(selection){
+  tx(g=>{
+    if(g.phase!=='yinghunDiscard'||!g.pending||g.pending.type!=='yinghunDiscard'||g.pending.targetSeat!==mySeat) return g;
+    const d=g.pending,target=g.players[mySeat];
+    const choice=typeof selection==='number'?{kind:'hand',idx:selection}:selection;
+    let card=null,lostEquip=false;
+    if(choice&&choice.kind==='hand'&&Number.isInteger(choice.idx)) card=(target.hand||[]).splice(choice.idx,1)[0];
+    else if(choice&&choice.kind==='equip'&&EQUIP_SLOTS.includes(choice.slot)&&target.equips&&target.equips[choice.slot]){
+      card=target.equips[choice.slot]; target.equips[choice.slot]=null; lostEquip=true;
+    }
+    if(!card) return g;
+    g.discard.push(card); d.remaining--;
+    g.log=pushLog(g.log,target.name+' 因【英魂】弃置一张牌');
+    const noCards=(target.hand||[]).length+EQUIP_SLOTS.filter(slot=>target.equips&&target.equips[slot]).length===0;
+    if(d.remaining<=0 || noCards){
+      const owner=d.ownerSeat; g.pending=null; g.phase='play'; continueHuashenChangeCheckAtTurnStart(g,owner);
+    }else setResponseAskedAt(d);
+    if(lostEquip) triggerHook(g,mySeat,'onLoseEquip',{count:1});
+    return g;
+  });
+}
+function cancelYinghun(){
+  tx(g=>{
+    if(g.phase!=='yinghunTarget'||!g.pending||g.pending.type!=='yinghunTarget'||g.pending.seat!==mySeat) return g;
+    const seat=g.pending.seat;
+    g.pending=null; g.phase='play';
+    continueHuashenChangeCheckAtTurnStart(g,seat);
+    return g;
+  });
+}
+
+// ===== 孙策【制霸】:其他吴势力角色的出牌阶段限一次,可以与主公孙策拼点 =====
 function canTriggerZhiba(g, seat){
   const p=g.players[seat];
   if(!p || !p.alive) return false;
   if(g.phase!=='play' || g.turn!==seat) return false; // 仅自己的出牌阶段可发动
   if(g.gameMode!=='identity') return false;
-  if(p.role!=='zhu') return false;
-  if(!hasCap(p,'zhiba')) return false;
+  if(generalFaction(p)!=='wu') return false;
   if(g.zhibaUsed) return false;
   if((p.hand||[]).length===0) return false;
-  return g.players.some((q,i)=>i!==seat && q && q.alive && (q.hand||[]).length>0);
+  return g.players.some((q,i)=>i!==seat && q && q.alive && q.role==='zhu' && hasCap(q,'zhiba') && (q.hand||[]).length>0);
 }
-// startZhiba(targetSeat):play 阶段入口,孙策点选目标后提交。
-function startZhiba(targetSeat){
+function startZhiba(cardIdx){
   tx(g=>{
     if(!canTriggerZhiba(g, mySeat)) return g;
-    const me=g.players[mySeat], target=g.players[targetSeat];
-    if(!target || !target.alive || targetSeat===mySeat) return g;
-    if((target.hand||[]).length===0) return g;
-    // 孙策自动出第一张手牌(简化版,不做选牌阶段)
-    const card=me.hand.splice(0,1)[0];
-    g.discard.push(card);
+    const challenger=g.players[mySeat];
+    const lordSeat=g.players.findIndex((q,i)=>i!==mySeat && q && q.alive && q.role==='zhu' && hasCap(q,'zhiba') && (q.hand||[]).length>0);
+    const card=(challenger.hand||[])[cardIdx];
+    if(lordSeat<0 || !card) return g;
+    challenger.hand.splice(cardIdx,1);
     g.zhibaUsed=true;
-    g.pending=setResponseAskedAt({type:'zhibaAsk', lordSeat:mySeat, targetSeat, selfCard:card, resume:{phase:'play', pending:null}});
+    g.pending=setResponseAskedAt({type:'zhibaAsk', lordSeat, challengerSeat:mySeat, challengerCard:card, resume:{phase:'play', pending:null}});
     g.phase='zhibaAsk';
-    g.log=pushLog(g.log, me.name+' 发动【制霸】,与 '+target.name+' 拼点');
+    g.log=pushLog(g.log, challenger.name+' 发动 '+g.players[lordSeat].name+' 的主公技【制霸】,请求拼点');
     markSkillSound(g, '制霸');
     return g;
   });
 }
-// respondZhiba(cardIdx):目标出一张手牌拼点,比点后回 play(输赢无额外效果)。
+// 孙策选择拼点牌。魂姿觉醒后可用 cardIdx=-1 拒绝。
 function respondZhiba(cardIdx){
   tx(g=>{
     if(g.phase!=='zhibaAsk' || !g.pending || g.pending.type!=='zhibaAsk') return g;
-    if(g.pending.targetSeat!==mySeat) return g;
-    const target=g.players[mySeat];
-    const card=(target.hand||[])[cardIdx];
+    if(g.pending.lordSeat!==mySeat) return g;
+    const d=g.pending,lord=g.players[mySeat],challenger=g.players[d.challengerSeat];
+    if(!lord || !lord.alive || lord.role!=='zhu' || !hasCap(lord,'zhiba') || !challenger || !challenger.alive ||
+       d.challengerSeat===mySeat || generalFaction(challenger)!=='wu' || !d.challengerCard){
+      if(d.challengerCard) g.discard.push(d.challengerCard);
+      g.pending=null; g.phase='play'; return g;
+    }
+    if(cardIdx===-1 && lord.hunziAwakened){
+      challenger.hand.push(d.challengerCard);
+      g.log=pushLog(g.log,lord.name+' 拒绝了 '+challenger.name+' 的【制霸】拼点');
+      g.pending=null; g.phase='play'; return g;
+    }
+    const card=(lord.hand||[])[cardIdx];
     if(!card) return g;
-    target.hand.splice(cardIdx,1);
-    g.discard.push(card);
-    const lord=g.players[g.pending.lordSeat];
-    const selfCard=g.pending.selfCard;
-    const win=(selfCard.rank||0)>(card.rank||0);
-    g.log=pushLog(g.log, lord.name+' 出 '+pointText(selfCard)+', '+target.name+' 出 '+pointText(card)+', 拼点'+(win?lord.name+'赢':target.name+'赢'));
+    lord.hand.splice(cardIdx,1);
+    const challengerWin=(d.challengerCard.rank||0)>(card.rank||0);
+    if(challengerWin){
+      g.discard.push(d.challengerCard,card);
+    }else{
+      g.pending=setResponseAskedAt({type:'zhibaGain',lordSeat:mySeat,cards:[d.challengerCard,card]});
+      g.phase='zhibaGain';
+      g.log=pushLog(g.log, challenger.name+' 出 '+pointText(d.challengerCard)+', '+lord.name+' 出 '+pointText(card)+', '+challenger.name+'没赢,主公可以获得两张拼点牌');
+      return g;
+    }
+    g.log=pushLog(g.log, challenger.name+' 出 '+pointText(d.challengerCard)+', '+lord.name+' 出 '+pointText(card)+', 拼点'+challenger.name+'赢');
     g.pending=null;
     g.phase='play';
     return g;
+  });
+}
+function respondZhibaGain(take){
+  tx(g=>{
+    if(g.phase!=='zhibaGain'||!g.pending||g.pending.type!=='zhibaGain'||g.pending.lordSeat!==mySeat) return g;
+    const d=g.pending,lord=g.players[mySeat];
+    if(take){ lord.hand.push(...d.cards); g.log=pushLog(g.log,lord.name+' 发动【制霸】,获得两张拼点牌'); }
+    else { g.discard.push(...d.cards); g.log=pushLog(g.log,lord.name+' 不获得【制霸】拼点牌'); }
+    g.pending=null; g.phase='play'; return g;
   });
 }
 
@@ -5818,6 +5995,11 @@ function handCapLimit(g, seat){
   let cap=p.hp;
   if(g.gameMode==='identity' && p.role==='zhu' && Number.isInteger(g.lordHandCap) && g.lordHandCap>0){
     cap-=g.lordHandCap;
+  }
+  // 袁绍【血裔】:仅作为身份局主公时生效,其他群势力角色每名令上限+2。
+  if(g.gameMode==='identity' && p.role==='zhu' && hasCap(p,'xueyi')){
+    const others=g.players.filter((q,i)=>i!==seat && q && q.alive && generalFaction(q)==='qun').length;
+    cap+=others*2;
   }
   return Math.max(cap,0);
 }
@@ -6341,6 +6523,7 @@ function startTurn(g, seat){
     currentPlayer.fenxunUsed = false;
     currentPlayer.fenxunTarget = null;
     currentPlayer.jujianUsed = false;
+    currentPlayer.huangtianUsed = false;
   }
   // 贾诩完杀：回合开始时重置状态
   g.wanshaActive = false; g.wanshaDyingSeat = null;
@@ -6364,6 +6547,10 @@ function startTurn(g, seat){
       }
     }
   }
+  // 孙策【魂姿】在准备阶段觉醒。刚觉醒获得的【英魂】从下个准备阶段起询问，
+  // 避免在同一个“准备阶段开始时”时点倒序补触发一个刚获得的技能。
+  const hunziJustAwakened=maybeAwakenHunzi(g,seat);
+  if(!hunziJustAwakened && maybeStartYinghun(g,seat)) return;
   // 姜维【志继】觉醒检查:准备阶段,若没有手牌(走 cap,不硬编码武将 id)
   if(p && p.alive && hasCap(p,'zhiji') && (p.hand||[]).length===0 && !p.zhijiAwakened){
     p.zhijiAwakened = true;

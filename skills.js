@@ -377,8 +377,9 @@ function resolveGuhuoResponseTao(g, seat, actual, claimed){
   const dyingP=g.players[g.pending.seat];
   if(!dyingP) return;
   g.discard.push(actual);
-  dyingP.hp++;
-  g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【'+claimed.name+'】对 '+dyingP.name+' 使用,回复1点体力（体力'+dyingP.hp+'）');
+  const recovery=peachRecoveryAmount(g,seat,g.pending.seat);
+  dyingP.hp=Math.min(dyingP.maxHp,dyingP.hp+recovery);
+  g.log=pushLog(g.log, me.name+' 【蛊惑】生效,将扣置牌当【'+claimed.name+'】对 '+dyingP.name+' 使用,回复'+recovery+'点体力（体力'+dyingP.hp+'）');
   removeBuquCard(g, g.pending.seat);
   if(hasCap(dyingP, 'enyuan') && seat!==g.pending.seat){
     ensureDeck(g);

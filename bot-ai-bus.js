@@ -368,6 +368,10 @@ function autoRespondAction(g){
   if(type==='jijiangAsk') return function(){ respondJijiangAsk(false); };       // 激将求助:不出
   if(type==='hujiaAsk') return function(){ respondHujiaAsk(false); };           // 护驾求助:不出
   if(type==='zhibaAsk') return function(){ respondZhiba(0); };                  // 制霸拼点:出第0张
+  if(type==='zhibaGain') return function(){ respondZhibaGain(true); };          // 制霸:获得拼点牌
+  if(type==='yinghunTarget') return function(){ cancelYinghun(); };             // 英魂:不发动
+  if(type==='yinghunChoice') return function(){ respondYinghunChoice('drawX'); }; // 英魂:摸X弃1
+  if(type==='yinghunDiscard') return function(){ const p=g.players[g.pending.targetSeat],slot=EQUIP_SLOTS.find(function(s){return p.equips&&p.equips[s];}); discardYinghunCard((p.hand||[]).length?0:{kind:'equip',slot:slot}); }; // 英魂:优先弃手牌,否则弃装备
   // 左慈【化身/新生】"是否更改化身"超时兜底(真实bug修复:这四个pending此前既没有登记
   // 在这张白名单里,创建时也没有setResponseAskedAt补时间戳——两处都不改,30秒超时机制
   // 对这四个phase形同虚设,机器人一旦在这四步没有正常响应就永久卡死,重试也救不回来。

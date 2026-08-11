@@ -141,7 +141,7 @@ function mkG(opt){
       delays: [],
       isBot: (opt.botOf ? opt.botOf[i] : false),
       role: (opt.roles ? opt.roles[i] : (i === 0 ? 'zhu' : (i === 1 ? 'fan' : 'zhong'))),
-      general: (opt.generals ? opt.generals[i] : 'yuJi')
+      general: (opt.generals && opt.generals[i]) || (i>0 && opt.helperFaction==='shu' ? 'zhaoyun' : (i>0 && opt.helperFaction==='wei' ? 'xiahoudun' : 'yuji'))
     };
   });
   const g = {
@@ -173,7 +173,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   // ===== A. 激将 =====
 
   await check('A1 激将触发:主公刘备决斗不出杀 → jijiangAsk,used置真,从下家问起', function(){
-    const g = mkG({ phase:'duel', pending: DUEL, generals:{0:'liubei'} });
+    const g = mkG({ phase:'duel', pending: DUEL, generals:{0:'liubei'}, helperFaction:'shu' });
     setG(g); seat(0);
     R('duelResponse(false)');
     const gg = getG();
@@ -188,7 +188,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('A2 激将响应:被求助者替出杀 → 视为完成杀响应(决斗义务换给对手)', function(){
-    const g = mkG({ phase:'duel', pending: DUEL, generals:{0:'liubei'}, hands:{1:[S]} });
+    const g = mkG({ phase:'duel', pending: DUEL, generals:{0:'liubei'}, helperFaction:'shu', hands:{1:[S]} });
     setG(g); seat(0);
     R('duelResponse(false)');
     seat(1);
@@ -203,7 +203,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('A3 激将无人替:不出→问下家;问完一圈→回原 pending 继续主公正常响应', function(){
-    const g = mkG({ phase:'duel', pending: DUEL, generals:{0:'liubei'} });
+    const g = mkG({ phase:'duel', pending: DUEL, generals:{0:'liubei'}, helperFaction:'shu' });
     setG(g); seat(0);
     R('duelResponse(false)');
     seat(1); R('respondJijiangAsk(false)');
@@ -223,7 +223,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('A4 激将南蛮:aoeResp 不出杀 → 求助;替出 → AOE 结算推进(主公末位→结束)', function(){
-    const g = mkG({ phase:'aoeResp', pending: AOESHA, aoe: NANMAN, generals:{0:'liubei'}, hands:{1:[S]} });
+    const g = mkG({ phase:'aoeResp', pending: AOESHA, aoe: NANMAN, generals:{0:'liubei'}, helperFaction:'shu', hands:{1:[S]} });
     setG(g); seat(0);
     R('aoeRespond(false)');
     let gg = getG();
@@ -237,7 +237,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('A5 激将南蛮无人替 → 回原 aoeResp pending', function(){
-    const g = mkG({ phase:'aoeResp', pending: AOESHA, aoe: NANMAN, generals:{0:'liubei'} });
+    const g = mkG({ phase:'aoeResp', pending: AOESHA, aoe: NANMAN, generals:{0:'liubei'}, helperFaction:'shu' });
     setG(g); seat(0);
     R('aoeRespond(false)');
     seat(1); R('respondJijiangAsk(false)');
@@ -251,7 +251,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   // ===== B. 护驾 =====
 
   await check('B1 护驾触发:主公曹操被杀不出闪 → hujiaAsk', function(){
-    const g = mkG({ phase:'respond', pending:{from:1, to:0}, generals:{0:'caocao'} });
+    const g = mkG({ phase:'respond', pending:{from:1, to:0}, generals:{0:'caocao'}, helperFaction:'wei' });
     setG(g); seat(0);
     R('respondShan(false)');
     const gg = getG();
@@ -263,7 +263,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('B2 护驾响应:替出闪 → 杀被抵消,主公不受伤,回 play', function(){
-    const g = mkG({ phase:'respond', pending:{from:1, to:0}, generals:{0:'caocao'}, hands:{1:[SH]} });
+    const g = mkG({ phase:'respond', pending:{from:1, to:0}, generals:{0:'caocao'}, helperFaction:'wei', hands:{1:[SH]} });
     setG(g); seat(0);
     R('respondShan(false)');
     seat(1); R('respondHujiaAsk(true)');
@@ -275,7 +275,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('B3 护驾无人替 → 回原 respond pending', function(){
-    const g = mkG({ phase:'respond', pending:{from:1, to:0}, generals:{0:'caocao'} });
+    const g = mkG({ phase:'respond', pending:{from:1, to:0}, generals:{0:'caocao'}, helperFaction:'wei' });
     setG(g); seat(0);
     R('respondShan(false)');
     seat(1); R('respondHujiaAsk(false)');
@@ -287,7 +287,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('B4 护驾万箭:替出闪 → AOE 结算推进(主公末位→结束)', function(){
-    const g = mkG({ phase:'aoeResp', pending: AOESHAN, aoe: WANJIAN, generals:{0:'caocao'}, hands:{1:[SH]} });
+    const g = mkG({ phase:'aoeResp', pending: AOESHAN, aoe: WANJIAN, generals:{0:'caocao'}, helperFaction:'wei', hands:{1:[SH]} });
     setG(g); seat(0);
     R('aoeRespond(false)');
     let gg = getG();
@@ -516,70 +516,67 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     assert.strictEqual(calls[0][0], true);
   });
 
-  // ===== H. 制霸(孙策,出牌阶段限一次拼点) =====
+  // ===== H. 制霸(其他吴势力角色向主公孙策发起拼点) =====
 
-  await check('H1 制霸触发:孙策(role zhu)play 选目标 → zhibaAsk pending,zhibaUsed 置真,孙策第一张手牌进弃牌堆', function(){
-    const g = mkG({ phase:'play', turn:0, generals:{0:'sunce'},
-      hands:{0:[S,{id:'s2',name:'杀',suit:'♠',rank:7}], 1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
-    setG(g); seat(0);
-    R('startZhiba(1)');
+  await check('H1 制霸触发:吴势力角色play出牌 → 请求主公孙策拼点', function(){
+    const g = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'lvmeng'},
+      hands:{0:[S], 1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
+    setG(g); seat(1);
+    R('startZhiba(0)');
     const gg = getG();
     assert.strictEqual(gg.phase, 'zhibaAsk');
     assert.strictEqual(gg.pending.type, 'zhibaAsk');
     assert.strictEqual(gg.pending.lordSeat, 0);
-    assert.strictEqual(gg.pending.targetSeat, 1);
-    assert.strictEqual(gg.pending.selfCard.id, 's1'); // 自动出第一张手牌
+    assert.strictEqual(gg.pending.challengerSeat, 1);
+    assert.strictEqual(gg.pending.challengerCard.id, 'f2');
     assert.strictEqual(gg.zhibaUsed, true);
-    assert.strictEqual(gg.players[0].hand.length, 1);
-    assert.ok(gg.discard.some(function(c){ return c.id === 's1'; }));
+    assert.strictEqual(gg.players[1].hand.length, 0);
     assert.ok(gg.log.some(function(e){ return e.text.indexOf('制霸') >= 0; }));
   });
 
-  await check('H2 制霸响应:目标出牌 → 双方各弃一张、比点日志、回 play', function(){
-    const g = mkG({ phase:'zhibaAsk', turn:0, generals:{0:'sunce'},
-      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
-      hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
-    setG(g); seat(1);
+  await check('H2 制霸响应:吴将没赢 → 主公获得双方拼点牌', function(){
+    const challenger={id:'f2',name:'闪',suit:'♥',rank:3};
+    const g = mkG({ phase:'zhibaAsk', turn:1, generals:{0:'sunce',1:'lvmeng'},
+      pending:{type:'zhibaAsk', lordSeat:0, challengerSeat:1, challengerCard:challenger, resume:{phase:'play', pending:null}},
+      hands:{0:[S]} });
+    setG(g); seat(0);
     R('respondZhiba(0)');
+    assert.strictEqual(getG().phase,'zhibaGain');
+    R('respondZhibaGain(true)');
     const gg = getG();
     assert.strictEqual(gg.phase, 'play');
     assert.strictEqual(gg.pending, null);
-    assert.strictEqual(gg.players[1].hand.length, 0);
-    assert.ok(gg.discard.some(function(c){ return c.id === 'f2'; }));
+    assert.strictEqual(gg.players[0].hand.length, 2);
+    assert.ok(gg.players[0].hand.some(function(c){ return c.id === 'f2'; }));
     assert.ok(gg.log.some(function(e){ return e.text.indexOf('拼点') >= 0; }));
   });
 
-  await check('H3 守卫:zhibaUsed 已真不再发动;非主公(role zhong)不可发动;ffa 不触发', function(){
-    const g1 = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH]}, zhibaUsed:true });
-    setG(g1); seat(0);
-    R('startZhiba(1)');
+  await check('H3 守卫:已使用/非吴势力/ffa 不触发', function(){
+    const g1 = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'lvmeng'}, hands:{0:[S],1:[SH]}, zhibaUsed:true });
+    setG(g1); seat(1); R('startZhiba(0)');
     let gg = getG();
     assert.strictEqual(gg.phase, 'play');
     assert.ok(!gg.pending);
-    const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce',1:'caocao'}, roles:{0:'zhong',1:'zhu',2:'fan'}, hands:{0:[S],1:[SH]} });
-    setG(g2); seat(0);
-    R('startZhiba(1)');
+    const g2 = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'caocao'}, hands:{0:[S],1:[SH]} });
+    setG(g2); seat(1); R('startZhiba(0)');
     gg = getG();
     assert.strictEqual(gg.phase, 'play');
     assert.ok(!gg.pending);
-    const g3 = mkG({ mode:'ffa', phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH]} });
-    setG(g3); seat(0);
-    R('startZhiba(1)');
+    const g3 = mkG({ mode:'ffa', phase:'play', turn:1, generals:{0:'sunce',1:'lvmeng'}, hands:{0:[S],1:[SH]} });
+    setG(g3); seat(1); R('startZhiba(0)');
     gg = getG();
     assert.strictEqual(gg.phase, 'play');
     assert.ok(!gg.pending);
   });
 
-  await check('H4 守卫:孙策无手牌 / 目标无手牌 不可发动', function(){
-    const g1 = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{1:[SH]} });
-    setG(g1); seat(0);
-    R('startZhiba(1)');
+  await check('H4 守卫:主公无手牌 / 吴将无手牌不可发动', function(){
+    const g1 = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'lvmeng'}, hands:{1:[SH]} });
+    setG(g1); seat(1); R('startZhiba(0)');
     let gg = getG();
     assert.strictEqual(gg.phase, 'play');
     assert.ok(!gg.pending);
-    const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S]} });
-    setG(g2); seat(0);
-    R('startZhiba(1)');
+    const g2 = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'lvmeng'}, hands:{0:[S]} });
+    setG(g2); seat(1); R('startZhiba(0)');
     gg = getG();
     assert.strictEqual(gg.phase, 'play');
     assert.ok(!gg.pending);
@@ -592,10 +589,10 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     const g1b = R('normalize({players:[], log:[], deck:[], discard:[], zhibaUsed:"x", lordHandCap:"y"})');
     assert.strictEqual(g1b.zhibaUsed, false);
     assert.strictEqual(g1b.lordHandCap, 0);
-    const bad = R('normalize({players:[{name:"a",alive:true},{name:"b",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"zhibaAsk", pending:{type:"zhibaAsk", lordSeat:"x", targetSeat:1}})');
+    const bad = R('normalize({players:[{name:"a",alive:true},{name:"b",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"zhibaAsk", pending:{type:"zhibaAsk", lordSeat:"x", challengerSeat:1}})');
     assert.strictEqual(bad.pending, null);
     assert.strictEqual(bad.phase, 'play');
-    const good = R('normalize({players:[{name:"a",alive:true},{name:"b",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"zhibaAsk", pending:{type:"zhibaAsk", lordSeat:0, targetSeat:1, selfCard:{id:"s1"}, resume:{phase:"play", pending:null}}})');
+    const good = R('normalize({gameMode:"identity",players:[{name:"a",general:"sunce",role:"zhu",caps:{zhiba:true},alive:true},{name:"b",general:"zhouyu",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"zhibaAsk", pending:{type:"zhibaAsk", lordSeat:0, challengerSeat:1, challengerCard:{id:"s1"}, resume:{phase:"play", pending:null}}})');
     assert.ok(good.pending && good.pending.type === 'zhibaAsk');
     const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce'} });
     g2.zhibaUsed = true; g2.lordHandCap = 1;
@@ -668,8 +665,8 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
 
   // ===== J. 机器人 =====
 
-  await check('J1 BOT_PHASE_ACTOR 登记 zhibaAsk=targetSeat', function(){
-    assert.strictEqual(R('BOT_PHASE_ACTOR.zhibaAsk'), 'targetSeat');
+  await check('J1 BOT_PHASE_ACTOR 登记 zhibaAsk=lordSeat', function(){
+    assert.strictEqual(R('BOT_PHASE_ACTOR.zhibaAsk'), 'lordSeat');
   });
 
   await check('J2 BOT_DECISIONS.zhibaAsk 注册形状完整;botDecide 无密钥选点数最大的手牌', async function(){
@@ -678,11 +675,11 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
       && typeof s.localFallback === 'function' && typeof s.execute === 'function');
     R('aiApiKey = ""; aiProvider = null;');
     R('window.__zbCalls = []; respondZhiba = function(cardIdx){ window.__zbCalls.push(cardIdx); };');
-    const g = mkG({ phase:'zhibaAsk', turn:0,
-      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
-      hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:3},{id:'f3',name:'闪',suit:'♦',rank:11}]} });
+    const g = mkG({ phase:'zhibaAsk', turn:1, generals:{0:'sunce',1:'lvmeng'},
+      pending:{type:'zhibaAsk', lordSeat:0, challengerSeat:1, challengerCard:S, resume:{phase:'play', pending:null}},
+      hands:{0:[{id:'f2',name:'闪',suit:'♥',rank:3},{id:'f3',name:'闪',suit:'♦',rank:11}]} });
     setG(g);
-    const r = await R('(async function(){ return await botDecide("zhibaAsk", _g, 1); })()');
+    const r = await R('(async function(){ return await botDecide("zhibaAsk", _g, 0); })()');
     assert.strictEqual(r, true);
     assert.strictEqual(R('window.__zbCalls').length, 1);
     assert.strictEqual(R('window.__zbCalls')[0], 1); // 点数大的下标
@@ -691,11 +688,11 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   await check('J3 runBotDecision 接线:zhibaAsk 阶段命中专用决策', async function(){
     R('aiApiKey = ""; aiProvider = null;');
     R('window.__zbCalls = []; respondZhiba = function(cardIdx){ window.__zbCalls.push(cardIdx); };');
-    const g = mkG({ phase:'zhibaAsk', turn:0, generals:{0:'sunce'},
-      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
-      botOf:{1:true}, hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
+    const g = mkG({ phase:'zhibaAsk', turn:1, generals:{0:'sunce',1:'lvmeng'},
+      pending:{type:'zhibaAsk', lordSeat:0, challengerSeat:1, challengerCard:S, resume:{phase:'play', pending:null}},
+      botOf:{0:true}, hands:{0:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
     setG(g);
-    await R('(async function(){ await runBotDecision(_g, 1); return true; })()');
+    await R('(async function(){ await runBotDecision(_g, 0); return true; })()');
     assert.strictEqual(R('window.__zbCalls').length, 1);
   });
 
@@ -703,18 +700,11 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     assert.strictEqual(R('CONTROLS_CHOICE_EXCLUDE.has("zhibaAsk")'), true);
   });
 
-  await check('J5 BOT_SEAT_PICKS.zhiba 注册:主公孙策 play 阶段制霸目标选择;非主公不命中', function(){
-    const s = R('BOT_SEAT_PICKS.zhiba');
-    assert.ok(s && typeof s.match === 'function' && typeof s.buildSeatCandidates === 'function'
-      && typeof s.execute === 'function');
-    const g = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH],2:[{id:'f4',name:'闪',suit:'♥',rank:5}]} });
-    setG(g);
-    assert.strictEqual(R('BOT_SEAT_PICKS.zhiba.match(_g, 0)'), true);
-    const cands = R('BOT_SEAT_PICKS.zhiba.buildSeatCandidates(_g, 0)');
-    assert.strictEqual(cands.length, 2);
-    const g2 = mkG({ phase:'play', turn:0, generals:{0:'sunce',1:'caocao'}, roles:{0:'zhong',1:'zhu',2:'fan'}, hands:{0:[S],1:[SH]} });
-    setG(g2);
-    assert.strictEqual(R('BOT_SEAT_PICKS.zhiba.match(_g, 0)'), false);
+  await check('J5 制霸主动入口:吴势力角色可用,非吴势力不可用', function(){
+    const g = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'lvmeng'}, hands:{0:[S],1:[SH]} });
+    setG(g); assert.strictEqual(R('canTriggerZhiba(_g,1)'),true);
+    const g2 = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'caocao'}, hands:{0:[S],1:[SH]} });
+    setG(g2); assert.strictEqual(R('canTriggerZhiba(_g,1)'),false);
   });
 
   await check('J6 A1 超时保守动作表:zhibaAsk → respondZhiba(0)', function(){
@@ -728,12 +718,12 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
 
   // ===== K. UI =====
 
-  await check('K1 UI:zhibaAsk 目标渲染拼点按钮,点击走 respondZhiba', function(){
+  await check('K1 UI:zhibaAsk 主公渲染拼点按钮,点击走 respondZhiba', function(){
     R('window.__zbCalls = []; respondZhiba = function(cardIdx){ window.__zbCalls.push(cardIdx); };');
-    const g = mkG({ phase:'zhibaAsk', turn:0, generals:{0:'sunce'},
-      pending:{type:'zhibaAsk', lordSeat:0, targetSeat:1, selfCard:S, resume:{phase:'play', pending:null}},
-      hands:{1:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
-    setG(g); seat(1);
+    const g = mkG({ phase:'zhibaAsk', turn:1, generals:{0:'sunce',1:'lvmeng'},
+      pending:{type:'zhibaAsk', lordSeat:0, challengerSeat:1, challengerCard:S, resume:{phase:'play', pending:null}},
+      hands:{0:[{id:'f2',name:'闪',suit:'♥',rank:9}]} });
+    setG(g); seat(0);
     __controlsEl = makeEl();
     context.window.__controlsEl = __controlsEl;
     R('renderControls(_g)');
@@ -744,9 +734,9 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     assert.strictEqual(R('window.__zbCalls')[0], 0);
   });
 
-  await check('K2 UI:play 阶段孙策主公渲染「发动【制霸】」按钮;ffa/非主公不渲染', function(){
-    const g = mkG({ phase:'play', turn:0, generals:{0:'sunce'}, hands:{0:[S],1:[SH]} });
-    setG(g); seat(0);
+  await check('K2 UI:吴势力角色play阶段渲染「发动【制霸】」按钮;ffa/非吴不渲染', function(){
+    const g = mkG({ phase:'play', turn:1, generals:{0:'sunce',1:'lvmeng'}, hands:{0:[S],1:[SH]} });
+    setG(g); seat(1);
     __controlsEl = makeEl();
     context.window.__controlsEl = __controlsEl;
     R('renderControls(_g)');
@@ -761,9 +751,72 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     assert.ok(labels.indexOf('发动【制霸】') < 0, 'ffa 不应有制霸按钮');
   });
 
-  // ===== L. 无密钥零变化 =====
+  // ===== L. 新增主公技与魂姿解锁 =====
 
-  await check('L1 无密钥零变化:ffa 主公弃牌阶段不受脏 lordHandCap 影响(上限仍=hp)', function(){
+  await check('L1 救援:吴势力角色对主公孙权使用桃时回复值+1;非吴/非主公不加成', function(){
+    const g=mkG({generals:{0:'sunquan',1:'lvmeng',2:'caocao'}});
+    setG(g);
+    assert.strictEqual(R('peachRecoveryAmount(_g,1,0)'),2);
+    assert.strictEqual(R('peachRecoveryAmount(_g,2,0)'),1);
+    assert.strictEqual(R('peachRecoveryAmount(_g,1,1)'),1);
+  });
+
+  await check('L2 黄天:群势力角色每个出牌阶段限一次交给主公闪/闪电', function(){
+    const lightning={id:'lt',name:'闪电',suit:'♠',rank:1};
+    const g=mkG({phase:'play',turn:1,generals:{0:'zhangjiao',1:'yuanshao'},hands:{1:[lightning,SH]}});
+    setG(g); seat(1);
+    assert.strictEqual(R('canUseHuangtian(_g,1)'),true);
+    R('useHuangtian(0)');
+    let gg=getG();
+    assert.strictEqual(gg.players[0].hand[0].id,'lt');
+    assert.strictEqual(gg.players[1].huangtianUsed,true);
+    R('useHuangtian(0)');
+    gg=getG(); assert.strictEqual(gg.players[0].hand.length,1);
+  });
+
+  await check('L3 血裔:袁绍主公手牌上限按其他存活群势力角色每名+2', function(){
+    const g=mkG({generals:{0:'yuanshao',1:'zhangjiao',2:'lvmeng'}});
+    setG(g); assert.strictEqual(R('handCapLimit(_g,0)'),6);
+    getG().players[2].general='yuanshu';
+    assert.strictEqual(R('handCapLimit(_g,0)'),8);
+    getG().players[1].alive=false;
+    assert.strictEqual(R('handCapLimit(_g,0)'),6);
+  });
+
+  await check('L4 魂姿:1体力准备阶段觉醒,减上限并获得英姿/英魂;不重复觉醒', function(){
+    const g=mkG({phase:'play',turn:0,generals:{0:'sunce'},hpOf:{0:1}});
+    setG(g); R('startTurn(_g,0)');
+    let gg=getG();
+    assert.strictEqual(gg.players[0].hunziAwakened,true);
+    assert.strictEqual(gg.players[0].maxHp,3);
+    assert.strictEqual(R('generalCapValue(_g.players[0],"extraDrawPhase",0)'),1);
+    assert.strictEqual(R('hasCap(_g.players[0],"yinghun")'),true);
+    R('startTurn(_g,0)'); gg=getG(); assert.strictEqual(gg.players[0].maxHp,3);
+  });
+
+  await check('L5 英魂:觉醒后准备阶段选择目标并结算摸X弃1', function(){
+    const g=mkG({phase:'play',turn:0,generals:{0:'sunce'},hpOf:{0:1},hands:{1:[SH]}});
+    g.players[0].maxHp=3; g.players[0].hunziAwakened=true; g.players[0].caps={extraDrawPhase:1,yinghun:true};
+    g.deck=[{id:'d1',name:'杀',suit:'♠',rank:2},{id:'d2',name:'闪',suit:'♥',rank:2}];
+    setG(g); R('startTurn(_g,0)');
+    assert.strictEqual(getG().phase,'yinghunTarget');
+    seat(0); R('chooseYinghunTarget(1)'); R('respondYinghunChoice("drawX")');
+    assert.strictEqual(getG().phase,'yinghunDiscard');
+    seat(1); R('discardYinghunCard(0)');
+    const gg=getG();
+    assert.strictEqual(gg.pending,null);
+    assert.ok(gg.log.some(function(e){return e.text.indexOf('英魂')>=0;}));
+  });
+
+  await check('L6 激将/护驾仅询问对应势力角色', function(){
+    const g=mkG({phase:'duel',pending:DUEL,generals:{0:'liubei',1:'caocao',2:'zhaoyun'}});
+    setG(g); seat(0); R('duelResponse(false)');
+    assert.strictEqual(getG().pending.asking,2);
+  });
+
+  // ===== M. 无密钥零变化 =====
+
+  await check('M1 无密钥零变化:ffa 主公弃牌阶段不受脏 lordHandCap 影响(上限仍=hp)', function(){
     // ffa 下 role 本应被 normalize 清空;这里不跑 normalize,靠 handCapLimit 自身 gameMode 守卫
     const g = mkG({ mode:'ffa', phase:'discard', turn:0, generals:{0:'caocao',1:'yuanshu'},
       hands:{0:[S,SH,{id:'t1',name:'桃',suit:'♥',rank:3},{id:'w1',name:'无中生有',suit:'♥',rank:7}]} }); // 手牌4=hp4

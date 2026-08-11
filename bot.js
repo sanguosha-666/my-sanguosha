@@ -82,10 +82,10 @@ const BOT_PHASE_ACTOR = {
   // 不登记会掉进 botFallbackSeats+botSafePrompt(按钮文案"替主公打出【X】/不出"不命中
   // 任一正则 → 只告警不动作,机器人求助必然卡死)。
   jijiangAsk:'asking', hujiaAsk:'asking',
-  // 【B2b】制霸拼点:行动者是 pending.targetSeat(目标,服务端 respondZhiba 守卫
-  // g.pending.targetSeat!==mySeat)。登记后 botSeatForState 才能解析出行动者走
+  // 【B2b】制霸拼点:行动者是 pending.lordSeat(被请求的主公)。
   // runBotDecision 专用分支(botDecide('zhibaAsk'))。
-  zhibaAsk:'targetSeat',
+  zhibaAsk:'lordSeat', zhibaGain:'lordSeat',
+  yinghunTarget:'seat', yinghunChoice:'seat', yinghunDiscard:'targetSeat',
   // 【调度盲区收尾】蔡文姬【悲歌】三段(是否发动/选弃置的牌/进行判定),行动者始终是
   // pending.sourceSeat(悲歌发动者本人,服务端 triggerBeige/beigeDiscard/doBeigeJudge
   // 三个函数守卫都是 pending.sourceSeat!==mySeat)。此前三个 phase 都不在这张表里,
@@ -1767,34 +1767,36 @@ BOT_DECISIONS.hujiaAsk = {
   maxTokens: 60,
 };
 
-// ================= B2b 制霸拼点(孙策【制霸】目标响应) =================
-// 服务端 respondZhiba:目标出一张手牌拼点,输赢无额外效果。机器人被拼点时选点数最大的
-// 牌(胜率最高;输赢都无惩罚,任何牌都合法)。无密钥 localFallback 同样选最大点——制霸是
-// 本次新功能,不属于"无密钥零变化"承诺范围(零变化只针对非身份局/非主公路径,见测试 L 组)。
+// ================= B2b 制霸拼点(孙策主公响应) =================
 BOT_DECISIONS.zhibaAsk = {
   match: function(g, seat){
     const d=g.pending;
-    return g.phase==='zhibaAsk' && d && d.type==='zhibaAsk' && d.targetSeat===seat;
+    return g.phase==='zhibaAsk' && d && d.type==='zhibaAsk' && d.lordSeat===seat;
   },
   buildCandidates: function(g, seat){
     const p=g.players[seat];
-    return (p.hand||[]).map(function(c, i){
+    const candidates=(p.hand||[]).map(function(c, i){
       return { action:'拼点【'+c.name+'】', cardIdx:i };
     });
+    if(p.hunziAwakened) candidates.push({action:'拒绝拼点',cardIdx:-1,refuse:true});
+    return candidates;
   },
   localFallback: function(g, seat, candidates){
     const hand=g.players[seat].hand||[];
-    return candidates.slice().sort(function(a,b){
-      return (hand[b.cardIdx].rank||0) - (hand[a.cardIdx].rank||0);
-    })[0] || candidates[0];
+    const cards=candidates.filter(function(c){return c.cardIdx>=0;}).sort(function(a,b){
+      return ((hand[b.cardIdx]&&hand[b.cardIdx].rank)||0) - ((hand[a.cardIdx]&&hand[a.cardIdx].rank)||0);
+    });
+    if(g.players[seat].hunziAwakened && (!cards.length || ((hand[cards[0].cardIdx]&&hand[cards[0].cardIdx].rank)||0)<10))
+      return candidates.find(function(c){return c.refuse;});
+    return cards[0] || candidates[0];
   },
   execute: function(g, seat, choice){
     if(!choice) return;
     botInvoke(seat, function(){ respondZhiba(choice.cardIdx); });
   },
   buildSystemPrompt: function(){
-    return '你在扮演网页版三国杀的AI机器人。孙策对你发动【制霸】,要求你选一张手牌拼点:'
-      +'候选为你的每张手牌(点数大的赢,输赢无额外惩罚)。请选择最有利的一张。'
+    return '你在扮演网页版三国杀的AI机器人。吴势力角色请求发动你的主公技【制霸】。'
+      +'候选为你的每张手牌,请选择最有利的一张拼点。'
       +'只输出 {"choice":数字},不要解释。';
   },
   maxTokens: 60,
@@ -2419,38 +2421,6 @@ BOT_SEAT_PICKS.guose = {
     const me = g.players[seat];
     const idx = (me.hand||[]).findIndex(isGuoseCard);
     if(idx>=0) botInvoke(seat, function(){ guoSe(idx, targetSeat); });
-  },
-};
-
-// BOT_SEAT_PICKS.zhiba:孙策【制霸】的"选目标"入口(有密钥时由 seatPick 总线接管;
-// 无密钥 seatPick 不接线,机器人不主动发动制霸——制霸是本次新功能,零变化承诺只覆盖
-// 非身份局/非主公路径)。合法性镜像 render-controls 制霸按钮:身份局主公 + hasCap zhiba
-// + !zhibaUsed + 自己有手牌 + 目标存活且有手牌。
-BOT_SEAT_PICKS.zhiba = {
-  match: function(g, seat){
-    if(!g || g.phase!=='play' || g.turn!==seat) return false;
-    if(g.gameMode!=='identity') return false;
-    const me = g.players && g.players[seat];
-    if(!me || me.role!=='zhu' || !hasCap(me,'zhiba') || g.zhibaUsed) return false;
-    if((me.hand||[]).length===0) return false;
-    return g.players.some(function(p,i){ return p && p.alive && i!==seat && (p.hand||[]).length>0; });
-  },
-  buildSeatCandidates: function(g, seat){
-    const out = [];
-    g.players.forEach(function(p, i){
-      if(!p || !p.alive || i===seat) return;
-      if((p.hand||[]).length===0) return;
-      out.push({ seat: i, label: '制霸→'+p.name });
-    });
-    return out;
-  },
-  fallbackSeat: function(g, seat){
-    // 【无密钥兜底解锁】制霸是拼点,按damage口径挑目标(公式本身已含手牌数权重,
-    // 符合"挑手牌多的目标"这条建议方向,不用另开一套评分)。
-    return pickBestCandidateSeat(g, seat, BOT_SEAT_PICKS.zhiba.buildSeatCandidates(g, seat), 'damage');
-  },
-  execute: function(g, seat, targetSeat){
-    botInvoke(seat, function(){ startZhiba(targetSeat); });
   },
 };
 
@@ -3817,13 +3787,39 @@ async function runBotDecision(g,seat){
     // 【B2a】护驾求助:同 jijiangAsk 一套接线,need='闪'。
     if(await botDecide('hujiaAsk',g,seat)) return;
   }
-  if(g.phase==='zhibaAsk' && d && d.type==='zhibaAsk' && d.targetSeat===seat){
-    // 【B2b】制霸拼点:目标(机器人)选一张手牌出。无密钥回退=选点数最大的牌。
-    // phase+type+targetSeat 守卫保留作双保险,命中即 return。位置刻意在 L1 之前 +
+  if(g.phase==='zhibaAsk' && d && d.type==='zhibaAsk' && d.lordSeat===seat){
+    // 【B2b】制霸拼点:主公(机器人)选一张手牌出。
     // EXCLUDE 收录,双保险防 L1 镜像"拼点【X】"按钮抢先。
     if(await botDecide('zhibaAsk',g,seat)) return;
   }
+  if(g.phase==='zhibaGain' && d && d.type==='zhibaGain' && d.lordSeat===seat){
+    botInvoke(seat,function(){ respondZhibaGain(true); }); return;
+  }
+  if(g.phase==='yinghunTarget' && d && d.type==='yinghunTarget' && d.seat===seat){
+    const allies=g.players.map(function(p,i){return {p:p,i:i};}).filter(function(x){
+      return x.i!==seat && x.p && x.p.alive && botCanSave(g,seat,x.i);
+    }).sort(function(a,b){ return (a.p.hand||[]).length-(b.p.hand||[]).length || a.p.hp-b.p.hp; });
+    const target=allies.length?allies[0].i:-1;
+    if(target>=0) botInvoke(seat,function(){ chooseYinghunTarget(target); });
+    else botInvoke(seat,cancelYinghun);
+    return;
+  }
+  if(g.phase==='yinghunChoice' && d && d.type==='yinghunChoice' && d.seat===seat){
+    botInvoke(seat,function(){ respondYinghunChoice('drawX'); }); return;
+  }
+  if(g.phase==='yinghunDiscard' && d && d.type==='yinghunDiscard' && d.targetSeat===seat){
+    const p=g.players[seat],slot=EQUIP_SLOTS.find(function(s){return p.equips&&p.equips[s];});
+    botInvoke(seat,function(){ discardYinghunCard((p.hand||[]).length?0:{kind:'equip',slot:slot}); }); return;
+  }
   if(g.phase==='draw'&&g.turn===seat){ botInvoke(seat,doDraw); return; }
+  if(g.phase==='play'&&g.turn===seat && canUseHuangtian(g,seat)){
+    const idx=(g.players[seat].hand||[]).findIndex(function(c){ return c.name==='闪'||c.name==='闪电'; });
+    if(idx>=0){ botInvoke(seat,function(){ useHuangtian(idx); }); return; }
+  }
+  if(g.phase==='play'&&g.turn===seat && canTriggerZhiba(g,seat)){
+    const hand=g.players[seat].hand||[],idx=hand.reduce(function(best,c,i){ return best<0||(c.rank||0)<(hand[best].rank||0)?i:best; },-1);
+    if(idx>=0){ botInvoke(seat,function(){ startZhiba(idx); }); return; }
+  }
   // L3 多步两阶段(借刀/离间/丈八/仁德):阶段A选中后 botTwoStepA 本地挂起,等下一调度走
   // 阶段B(丈八再等第三调度选目标);命中即 return,不让 runBotActionWindow 重复决策
   // (借刀在出牌枚举里已被排除,其余三项也不在 CARD_PLAYS 里,两路天然不冲突)。

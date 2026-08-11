@@ -305,15 +305,15 @@ const GENERALS = {
   huangyueying:  { id:'huangyueying',  name:'黄月英', gender:'female', faction:'shu', maxHp:3, skill:'集智',
     desc:'当你使用一张锦囊牌时,你可以摸一张牌。',
     caps:{ jizhi:true } },
-  sunquan:       { id:'sunquan',       name:'孙权',   gender:'male', faction:'wu', maxHp:4, skill:'制衡',
-    desc:'出牌阶段限一次,你可以弃置任意张牌,然后摸等量的牌。',
-    caps:{ zhiheng:true } },
+  sunquan:       { id:'sunquan',       name:'孙权',   gender:'male', faction:'wu', maxHp:4, skill:'制衡/救援',
+    desc:'制衡:出牌阶段限一次,你可以弃置任意张牌,然后摸等量的牌。救援:主公技,锁定技,其他吴势力角色对你使用【桃】的回复值+1。',
+    caps:{ zhiheng:true, jiuyuan:true } },
   zhouyu:        { id:'zhouyu',        name:'周瑜',   gender:'male', faction:'wu', maxHp:3, skill:'英姿/反间',
     desc:'英姿:锁定技,摸牌阶段你额外摸一张牌。反间:出牌阶段限一次,你可以令一名其他角色选择一种花色,然后获得你一张手牌并展示;若花色不同,其受到你造成的1点伤害。',
     caps:{ extraDrawPhase:1, fanjian:true } },
-  sunce:         { id:'sunce',         name:'孙策',   gender:'male', faction:'wu', maxHp:4, skill:'激昂/制霸',
-    desc:'当你使用【决斗】或红色【杀】指定目标后,或成为【决斗】或红色【杀】的目标后,你可以摸一张牌。制霸:主公技,出牌阶段限一次,你可以与一名其他角色拼点。魂姿为觉醒技,当前暂不实现。',
-    caps:{ jiang:true, zhiba:true } },
+  sunce:         { id:'sunce',         name:'孙策',   gender:'male', faction:'wu', maxHp:4, skill:'激昂/魂姿/制霸',
+    desc:'激昂:当你使用【决斗】或红色【杀】指定目标后,或成为【决斗】或红色【杀】的目标后,你可以摸一张牌。魂姿:觉醒技,准备阶段,若你的体力值为1,你减1点体力上限,然后获得【英姿】和【英魂】。制霸:主公技,其他吴势力角色的出牌阶段限一次,其可以与你拼点;若你已发动【魂姿】,你可以拒绝此拼点。其没赢后,你获得双方拼点的牌。',
+    caps:{ jiang:true, hunzi:true, zhiba:true } },
   huatuo:        { id:'huatuo',        name:'华佗',   gender:'male', faction:'qun', maxHp:3, skill:'青囊/急救',
     desc:'青囊:出牌阶段限一次,你可以弃置一张手牌,令一名已受伤的角色回复1点体力。急救:你的回合外,你可以将一张红色牌当【桃】使用。',
     caps:{ qingnang:true, jijiu:true } },
@@ -395,15 +395,15 @@ const GENERALS = {
   jiaxu:         { id:'jiaxu',         name:'贾诩',   gender:'male', faction:'wei', maxHp:3, skill:'完杀/乱武/帷幕',
     desc:'完杀:锁定技,你的回合内,当一名角色进入濒死状态时,除你和其以外的角色不能对其使用【桃】直到此次濒死结算结束。乱武:限定技,出牌阶段,你可以令所有其他角色依次选择一项:1.对距离最近的另一名角色使用一张【杀】;2.失去1点体力。帷幕:锁定技,你不能成为黑色锦囊牌的目标。',
     caps:{ wansha:true, luanwu:true, weimu:true } },
-  yuanshao:      { id:'yuanshao',      name:'袁绍',   gender:'male', faction:'qun', maxHp:4, skill:'乱击',
-    desc:'乱击:出牌阶段,你可以将两张花色相同的手牌当【万箭齐发】使用。',
-    caps:{ luanji:true } },
+  yuanshao:      { id:'yuanshao',      name:'袁绍',   gender:'male', faction:'qun', maxHp:4, skill:'乱击/血裔',
+    desc:'乱击:出牌阶段,你可以将两张花色相同的手牌当【万箭齐发】使用。血裔:主公技,锁定技,你的手牌上限+X,X为其他群势力角色数的两倍。',
+    caps:{ luanji:true, xueyi:true } },
   yuanshu:       { id:'yuanshu',       name:'袁术',   gender:'male', faction:'qun', maxHp:4, skill:'妄尊/同疾',
     desc:'妄尊:主公的准备阶段,你可以摸一张牌,然后其本回合的手牌上限-1。同疾:锁定技,若你的手牌数大于体力值,攻击范围内包含你的其他角色使用【杀】不能指定除你以外的角色为目标。',
     caps:{ tongji:true, wangzun:true } },
-  zhangjiao:     { id:'zhangjiao',     name:'张角',   gender:'male', faction:'qun', maxHp:3, skill:'雷击/鬼道',
-    desc:'雷击:当你使用或打出【闪】时,你可以令一名角色进行一次判定,若结果为♠,你对其造成2点雷电伤害。鬼道:当一名角色的判定牌生效前,你可以打出一张黑色牌替换之。',
-    caps:{ leiji:true, guidu:true } },
+  zhangjiao:     { id:'zhangjiao',     name:'张角',   gender:'male', faction:'qun', maxHp:3, skill:'雷击/鬼道/黄天',
+    desc:'雷击:当你使用或打出【闪】时,你可以令一名角色进行一次判定,若结果为♠,你对其造成2点雷电伤害。鬼道:当一名角色的判定牌生效前,你可以打出一张黑色牌替换之。黄天:主公技,其他群势力角色的出牌阶段限一次,其可以交给你一张【闪】或【闪电】。',
+    caps:{ leiji:true, guidu:true, huangtian:true } },
   caiwenji:      { id:'caiwenji',      name:'蔡文姬', gender:'female', faction:'wei', maxHp:3, skill:'悲歌/断肠',
     desc:'悲歌:当一名角色受到【杀】造成的伤害后,你可以弃置一张牌,令其判定,若结果为:红桃,其回复1点体力;方块,其摸两张牌;梅花,伤害来源弃置两张牌;黑桃,伤害来源翻面。断肠:锁定技,当你死亡时,杀死你的角色失去所有武将技能。',
     caps:{ beige:true, duanchang:true } },
@@ -492,7 +492,7 @@ const GENERALS = {
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 
-// ---------- 左慈【化身】技能拆分表(数据基础层,尚未接入游戏逻辑) ----------
+// ---------- 左慈【化身】技能拆分表 ----------
 // HUASHEN_SKILL_TABLE:把 GENERALS 里每个武将"整个打包"的 caps/hooks,按单个技能名的粒度
 // 拆开,供左慈【化身】(选择借用其他武将的单个技能)使用。覆盖 GENERALS 里当前已实现的全部
 // 64 个武将(左慈自己除外),每条 caps/hooks key 均已用脚本逐一核对确认真实存在于对应武将的
@@ -510,10 +510,10 @@ function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 // hooks.onLoseEquip 服务于同一个技能(不是两个不同技能),借用时两者必须作为整体一起生效,
 // 只借其一无意义(只借 cap 没有实际触发逻辑;只借 hook 则查询"是否有旋风能力"的地方会查不到)。
 //
-// 【袁术"妄尊"未纳入】yuanshu 的 GENERALS.desc 提到"妄尊"(主公技,主公准备阶段摸一张牌、
+// 【袁术"妄尊"未纳入】yuanshu 的 GENERALS.desc 提到"妄尊"(作用于主公的普通武将技,主公准备阶段摸一张牌、
 // 手牌上限-1)和"同疾"两个技能名,但 GENERALS.caps 里只有 tongji 一个 key,对应"同疾"——
-// 项目当前无身份局/主公系统(CLAUDE.md 刘备条目已注明同类限制),妄尊没有可借用的实现,
-// 因此这里只收"同疾"一条,不为妄尊编造一个不存在的 cap。
+// 手牌上限-1)和"同疾"两个技能名。妄尊依赖身份局主公时机,不适合作为化身候选,
+// 因此这里只收"同疾"一条。
 //
 // 【马谡"散谣"未纳入】masu 条目本该有"散谣"(caps:['sanyao'])+"制蛮"(caps:['zhimeng'])
 // 两条,这次审查 generalHasCap->hasCap 时核实发现:sanyao 这个 cap 从未被任何
@@ -800,6 +800,8 @@ function generalCapValue(player, cap, fallback){
   const gen = player && getGeneral(player.general);
   const v = gen && gen.caps && gen.caps[cap];
   if(typeof v === 'number') return v;
+  const runtime = player && player.caps && player.caps[cap];
+  if(typeof runtime === 'number') return runtime;
   return huashenCapValue(player, cap, fallback);
 }
 // generalGender: 左慈声明借用某个武将后,性别视为与该武将相同(desc里写的"性别视为与该
