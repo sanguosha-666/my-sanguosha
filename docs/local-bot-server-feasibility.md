@@ -680,6 +680,9 @@ b.innerHTML = '弃置 '+cardFace(o.card)+'【'+escapeHtml(o.card.name)+'】'; //
 | 🔴 **确认存在差异** | **8** | 6.7% |
 | ⚪ **未验证**（合成 g 下两边都没渲染出按钮，分支未被走到） | **21** | 17.5% |
 
+> ⚠️ **这张表是第一轮的中间结果，已被下面「C-4 补齐（第三轮）」一节取代。**
+> 最终结论是 **107 一致 / 9 差异 / 4 设计上无按钮 / 0 未验证**。
+
 **🔴 确认存在差异的 8 个**（即 C-2 的 P1+P2 全集，两种方法结论一致）：
 `beigeChoose`、`beigeDiscard`、`beigeJudge`、`chengxiangAsk`、`huogong`、`huogongReveal`、
 `zhimengAsk`、`zhimengPick`
@@ -921,3 +924,143 @@ if (g && g.botServerActive && !aiTestSelf) return;   // Node 接管机器人座�
 `showConfirm` 之后，第 2、5、6 条的预期会**反转**——届时必须主动把断言改成新的正确预期，
 而不是让它们继续「静静地通过」（CLAUDE.md 第 20 条：设计变更后必须回头检查旧断言的语义
 是否还成立）。测试文件头部已写明这一点。
+
+---
+---
+
+# C-4 补齐（第三轮）：21 个「未验证」清零
+
+> 目标：把上一轮剩下的 21 个 `⚪未验证` phase 逐一验证到底，用**成因探测**（不用容易漏判的
+> 纯输出比对）。同样只做调查，不含生产功能代码改动。
+>
+> 产出：`run_bot_shim_gap_protection_test.js`（11/11）。
+
+## 方法修正：先修好探针自己
+
+这一轮开始时探针给出了「13 个 phase 在 shim 下渲染出 0 个按钮、jsdom 却全都正常」这种
+夸张结果。**这不是被测对象的问题，是探针自己的缺陷**：
+
+- 我为了做「未实现 DOM 属性」探测，给 shim 元素套了一层 `Proxy`。去掉 `Proxy` 后，同样的
+  11 个 phase 立刻恢复成和 jsdom 完全一致 —— 证明是 `Proxy` 破坏了 shim 的渲染。
+- 顺带回头复核了**上一轮的 C-2 成因探测也用了同一个 `Proxy`**。重跑无 `Proxy` 版本，
+  结果**逐字相同**（同样 6 个 P1、2 个 P2、P3/P4 均未被调用）——上一轮的 C-2 结论不受影响，
+  确认无误。
+- 去掉 `Proxy` 后失去了「未实现属性」探测能力，改用更可靠的信号：
+  **把 `collectControlsCandidates` 用 `try/catch` 吞掉的渲染异常 surface 出来**（缺任何 API
+  都必然抛异常）。这一招立刻抓到一个此前被静默吞掉的问题：`generalAvatarSrc is not defined`
+  —— 那是 render.js 的函数、我的沙箱没提供，导致 huashen 系列三个 phase 只渲染了一半。
+  补上 stub 后才拿到完整结果。
+
+**教训**：探针本身也要先证伪。这已经是本次调查里第三次「我自己的测试数据/测试代码制造的
+假象」（前两次：`huogong` 假阴性、`zhimengPick` 假阳性）。
+
+## 新发现的第三种分叉成因：P6
+
+除了已知的 P1（容器 `innerHTML` 塞 button 字符串）、P2（按钮 label 用 `innerHTML`），
+这一轮新识别出：
+
+**P6 —— 把 `container.innerHTML` 当作「是否为空」的判断依据。**
+`render-controls.js:4174` 有 `if(yuanshuSeatTongji !== null && c.innerHTML==='')`。
+shim 的 `innerHTML` 是独立字段，`appendChild` 之后仍是 `''`；规范 DOM 会反映子节点。
+两者对这个判断得出**相反结论**。
+
+**实测确认它会被触发**（`discard` 分支是 `else-if` 链、不 `return`，会一路落到函数末尾那段
+袁术【同疾】判断；场上有袁术时即命中），**但结论是无害**：该代码块只调 `setBanner(...)`，
+**从不创建按钮**。机器人读的是按钮不是 banner，所以 P6 不影响按钮集合。
+记录在案，阶段3 若要让 shim 支持 banner 相关断言时需要重新评估。
+
+## 21 个 phase 的逐一结论
+
+| 结论 | 数量 | phase |
+|---|---|---|
+| ✅ **已验证一致** | **16** | `discard`、`haoshiPick`、`huanhuoPickSecond`、`huashenPick`、`huashenChangePickStart`、`huashenChangePickEnd`、`jiedaoChoice`、`luanjiConfirm`、`mengjin`、`pickingGeneral`、`pickingLordGeneral`、`qiangxiPickTarget`、`qilin`、`quhuDamageChoice`、`shaOffsetChoice`、`xuanfengPick` |
+| 🔴 **确认存在差异**（P1） | **1** | `renxinChoose` |
+| ⬜ **设计上就不产生 `#controls` 按钮**（两边一致，均为 0） | **4** | `guhuoTarget`、`tianyiPickCard`、`tianyiPickTarget`、`wugu` |
+
+关于那 4 个「设计上无按钮」的：它们不是渲染缺陷，是交互方式不同 —— `guhuoTarget`/
+`tianyiPickCard`/`tianyiPickTarget` 靠**点座位卡**、`wugu` 靠**点中央牌池**，`renderControls`
+只负责写 banner。shim 和 jsdom 都渲染 0 个按钮，属于**真一致**，不是「没验证到」。
+（这也解释了 `guhuoTarget` 漏登记为什么是硬卡死：连兜底能点的按钮都没有。）
+
+另外补一个边界记录：`discard` 在**手牌超上限**时两个按钮都是 `disabled`（`确认弃牌` 要选够
+数量才启用、`结束回合` 要弃完才启用），所以 `button:not(:disabled)` 收集到 0 个 —— 两边一致，
+是正确行为。手牌未超上限时正常渲染出可点的 `结束回合`。
+
+## 全量最终清单（120 个决策态 phase）
+
+| 分类 | 数量 | 占比 |
+|---|---|---|
+| ✅ **已验证一致** | **107** | 89.2% |
+| 🔴 **确认存在差异** | **9** | 7.5% |
+| ⬜ **设计上无 `#controls` 按钮**（两边一致） | **4** | 3.3% |
+| ⚪ 未验证 | **0** | **0%** |
+
+**🔴 9 个差异 phase 及其成因（成因只有 `innerHTML` 一个 API 的两种用法）**：
+
+- **P1（7 个）** 容器 `innerHTML` 塞 `<button>` 字符串 → shim 不解析 HTML → **0 个按钮**：
+  `beigeChoose`、`beigeDiscard`、`beigeJudge`、`chengxiangAsk`、`zhimengAsk`、`zhimengPick`、
+  **`renxinChoose`**（本轮新增）
+- **P2（2 个）** 按钮 label 用 `innerHTML` 设置 → shim 的 `textContent` 恒空 → label 退化成
+  `按钮N`：`huogong`、`huogongReveal`
+
+## 这 9 个差异对生产是否有害：全部无害，且已上锁
+
+对 9 个逐一验证「三重保护」是否齐全（不只看 EXCLUDE，要求专用分支**真的提交动作**）：
+
+| 保护条件 | 9 个的结果 |
+|---|---|
+| ① 在 `CONTROLS_CHOICE_EXCLUDE` 里（L1 不会镜像它的按钮） | ✅ 9/9 |
+| ② 在 `BOT_PHASE_ACTOR` 里登记（`botSeatForState` 能解析行动者） | ✅ 9/9 |
+| ③ `runBotDecision` 专用分支**真的提交了动作**（实测 tx 发生） | ✅ 9/9 |
+
+**结论：本轮没有发现新的真实 bug。** 这 9 个 phase 的机器人决策完全不经过读按钮的路径，
+shim 缺口够不着它们。
+
+> 验证过程中也踩了一次自己的坑：第一版保护检查 9 个全报「没提交动作」，看着像 9 个新 bug。
+> 实际是我把计数用的 `gameRef` 挂在了 sandbox 属性上，而 `game.js` 的 `let gameRef` 是脚本
+> 作用域绑定、会遮蔽它 —— 必须用 `vm.runInContext` 赋裸标识符。改对之后 9/9 全部正常提交。
+> **「结果整齐划一地异常」几乎总是探针的问题，不是被测对象的问题。**
+
+`run_bot_shim_gap_protection_test.js` 把这个不变量钉住了（11/11）：9 个 phase 各一条三重
+保护断言 + 一条「缺口清单本身没变」的结构断言（P2 写法全项目恰好 2 处，新增就会红）+
+一条对照断言（这 9 个在 shim 下确实失真，证明保护不是多余的）。已用「把 `renxinChoose`
+从 EXCLUDE 移除」验证过该断言真的会红。
+
+## 最终结论
+
+### C-4 是否 100% 验证完毕？—— **是**
+
+120 个决策态 phase 全部有明确结论，`未验证` 归零。缺口边界清晰且极小：
+**只有 `innerHTML` 一个 API 的两种用法，共 9 个 phase，且全部被三重保护挡住、当前对生产无害。**
+
+阶段3 要做的事因此变得非常具体，不再是开放式的「补齐 shim」：
+1. 给 shim 的 `innerHTML` setter 加一个只需处理 `<button>` 的极简解析，并让它同步更新 `_text`
+   —— 一处改动同时消灭 P1 和 P2 全部 9 个 phase；
+2. P6 记录在案但无需处理（banner-only）；
+3. 上线前按第一轮列的「浏览器 vs Node 按钮集合逐阶段对拍」再跑一次，这次有了 107 个
+   已知一致的基线可以直接对照。
+
+### 是否建议现在进入阶段1 的实际搭建？—— **建议：是**
+
+支持的理由：
+
+1. **阶段0 的三项调查全部完成**，没有悬而未决的未知项。原计划里「阶段0 产出的数据会决定
+   阶段2 的规模」这个前提已经满足：DOM 路径真实占比 **无密钥 4.2% / 有密钥 14.2%**，
+   且高频阶段（`play`/`respond`/`duel`/`dying`/`aoeResp`/`draw`/`discard`）**全部**在 L1
+   之前被结构化接管、永不碰 DOM。
+2. **11 个源文件在 Node + 最小 shim 下零报错加载**，`renderControls` 在 107/120 个 phase 上
+   与规范 DOM 输出一致 —— 「B 类可行性」已经不是推断而是实测。
+3. **调查期间发现的 3 个既有 bug 已全部修复并上锁**（两个漏登记 + confirmAndPlay 可达），
+   而且顺带补齐了两个 phase 的超时兜底。**阶段1 不会带着已知缺陷起步。**
+4. 阶段1 的内容（Node 骨架 + Firebase Admin 接入 + 只订阅只打印、不提交任何动作）
+   **本身不依赖任何尚未澄清的东西**，且它把「环境搭起来」和「决策正确性」彻底解耦，
+   是风险最低的一步。
+
+需要在阶段1 就一并处理的（来自本轮及上一轮的结论）：
+
+- 第一件事写 `.gitignore` 再去下服务账号私钥（风险 5）；
+- Firebase Admin 显式传 `{applyLocally:false}`；
+- `botServerActive` 开关必须**座位感知**（`&& !aiTestSelf`），否则会连真人托管一起关掉。
+
+**唯一不变的最高风险仍是 `mySeat`（约 893 处隐式读取）**，但阶段1~4 全程单房间不碰它，
+只有进入阶段5 多房间时才需要面对 —— 而那时的建议依然是「一房间一进程」绕开，不要正面重构。
