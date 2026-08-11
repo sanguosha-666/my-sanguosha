@@ -125,8 +125,13 @@ function normalize(g){
   g.lianyingQueue = g.lianyingQueue.filter(s=>Number.isInteger(s));
   // 贾诩【乱武】:杀结算跨 pending 时用此字段接回链(不塞进 g.pending,避免被杀响应覆盖)
   if(g.luanwuResume===undefined) g.luanwuResume=null;
-  if(g.luanwuResume && (typeof g.luanwuResume.sourceSeat!=='number' || !Array.isArray(g.luanwuResume.remainingSeats))){
+  if(g.luanwuResume && typeof g.luanwuResume.sourceSeat!=='number'){
     g.luanwuResume=null;
+  } else if(g.luanwuResume && !Array.isArray(g.luanwuResume.remainingSeats)){
+    // remainingSeats 推进到空数组([])时,Firebase 存进去读回来会变成 undefined(不保存空
+    // 数组,和下面 pending.remainingSeats 同一类坑)——链条问到最后一人前这个字段本来就该是
+    // 空数组,不是数据损坏,补默认值而不是把整条 luanwuResume 判死清空。
+    g.luanwuResume.remainingSeats=[];
   }
   // 夏侯渊【神速】:"视为杀"结算跨 pending 时用此字段接回链,和上面 g.luanwuResume 同一设计
   // (不塞进 g.pending,避免被杀响应过程中打开的各种子阶段覆盖)。
@@ -262,14 +267,24 @@ function normalize(g){
   // 最后一人从不会被真正询问"(不分人数,3人局时最容易被注意到,因为只剩1个"其他角色"能
   // 被问,一清空就等于"只问了下家一个人")。这条检查的其它几项(currentSeat/sourceSeat
   // 的类型与存活性)本身没问题,只删掉 remainingSeats.length===0 这一条误判。
+  // ⚠️ 第二个坑(debugLogs 抓到过真实 pending_orphan_detected 案例,7人局 currentSeat=6
+  // 恰好是链条最后一人):上面那次修复删掉了 length===0 的误判,但保留的 !Array.isArray(d.
+  // remainingSeats) 这一条本身也会被同一个 Firebase 坑命中——"空数组存进去读回来变成
+  // undefined"(CLAUDE.md 二、Firebase 的关键坑),remainingSeats 推进到 [] 之后写入
+  // Firebase、下一次读出来就是 undefined、不再是"空数组"而是"没有这个字段",直接命中
+  // !Array.isArray() 判定为结构不合法、把整个 pending 清空——症状和第一次那个坑几乎一样
+  // (链条问到最后一人前 pending 就被误杀),只是触发路径从"检查空数组"变成了"检查字段
+  // 缺失"。修法和 g.luanwuResume.remainingSeats(见上方同函数)一致:currentSeat/sourceSeat
+  // 校验通过但 remainingSeats 不是数组时,补默认值[]而不是整体判死。
   if(g.pending && g.pending.type==='luanwuChoose'){
     const d = g.pending;
     if(typeof d.currentSeat!=='number' || !g.players[d.currentSeat] || !g.players[d.currentSeat].alive ||
-       !Array.isArray(d.remainingSeats) ||
        typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
       logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luanwuChoose)');
       g.pending = null;
       g.phase = 'play';
+    } else if(!Array.isArray(d.remainingSeats)){
+      d.remainingSeats = [];
     }
   }
 
