@@ -23,11 +23,11 @@ async function check(name, fn){
   catch(e){ console.log('  FAIL '+name+' - '+(e&&e.message||e)); fail++; }
 }
 (async function(){
-  // 0. 默认勾选列表(用户确认的4模型)
-  await check('默认勾选: groq 4模型', function(){
+  // 0. 默认勾选列表(既有4条 + 全部20B+模型,用户确认)
+  await check('默认勾选: groq 6模型(既有4条+全部20B+)', function(){
     const d = vm.runInContext('DEFAULT_GROQ_MODELS', sandbox);
-    if(!d || d.length!==4) throw new Error('应4个,实际 '+(d&&d.length));
-    ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b'].forEach(function(m){
+    if(!d || d.length!==6) throw new Error('应6个,实际 '+(d&&d.length));
+    ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'].forEach(function(m){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });

@@ -67,8 +67,11 @@ let aiApiModel = '';
 // 多模型、每次调用 round-robin 轮换,撞 429 时按响应冷却跳过该模型,绕过单模型 TPM/TPD 墙。
 // 优先级:手动单选(aiApiModel 非空) > 多选轮换(aiApiModels 非空且 aiApiModel 空) > 默认档位。
 const AI_MODELS_STORAGE_KEY = 'sgsAiModels';
-// 默认勾选(groq 免费层独立池模型,用户确认)
-const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b'];
+// 默认勾选(groq 免费层独立池模型,用户确认;2026-08-11 补充:除既有 4 条外,再选中所有
+// 20B 以上体积的模型——实测 groq 生产表 20B+ 共 5 个:gpt-oss-120b/llama-3.3-70b/
+// gpt-oss-20b/gpt-oss-safeguard-20b/qwen3.6-27b,其中 gpt-oss-20b 与 safeguard-20b
+// 是本次新加的,groq/compound 是路由系统保留作默认)。
+const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'];
 // 默认勾选(hf:用户已在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,id 自带
 // :provider 后缀——选谁 HF 就路由到谁、服务端自动换 custom key,provider 直接计费,
 // 不消耗 HF credits)。用户指定(2026-08-11):groq 全部 4 个 + cerebras 全部 3 个 +
@@ -375,6 +378,7 @@ const AI_MODEL_OPTIONS = {
     { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B(更快更省)' },
     { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B(更强)' },
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B(更快)' },
+    { id: 'openai/gpt-oss-safeguard-20b', label: 'GPT-OSS Safeguard 20B' },
   ],
   hf: [
     // HF 模型 ID 格式: {HF规范模型ID}:{provider} 后缀(不是 provider 前缀!)。以下
