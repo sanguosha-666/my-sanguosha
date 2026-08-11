@@ -210,6 +210,8 @@ function detectAiProvider(key){
   if(/^sk-or-/.test(k)) return 'openrouter';
   if(/^gsk_/.test(k)) return 'groq';
   if(/^hf_/.test(k)) return 'hf';
+  if(/^co-/i.test(k)) return 'cohere';
+  if(/^cerebras-/i.test(k)) return 'cerebras';
   return null;
 }
 
@@ -342,6 +344,70 @@ const PROVIDER_ADAPTERS = {
       return msg.content;
     },
   },
+  cohere: {
+    // Cohere(api.cohere.com)直连吃 Trial 免费额度(1000 calls/月,注册即送无需绑卡)。
+    // 已实测(2026-08-11)支持浏览器直连 CORS(原生 /v2/chat 与 OpenAI 兼容端点都返回
+    // access-control-allow-origin: *)——实测带假 key 的 POST 响应也带 ACAO:*。
+    // 用 OpenAI 兼容端点 api.cohere.com/compatibility/v1/chat/completions(适配器结构
+    // 与 groq 一致),不是原生 /v2/chat(非 OpenAI 格式)。⚠️ 系统提示用 developer 角色
+    // 而不是 system(Cohere 兼容端点的要求)。
+    label: 'Cohere(免费Trial)',
+    defaultModel: 'command-a-03-2025',
+    endpoint: 'https://api.cohere.com/compatibility/v1/chat/completions',
+    buildRequest(apiKey, opts){
+      const messages = [];
+      if(opts.systemPrompt) messages.push({ role:'developer', content: opts.systemPrompt });
+      messages.push({ role:'user', content: opts.userPrompt });
+      return {
+        url: this.endpoint,
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer '+apiKey,
+        },
+        body: JSON.stringify({
+          model: opts.model || this.defaultModel,
+          max_tokens: opts.maxTokens || 512,
+          messages,
+        }),
+      };
+    },
+    parseResponse(json){
+      const msg = json && Array.isArray(json.choices) && json.choices[0] && json.choices[0].message;
+      if(!msg || typeof msg.content !== 'string') throw new Error('未识别的 Cohere 响应结构');
+      return msg.content;
+    },
+  },
+  cerebras: {
+    // Cerebras(api.cerebras.ai)直连。⚠️ 免费额度是 $5 一次性 credits(必须绑卡、30天
+    // 过期),不是持续免费层——接入是满足"直连吃额度"的需求,实际是计费 API。已实测
+    // CORS preflight 返回 200+ACAO:*(2026-08-11);成功路径有第三方生产实证(Big-AGI
+    // 默认开启浏览器直连),真 key 复核过可用。OpenAI 兼容格式,适配器结构与 groq 一致。
+    label: 'Cerebras(计费·$5一次性)',
+    defaultModel: 'gpt-oss-120b',
+    endpoint: 'https://api.cerebras.ai/v1/chat/completions',
+    buildRequest(apiKey, opts){
+      const messages = [];
+      if(opts.systemPrompt) messages.push({ role:'system', content: opts.systemPrompt });
+      messages.push({ role:'user', content: opts.userPrompt });
+      return {
+        url: this.endpoint,
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer '+apiKey,
+        },
+        body: JSON.stringify({
+          model: opts.model || this.defaultModel,
+          max_tokens: opts.maxTokens || 512,
+          messages,
+        }),
+      };
+    },
+    parseResponse(json){
+      const msg = json && Array.isArray(json.choices) && json.choices[0] && json.choices[0].message;
+      if(!msg || typeof msg.content !== 'string') throw new Error('未识别的 Cerebras 响应结构');
+      return msg.content;
+    },
+  },
 };
 
 // ---------- 模型选择候选表 ----------
@@ -393,6 +459,19 @@ const AI_MODEL_OPTIONS = {
     { id: 'CohereLabs/c4ai-command-r7b-12-2024:cohere', label: 'Command R7B·Cohere' },
     { id: 'google/gemma-4-31B-it:cerebras', label: 'Gemma 4 31B·Cerebras' },
     { id: 'zai-org/GLM-4.7:cerebras', label: 'GLM-4.7·Cerebras' },
+  ],
+  cohere: [
+    // Cohere 直连(吃 Trial 免费额度)。模型名是 Cohere 自家 ID(compatibility 端点认这个),
+    // 不是 HF 的 CohereLabs/* 前缀。已从官方模型表核实(2026-08-11)。
+    { id: 'command-a-03-2025', label: 'Command A(默认)' },
+    { id: 'command-a-reasoning-08-2025', label: 'Command A Reasoning(更强)' },
+    { id: 'command-r7b-12-2024', label: 'Command R7B(更快更省)' },
+  ],
+  cerebras: [
+    // Cerebras 直连(计费,$5一次性额度)。模型名实测自 /public/v1/models(2026-08-11)。
+    { id: 'gpt-oss-120b', label: 'GPT-OSS 120B(默认)' },
+    { id: 'zai-glm-4.7', label: 'GLM-4.7' },
+    { id: 'gemma-4-31b', label: 'Gemma 4 31B' },
   ],
 };
 
@@ -475,6 +554,8 @@ const AI_DEFAULT_MODEL = {
   openrouter: PROVIDER_ADAPTERS.openrouter.defaultModel,
   groq: PROVIDER_ADAPTERS.groq.defaultModel,
   hf: PROVIDER_ADAPTERS.hf.defaultModel,
+  cohere: PROVIDER_ADAPTERS.cohere.defaultModel,
+  cerebras: PROVIDER_ADAPTERS.cerebras.defaultModel,
 };
 // HF_PROVIDER_LABEL:HF router 的 provider 字符串(小写) → 显示名。只在 HF 模型列表
 // 展开(entriesOf)里用,展示"提供商名：模型名"。目前只展示用户配置了 custom key 的
@@ -530,6 +611,20 @@ const MODEL_LIST_API = {
       });
       return out;
     },
+  },
+  cohere: {
+    // Cohere 兼容端点的模型列表接口(2026-08-11 实测存在,免认证 GET 返回
+    // {data:[{id,...}]} 平铺结构,labelOf 路径即可)。拉取失败回退静态表。
+    url: 'https://api.cohere.com/compatibility/v1/models',
+    headers(){ return {}; },
+    labelOf(m){ return (m && m.id) || ''; },
+  },
+  cerebras: {
+    // Cerebras 模型列表免认证 GET /public/v1/models(2026-08-11 实测),返回
+    // {data:[{id,...}]} 平铺结构。
+    url: 'https://api.cerebras.ai/public/v1/models',
+    headers(){ return {}; },
+    labelOf(m){ return (m && m.id) || ''; },
   },
 };
 
