@@ -1511,19 +1511,19 @@ function render(g){
       }
     }
     // 刘备【仁德】:从明确的技能入口进入后,选择手牌并交给其他角色。
-    if(rendeMode && selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && hasCap(meP,'rende') && i!==mySeat && p.alive){
-      const idx=selectedCardIdx;
+    if(rendeMode && rendePicks.length>0 && g.phase==='play' && g.turn===mySeat && hasCap(meP,'rende') && i!==mySeat && p.alive){
+      const picks=rendePicks.slice();
       const targetSeat=i;
       const rb=document.createElement('button');
       rb.className='ghost';
-      rb.textContent='仁德:交给此人';
+      rb.textContent='仁德:交出 '+picks.length+' 张';
       rb.style.margin='6px 14px 0';
-      rb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>{ selectedCardIdx=null; renDe(idx, targetSeat); }); };
+      rb.onclick=(e)=>{ e.stopPropagation(); confirmAndPlay('将选中的 '+picks.length+' 张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>renDe(picks, targetSeat)); };
       d.appendChild(rb);
       d.style.cursor='pointer';
       d.style.outline='2px dashed var(--cinnabar-bright)';
       d.title='选择为【仁德】的赠牌目标';
-      d.onclick=()=>{ confirmAndPlay('将这张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>renDe(idx, targetSeat)); };
+      d.onclick=()=>{ confirmAndPlay('将选中的 '+picks.length+' 张手牌交给 '+g.players[targetSeat].name+'，发动【仁德】？', ()=>renDe(picks, targetSeat)); };
     }
     // 刘备【激将】:主动使用时先选合法的【杀】目标,再进入蜀势力角色依次响应流程。
     if(jijiangMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){

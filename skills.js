@@ -1563,16 +1563,21 @@ function renDe(cardIdx, targetSeat){
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
     if(!me || !me.alive || !hasCap(me,'rende')) return g;
-    const card=me.hand[cardIdx];
-    if(!card) return g;
+    const picks=(Array.isArray(cardIdx)?cardIdx:[cardIdx])
+      .filter(Number.isInteger)
+      .filter((idx,pos,arr)=>arr.indexOf(idx)===pos)
+      .sort((a,b)=>a-b);
+    if(picks.length===0 || picks.some(idx=>!me.hand[idx])) return g;
     const target=g.players[targetSeat];
     if(targetSeat===mySeat || !target || !target.alive) return g;
-    me.hand.splice(cardIdx,1);
-    target.hand.push(card);
+    const cards=picks.map(idx=>me.hand[idx]);
+    for(let n=picks.length-1;n>=0;n--) me.hand.splice(picks[n],1);
+    target.hand.push(...cards);
     if(!Number.isInteger(g.renDeCount)) g.renDeCount=0;
-    g.renDeCount++;
-    g.log=pushLog(g.log, me.name+' 【仁德】将一张牌交给 '+target.name);
-    if(g.renDeCount===2){
+    const oldCount=g.renDeCount;
+    g.renDeCount+=cards.length;
+    g.log=pushLog(g.log, me.name+' 【仁德】将 '+cards.length+' 张牌交给 '+target.name);
+    if(oldCount<2 && g.renDeCount>=2){
       if(me.hp<me.maxHp) me.hp = Math.min(me.maxHp, me.hp+1);
       g.log=pushLog(g.log, me.name+' 【仁德】发动,回复1点体力');
       markSkillSound(g, '仁德');

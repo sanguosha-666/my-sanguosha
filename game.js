@@ -610,7 +610,7 @@ function normalize(g){
      (typeof g.pending.lordSeat!=='number' || typeof g.pending.asking!=='number' ||
       typeof g.pending.need!=='string' || !g.pending.resume ||
       typeof g.pending.resume!=='object' || typeof g.pending.resume.phase!=='string' ||
-      !g.pending.resume.pending)){
+      !Object.prototype.hasOwnProperty.call(g.pending.resume,'pending'))){
     logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jijiangAsk/hujiaAsk)');
     g.pending=null; g.phase='play';
   }

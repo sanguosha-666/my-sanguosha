@@ -378,6 +378,8 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     assert.strictEqual(bad.phase, 'play');
     const good = R('normalize({players:[{name:"a",alive:true},{name:"b",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"jijiangAsk", pending:{type:"jijiangAsk", lordSeat:0, asking:1, need:"杀", resume:{phase:"duel", pending:{type:"duel"}}}})');
     assert.ok(good.pending && good.pending.type === 'jijiangAsk');
+    const active = R('normalize({players:[{name:"a",alive:true},{name:"b",alive:true},{name:"c",alive:true}], log:[], deck:[], discard:[], phase:"jijiangAsk", pending:{type:"jijiangAsk", lordSeat:0, asking:1, need:"杀", resume:{phase:"play", pending:null}}})');
+    assert.ok(active.pending && active.pending.type === 'jijiangAsk','主动激将的 resume.pending=null 必须保留');
   });
 
   await check('D3 startTurn 重置 jijiangUsed/hujiaUsed', function(){
@@ -822,7 +824,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   });
 
   await check('L7 刘备出牌阶段有明确【仁德】【激将】按钮', function(){
-    const g=mkG({phase:'play',turn:0,generals:{0:'liubei',1:'caocao',2:'zhaoyun'},hands:{0:[SH],2:[S]}});
+    const g=mkG({phase:'play',turn:0,generals:{0:'liubei',1:'caocao',2:'zhaoyun'},hands:{0:[SH,S],2:[S]}});
     setG(g); seat(0);
     __controlsEl=makeEl(); context.window.__controlsEl=__controlsEl;
     R('renderControls(_g)');
@@ -838,14 +840,16 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
     R('renderHand(_g)');
     assert.ok(__handEl.children && __handEl.children[0] && typeof __handEl.children[0].onclick==='function','仁德模式下手牌应可点击');
     __handEl.children[0].onclick();
-    assert.strictEqual(R('selectedCardIdx'),0);
+    __handEl.children[1].onclick();
+    assert.deepStrictEqual(Array.from(R('rendePicks')), [0,1]);
     const rendeLabels=R('(window.__controlsEl.children || []).map(function(el){ return el.textContent; })');
-    assert.ok(rendeLabels.indexOf('交给 角色1')>=0,'选牌后应有明确赠牌目标,实际 '+JSON.stringify(rendeLabels));
+    assert.ok(rendeLabels.indexOf('把 2 张牌交给 角色1')>=0,'多选后应有批量赠牌目标,实际 '+JSON.stringify(rendeLabels));
     R('var __savedConfirmAndPlay=confirmAndPlay; confirmAndPlay=function(message,fn){ resetSelectionState(); fn(); };');
-    R('(window.__controlsEl.children || []).find(function(el){ return el.textContent==="交给 角色1"; }).onclick()');
+    R('(window.__controlsEl.children || []).find(function(el){ return el.textContent==="把 2 张牌交给 角色1"; }).onclick()');
     R('confirmAndPlay=__savedConfirmAndPlay;');
     assert.strictEqual(getG().players[0].hand.length,0);
-    assert.strictEqual(getG().players[1].hand.length,1);
+    assert.strictEqual(getG().players[1].hand.length,2);
+    assert.strictEqual(getG().renDeCount,2);
 
     // 重新构造局面验证激将入口点击后,合法目标也是明确按钮且点击会真正进入询问阶段。
     const jg=mkG({phase:'play',turn:0,generals:{0:'liubei',1:'caocao',2:'zhaoyun'},hands:{0:[SH],2:[S]}});

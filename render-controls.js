@@ -116,7 +116,8 @@ function resetQingnang(){ qingnangMode=false; qingnangCardIdx=null; }
 // 刘备【仁德】:先明确点击技能入口,再选择手牌和受赠角色。
 // 不再把“任意点牌后可能出现仁德小按钮”当作唯一入口,避免玩家误以为技能未实现。
 let rendeMode = false;
-function resetRende(){ rendeMode=false; }
+let rendePicks = [];
+function resetRende(){ rendeMode=false; rendePicks=[]; }
 // 刘备【激将】:出牌阶段主动请求蜀势力角色代为出【杀】前,先选择杀的目标。
 let jijiangMode = false;
 function resetJijiang(){ jijiangMode=false; }
@@ -3722,23 +3723,23 @@ function renderControls(g){
       const cb=document.createElement('button'); cb.className='ghost';
       cb.textContent='取消'; cb.onclick=()=>{ resetQingnang(); render(g); }; c.appendChild(cb);
     } else if(rendeMode){
-      setBanner(selectedCardIdx===null
-        ? '【仁德】选择一张要交出的手牌。'
-        : '已选中一张手牌,请选择一名其他角色交给他（可继续发动）。');
-      if(selectedCardIdx!==null){
+      setBanner(rendePicks.length===0
+        ? '【仁德】请选择要交出的手牌（可以多选）。'
+        : '已选中 '+rendePicks.length+' 张手牌,请选择一名其他角色一次性交给他。');
+      if(rendePicks.length>0){
         g.players.forEach((p,seat)=>{
           if(seat===mySeat || !p || !p.alive) return;
-          const idx=selectedCardIdx;
+          const picks=rendePicks.slice();
           const targetSeat=seat;
           const tb=document.createElement('button');
           tb.className='primary';
-          tb.textContent='交给 '+p.name;
-          tb.onclick=()=>{ confirmAndPlay('将这张手牌交给 '+p.name+'，发动【仁德】？', ()=>renDe(idx, targetSeat)); };
+          tb.textContent='把 '+picks.length+' 张牌交给 '+p.name;
+          tb.onclick=()=>{ confirmAndPlay('将选中的 '+picks.length+' 张手牌交给 '+p.name+'，发动【仁德】？', ()=>renDe(picks, targetSeat)); };
           c.appendChild(tb);
         });
       }
       const cb=document.createElement('button'); cb.className='ghost';
-      cb.textContent='取消'; cb.onclick=()=>{ selectedCardIdx=null; resetRende(); render(g); }; c.appendChild(cb);
+      cb.textContent='取消'; cb.onclick=()=>{ resetRende(); render(g); }; c.appendChild(cb);
     } else if(jijiangMode){
       setBanner('【激将】请选择一名合法目标,然后请求其他蜀势力角色代你打出【杀】。');
       const virtualSha={name:'杀',suit:'',rank:'',id:'jijiang'};
@@ -3898,7 +3899,7 @@ function renderControls(g){
     const noLocalMode = !zhangbaMode && !duanliangMode && !qixiMode && !guoseMode && !lianhuanMode && !lijianMode && !fanjianMode && !qingnangMode && !rendeMode && !jijiangMode && !zhihengMode && !fangtianMode && !quhuMode && !dimengMode && !tianyiMode && !sanyaoMode && !zhibaMode;
     if(noLocalMode && selectedCardIdx===null && hasCap(me,'rende') && (me.hand||[]).length>0){
       const rb=document.createElement('button'); rb.className='ghost';
-      rb.textContent='发动【仁德】'; rb.onclick=()=>{ selectedCardIdx=null; rendeMode=true; render(g); }; c.appendChild(rb);
+      rb.textContent='发动【仁德】'; rb.onclick=()=>{ selectedCardIdx=null; rendePicks=[]; rendeMode=true; render(g); }; c.appendChild(rb);
     }
     if(noLocalMode && selectedCardIdx===null && canTriggerLordAsk(g,mySeat,'jijiang') && canSha){
       const jb=document.createElement('button'); jb.className='ghost';

@@ -111,13 +111,14 @@ function renderHand(g){
     const guosePicked = guoseMode && guoseCardIdx===idx;
     const lianhuanPicked = lianhuanMode && lianhuanCardIdx===idx;
     const lijianPicked = lijianMode && lijianCardIdx===idx;
+    const rendePicked = rendeMode && rendePicks.includes(idx);
     const lirangPicked = lirangPicks.includes(idx);
     const qingnangPicked = qingnangMode && qingnangCardIdx===idx;
     const zhihengPicked = zhihengMode && zhihengPicks.includes(idx);
     const qiaobianPicked = qiaobianMode==='choosePhase' && qiaobianCardIdx===idx;
     const discardPicked = discardSelectedSet.has(idx);
     const responsePicked = respondRole && selectedResponseCardIdx===idx;
-    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked||discardPicked||responsePicked)?' selected':'')+(discardPicked?' discard-selected':'');
+    el.className='card '+cls+((selectedCardIdx===idx||picked||duanliangPicked||qixiPicked||guosePicked||lianhuanPicked||lijianPicked||rendePicked||lirangPicked||qingnangPicked||zhihengPicked||qiaobianPicked||discardPicked||responsePicked)?' selected':'')+(discardPicked?' discard-selected':'');
     // 卡片版式:顶部标题栏(牌名,代码生成文字,不依赖图片、始终显示)+ 下方插画区域(图片,
     // 有则铺满、没有则留一块占位底色)+ 左上角花色点数角标——更接近实体卡牌的分区观感,
     // 牌名不再像早期"图片铺满全卡"那版那样靠 no-art 来控制显示/隐藏。
@@ -212,9 +213,13 @@ function renderHand(g){
       usable = true;
       if(usable) onClick=()=>{ lijianCardIdx = (lijianCardIdx===idx?null:idx); lijianFromSeat=null; render(g); };
     } else if(g.phase==='play'&&myTurn&&rendeMode){
-      // 仁德模式只负责选择要交出的牌,不触发这张牌原本的使用效果。
+      // 仁德模式支持多选,最后一次事务把全部选中牌交给同一角色。
       usable = true;
-      onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); render(g); };
+      onClick=()=>{
+        if(rendePicked) rendePicks=rendePicks.filter(x=>x!==idx);
+        else rendePicks.push(idx);
+        render(g);
+      };
     } else if(g.phase==='play'&&myTurn&&qingnangMode){
       // 青囊选牌模式:任意一张手牌都可弃置作为发动成本。
       usable = true;
