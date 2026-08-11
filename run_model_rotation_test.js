@@ -31,6 +31,23 @@ async function check(name, fn){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
+  // 0b. hf 默认勾选(三家各一,id 都带 :provider 后缀——走 custom key 轮换)
+  await check('默认勾选: hf 三家 custom key 模型', function(){
+    const d = vm.runInContext('DEFAULT_HF_MODELS', sandbox);
+    if(!d || d.length!==3) throw new Error('应3个,实际 '+(d&&d.length));
+    ['openai/gpt-oss-120b:groq','CohereLabs/c4ai-command-a-03-2025:cohere','openai/gpt-oss-120b:cerebras'].forEach(function(m){
+      if(d.indexOf(m)<0) throw new Error('缺 '+m);
+    });
+  });
+  // 0c. resolveAiModel: hf 也走多选轮换(和 groq 同一套)
+  await check('resolveAiModel: hf 多选轮换顺序', function(){
+    vm.runInContext('aiProvider="hf"; aiApiModel=""; aiApiModels=["openai/gpt-oss-120b:groq","CohereLabs/c4ai-command-a-03-2025:cohere","openai/gpt-oss-120b:cerebras"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
+    const r1 = vm.runInContext('resolveAiModel', sandbox)('hf');
+    const r2 = vm.runInContext('resolveAiModel', sandbox)('hf');
+    const r3 = vm.runInContext('resolveAiModel', sandbox)('hf');
+    if(r1!=='openai/gpt-oss-120b:groq' || r2!=='CohereLabs/c4ai-command-a-03-2025:cohere' || r3!=='openai/gpt-oss-120b:cerebras')
+      throw new Error('hf轮换顺序错: '+r1+'/'+r2+'/'+r3);
+  });
   // 1. resolveAiModel: 非 groq 返回 undefined(零变化)
   await check('resolveAiModel: 非groq返回undefined', function(){
     vm.runInContext('aiProvider="claude"; aiApiModel=""; aiApiModels=[];', sandbox);

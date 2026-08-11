@@ -69,6 +69,14 @@ let aiApiModel = '';
 const AI_MODELS_STORAGE_KEY = 'sgsAiModels';
 // 默认勾选(groq 免费层独立池模型,用户确认)
 const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b'];
+// 默认勾选(hf:用户已在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,三家各取一个
+// 代表模型,id 自带 :provider 后缀——选谁 HF 就路由到谁、服务端自动换 custom key,
+// provider 直接计费,不消耗 HF credits)。
+const DEFAULT_HF_MODELS = [
+  'openai/gpt-oss-120b:groq',
+  'CohereLabs/c4ai-command-a-03-2025:cohere',
+  'openai/gpt-oss-120b:cerebras',
+];
 let aiApiModels = [];
 let _modelRotateIdx = 0;          // round-robin 指针
 let _modelCooldowns = {};         // modelId → retryAt(时间戳);会话内有效,不持久化
@@ -81,9 +89,12 @@ function parseGroqRetrySeconds(text){
   const sec = parseInt(m[1],10) * 60 + (m[2] ? Math.round(parseFloat(m[2])) : 0);
   return (Number.isFinite(sec) && sec>0) ? sec : null;
 }
-// resolveAiModel:轮换选模型。非groq/无多选/手动单选 → aiApiModel||undefined(零变化)。
+// resolveAiModel:轮换选模型。非groq/hf/无多选/手动单选 → aiApiModel||undefined(零变化)。
+// groq 与 hf 共用多选轮换:groq 是"免费层各模型独立配额池"绕过 TPD/TPM 墙,hf 是
+// "用户在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,轮换选 provider 对应的
+// 模型条目"(条目 id 自带 :provider 后缀,选谁就等于路由到谁,HF 服务端自动换 custom key)。
 function resolveAiModel(provider){
-  if(provider!=='groq') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
+  if(provider!=='groq' && provider!=='hf') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
   if(typeof aiApiModel==='string' && aiApiModel) return aiApiModel;   // 手动单选优先
   const list = (Array.isArray(aiApiModels) && aiApiModels.length) ? aiApiModels : null;
   if(!list) return undefined;
@@ -118,10 +129,14 @@ let aiTestAutopilotDisconnectRef = null;
       aiApiModels = rawModels ? JSON.parse(rawModels) : [];
       if(!Array.isArray(aiApiModels)) aiApiModels = [];
     }catch(e){ aiApiModels = []; }
-    // 【多模型轮换】groq 密钥下若用户从未配置过多选,默认勾选 DEFAULT_GROQ_MODELS
-    // (只内存生效、不写 sessionStorage——默认值随列表改动自动跟进,见 renderModelPicker)。
+    // 【多模型轮换】groq 密钥下若用户从未配置过多选,默认勾选 DEFAULT_GROQ_MODELS;
+    // hf 密钥下默认勾选 DEFAULT_HF_MODELS(三家各一,走 custom key 轮换)。
+    // 都只在内存生效、不写 sessionStorage——默认值随列表改动自动跟进,见 renderModelPicker。
     if(aiProvider==='groq' && aiApiModels.length===0){
       aiApiModels = DEFAULT_GROQ_MODELS.slice();
+    }
+    if(aiProvider==='hf' && aiApiModels.length===0){
+      aiApiModels = DEFAULT_HF_MODELS.slice();
     }
   }catch(e){
     // 隐私模式等场景下 sessionStorage 可能整体不可用——静默回退到空值,不影响
@@ -420,6 +435,10 @@ const AI_DEFAULT_MODEL = {
   groq: PROVIDER_ADAPTERS.groq.defaultModel,
   hf: PROVIDER_ADAPTERS.hf.defaultModel,
 };
+// HF_PROVIDER_LABEL:HF router 的 provider 字符串(小写) → 显示名。只在 HF 模型列表
+// 展开(entriesOf)里用,展示"提供商名：模型名"。目前只展示用户配置了 custom key 的
+// groq/cohere/cerebras 三家;以后要加 provider 在这里补一行。
+const HF_PROVIDER_LABEL = { groq:'Groq', cohere:'Cohere', cerebras:'Cerebras' };
 const MODEL_LIST_API = {
   claude: {
     url: 'https://api.anthropic.com/v1/models?limit=1000',
@@ -444,11 +463,32 @@ const MODEL_LIST_API = {
   hf: {
     // HF /v1/models 是公开接口(不需要鉴权头,实测 2026-08-11 返回全量列表,
     // 每项带 id/providers[].status)。返回的 id 是 HF 规范模型 ID(如 openai/gpt-oss-120b),
-    // 不带 provider 后缀——用户选中后若想指定 provider 用自定义输入补 :provider 后缀,
-    // 静态表 AI_MODEL_OPTIONS.hf 已预置三家常见组合。
+    // 不带 provider 后缀——轮换需要精确到"哪个 provider 跑这个模型",用 entriesOf 展开:
+    // 同一个模型被多家服务(如 openai/gpt-oss-120b 同时有 groq/cerebras/novita...)时
+    // 生成多条 {id: 'HF模型ID:provider', label: '提供商名：模型名'},并只保留用户
+    // 关心的 groq/cohere/cerebras 三家 status=live 的条目(其余 provider 一律丢弃,
+    // 避免列表被 novita/together 等一堆用不到的服务刷屏)。
     url: 'https://router.huggingface.co/v1/models?limit=1000',
     headers(){ return {}; },
     labelOf(m){ return (m && m.id) || ''; },
+    // 只有 hf 用 entriesOf:响应结构是 {data:[{id, providers:[{provider,status}]}]},
+    // 一个模型可能多家服务,展开成按 provider 拆开的条目;claude/openrouter/groq 的
+    // 响应是平铺数组没有这个字段,自然走默认 labelOf 路径。
+    entriesOf(json){
+      const out = [];
+      const want = { groq:1, cohere:1, cerebras:1 };
+      (json && Array.isArray(json.data) ? json.data : []).forEach(function(m){
+        const id = (m && m.id) || '';
+        if(!id) return;
+        (m.providers || []).forEach(function(p){
+          if(!want[p.provider]) return;                    // 只保留三家
+          if(p.status !== 'live') return;                  // 只保留可用
+          const provLabel = HF_PROVIDER_LABEL[p.provider] || p.provider;
+          out.push({ id: id + ':' + p.provider, label: provLabel + '：' + id });
+        });
+      });
+      return out;
+    },
   },
 };
 
@@ -479,9 +519,13 @@ function fetchProviderModels(provider, apiKey){
     if(!res.ok) return null;
     return res.json().then(function(json){
       if(!json || !Array.isArray(json.data)) return null;
-      const models = json.data.map(function(m){
-        return { id: (m && m.id) || '', label: spec.labelOf(m) };
-      }).filter(function(x){ return !!x.id; });
+      // hf 用 entriesOf 展开(同一模型多家 provider 拆成多条);其余 provider 走默认
+      // labelOf 平铺(它们的响应本来就是一张平铺模型表,没有 provider 维度)。
+      const models = (typeof spec.entriesOf==='function')
+        ? spec.entriesOf(json)
+        : json.data.map(function(m){
+            return { id: (m && m.id) || '', label: spec.labelOf(m) };
+          }).filter(function(x){ return !!x.id; });
       if(models.length) modelListCache[provider] = { models: models, ts: Date.now() };
       return models;
     }, function(){ return null; });
@@ -696,13 +740,15 @@ function showAiKeyModal(onDone){
     modelWrap.innerHTML = '';
     if(!aiProvider) return;
     const provider = aiProvider;
-    // 【多模型轮换】groq 密钥下默认勾选免费层 4 模型(用户从未配置过多选时自动填入,
-    // 只在内存生效、不写 sessionStorage——默认值随 DEFAULT_GROQ_MODELS 改动自动跟进;
-    // 用户主动勾选/取消勾选时由 onPick → persistAiState 持久化真实选择)。
+    // 【多模型轮换】groq 密钥下默认勾选免费层模型、hf 密钥下默认勾选三家 custom key
+    // 模型(用户从未配置过多选时自动填入,只在内存生效、不写 sessionStorage——默认值随
+    // DEFAULT_GROQ_MODELS/DEFAULT_HF_MODELS 改动自动跟进;用户主动勾选/取消勾选时由
+    // onPick → persistAiState 持久化真实选择)。
     // 用户全部取消勾选后 aiApiModels 为空,下次进设置会恢复默认勾选——想彻底不用轮换
     // 可用自定义入口写手动单选(aiApiModel,优先级高于多选,见 resolveAiModel)。
-    if(provider==='groq' && (!Array.isArray(aiApiModels) || aiApiModels.length===0)){
-      aiApiModels = DEFAULT_GROQ_MODELS.slice();
+    const defaultModels = (provider==='groq') ? DEFAULT_GROQ_MODELS : (provider==='hf' ? DEFAULT_HF_MODELS : null);
+    if(defaultModels && (!Array.isArray(aiApiModels) || aiApiModels.length===0)){
+      aiApiModels = defaultModels.slice();
     }
 
     const label = document.createElement('label');
@@ -716,10 +762,10 @@ function showAiKeyModal(onDone){
     statusNote.style.cssText = 'margin-top:4px;';
     modelWrap.appendChild(statusNote);
 
-    const isGroq = provider==='groq';
+    const isRotating = (provider==='groq' || provider==='hf');
     function applyList(list, fromFallback){
       statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型')
-        + (isGroq ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入;自定义输入会退出轮换(点勾选恢复)' : '');
+        + (isRotating ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入;自定义输入会退出轮换(点勾选恢复)' : '');
       // 自定义遗留(aiApiModel 非空且不在列表)→ 显示文本框并预填
       const isCustom = !!aiApiModel && !list.some(function(m){ return m.id === aiApiModel; });
       const customInput = document.createElement('input');
@@ -739,14 +785,14 @@ function showAiKeyModal(onDone){
       // 先渲染搜索框+列表;自定义文本框跟在列表末尾的"自定义"按钮下方,超时提示垫底
       renderModelListInto(modelWrap, list, {
         selectedId: aiApiModel,
-        selectedIds: isGroq ? aiApiModels : undefined,
-        multi: isGroq,
+        selectedIds: isRotating ? aiApiModels : undefined,
+        multi: isRotating,
         defaultValueId: AI_DEFAULT_MODEL[provider] || null,
         onPick: function(id, checked){
           if(id === AI_MODEL_CUSTOM_VALUE){
             customInput.style.display = 'inline-block';
             aiApiModel = customInput.value.trim(); // 可能是空字符串,commitCustomModel 会在用户真正输入后覆盖
-          } else if(isGroq){
+          } else if(isRotating){
             // 多选 toggle:维护 aiApiModels(轮换池),并同时清空 aiApiModel——用户点勾选
             // 的意图就是回到轮换模式,否则自定义输入残留的 aiApiModel 会让 resolveAiModel
             // 手动单选优先,轮换静默失效(checked=本次点击后的选中态,由 renderModelListInto
@@ -834,7 +880,13 @@ function showAiKeyModal(onDone){
       }
       // provider 真的发生了变化(不是同一个 provider 重复识别)才清空已选模型——避免
       // 把上一个 provider 的模型ID带进新 provider(两者的候选表/合法值域互不相通)。
-      if(prevProvider!==aiProvider) aiApiModel = '';
+      // aiApiModel 是手动单选、aiApiModels 是多选轮换池:groq 换 hf 时 groq 默认勾选的
+      // 那几个模型(无 :provider 后缀)如果残留,会直接进 hf 的轮换池变成无效请求
+      // (HF 只认带 :后缀的 id),所以两个都要清。
+      if(prevProvider!==aiProvider){
+        aiApiModel = '';
+        aiApiModels = [];
+      }
     }
     renderModelPicker();
     updateSaveBtnState();

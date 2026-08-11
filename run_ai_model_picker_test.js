@@ -191,6 +191,41 @@ const testCode = String.raw`
     if(!r || r[0].id !== 'llama-3.3-70b-versatile' || r[0].label !== 'llama-3.3-70b-versatile') throw new Error('label 应回退 id,实际 ' + JSON.stringify(r && r[0]));
   });
 
+  // 3b. hf:entriesOf 只保留 groq/cohere/cerebras 三家 live 模型,id 带 :provider 后缀,
+  //     label 格式 "提供商名：模型名",其它 provider / 非 live 一律丢弃
+  await check('3b. hf entriesOf 展开三家 live 模型 + 提供商名：模型名 格式', async function(){
+    delete modelListCache.hf;
+    window.__fetchLog.length = 0;
+    window.__fetchImpl = function(){ return jsonRes({ data: [
+      { id: 'openai/gpt-oss-120b', providers: [
+        { provider: 'groq', status: 'live' }, { provider: 'cerebras', status: 'live' }, { provider: 'novita', status: 'live' }
+      ] },
+      { id: 'CohereLabs/c4ai-command-a-03-2025', providers: [
+        { provider: 'cohere', status: 'live' }
+      ] },
+      { id: 'meta-llama/Llama-3.3-70B-Instruct', providers: [
+        { provider: 'groq', status: 'error' }
+      ] },
+      { id: 'google/gemma-4-31B-it', providers: [
+        { provider: 'cerebras', status: 'live' }
+      ] },
+    ] }); };
+    var r = await fetchProviderModels('hf', 'hf_test');
+    var f = lastFetch();
+    if((f.url || '').indexOf('/v1/models') < 0) throw new Error('url 应为 HF /v1/models,实际 ' + f.url);
+    if(!r || r.length !== 4) throw new Error('应展开出 4 项(groq/cerebras 各一 + cohere 一 + cerebras gemma 一),实际 ' + JSON.stringify(r));
+    // id 带 :provider 后缀
+    if(r[0].id !== 'openai/gpt-oss-120b:groq') throw new Error('第0项 id 应带 :groq 后缀,实际 ' + JSON.stringify(r[0]));
+    if(r[1].id !== 'openai/gpt-oss-120b:cerebras') throw new Error('第1项 id 应带 :cerebras 后缀,实际 ' + JSON.stringify(r[1]));
+    // label 格式 提供商名：模型名
+    if(r[0].label !== 'Groq：openai/gpt-oss-120b') throw new Error('第0项 label 应为 Groq：openai/gpt-oss-120b,实际 ' + JSON.stringify(r[0].label));
+    if(r[2].label !== 'Cohere：CohereLabs/c4ai-command-a-03-2025') throw new Error('第2项 label 应为 Cohere：…,实际 ' + JSON.stringify(r[2].label));
+    // novita 被丢弃、groq error 状态的被丢弃
+    var ids = r.map(function(x){ return x.id; }).join(',');
+    if(ids.indexOf('novita') >= 0) throw new Error('novita 不应出现在结果里,实际 ' + ids);
+    if(ids.indexOf('Llama-3.3') >= 0) throw new Error('groq 非 live 的模型不应出现,实际 ' + ids);
+  });
+
   // 4. 结构不符(data 不是数组)→ null
   await check('4. data 不是数组 → null', async function(){
     delete modelListCache.claude;
