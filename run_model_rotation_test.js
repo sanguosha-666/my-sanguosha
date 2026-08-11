@@ -58,11 +58,11 @@ async function check(name, fn){
     const r = vm.runInContext('resolveAiModel', sandbox)('groq');
     if(r!=='openai/gpt-oss-120b') throw new Error('应跳过冷却中的compound,实际 '+r);
   });
-  // 5. 全部冷却 → 返回第一个(注定429走本地兜底)
-  await check('resolveAiModel: 全部冷却返回第一个', function(){
+  // 5. 全部冷却 → 返回空串哨兵(调用点短路,不发注定失败的请求)
+  await check('resolveAiModel: 全部冷却返回空串哨兵', function(){
     vm.runInContext('aiApiModels=["groq/compound","openai/gpt-oss-120b"]; _modelCooldowns={"groq/compound": Date.now()+9999,"openai/gpt-oss-120b": Date.now()+9999}; _modelRotateIdx=0;', sandbox);
     const r = vm.runInContext('resolveAiModel', sandbox)('groq');
-    if(r!=='groq/compound') throw new Error('全冷却应返回第一个,实际 '+r);
+    if(r!=='') throw new Error('全冷却应返回空串哨兵,实际 '+JSON.stringify(r));
   });
   // 6. 429 解析: 正常格式
   await check('parseGroqRetrySeconds: 15m21s → 921', function(){
@@ -97,6 +97,22 @@ async function check(name, fn){
       if(m!=='openai/gpt-oss-120b') throw new Error('应跳过冷却的compound选gpt-oss,实际 '+m);
     }finally{
       vm.runInContext('window.fetch = window.__origFetch;', sandbox);
+    }
+  });
+  // 10. 413 接线:mock fetch 返回 413 → 冷却写入 300s → 轮换跳过(真实bug:413此前不写冷却)
+  await check('413接线: callAI收到413写冷却300s,resolveAiModel跳过该模型', async function(){
+    vm.runInContext('window.__origFetch2 = window.fetch; window.fetch = function(url, opts){ return Promise.resolve({ ok:false, status:413, text:function(){ return Promise.resolve("Request too large for model `openai/gpt-oss-120b` ... Limit 8000, Requested 9362, please reduce your message size and try again."); }, json:function(){ return Promise.resolve({}); } }); };', sandbox);
+    try{
+      vm.runInContext('aiProvider="groq"; aiApiModel=""; aiApiModels=["groq/compound","openai/gpt-oss-120b"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
+      var r = await vm.runInContext('callAI', sandbox)('groq','gsk_test',{ systemPrompt:'s', userPrompt:'u', model:'openai/gpt-oss-120b' });
+      if(r.ok) throw new Error('413应返回ok:false');
+      var cd = vm.runInContext('_modelCooldowns', sandbox);
+      if(!cd['openai/gpt-oss-120b'] || typeof cd['openai/gpt-oss-120b']!=='number') throw new Error('应写入冷却,实际 '+JSON.stringify(cd));
+      if(Math.abs(cd['openai/gpt-oss-120b'] - Date.now() - 300000) > 5000) throw new Error('413冷却应≈now+300000,实际差值 '+(cd['openai/gpt-oss-120b']-Date.now()));
+      var m = vm.runInContext('resolveAiModel', sandbox)('groq');
+      if(m!=='groq/compound') throw new Error('应跳过413冷却的gpt-oss选compound,实际 '+m);
+    }finally{
+      vm.runInContext('window.fetch = window.__origFetch2;', sandbox);
     }
   });
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');

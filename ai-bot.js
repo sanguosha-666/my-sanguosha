@@ -96,7 +96,9 @@ function resolveAiModel(provider){
     _modelRotateIdx = (idx + 1) % list.length; // 指针前进
     return model;
   }
-  return list[0]; // 全部冷却中 → 返回第一个(本次注定429,走本地兜底)
+  // 全部冷却中 → 返回空串哨兵:调用点据此短路,不再发起注定失败的请求
+  // (此前返回 list[0] 会照发一次必失败的请求,浪费配额噪音;改后行为=直接本地兜底)
+  return '';
 }
 
 // ===== AI托管(纯客户端本地状态,不写入Firebase) =====
@@ -321,11 +323,16 @@ function callAI(provider, apiKey, opts){
     }
     if(!res.ok){
       return res.text().then(t=>{
-        if(res.status===429 && provider==='groq' && opts && typeof opts.model==='string'){
-          const sec = parseGroqRetrySeconds(t);
-          const retryAt = Date.now() + ((sec!==null ? sec : 60) * 1000);
+        if(provider==='groq' && opts && typeof opts.model==='string' && (res.status===429 || res.status===413)){
+          // 429=限流(解析 retry_after);413=请求过大——该模型不适合当前输入规模,
+          // 冷却 300s 固定值(解析不到 retry_after),两种都写 _modelCooldowns 让轮换跳过。
+          const is413 = res.status===413;
+          const sec = is413 ? null : parseGroqRetrySeconds(t);
+          const coolSec = is413 ? 300 : (sec!==null ? sec : 60);
+          const retryAt = Date.now() + (coolSec * 1000);
           _modelCooldowns[opts.model] = retryAt;
-          console.warn('[AI] 模型 '+opts.model+' 触发限流,冷却 '+(sec!==null?sec:60)+'s(到 '+new Date(retryAt).toTimeString().slice(0,8)+')');
+          console.warn('[AI] 模型 '+opts.model+' '+(is413?'请求过大(413)':'触发限流(429)')
+            +',冷却 '+coolSec+'s(到 '+new Date(retryAt).toTimeString().slice(0,8)+')');
         }
         return { ok:false, reason:'other', detail:'HTTP '+res.status+': '+t.slice(0,200) };
       });

@@ -125,15 +125,21 @@ async function updateAiSummary(g, seat){
   showAiThinkingIndicator(g, seat);
   let result;
   try{
+    // 多模型轮换:实际选中的模型由 resolveAiModel(provider) 决定(手动单选优先,
+    // 其次多选 round-robin,都无则 undefined 走默认档位)。typeof 防御跨文件加载
+    // 顺序(ai-bot.js 最后加载)。关键:opts.model 必须传实际模型不能 undefined 掉——
+    // callAI 的 429/413 分支靠它知道当前模型、写 _modelCooldowns 冷却。
+    const model = (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined);
+    if(model === ''){
+      // 全池冷却(哨兵空串):不发注定失败的请求,沿用旧摘要返回(和 callAI 失败零差异,
+      // 只是省掉一次无效网络往返)。
+      return;
+    }
     result = await callAI(aiProvider, aiApiKey, {
       systemPrompt: buildSummaryPrompt(g, seat),
       userPrompt: userPrompt,
       maxTokens: 300,
-      // 多模型轮换:实际选中的模型由 resolveAiModel(provider) 决定(手动单选优先,
-      // 其次多选 round-robin,都无则 undefined 走默认档位)。typeof 防御跨文件加载
-      // 顺序(ai-bot.js 最后加载)。关键:opts.model 必须传实际模型不能 undefined 掉——
-      // callAI 的 429 分支靠它知道当前模型、写 _modelCooldowns 冷却。
-      model: (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined),
+      model,
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
@@ -236,12 +242,20 @@ async function callAiChooseIndex(opts){
   showAiThinkingIndicator(g, seat);
   let result;
   try{
+    const model = (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined);
+    if(model === ''){
+      // 全池冷却(哨兵空串):不发注定失败的请求,直接走本地兜底(null)。
+      // 托管记录:本次没有实际发起 AI 调用,rawResponse 保持 null。
+      if(autopilotHit && aiTestLastCall) aiTestLastCall.rawResponse = null;
+      if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
+      return null;
+    }
     result = await callAI(aiProvider, aiApiKey, {
       systemPrompt: sysText,
       userPrompt: userPromptText,
       maxTokens: opts.maxTokens || 80,
       // 多模型轮换:同 updateAiSummary 的 callAI 调用点,见该处注释。
-      model: (typeof resolveAiModel==='function' ? resolveAiModel(aiProvider) : undefined),
+      model,
     });
   }catch(e){
     result = { ok:false, reason:'other', detail:String(e) };
