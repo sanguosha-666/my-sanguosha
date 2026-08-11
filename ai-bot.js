@@ -867,29 +867,35 @@ function handleAddBotClick(){
 // Firebase/g。游戏调度侧(bot.js)用 typeof aiTestAutopilot!=='undefined' 防御式
 // 读取,本文件是 aiTestAutopilot 的全项目唯一定义点。
 
-// toggleAiTestAutopilot:AI托管按钮开关。无密钥时提示配置;有密钥时开启并弹信息窗。
+// 顶部机器人按钮只负责打开信息窗；开始/结束托管由信息窗底部两个明确按钮控制。
 function toggleAiTestAutopilot(){
-  if(!aiTestAutopilot.active){
-    if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider){
-      if(typeof showAiKeyModal==='function') showAiKeyModal();
-      return; // 无密钥不开启托管
-    }
-    aiTestAutopilot = { active:true, seat:mySeat, records:[] };
-    openAiTestModal();
-    updateAiTestStatus();
-    const btn=document.getElementById('aiTestBtn');
-    if(btn){ btn.classList.add('aitest-active'); btn.title='关闭AI托管'; }
-  } else {
-    aiTestAutopilot.active = false;
-    updateAiTestStatus();
-    const btn=document.getElementById('aiTestBtn');
-    if(btn){ btn.classList.remove('aitest-active'); btn.title='AI托管:由AI托管当前玩家并显示决策信息'; }
-    // records 保留,弹窗内容不清空
+  openAiTestModal();
+}
+function startAiTestAutopilot(){
+  if(aiTestAutopilot.active) return;
+  if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider){
+    if(typeof showAiKeyModal==='function') showAiKeyModal();
+    return;
   }
+  aiTestAutopilot.active=true;
+  aiTestAutopilot.seat=mySeat;
+  updateAiTestStatus();
+  const btn=document.getElementById('aiTestBtn');
+  if(btn) btn.classList.add('aitest-active');
+}
+function stopAiTestAutopilot(){
+  aiTestAutopilot.active=false;
+  updateAiTestStatus();
+  const btn=document.getElementById('aiTestBtn');
+  if(btn) btn.classList.remove('aitest-active');
 }
 function updateAiTestStatus(){
   const el=document.getElementById('aiTestStatus');
   if(el) el.textContent = aiTestAutopilot.active ? ('托管中·座位'+aiTestAutopilot.seat) : '未托管';
+  const startBtn=document.getElementById('aiTestStartBtn');
+  const stopBtn=document.getElementById('aiTestStopBtn');
+  if(startBtn) startBtn.disabled=aiTestAutopilot.active;
+  if(stopBtn) stopBtn.disabled=!aiTestAutopilot.active;
 }
 
 function openAiTestModal(){
@@ -938,7 +944,13 @@ function toggleAiTestRecord(idx){
 }
 function clearAiTestRecords(){
   aiTestAutopilot.records = [];
+  aiTestPendingRecord = null;
   renderAiTestRecords();
+}
+let aiTestLastObservedPhase = null;
+function syncAiTestGamePhase(phase){
+  if(phase==='over' && aiTestLastObservedPhase!=='over') clearAiTestRecords();
+  aiTestLastObservedPhase=phase;
 }
 // appendAiTestRecord:每次托管决策完成后追加一条记录。增量插入单条 DOM、不整窗重建
 // innerHTML——整窗重建会把已展开的详情全部收起、滚动位置重置回顶部;增量插入只动

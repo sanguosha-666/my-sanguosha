@@ -373,29 +373,46 @@ const testCode = String.raw`
       throw new Error('非控制器浏览器轮到别的bot座位时不应调度,实际调度 '+scheduled+' 次(入口门未限定托管座位)');
   });
 
-  // ============ Task4: toggleAiTestAutopilot 开关 + 信息窗渲染(5 项) ============
+  // ============ Task4:弹窗入口 + 明确开始/结束按钮 + 记录生命周期 ============
   // mock showAiKeyModal:和 callAI 一样是函数声明绑定,直接整体替换成"记录已弹窗"的桩。
   showAiKeyModal = function(){ globalThis.__aiKeyModalShown = true; };
 
-  await check('toggleAiTestAutopilot: 无密钥不开启且弹配置框', function(){
+  await check('顶部AI按钮只打开弹窗,不改变托管状态或清空记录', function(){
+    aiTestAutopilot = {active:false, seat:null, records:[{summary:'保留'}]};
+    toggleAiTestAutopilot();
+    if(aiTestAutopilot.active) throw new Error('打开弹窗不应开始托管');
+    if(aiTestAutopilot.records.length!==1) throw new Error('打开弹窗不应清空记录');
+  });
+  await check('startAiTestAutopilot:无密钥不开启且弹配置框', function(){
     aiApiKey = ''; aiProvider = 'openrouter';
     aiTestAutopilot = {active:false, seat:null, records:[]};
     globalThis.__aiKeyModalShown = false;
-    toggleAiTestAutopilot();
+    startAiTestAutopilot();
     if(aiTestAutopilot.active) throw new Error('无密钥不应开启托管');
     if(!globalThis.__aiKeyModalShown) throw new Error('应弹AI密钥配置');
   });
-  await check('toggleAiTestAutopilot: 有密钥开启托管', function(){
+  await check('startAiTestAutopilot:有密钥开启且保留已有记录', function(){
     aiApiKey = 'sk-or-test'; aiProvider = 'openrouter';
-    aiTestAutopilot = {active:false, seat:null, records:[]};
-    toggleAiTestAutopilot();
+    aiTestAutopilot = {active:false, seat:null, records:[{summary:'保留'}]};
+    startAiTestAutopilot();
     if(!aiTestAutopilot.active) throw new Error('有密钥应开启');
     if(aiTestAutopilot.seat!==0) throw new Error('seat应为mySeat(0),实际 '+aiTestAutopilot.seat);
+    if(aiTestAutopilot.records.length!==1) throw new Error('开始托管不应清空记录');
   });
-  await check('toggleAiTestAutopilot: 再次点击关闭托管', function(){
-    aiTestAutopilot = {active:true, seat:0, records:[]};
-    toggleAiTestAutopilot();
-    if(aiTestAutopilot.active) throw new Error('再次点击应关闭');
+  await check('stopAiTestAutopilot:结束托管但保留已有记录', function(){
+    aiTestAutopilot = {active:true, seat:0, records:[{summary:'保留'}]};
+    stopAiTestAutopilot();
+    if(aiTestAutopilot.active) throw new Error('结束按钮应关闭托管');
+    if(aiTestAutopilot.records.length!==1) throw new Error('结束托管不应清空记录');
+  });
+  await check('只有清空按钮或游戏结束清空记录', function(){
+    aiTestAutopilot = {active:false, seat:0, records:[{summary:'a'}]};
+    clearAiTestRecords();
+    if(aiTestAutopilot.records.length!==0) throw new Error('清空按钮应清空记录');
+    aiTestAutopilot.records=[{summary:'b'}];
+    syncAiTestGamePhase('play');
+    syncAiTestGamePhase('over');
+    if(aiTestAutopilot.records.length!==0) throw new Error('游戏结束应清空记录');
   });
   await check('appendAiTestRecord: 追加后records增长且摘要含决策文本', function(){
     aiTestAutopilot = {active:true, seat:0, records:[]};
