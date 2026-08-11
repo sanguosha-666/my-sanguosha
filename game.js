@@ -78,6 +78,8 @@ function normalize(g){
   if(g.lordGeneralPool!=null && !Array.isArray(g.lordGeneralPool)) g.lordGeneralPool=null;
   g.players.forEach(p=>{
     if(!p) return;
+    // AI托管标识是公开房间状态，仅同步一个布尔值；API密钥和托管记录始终不进入 g。
+    if(typeof p.aiAutopilot!=='boolean') p.aiAutopilot=false;
     if(p.role!=null && !['zhu','zhong','fan','nei'].includes(p.role)) p.role=null;
     if(typeof p.roleRevealed!=='boolean') p.roleRevealed=false;
     // 非 identity 清空脏身份,避免旧局/乱斗残留

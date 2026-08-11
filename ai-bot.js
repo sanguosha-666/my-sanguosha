@@ -103,6 +103,7 @@ function resolveAiModel(provider){
 // active:托管开关;seat:被托管的座位(当前浏览器玩家的 mySeat);records:本次托管期间
 // 的决策记录(供信息窗展示,关闭弹窗不清空、刷新即丢)。
 let aiTestAutopilot = { active:false, seat:null, records:[] };
+let aiTestAutopilotDisconnectRef = null;
 
 (function hydrateAiStateFromSession(){
   try{
@@ -879,15 +880,44 @@ function startAiTestAutopilot(){
   }
   aiTestAutopilot.active=true;
   aiTestAutopilot.seat=mySeat;
+  publishAiTestAutopilot(true, mySeat);
   updateAiTestStatus();
   const btn=document.getElementById('aiTestBtn');
   if(btn) btn.classList.add('aitest-active');
 }
 function stopAiTestAutopilot(){
+  const seat=aiTestAutopilot.seat;
   aiTestAutopilot.active=false;
+  publishAiTestAutopilot(false, seat);
   updateAiTestStatus();
   const btn=document.getElementById('aiTestBtn');
   if(btn) btn.classList.remove('aitest-active');
+}
+
+// 房间里只公开“该座位是否托管”这一项。cid 校验保证当前浏览器只能修改自己的座位；
+// 密钥、prompt、AI回复和记录仍保留在 aiTestAutopilot 本地对象中，绝不写入 Firebase。
+function publishAiTestAutopilot(active, seat){
+  if(!Number.isInteger(seat) || typeof tx!=='function') return;
+  tx(function(g){
+    const p=g && g.players && g.players[seat];
+    if(!p || p.cid!==myClientId) return g;
+    p.aiAutopilot=!!active;
+    return g;
+  });
+  // 浏览器异常关闭或断线时自动撤掉公开标识，避免房间里永久显示“托管中”。
+  if(aiTestAutopilotDisconnectRef && typeof aiTestAutopilotDisconnectRef.cancel==='function'){
+    aiTestAutopilotDisconnectRef.cancel();
+  }
+  aiTestAutopilotDisconnectRef=null;
+  if(active && gameRef && typeof gameRef.child==='function'){
+    const ref=gameRef.child('players/'+seat+'/aiAutopilot');
+    if(ref && typeof ref.onDisconnect==='function'){
+      aiTestAutopilotDisconnectRef=ref.onDisconnect();
+      if(aiTestAutopilotDisconnectRef && typeof aiTestAutopilotDisconnectRef.set==='function'){
+        aiTestAutopilotDisconnectRef.set(false);
+      }
+    }
+  }
 }
 function updateAiTestStatus(){
   const el=document.getElementById('aiTestStatus');
@@ -965,7 +995,10 @@ function clearAiTestRecords(){
 }
 let aiTestLastObservedPhase = null;
 function syncAiTestGamePhase(phase){
-  if(phase==='over' && aiTestLastObservedPhase!=='over') clearAiTestRecords();
+  if(phase==='over' && aiTestLastObservedPhase!=='over'){
+    clearAiTestRecords();
+    if(aiTestAutopilot.active) stopAiTestAutopilot();
+  }
   aiTestLastObservedPhase=phase;
 }
 // appendAiTestRecord:每次托管决策完成后追加一条记录。增量插入单条 DOM、不整窗重建

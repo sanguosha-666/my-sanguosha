@@ -393,17 +393,21 @@ const testCode = String.raw`
   });
   await check('startAiTestAutopilot:有密钥开启且保留已有记录', function(){
     aiApiKey = 'sk-or-test'; aiProvider = 'openrouter';
+    _g = {players:[{cid:myClientId, aiAutopilot:false}]};
     aiTestAutopilot = {active:false, seat:null, records:[{summary:'保留'}]};
     startAiTestAutopilot();
     if(!aiTestAutopilot.active) throw new Error('有密钥应开启');
     if(aiTestAutopilot.seat!==0) throw new Error('seat应为mySeat(0),实际 '+aiTestAutopilot.seat);
     if(aiTestAutopilot.records.length!==1) throw new Error('开始托管不应清空记录');
+    if(!_g.players[0].aiAutopilot) throw new Error('开始托管应把公开标识同步到自己的玩家状态');
   });
   await check('stopAiTestAutopilot:结束托管但保留已有记录', function(){
+    _g = {players:[{cid:myClientId, aiAutopilot:true}]};
     aiTestAutopilot = {active:true, seat:0, records:[{summary:'保留'}]};
     stopAiTestAutopilot();
     if(aiTestAutopilot.active) throw new Error('结束按钮应关闭托管');
     if(aiTestAutopilot.records.length!==1) throw new Error('结束托管不应清空记录');
+    if(_g.players[0].aiAutopilot) throw new Error('结束托管应清除房间公开标识');
   });
   await check('只有清空按钮或游戏结束清空记录', function(){
     aiTestAutopilot = {active:false, seat:0, records:[{summary:'a'}]};

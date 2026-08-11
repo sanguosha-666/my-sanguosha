@@ -960,9 +960,9 @@ function renderSeatCard(g, seat, isSelf){
   const infoBadge = (avatarReady&&gen)
     ? '<span class="seat-info-badge info-badge" title="'+escapeHtml(gen.skill+'：'+(gen.desc||''))+'" onclick="event.stopPropagation();showGeneralInfo(\''+gen.id+'\')">?</span>'
     : '';
-  // AI托管是当前浏览器的本地状态；只在实际被托管的座位卡上显示机器人标识。
-  // 不写入共享游戏状态，结束托管后由 updateAiTestStatus 立即移除。
-  const autopilotBadge = (typeof aiTestAutopilot!=='undefined' && aiTestAutopilot.active && aiTestAutopilot.seat===seat)
+  // 托管标识读取房间共享状态，因此所有玩家都会在被托管座位卡上看到它。
+  // 共享的只有这个布尔值；API密钥和托管记录仍然只存在托管者本机。
+  const autopilotBadge = p.aiAutopilot
     ? '<div class="seat-autopilot-badge" title="AI托管中" aria-label="AI托管中">🤖</div>'
     : '';
   // 出牌顺序编号角标(右下角,常驻显示):死亡玩家不参与编号、不显示(orderMap 里没有
