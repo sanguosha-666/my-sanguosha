@@ -156,6 +156,7 @@ function detectAiProvider(key){
   if(/^sk-ant-/.test(k)) return 'claude';
   if(/^sk-or-/.test(k)) return 'openrouter';
   if(/^gsk_/.test(k)) return 'groq';
+  if(/^hf_/.test(k)) return 'hf';
   return null;
 }
 
@@ -252,6 +253,42 @@ const PROVIDER_ADAPTERS = {
       return msg.content;
     },
   },
+  hf: {
+    // Hugging Face Inference Providers(router.huggingface.co):统一路由入口,一把 HF
+    // token 覆盖 groq/cohere/cerebras/novita/together 等多家推理商。OpenAI 兼容格式,
+    // 已实测(2026-08-11)支持浏览器直连 CORS(access-control-allow-origin: *),不需要
+    // 像 Anthropic 那样的特殊 header。模型 ID 格式是 `{HF规范模型ID}:{provider}` 后缀,
+    // 不是 `provider/模型名` 前缀(后者 404)——例如 openai/gpt-oss-120b:groq 走 groq、
+    // :cerebras 走 cerebras、CohereLabs/c4ai-command-a-03-2025:cohere 走 cohere;
+    // 不加后缀默认 :fastest(auto,同模型多 provider 时按健康状态自动 failover)。
+    // 密钥:HF fine-grained token,创建时勾选 "Make calls to Inference Providers"
+    // (inference.serverless.write),前缀 hf_。
+    label: 'HF 推理路由(Groq/Cohere/Cerebras)',
+    defaultModel: 'openai/gpt-oss-120b',
+    endpoint: 'https://router.huggingface.co/v1/chat/completions',
+    buildRequest(apiKey, opts){
+      const messages = [];
+      if(opts.systemPrompt) messages.push({ role:'system', content: opts.systemPrompt });
+      messages.push({ role:'user', content: opts.userPrompt });
+      return {
+        url: this.endpoint,
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer '+apiKey,
+        },
+        body: JSON.stringify({
+          model: opts.model || this.defaultModel,
+          max_tokens: opts.maxTokens || 512,
+          messages,
+        }),
+      };
+    },
+    parseResponse(json){
+      const msg = json && Array.isArray(json.choices) && json.choices[0] && json.choices[0].message;
+      if(!msg || typeof msg.content !== 'string') throw new Error('未识别的 HF 响应结构');
+      return msg.content;
+    },
+  },
 };
 
 // ---------- 模型选择候选表 ----------
@@ -288,6 +325,20 @@ const AI_MODEL_OPTIONS = {
     { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B(更快更省)' },
     { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B(更强)' },
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B(更快)' },
+  ],
+  hf: [
+    // HF 模型 ID 格式: {HF规范模型ID}:{provider} 后缀(不是 provider 前缀!)。以下
+    // 条目是 2026-08-11 从 https://router.huggingface.co/v1/models 实测快照里挑的
+    // status=live 的真实模型,覆盖 groq/cohere/cerebras 三家。第一项=adapter 默认
+    // openai/gpt-oss-120b(不加后缀=:fastest auto,同模型多 provider 自动 failover)。
+    { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B(默认·auto多商路由)' },
+    { id: 'openai/gpt-oss-120b:groq', label: 'GPT-OSS 120B·Groq' },
+    { id: 'openai/gpt-oss-120b:cerebras', label: 'GPT-OSS 120B·Cerebras' },
+    { id: 'meta-llama/Llama-3.3-70B-Instruct:groq', label: 'Llama 3.3 70B·Groq' },
+    { id: 'CohereLabs/c4ai-command-a-03-2025:cohere', label: 'Command A·Cohere' },
+    { id: 'CohereLabs/c4ai-command-r7b-12-2024:cohere', label: 'Command R7B·Cohere' },
+    { id: 'google/gemma-4-31B-it:cerebras', label: 'Gemma 4 31B·Cerebras' },
+    { id: 'zai-org/GLM-4.7:cerebras', label: 'GLM-4.7·Cerebras' },
   ],
 };
 
@@ -367,6 +418,7 @@ const AI_DEFAULT_MODEL = {
   claude: PROVIDER_ADAPTERS.claude.defaultModel,
   openrouter: PROVIDER_ADAPTERS.openrouter.defaultModel,
   groq: PROVIDER_ADAPTERS.groq.defaultModel,
+  hf: PROVIDER_ADAPTERS.hf.defaultModel,
 };
 const MODEL_LIST_API = {
   claude: {
@@ -387,6 +439,15 @@ const MODEL_LIST_API = {
   groq: {
     url: 'https://api.groq.com/openai/v1/models',
     headers(apiKey){ return { 'authorization': 'Bearer ' + apiKey }; },
+    labelOf(m){ return (m && m.id) || ''; },
+  },
+  hf: {
+    // HF /v1/models 是公开接口(不需要鉴权头,实测 2026-08-11 返回全量列表,
+    // 每项带 id/providers[].status)。返回的 id 是 HF 规范模型 ID(如 openai/gpt-oss-120b),
+    // 不带 provider 后缀——用户选中后若想指定 provider 用自定义输入补 :provider 后缀,
+    // 静态表 AI_MODEL_OPTIONS.hf 已预置三家常见组合。
+    url: 'https://router.huggingface.co/v1/models?limit=1000',
+    headers(){ return {}; },
     labelOf(m){ return (m && m.id) || ''; },
   },
 };
