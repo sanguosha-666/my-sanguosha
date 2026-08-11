@@ -606,13 +606,24 @@ function normalize(g){
   // 主公技求助阶段(激将/护驾):lordSeat/asking 应是数字座位号、need 应是字符串、
   // resume 是原 pending 快照(结构非法=这条求助链无法继续);不对就整体判无效。
   // asking 在创建/切换点恒有值,不存在"还没轮到"的合法中间态,按结构校验不误伤。
-  if(g.pending && (g.pending.type==='jijiangAsk'||g.pending.type==='hujiaAsk') &&
-     (typeof g.pending.lordSeat!=='number' || typeof g.pending.asking!=='number' ||
-      typeof g.pending.need!=='string' || !g.pending.resume ||
-      typeof g.pending.resume!=='object' || typeof g.pending.resume.phase!=='string' ||
-      !Object.prototype.hasOwnProperty.call(g.pending.resume,'pending'))){
-    logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jijiangAsk/hujiaAsk)');
-    g.pending=null; g.phase='play';
+  // ⚠️ Firebase 吞 null 坑(第三次翻版,同 remainingSeats 两次):主动激将(useJijiang,
+  // 出牌阶段主动入口)构造 resume={phase:'play',pending:null,jijiangTarget:X}——
+  // pending:null 写入 Firebase 读回来键直接消失(null 值字段=删除该键,和"空数组存
+  // 进去读回来变 undefined"是同一族序列化限制,CLAUDE.md 只记了空数组那类),resume
+  // 因此缺 pending 键。这不是脏数据:出牌阶段主动激将本来就没有"正在响应的原
+  // pending",pending:null 就是合法中间态。拆两层:必填结构字段(lordSeat/asking/
+  // need/resume.phase)不合法才整体判死;resume 缺 pending 键时补默认 null,不误杀。
+  if(g.pending && (g.pending.type==='jijiangAsk'||g.pending.type==='hujiaAsk')){
+    const d = g.pending;
+    if(typeof d.lordSeat!=='number' || typeof d.asking!=='number' ||
+       typeof d.need!=='string' || !d.resume ||
+       typeof d.resume!=='object' || typeof d.resume.phase!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jijiangAsk/hujiaAsk)');
+      g.pending=null; g.phase='play';
+    } else if(!Object.prototype.hasOwnProperty.call(d.resume,'pending')){
+      // resume 缺 pending 键 = 主动激将的 pending:null 被 Firebase 吞掉,补回 null。
+      d.resume.pending = null;
+    }
   }
   // 孙策【制霸】拼点阶段:lordSeat/challengerSeat 应是数字座位号、challengerCard 是吴势力角色已出的拼点牌、
   // resume 是进入前的快照(play 阶段 pending 恒为 null,不要求 resume.pending 有值)。
