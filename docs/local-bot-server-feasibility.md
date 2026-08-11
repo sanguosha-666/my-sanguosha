@@ -461,3 +461,429 @@ GitHub 仓库 + GitHub Pages 部署，一旦误提交等于把数据库完全交
 「多房间」变成了一个独立的架构问题——**建议用「一房间一进程」绕开，而不是正面重构**。
 
 建议从**阶段 0（纯调查，不写生产代码）**开始，那三份数据会让后续每一步的规模都变得可估。
+
+---
+---
+
+# 阶段0 调查补全（第二轮）
+
+> 上一节列出的 C-1~C-5 里，有几项只给了「建议的调查方式」而没有实际数据。本节把它们跑完，
+> 补上真实测量结果。**同样只做调查，不含任何生产功能代码改动。**
+>
+> 调查脚本放在会话临时目录（不进仓库）；其中三个可复现的行为场景已固化成
+> `run_bot_domhost_probe_test.js`（6/6 通过），作为阶段2/3 的验收基线。
+
+## 0. 先澄清一处编号错位
+
+上一节的编号和这次任务里引用的编号对不上，先对齐，避免以后翻记录时混淆：
+
+| 上一节原编号 | 内容 | 本次任务里的叫法 |
+|---|---|---|
+| C-1 | DOM 路径的真实覆盖占比 | C-1（一致） |
+| **C-2** | **`renderControls` 在 shim 下的完整性** | **被称作 C-4** |
+| C-3 | `controlsChoiceCtx` 跨 AI await | 「另外两个问题」第 1 项 |
+| **C-4** | **`confirmAndPlay` 是否对机器人可达** | 「另外两个问题」第 2 项 |
+| C-5 | `aiTestAutopilot` 去向 | 「另外两个问题」第 3 项 |
+
+也就是说，本次任务里的「C-2」在上一节并不存在对应条目（那个位置被 renderControls 完整性
+占着，而它这次改叫 C-4 了）。**本节把「C-2」重新定义为一项确实还没做、且和 C-4 互补的
+调查：DOM API 表面缺口清单**——C-4 比对的是「输出（按钮集合）是否一致」，C-2 查的是
+「render 路径到底碰了哪些 DOM API、其中哪些被 shim 用退化实现糊弄过去了」。两者一个查
+结果、一个查成因，成因侧不受「合成 g 是否走到那条分支」的影响，可靠性更高（见 C-4 里
+关于假阴性的说明）。
+
+## 调查方法与可信度声明
+
+- **执行环境**：真实加载全部 11 个 JS 文件进 vm 沙箱（`config/data/debug-log/room-lifecycle/
+  game/weapons/skills/bot-ai-bus/bot/ai-bot/render-controls`），**11 个文件在最小 shim 下
+  全部零报错加载通过**——这本身就是上一节「B 类可行性」的又一条实证。
+- **参照实现**：C-4 的比对基准用 **jsdom**（规范级 DOM 实现），装在会话临时目录里，
+  **没有写进仓库、没有新增 `package.json`**，项目的零依赖取向不受影响。jsdom 是真实浏览器
+  的代理参照，不等于 Chrome 本身——但对「innerHTML 会不会被解析成子节点」「textContent
+  和 innerHTML 是不是同一份数据」这类**规范明确规定**的语义，jsdom 与浏览器一致，足以定案。
+- **样本**：从 `game.js/skills.js/weapons.js/render-controls.js/room-lifecycle.js` 里
+  提取出全部 **124** 个 `g.phase` 取值，剔除 4 个非决策态（`lobby`/`over`/`end`/
+  `qiangxiXxx`），得到 **120 个决策态 phase** 作为统一样本集。
+- **不靠代码走读**：C-1 用计数包装器把 `collectControlsCandidates`/`botSafePrompt`/
+  `botDecide`/`botInvoke` 全部换成「先计数、再委托回真实实现」，记录的是**真的被调用过**。
+
+---
+
+## C-1：DOM 路径的真实触发占比
+
+### 关键结构性发现：L1 的位置决定了一切
+
+`runBotDecision` 全长 919 行，里面有 **121 个 phase 的专用分支**。而
+`botDecide('controlsChoice')`（L1，DOM 路径）的调用点位于**函数的约 20% 处**：
+
+```
+runBotDecision 开头
+  ├─ 22 个 phase 的专用分支      ← 在 L1 之前，DOM 永远碰不到
+  ├─ botDecide('controlsChoice') ← L1，DOM 路径入口
+  ├─ 99 个 phase 的专用分支      ← 在 L1 之后
+  └─ botSafePrompt(g,seat)       ← 最终兜底，DOM 路径
+```
+
+L1 排在 99 个专用分支**前面**，意味着只要一个 phase 不在 `CONTROLS_CHOICE_EXCLUDE` 里，
+L1 就会抢在它自己的专用分支之前接管。**这正是 `CONTROLS_CHOICE_EXCLUDE` 需要多达 88 项的
+原因**——那 88 项不是「例外」，是在保护后面 99 个专用分支不被 L1 截胡。
+
+L1 之前的 22 个 phase：`pickingLordGeneral, pickingGeneral, huashenPick, guanxingReview,
+xunxunPick, yijiAssign, lirangAsk, xiaoguo, jijiangAsk, hujiaAsk, zhibaAsk, zhibaGain,
+yinghunTarget, yinghunChoice, yinghunDiscard, draw, play, discard, respond, aoeResp,
+duel, dying`（注意 `play`/`respond`/`duel`/`dying`/`aoeResp` 这几个最高频的都在里面）。
+
+### 实测数据（动态探针，120 个 phase 全跑）
+
+| | 有 AI 密钥 | 无 AI 密钥 |
+|---|---|---|
+| 实际触达 DOM 路径 | **21 / 120 = 17.5%** | **9 / 120 = 7.5%** |
+| ├ 经 `collectControlsCandidates`（L1） | 16 | 3 |
+| └ 经 `botSafePrompt`（兜底） | 6 | 6 |
+| 纯结构化（全程未碰 DOM） | **99 / 120 = 82.5%** | **111 / 120 = 92.5%** |
+
+### 但这 21 个里要再拆一层：真依赖 vs 合成数据不足
+
+动态探针用的是**通用合成 pending**（按 `BOT_PHASE_ACTOR` 填座位字段 + 一批常见字段），
+有些专用分支的守卫需要更真实的数据才能过。逐个核对这 21 个之后：
+
+**（a）真·永久依赖 DOM ——「注册漏登记」导致专用分支是死代码：2 个**
+
+| phase | 现象 |
+|---|---|
+| `guhuoTarget` | `BOT_PHASE_ACTOR` **未登记** → `botSeatForState` 恒返回 -1 → 专用分支（bot.js:4590）**永远不会被调用**，只能走 `runBotFallbackProbe` → `botSafePrompt` 逐座位试点 |
+| `quhuDamageChoice` | 同上，专用分支在 bot.js:4596，同样是死代码 |
+
+探针实测这两个 phase：`resolvedSeat = -1`、`botDecide` 调用记录为空（`decide:[]`）、
+`safePrompt` 被调用 3 次（3 个存活机器人各试一次）。**`botDecide` 一次都没被调用**，
+这是「分支存在但不可达」的直接证据，不是推断。
+
+> 🐛 **这是一个本次调查顺带发现的既有 bug，和迁移无关。** 它正是 CLAUDE.md
+> 「AI 机器人决策总线 → 调度前提」那条约定点名的失败模式：*「新增任何阶段分支/注册项，
+> 必须同时在这张表登记（不登记则行动者解析恒 -1，分支永远不会被调用）」*。
+> 后果不是崩溃——`botSafePrompt` 的正则兜底还能点掉按钮——而是**那两条专门写的决策逻辑
+> 从上线起就没跑过一次**。修法是各补一行 `BOT_PHASE_ACTOR` 登记，属于独立的小修复，
+> 建议单独开一次任务处理，不要混进迁移里。
+
+**（b）合成数据不足导致的假象：4 个**
+
+`huashenPick`、`wugu`、`xuanfengPick`、`yijiAssign` —— 探针记录显示它们的 `botDecide`
+**确实被调用了**（如 `yijiAssign` 的 `decide:["yijiAssign","controlsChoice"]`），只是因为
+合成 g 里缺少对应技能的真实数据（化身池 / 五谷牌堆 / 旋风可拆目标），决策返回 false 才
+落到 `botSafePrompt`。真实对局里这些走专用分支，不算 DOM 依赖。
+
+**（c）L1 正常接管的 phase：有密钥 15 个 / 无密钥 3 个**
+
+- 无密钥（仅 ALLOWLIST）：`wuxie`、`luoyingAsk`、`luoshen`
+- 有密钥额外增加：`lieRenChoose, lieRenPickCard, lirangRecover, liuli, qiaobianTurnStart,
+  shensuChoose1, shensuChoose2, tianxiang, tianyiPickCard, tianyiPickTarget, xiaoguoChoice,
+  zhengyi` 等 12 个
+
+### C-1 结论
+
+**DOM 路径不是核心路径，是边缘路径。** 扣掉合成数据造成的假象后，真实占比是：
+
+- **无 AI 密钥：5 / 120 ≈ 4.2%**（3 个 ALLOWLIST + 2 个漏登记）
+- **有 AI 密钥：17 / 120 ≈ 14.2%**（15 个 L1 + 2 个漏登记）
+
+而且这 17 个里**没有一个是高频阶段**——`play`/`respond`/`duel`/`dying`/`aoeResp`/`draw`/
+`discard` 这些一局里反复出现几十次的阶段，全部在 L1 之前被结构化分支接管，永远不碰 DOM。
+走 DOM 的都是特定武将技能的低频询问。
+
+**对实施计划的影响：支持上一节「阶段2 先禁用 DOM 路径」这个分期是可行的**——无密钥模式下
+只有 5 个 phase 会受影响，其中 3 个（`wuxie`/`luoyingAsk`/`luoshen`）可以优先补结构化注册
+（它们本来就有 allowlist 的特殊待遇，说明逻辑简单），剩下 2 个本来就是 bug。
+
+---
+
+## C-2（重新定义）：DOM API 表面缺口清单
+
+**范围定义**：在最小 shim 下真实执行全部 120 个 phase 的 `collectControlsCandidates`
+（含 3 组不同花色的手牌变体以提高分支覆盖），用带埋点的 shim 记录：
+① 哪些 DOM 写法必然与规范 DOM 语义分叉；② 哪些 shim 用退化常量实现的 API 被真的调用了；
+③ 有没有访问到 shim 根本没实现的属性（用 Proxy 捕获）。
+
+### 结果
+
+**【P1】容器 `innerHTML` 里塞按钮 HTML 字符串 → shim 不解析 HTML，按钮完全不可见（6 个 phase）**
+
+```js
+// 最小 shim 的实现：只存字符串、把 children 清空，从不解析
+set innerHTML(v){ el._html = String(v==null?'':v); el.children = []; }
+```
+`render-controls.js` 有 6 处 `c.innerHTML = <某个返回HTML字符串的函数>`（beige 系列 / 曹冲
+称象 / 制蛮），这些按钮在 shim 下**一个都收集不到**，机器人看到 0 个候选。
+
+命中 phase：`beigeChoose`、`beigeDiscard`、`beigeJudge`、`chengxiangAsk`、`zhimengAsk`、
+`zhimengPick`
+
+**【P2】按钮 label 用 `innerHTML` 设置 → shim 的 `textContent` 恒空，label 退化成「按钮N」（2 个 phase）**
+
+```js
+b.innerHTML = '展示 '+cardFace(card)+'【'+escapeHtml(card.name)+'】';   // render-controls.js:3022
+b.innerHTML = '弃置 '+cardFace(o.card)+'【'+escapeHtml(o.card.name)+'】'; // render-controls.js:3039
+```
+按钮本身能被收集到（是 `createElement` 造的），但 `collectControlsCandidates` 读的是
+`btn.textContent`，而 shim 里 `_html` 和 `_text` 是两个独立字段——于是 label 落到
+`(btn.textContent||'').trim() || ('按钮'+i)` 的兜底分支，变成 `按钮0/按钮1/…`。
+
+命中 phase：`huogong`、`huogongReveal`
+
+**这一类比 P1 更危险**：不抛错、不缺按钮，机器人照常「工作」，只是 AI 拿到的候选列表是
+`["按钮0","按钮1","按钮2","按钮3"]` —— **完全没有信息可供判断**，而且
+`controlsChoiceLocalFallback` 的安全/必选正则也一个都匹配不上，只能退化成永远选
+`candidates[0]`。这正是上一节风险 2 预言的「语法合法但语义错误的静默差异」，现在有实例了。
+
+**【P3~P5】三条重要的负面结果（都是好消息）**
+
+| 检查项 | 结果 |
+|---|---|
+| `classList.contains()` 恒返回 `false` 是否影响按钮集合 | **渲染期间一次都没被调用** → 上一节风险 2 里专门点名担心的这个退化实现，**对按钮收集路径完全无影响**，风险解除 |
+| `querySelector()` 恒返回 `null` | **渲染期间一次都没被调用** |
+| 访问了 shim 未实现的元素属性（Proxy 捕获） | **零次** |
+
+### C-2 结论
+
+**缺口极小且高度集中：只有 `innerHTML` 这一个 API 的两种用法，共 8 个 phase。**
+最小 shim 剩余的所有退化实现（`classList`/`querySelector`/`style`/`setAttribute` 等）在
+按钮收集路径上根本没被触发，不构成风险。
+
+修法也很局部，二选一：
+- **(a) 给 shim 的 `innerHTML` setter 加一个极简 HTML 解析**（只需处理 `<button>` 标签和
+  文本内容），并让 setter 同步更新 `_text`；
+- **(b) 改 `render-controls.js` 这 8 处写法**，容器改用 `createElement`+`appendChild`、
+  按钮 label 改用 `textContent`。**这个方案顺带把浏览器端也改干净了**（现在这 8 处混用
+  两种风格本来就不一致），但属于动生产代码，不在阶段0 范围。
+
+建议 **(a)**：改 shim 不碰生产代码，风险最低。
+
+---
+
+## C-4（= 上一节 C-2）：renderControls 在 shim 下的完整性
+
+**方法**：同一份 `g`，分别在【最小 shim】和【jsdom】两个独立沙箱里真实调用
+`collectControlsCandidates(g, 0)`，比对收集到的按钮 label 数组，逐 phase 判定。
+
+> 过程中修正了一个会让比对失真的问题：jsdom 首轮加载 `game.js` 时抛
+> `Cannot set properties of null (setting 'onclick')` —— 因为 `game.js:26` 顶层就执行
+> `document.getElementById('joinBtn').onclick = joinRoom`，规范 DOM 找不到就返回 `null`，
+> 而最小 shim 的 `getElementById` 找不到时返回一个可丢弃的假元素、不会抛。
+> **这实测确认了上一节 A-7 的判断**（顶层 DOM 绑定在 Node 下必须加守卫），
+> 也说明最小 shim 在这一点上比规范 DOM「宽容」，反而掩盖了问题。
+> 给 jsdom 文档补齐这些元素后重跑，两边均零报错加载。
+
+### 最终清单（120 个决策态 phase）
+
+| 分类 | 数量 | 占比 |
+|---|---|---|
+| ✅ **已验证一致**（两边都渲染出按钮且完全相同） | **91** | 75.8% |
+| 🔴 **确认存在差异** | **8** | 6.7% |
+| ⚪ **未验证**（合成 g 下两边都没渲染出按钮，分支未被走到） | **21** | 17.5% |
+
+**🔴 确认存在差异的 8 个**（即 C-2 的 P1+P2 全集，两种方法结论一致）：
+`beigeChoose`、`beigeDiscard`、`beigeJudge`、`chengxiangAsk`、`huogong`、`huogongReveal`、
+`zhimengAsk`、`zhimengPick`
+
+差异实例：
+```
+[beigeDiscard]  shim: []
+                jsdom: ["弃置【杀】(♠7)","弃置【闪】(♦2)","弃置【桃】(♥9)","弃置【无懈可击】(♣3)","取消"]
+[huogongReveal] shim: ["按钮0","按钮1","按钮2","按钮3"]
+                jsdom: ["展示 ♠7【杀】","展示 ♦2【闪】","展示 ♥9【桃】","展示 ♣3【无懈可击】"]
+```
+
+**⚪ 未验证的 21 个**：`discard, guhuoTarget, haoshiPick, huanhuoPickSecond,
+huashenChangePickEnd, huashenChangePickStart, huashenPick, jiedaoChoice, luanjiConfirm,
+mengjin, pickingGeneral, pickingLordGeneral, qiangxiPickTarget, qilin, quhuDamageChoice,
+renxinChoose, shaOffsetChoice, tianyiPickCard, tianyiPickTarget, wugu, xuanfengPick`
+—— 这些需要更真实的 `g`（特定武将在场、特定牌型、特定装备）才能渲染出按钮。
+
+### ⚠️ 关于这份清单的可信度：我自己的第一版比对出过一次假阴性
+
+第一轮纯输出比对给出的是「7 个差异」，`huogong` 被判成「一致」。原因是合成 `g` 的手牌花色
+和 `pending.suit` 不匹配，那条带缺陷的 `innerHTML` 分支根本没被走到，两边都只渲染出一个
+「不弃牌」按钮 → 判定一致。**定向复测（把 `pending.suit` 改成手牌里有的花色）后立刻暴露**：
+
+```
+[huogong suit=♠]  shim: ["按钮0","不弃牌"]
+                  jsdom: ["弃置 ♠7【杀】","不弃牌"]
+```
+
+这正是 CLAUDE.md 第 20 条说的「一条从没红过的断言等于没被验证过」在本次调查里的现场版本。
+**所以最终清单不采用纯输出比对，改用 C-2 的成因探测（埋点记录 `innerHTML` 写法是否真的
+被执行）作为「确认差异」的判据**——成因探测不依赖「按钮有没有渲染出来」，不受合成 g 覆盖
+度影响，这才把 `huogong` 抓了回来（7 → 8）。
+
+**结论：「91 已验证一致」是可信的**（那 91 个两边都真的渲染出了按钮并逐字相同）；
+**「21 未验证」是真的未知，不是隐含通过**。阶段3 验收时必须把这 21 个用真实对局数据补测，
+不能因为这轮「没报差异」就当它们没问题。
+
+---
+
+## 三项具体问题的结论
+
+### 1️⃣ `controlsChoiceCtx` 跨 AI await 持有 DOM —— 单房间「无害」需要打个折扣
+
+上一节的初步判断是「单房间无害，多房间会撞车」。实测验证（`run_bot_domhost_probe_test.js`
+场景2、3）：
+
+**✅ 对正确性确实无害**：
+- `collect` 期间真实控件被改名成 `#human-controls`，`dispose` 后正确归还成 `#controls`；
+- await 期间即使人类客户端又渲染了一次，之前冻结的按钮对象**仍可安全 `invoke()`**
+  （按钮是 collect 时那次渲染产生的独立 DOM 节点，onclick 闭包捕获的是当时的 `g`，
+  不受后续渲染影响）；
+- `dispose` 的 id 归还在重渲染之后依然正确。
+
+**⚠️ 但对人类的界面有害（这是上一节漏掉的）**：改名窗口期间，
+`document.getElementById('controls')` 返回的是**隐藏 box 而不是真实控件**（实测确认）。
+`renderControls` 第一件事就是 `const c = document.getElementById('controls')` ——
+所以**AI 思考的那最多 15 秒里，人类玩家自己的操作区渲染全部写进了隐藏 box，屏幕上的控件
+不更新**。这是一个既有的、纯浏览器端的 UX 缺陷，和迁移无关。
+
+**对迁移的意义（正面）**：这个缺陷在 Node 服务里**自动消失**——Node 进程里没有人类共享
+同一个 document，改名窗口期间没有任何「人类渲染」需要被正确路由。**这反而是迁移的一个
+额外收益，不是新增风险。**
+
+**多房间的判断维持不变**：多房间共享一个 document 时，房间 B 的 collect 会撞上房间 A 未
+归还的改名状态。但如果按上一节建议走「一房间一进程」，每个进程有自己的 document，
+这个问题一并消失，不需要额外加锁。
+
+---
+
+### 2️⃣ `confirmAndPlay` 是否对机器人可达 —— **可达，风险 3 不是理论风险**
+
+先修正上一节的一处计数：全项目 `confirmAndPlay` 调用点是 **15 处**（不是 17；grep 到的
+16 处里有 1 处在注释里）。
+
+**逐处回溯所在 phase 的结果**：
+
+| 所在 phase | 调用点 | L1 会不会碰 | 判定 |
+|---|---|---|---|
+| `play` | 3694, 3701, 3737, 3761, 3805, 3838, 3847, 3865, 3881, 3890, 3910, 3924（12 处） | ❌ `play` 在 L1 **之前**由 `botPlay` 结构化接管 | ✅ 不可达 |
+| `dying` | 3150（涅槃） | ❌ `dying` 在 L1 之前 | ✅ 不可达 |
+| `lirangAsk` | 2306（礼让） | ❌ `lirangAsk` 在 L1 之前 | ✅ 不可达 |
+| **`wuxie` 等 5 个响应阶段** | **361（于吉【蛊惑】，在 helper `addGuhuoResponseButtons` 里）** | **⚠️ 见下** | **🔴 可达** |
+
+第 361 处不在任何单一 phase 里，它在共用 helper `addGuhuoResponseButtons(container, g, me, role)`
+内部，被 5 个响应阶段调用：`respond`(2949)、`duel`(3000)、**`wuxie`(3059)**、`dying`(3146)、
+`aoeResp`(3231)。其中四个都在 L1 之前被结构化接管——**唯独 `wuxie` 在
+`CONTROLS_CHOICE_ALLOWLIST` 里，而且不在 `CONTROLS_CHOICE_EXCLUDE` 里**，
+也就是说**连没有 AI 密钥时 L1 都会接管它**。
+
+**实测复现**（`run_bot_domhost_probe_test.js` 场景1，无密钥模式）：
+
+```
+controlsChoiceMatch(g, 0) === true
+收集到的候选: ["蛊惑:手牌【杀】当【无懈可击】","蛊惑:手牌【闪】当【无懈可击】"]
+点击其中一个 → showConfirm 被调用 1 次，startGuhuoResponse 被调用 0 次
+```
+
+**触发条件**：机器人座位的武将是于吉（或任何有 `guhuo` cap 的武将）+ 处于 `wuxie` 无懈询问
+阶段 + `g.guhuoUsed` 为 false + 手牌非空。
+
+**当前（浏览器端）的实际后果**：不是死锁，但是个真实 bug —— 机器人「点」了按钮之后，
+**担任机器人控制者的那名真人玩家的屏幕上会突然弹出一个确认框**（「扣置这张手牌发动【蛊惑】，
+声明为【无懈可击】？」），而这个框是替机器人弹的。真人点「确定」它才生效、点「取消」就
+没了。相当于机器人的决策被静默转交给了人类。
+
+**迁移到 Node 后的后果**：headless 环境没人点确定 → 动作永不执行 → 状态不变 →
+`scheduleBotTurn` 靠状态变化驱动、不会重试 → **永久卡死**（CLAUDE.md 第 26 条的模式）。
+
+**结论：风险 3 的等级要上调。** 它不再是「迁移时不要引入原本不存在的可达路径」，而是
+**「已经存在一条可达路径，且迁移会把它从『界面困惑』升级成『永久卡死』」**。
+B-3（headless `showConfirm` 自动确认）必须**在阶段2 接上决策的同时就做**，不能拖到阶段3。
+
+> 附带：这条路径在浏览器端也值得单独修一次（机器人不该让人类替它确认）。属于既有 bug，
+> 建议和 C-1 发现的两处漏登记一起，单独开任务处理。
+
+---
+
+### 3️⃣ `aiTestAutopilot`（真人座位 AI 托管）的去向 —— **建议：保留在浏览器端，第一版不搬**
+
+**现状盘点**：共 45 处引用，分布是 `ai-bot.js` 32 / `bot.js` 11 / `render.js` 2 /
+`bot-ai-bus.js` 2。其中 `ai-bot.js` 那 32 处绝大多数是 UI（托管开关、状态徽标、决策记录
+信息窗、弹窗）。它还会把托管状态发布到 RTDB：`publishAiTestAutopilot` 写
+`players/{seat}/aiAutopilot`，并挂 `onDisconnect().set(false)` 做断线自动撤销。
+
+**建议不搬，理由三条**：
+
+1. **归属语义对不上。** `publishAiTestAutopilot` 的守卫是 `if(p.cid !== myClientId) return g;`
+   —— 托管的前提是「这个座位属于**我这个浏览器**」。Node 进程不拥有任何座位，要搬过去
+   就得先发明一套「谁授权 Node 代打我的座位」的授权模型，这是纯新增复杂度，和迁移目标
+   （把机器人搬出浏览器）无关。
+2. **两者天然不冲突。** Node 服务只驱动 `p.isBot === true` 的座位；托管驱动的是真人座位
+   （`p.cid` 有值、`isBot` 为 false）。**两个集合不相交**，可以共存，不需要任何协调机制。
+3. **它本来就是个调试/演示工具**，不是对局必需功能；32/45 的引用是 UI，搬到无界面的 Node
+   进程里，「决策记录信息窗」这个它最主要的价值直接归零。
+
+**⚠️ 但有一个必须注意的实施细节**（这条修正了上一节 3.2 的建议）：
+
+上一节建议在 `scheduleBotTurn` 开头加 `if (g && g.botServerActive) return;`。
+**这样写会把托管一起关掉** —— 因为托管正是靠 `scheduleBotTurn` 里的 `aiTestSelf` 分支
+放行的（非控制者浏览器也能驱动自己的托管座位）。正确写法必须是座位感知的：
+
+```js
+const aiTestSelf = (typeof aiTestAutopilot!=='undefined') && aiTestAutopilot
+  && aiTestAutopilot.active && aiTestAutopilot.seat === mySeat;
+if (g && g.botServerActive && !aiTestSelf) return;   // Node 接管机器人座位，但不影响真人托管
+```
+
+即：**Node 服务在线时，浏览器端只让出「机器人座位」的驱动权，保留「自己托管自己座位」的
+能力。**
+
+---
+
+## 基于新数据：对上一节实施计划与风险评级的调整
+
+### 需要调整的
+
+| 项 | 原判断 | 新判断 | 依据 |
+|---|---|---|---|
+| **风险 3（`confirmAndPlay`）** | 🟠 中等；「大概率已被覆盖住，属理论风险」 | **🔴 上调为高危，且提前到阶段2** | 实测确认 `wuxie` + 于吉【蛊惑】是一条**真实可达**路径，无密钥也会命中；迁移后由「界面困惑」变成「永久卡死」 |
+| **B-3（headless `showConfirm`）** | 阶段3 做 | **提前到阶段2，与「接上决策」同批** | 同上。否则阶段2 一跑到那个场景就卡死，会污染阶段2 的稳定性判断 |
+| **风险 2 中的 `classList.contains`** | 点名担心的退化实现 | **风险解除** | 实测渲染期间**一次都没被调用**，对按钮收集路径无影响 |
+| **风险 2 的具体形态** | 泛泛地担心「静默差异」 | **收敛为一个具体 API 的两种用法**（`innerHTML`），共 8 个 phase，且已定位到行号 | C-2 成因探测 |
+| **C-3 单房间「无害」** | 无害 | **对正确性无害，但对人类界面有害**（AI 思考期间人类控件区不更新）；且该缺陷**在 Node 里自动消失** | 实测 `getElementById('controls')` 在窗口期指向隐藏 box |
+
+### 不需要调整的
+
+- **阶段划分（0→1→2→3→4→5）整体成立**，且 C-1 数据**支持**「阶段2 先禁用 DOM 路径」这个
+  分期：无密钥下只有 5 个 phase 受影响。
+- **风险 1（`mySeat`，约 893 处）仍是最高风险**，本轮没有任何新数据改变这个判断。
+- **多房间用「一房间一进程」**的建议不变，且 C-3 的实测让它多了一条支持理由（顺带解决
+  document 共享冲突）。
+
+### 阶段2 的清单需要补两条
+
+1. 实现 headless `showConfirm`（B-3），**在接上决策之前**；
+2. 补 `wuxie`/`luoyingAsk`/`luoshen` 三个 ALLOWLIST phase 的结构化决策分支——它们是无密钥
+   模式下仅有的 3 个 L1 依赖，补掉之后**无密钥模式可以做到完全不需要 DOM 宿主**（只剩
+   `guhuoTarget`/`quhuDamageChoice` 两个 bug，各补一行注册即可）。这会让阶段2 的验收
+   标准变得非常干净：**无密钥 + 零 DOM 宿主，机器人应能完整打完一局**。
+
+### 顺带发现、建议单独立项的既有 bug（都与迁移无关）
+
+| # | 问题 | 影响 |
+|---|---|---|
+| 1 | `guhuoTarget` 未登记 `BOT_PHASE_ACTOR` | 专用分支（bot.js:4590）是死代码，从未执行过 |
+| 2 | `quhuDamageChoice` 未登记 `BOT_PHASE_ACTOR` | 专用分支（bot.js:4596）是死代码，从未执行过 |
+| 3 | `wuxie` 阶段机器人会点出 `confirmAndPlay` 按钮 | 替机器人给真人弹确认框，决策被静默转交给人类 |
+| 4 | `zhimengPick` 的按钮 label 渲染成字面量 `"undefined"` | jsdom 比对时发现：`jsdom: ["undefined","undefined"]`，是 render-controls 自身的渲染缺陷，与 shim 无关 |
+
+---
+
+## 本轮产出的可复现资产
+
+`run_bot_domhost_probe_test.js`（**6/6 通过**）—— 把三个关键场景固化成可重跑的行为基线：
+
+1. `confirmAndPlay` 可达性：`wuxie` + 于吉【蛊惑】，L1 确实收集到 `confirmAndPlay` 按钮；
+2. `confirmAndPlay` 后果：点击只弹确认框（1 次），真实动作执行 0 次；
+3. `controlsChoiceCtx`：改名窗口确实存在，`dispose` 后正确归还；
+4. `controlsChoiceCtx` 单房间安全性：await 期间重渲染后，冻结的按钮仍可安全 `invoke`；
+5. shim 缺口 P2：`huogongReveal` 的 label 退化成 `["按钮0","按钮1"]`；
+6. shim 缺口 P1：`zhimengAsk` 在 shim 下候选数为 0。
+
+**注意这 6 条断言目前锁定的是「缺陷存在」这个现状**。阶段3 修好 shim / 实现 headless
+`showConfirm` 之后，第 2、5、6 条的预期会**反转**——届时必须主动把断言改成新的正确预期，
+而不是让它们继续「静静地通过」（CLAUDE.md 第 20 条：设计变更后必须回头检查旧断言的语义
+是否还成立）。测试文件头部已写明这一点。
