@@ -4210,12 +4210,31 @@ function useJiushiAsJiu(g, me){
   markSkillSound(g, '酒诗');
   return {name:'酒', virtual:true};
 }
+function finishDyingRescueCard(g,responderSeat,card,asText,soundName,isJijiu){
+  if(!g.pending||g.pending.type!=='dying') return;
+  const dyingSeat=g.pending.seat;
+  const me=g.players[responderSeat], dyingP=g.players[dyingSeat];
+  if(!me||!me.alive||!dyingP||!dyingP.alive) return;
+  const recovery=peachRecoveryAmount(g,responderSeat,dyingSeat);
+  dyingP.hp=Math.min(dyingP.maxHp,dyingP.hp+recovery);
+  if(typeof recordBotRescueEvidence==='function') recordBotRescueEvidence(g,responderSeat,dyingSeat);
+  g.log=pushLog(g.log,me.name+' 对 '+dyingP.name+' '+asText+',回复'+recovery+'点体力（体力'+dyingP.hp+'）');
+  removeBuquCard(g,dyingSeat);
+  if(hasCap(dyingP,'enyuan')&&responderSeat!==dyingSeat){
+    ensureDeck(g); drawN(g,responderSeat,1);
+    g.log=pushLog(g.log,dyingP.name+' 回复1点体力,'+me.name+' 发动【恩怨】效果,摸一张牌');
+  }
+  if(isJijiu) markSkillSound(g,'急救');
+  markCardSound(g,soundName,responderSeat,card,dyingSeat);
+  if(dyingP.hp>0) finishDying(g,false);
+}
 function respondDying(useTao, jijiuChoice){
   tx(g=>{
     if(g.phase!=='dying'||!g.pending||g.pending.type!=='dying') return g;
     const me=g.players[mySeat];
     if(!me || !me.alive || g.pending.asking!==mySeat) return g;
-    const dyingP=g.players[g.pending.seat];
+    const dyingPending=g.pending;
+    const dyingP=g.players[dyingPending.seat];
     
     // 辅诩【完杀】：检查是否受到完杀限制
     if(useTao && g.wanshaActive && g.wanshaDyingSeat === g.pending.seat) {
@@ -4255,22 +4274,12 @@ function respondDying(useTao, jijiuChoice){
         card=me.hand.splice(idx,1)[0]; g.discard.push(card);
         asText='打出【'+card.name+'】';
       }
-      const recovery=peachRecoveryAmount(g,mySeat,g.pending.seat);
-      dyingP.hp=Math.min(dyingP.maxHp,dyingP.hp+recovery);
-      if(typeof recordBotRescueEvidence==='function') recordBotRescueEvidence(g,mySeat,g.pending.seat);
-      g.log=pushLog(g.log, me.name+' 对 '+dyingP.name+' '+asText+',回复'+recovery+'点体力（体力'+dyingP.hp+'）');
-      // 周泰【不屈】:回复体力时移除一张不屈牌
-      removeBuquCard(g, g.pending.seat);
-      // 法正【恩怨】：当其他角色令法正回复1点体力后，其摸一张牌
-      if(hasCap(dyingP, 'enyuan') && mySeat !== g.pending.seat) {
-        // me 是使用桃的角色，dyingP 是法正
-        ensureDeck(g);
-        drawN(g, mySeat, 1);
-        g.log = pushLog(g.log, dyingP.name + ' 回复1点体力,' + me.name + ' 发动【恩怨】效果,摸一张牌');
+      const isJijiu=!!(jijiuChoice&&jijiuChoice.kind!=='jiu'&&jijiuChoice.kind!=='jiushiJiu');
+      if(g.pending!==dyingPending&&g.pending){
+        g.pending.resume={type:'dyingJijiu',dyingPending,responderSeat:mySeat,card,asText,soundName,isJijiu};
+        return g;
       }
-      if(jijiuChoice && jijiuChoice.kind!=='jiu' && jijiuChoice.kind!=='jiushiJiu') markSkillSound(g, '急救');
-      markCardSound(g, soundName, mySeat, card, g.pending.seat);
-      if(dyingP.hp>0){ finishDying(g, false); }
+      finishDyingRescueCard(g,mySeat,card,asText,soundName,isJijiu);
       return g;
     }
     g.log=pushLog(g.log, me.name+'：不使用【桃】');
@@ -4690,6 +4699,11 @@ function resumeAfterInterrupt(g, resume, seat){
     if(attacker&&attacker.alive&&target&&target.alive){
       resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard);
     }else finishSingleShaTarget(g);
+  } else if(resume.type==='dyingJijiu'){
+    // 急救用红色装备触发失装技能后，恢复原 dying 快照，再完成这张牌的回复结算。
+    g.pending=resume.dyingPending;
+    g.phase='dying';
+    finishDyingRescueCard(g,resume.responderSeat,resume.card,resume.asText,resume.soundName,resume.isJijiu);
   } else { // 'sha' 及其它
     if(g.fangtianQueue){ advanceFangtianQueue(g); }
     else if(g.luanwuResume){ continueLuanwuAfterSha(g); }

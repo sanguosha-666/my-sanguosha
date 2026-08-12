@@ -130,4 +130,25 @@ describe('凌统【旋风】修复', function() {
     assert.strictEqual(_g.pending.to,2);
     assert.strictEqual(_g.pending.from,0);
   });
+
+  it('急救弃红色装备触发旋风后恢复原濒死上下文', function() {
+    mySeat=1;
+    const turnPlayer=player('当前回合角色','caocao');
+    const lingtong=player('兼具急救的凌统','lingtong');
+    lingtong.caps={jijiu:true};
+    lingtong.equips.armor={id:'red-equip',name:'八卦阵',suit:'♥'};
+    const dying=player('濒死角色','liubei'); dying.hp=0;
+    _g={players:[turnPlayer,lingtong,dying],turn:0,phase:'dying',started:true,
+      pending:{type:'dying',seat:2,asking:1,resume:{type:'sha'}},deck:[],discard:[],log:[],gameMode:'ffa'};
+
+    respondDying(true,{kind:'equip',slot:'armor'});
+    assert.strictEqual(_g.pending.type,'xuanfengPick','不得把旋风 pending 当作 dying 继续读取');
+    assert.strictEqual(_g.pending.resume.type,'dyingJijiu');
+    assert.strictEqual(dying.hp,0,'子技能完成前暂不结算回复');
+
+    cancelXuanfeng();
+    assert.strictEqual(dying.hp,1,'旋风完成后急救回复正确结算');
+    assert.strictEqual(dying.dying,false,'应正常脱离濒死');
+    assert.strictEqual(_g.pending,null,'不得残留旋风或 dying pending');
+  });
 });
