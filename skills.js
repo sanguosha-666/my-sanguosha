@@ -92,6 +92,8 @@ function jieDaoShaRen(cardIdx, seatA, seatB){
     if(!card || card.name!=='借刀杀人') return g;
     const A=g.players[seatA], B=g.players[seatB];
     if(!A || !A.alive || seatA===mySeat || !A.equips.weapon) return g;
+    const spec=CARD_PLAYS['借刀杀人'];
+    if(!spec || (spec.canTarget && !spec.canTarget(g,me,card,seatA))) return g;
     if(!B || !B.alive || seatB===seatA || !canReachSha(g, seatA, seatB)) return g;
     // 诸葛亮【空城】:借刀杀人的B同样是"被指定为这张杀的目标"(官方FAQ明确空城对借刀杀人的B
     // 目标同样生效),不能因为这条路径不走 CARD_PLAYS['杀'].canTarget 就漏了这层保护。
