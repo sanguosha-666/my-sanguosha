@@ -160,9 +160,15 @@ function sanitizePendingForLog(value, depth){
 
 const PENDING_ORPHAN_RATE_LIMIT_MS = 60000;
 let __pendingOrphanLastLogged = {}; // key(roomId+type+reason) -> 上次记录的ts,纯内存、不跨刷新持久化
+function isSharedDebugLogReporter(g){
+  const controller = (g.players || []).find(function(p){ return p && !p.isBot && p.cid; });
+  if(!controller) return true; // 尚无可识别控制端时保留单客户端诊断能力
+  return typeof myClientId !== 'undefined' && controller.cid === myClientId;
+}
 function logPendingOrphan(g, reason){
   try{
     if(!g || !g.pending) return;
+    if(!isSharedDebugLogReporter(g)) return;
     const type = g.pending.type || 'unknown';
     const isRateLimited = typeof reason === 'string' && reason.indexOf('B:') === 0;
     if(isRateLimited){
