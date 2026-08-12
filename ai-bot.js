@@ -399,6 +399,16 @@ const PROVIDER_ADAPTERS = {
     // 过期),不是持续免费层——接入是满足"直连吃额度"的需求,实际是计费 API。已实测
     // CORS preflight 返回 200+ACAO:*(2026-08-11);成功路径有第三方生产实证(Big-AGI
     // 默认开启浏览器直连),真 key 复核过可用。OpenAI 兼容格式,适配器结构与 groq 一致。
+    // 【reasoning 模型适配(2026-08-11)】zai-glm-4.7 是 reasoning 模型、thinking 默认
+    // 开启:思考链放 message.reasoning 单独字段、message.content 等思考完才填,思考链
+    // 占满 max_tokens 预算后响应在 finish_reason:"length" 截断、content 为空 →
+    // parseResponse 读 content 失败(用户 Console 实测:HTTP 200 但 content 空)。
+    // 【正解】Cerebras 推理文档明确:zai-glm-4.7 传 reasoning_effort:"none" 关闭思考,
+    // 关闭后就是普通 LLM 直接输出最终回答;gemma-4-31b 默认 none;但 gpt-oss-120b
+    // 只支持 low/medium/high、**关不掉**(只能 low 最小化思考)。因此按模型名传值:
+    // glm/gemma → "none",gpt-oss → "low"。max_tokens 下限抬到 500(关闭思考后
+    // JSON 决策通常 <300 token)。gpt-oss 关闭不了思考,500 可能仍不够,但那是它的
+    // 模型特性,建议优先用 zai-glm-4.7(强且可关)。
     label: 'Cerebras(直连)',
     defaultModel: 'gpt-oss-120b',
     endpoint: 'https://api.cerebras.ai/v1/chat/completions',
@@ -406,6 +416,10 @@ const PROVIDER_ADAPTERS = {
       const messages = [];
       if(opts.systemPrompt) messages.push({ role:'system', content: opts.systemPrompt });
       messages.push({ role:'user', content: opts.userPrompt });
+      const model = opts.model || this.defaultModel;
+      // zai-glm-4.7/gemma-4-31b 支持 reasoning_effort:"none" 关闭思考;gpt-oss-120b
+      // 只支持 low/medium/high(关不掉),给 low 最小化思考链。
+      const reasoningEffort = /gpt-oss/i.test(model) ? 'low' : 'none';
       return {
         url: this.endpoint,
         headers: {
@@ -413,9 +427,10 @@ const PROVIDER_ADAPTERS = {
           'authorization': 'Bearer '+apiKey,
         },
         body: JSON.stringify({
-          model: opts.model || this.defaultModel,
-          max_tokens: opts.maxTokens || 512,
+          model,
+          max_tokens: Math.max(opts.maxTokens || 0, 500),
           messages,
+          reasoning_effort: reasoningEffort,
         }),
       };
     },
