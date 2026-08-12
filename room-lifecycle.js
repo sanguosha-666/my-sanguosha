@@ -542,6 +542,7 @@ function cleanupRoom(){
 }
 
 function backToLobby(){
+  if(typeof aiSummaryReset === 'function') aiSummaryReset();
   if(chatQuery) chatQuery.off();
   chatQuery=null; chatRef=null; chatMessages=[];
   mySeat = null; selectedCardIdx = null; resetZhangba();
