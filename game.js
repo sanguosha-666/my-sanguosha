@@ -7007,16 +7007,7 @@ function findPlayerWithCap(g, cap) {
 // isBlackTactics: 判断是否为黑色锦囊牌
 function isBlackTactics(card) {
   if (!card || !card.suit) return false;
-  // 黑色：♠黑桃或♣梅花
-  const isBlack = card.suit === '♠' || card.suit === '♣';
-  // 锦囊牌：常见的锦囊牌列表
-  const tacticsCards = [
-    '过河拆桥', '顺手牵羊', '无中生有', '决斗', '借刀杀人',
-    '无懈可击', '五谷丰登', '桃园结义', '南蛮入侵', '万箭齐发',
-    '调虎离山', '理确kou', '兵粮寸断', '乐不思蜀', '火攻'
-  ];
-  const isTactics = tacticsCards.includes(card.name);
-  return isBlack && isTactics;
+  return (card.suit==='♠'||card.suit==='♣') && isTrickCardName(card.name);
 }
 
 // 陈宫【智迟】:检查目标是否受到智迟免疫
@@ -7043,21 +7034,8 @@ function isZhichiImmune(g, targetSeat, card) {
 // 五谷丰登是普通锦囊牌，不是延时锦囊
 function isNormalTacticsCard(card) {
   if (!card || !card.name) return false;
-  
-  // 延时锦囊牌列表
-  const delayedTactics = ['乐不思蜀', '兵粮寸断', '闪电'];
-  
-  // 判断是否为锦囊牌
-  const tacticsCards = [
-    '过河拆桥', '顺手牵羊', '无中生有', '决斗', '借刀杀人',
-    '无懈可击', '五谷丰登', '桃园结义', '南蛮入侵', '万箭齐发',
-    '调虎离山', '兵粮寸断', '乐不思蜀', '火攻', '闪电'
-  ];
-  
-  const isTactics = tacticsCards.includes(card.name);
-  
-  // 如果是锦囊牌且不在延时列表中，则为普通锦囊牌
-  return isTactics && !delayedTactics.includes(card.name);
+  // 锦囊身份统一由 isTrickCardName 判断，延时与否统一由 DELAY_TRICKS 数据表判断。
+  return isTrickCardName(card.name) && !DELAY_TRICKS[card.name];
 }
 
 // ===================== 蔡文姬技能实现 =====================

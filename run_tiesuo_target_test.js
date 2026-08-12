@@ -5,8 +5,7 @@ context.window.document=context.document;context.window.firebase=context.firebas
 const sandbox=vm.createContext(context);
 ['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js'].forEach(f=>vm.runInContext(fs.readFileSync(f,'utf8'),sandbox,{filename:f}));
 const R=code=>vm.runInContext(code,sandbox);
-R('tx=function(fn){return fn(__g);};mySeat=0;');
-R("CARD_PLAYS['铁索连环'].canTarget=function(g,me,card,seat){return seat!==1;};");
+R("tx=function(fn){return fn(__g);};mySeat=0;var actualTieCanTarget=CARD_PLAYS['铁索连环'].canTarget;CARD_PLAYS['铁索连环'].canTarget=function(g,me,card,seat){return seat!==1;};");
 const eq=()=>R('emptyEquips')();
 const mk=(name,general)=>({name,general,hp:4,maxHp:4,hand:[],equips:eq(),delays:[],alive:true});
 const chain=id=>({id,name:'铁索连环',suit:'♠',rank:12});
@@ -27,6 +26,18 @@ assert.strictEqual(g.players[0].hand.length,0,'两个合法目标正常消耗牌
 assert.strictEqual(g.players[0].chained,true,'第一个合法目标正常结算');
 assert.strictEqual(g.players[2].chained,true,'第二个合法目标正常结算');
 
+R("CARD_PLAYS['铁索连环'].canTarget=actualTieCanTarget;");
+assert.strictEqual(R("isBlackTactics({name:'铁索连环',suit:'♠'})"),true,'黑色铁索必须属于黑色锦囊');
+assert.strictEqual(R("isNormalTacticsCard({name:'铁索连环',suit:'♠'})"),true,'铁索必须属于普通锦囊');
+
+g=state();g.players[1].general='jiaxu';sandbox.__g=g;
+R('playCard(0,"铁索连环",1)');
+assert.strictEqual(g.players[0].hand.length,1,'帷幕应拒绝黑色铁索且不消耗牌');
+
+g=state();g.zhichiImmunity={seat:1,turn:0};sandbox.__g=g;
+R('playCard(0,"铁索连环",1)');
+assert.strictEqual(g.players[0].hand.length,1,'智迟应拒绝铁索且不消耗牌');
+
 const source=fs.readFileSync('game.js','utf8');
 assert.ok(source.includes('(spec.canTarget && !spec.canTarget(g,me,card,seat))'));
-console.log('tiesuo multi-target validation: 8/8 passed');
+console.log('tiesuo target validation: 12/12 passed');
