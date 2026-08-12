@@ -176,11 +176,11 @@ const testCode = String.raw`
     gameMode: 'ffa',
     shaUsed: false,
     players: [
-      { name: '机器人1', role: 'fan', hp: 3, maxHp: 4, alive: true,
+      { name: '机器人1', cid: 'bot-stable-1', role: 'fan', hp: 3, maxHp: 4, alive: true,
         hand: [{ name: '桃', suit: 'heart', rank: 3 }], equips: {}, delays: [], general: 'guanyu' },
-      { name: '机器人2', role: 'zhong', hp: 3, maxHp: 3, alive: true,
+      { name: '机器人2', cid: 'bot-stable-2', role: 'zhong', hp: 3, maxHp: 3, alive: true,
         hand: [], equips: {}, delays: [], general: 'machao' },
-      { name: '机器人3', role: 'zhu', hp: 4, maxHp: 4, alive: true,
+      { name: '机器人3', cid: 'bot-stable-3', role: 'zhu', hp: 4, maxHp: 4, alive: true,
         hand: [], equips: {}, delays: [], general: 'sunquan' },
     ],
     log: [{ seq: 1, text: '机器人1 对 机器人2 造成 1 点伤害' }],
@@ -236,22 +236,25 @@ const testCode = String.raw`
     if(aiSummary !== '二号目标更像反贼,我留闪') throw new Error('迭代后 aiSummary 应为新摘要,实际 "' + aiSummary + '"');
   });
 
-  // 6. 座位变化:seat 1 决策后改 seat 2 → 内部 reset(aiSummary 清空)
-  await check('6 座位变化触发 aiSummaryReset', async function(){
+  // 6. 多机器人分仓:切到其它机器人时当前槽为空,切回后恢复原摘要
+  await check('6 多机器人切换不会互相清空摘要', async function(){
     mockOk('{"choice":0}');
     await callAiChooseIndex({ g: g, seat: 1, candidates: candidates2 });
     if(aiSummary !== '') throw new Error('换座位后 aiSummary 应清空,实际 "' + aiSummary + '"');
     await callAiChooseIndex({ g: g, seat: 2, candidates: candidates2 });
     if(aiSummary !== '') throw new Error('再次换座位后 aiSummary 仍应为空');
+    await callAiChooseIndex({ g: g, seat: 0, candidates: candidates2 });
+    if(aiSummary !== '二号目标更像反贼,我留闪') throw new Error('切回座位0应恢复其摘要,实际 "' + aiSummary + '"');
+    var moved = g.players[0]; g.players[0] = g.players[1]; g.players[1] = moved;
+    await callAiChooseIndex({ g: g, seat: 1, candidates: candidates2 });
+    if(aiSummary !== '二号目标更像反贼,我留闪') throw new Error('同一 bot cid 换座后仍应恢复其摘要');
+    moved = g.players[0]; g.players[0] = g.players[1]; g.players[1] = moved;
+    await callAiChooseIndex({ g: g, seat: 0, candidates: candidates2 });
   });
 
   // 7. 上限:mock 返回 600 字 → aiSummary 长度 ≤500
   await check('7 超长摘要截断到 500', async function(){
-    // 上一项测试(6)把 aiSummarySeat 换成了 2;真实调用方(scheduleBotTurn)总是先同步把
-    // aiSummarySeat 设成目标座位、再发起 updateAiSummary(见跨座位竟态防护的写回校验),
-    // 这里直接调用 updateAiSummary(g,0) 前手动补上这一步,和生产环境的调用约定保持一致
-    // (不是绕过竟态防护,是补全测试没有模拟到的前置条件)。
-    aiSummarySeat = 0;
+    // 上一项已经切回座位0，继续验证同一机器人的摘要更新上限。
     var long = '';
     for(var i = 0; i < 36; i++) long += '这是用来撑长度的中文摘要文本片段。'; // 36*17=612 字
     if(long.length <= 500) throw new Error('测试构造错误:长文本长度 ' + long.length + ' 应 >500');

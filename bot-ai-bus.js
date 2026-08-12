@@ -106,6 +106,8 @@ let aiSummary = '';
 let aiSummarySeat = null;
 let aiSummaryRound = 0;
 let aiSummaryTurn = -1;
+let aiSummaryKey = null;
+let aiSummaryByBot = Object.create(null);
 // aiTestLastReason:AI托管模式(AI托管按钮)下,最近一次托管命中的 AI 询问里解析出的
 // 中文选择理由。模块级变量,供信息窗 record 采集(aiTestDecisionHook)。未托管时恒为
 // null——callAiChooseIndex 在未托管路径会把 reason 恒写 null,与未托管行为零变化。
@@ -123,10 +125,36 @@ let aiTestLastChoice = null;
 // 托管行为零变化。同样必须放模块顶层:函数体内声明(var 提升后是函数局部变量)外部读不到。
 let aiTestLastCall = null;
 function aiSummaryReset(){
+  aiSummaryByBot = Object.create(null);
   aiSummary = '';
   aiSummarySeat = null;
   aiSummaryRound = 0;
   aiSummaryTurn = -1;
+  aiSummaryKey = null;
+}
+function getAiSummaryKey(g, seat){
+  const p = g && g.players && g.players[seat];
+  return p && p.cid ? 'cid:'+p.cid : 'seat:'+seat;
+}
+function saveActiveAiSummary(){
+  if(aiSummaryKey===null) return;
+  aiSummaryByBot[aiSummaryKey] = {
+    text: aiSummary,
+    seat: aiSummarySeat,
+    round: aiSummaryRound,
+    turn: aiSummaryTurn
+  };
+}
+function selectAiSummary(g, seat){
+  const key = getAiSummaryKey(g, seat);
+  if(aiSummaryKey===key){ aiSummarySeat=seat; return; }
+  saveActiveAiSummary();
+  const saved = aiSummaryByBot[key];
+  aiSummary = saved ? saved.text : '';
+  aiSummarySeat = seat;
+  aiSummaryRound = saved ? saved.round : 0;
+  aiSummaryTurn = saved ? saved.turn : -1;
+  aiSummaryKey = key;
 }
 
 // updateAiSummary:异步调用 callAI 生成/迭代本座位的局内摘要。fire-and-forget——
@@ -146,6 +174,8 @@ function aiSummaryReset(){
 // 响应已经过期,直接丢弃,不写入(旧摘要/新归属原样保留,不受影响)。
 async function updateAiSummary(g, seat){
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return;
+  selectAiSummary(g, seat);
+  const requestKey = aiSummaryKey;
   const state = buildBotVisibleState(g, seat);
   const oldSummary = aiSummary ? ('旧摘要:\n'+aiSummary+'\n\n') : '';
   const userPrompt = oldSummary
@@ -176,11 +206,16 @@ async function updateAiSummary(g, seat){
     hideAiThinkingIndicator();
   }
   if(!result || !result.ok) return;
-  if(aiSummarySeat !== seat) return; // 归属已易主,这次响应过期,丢弃不写入
   const text = (result.text || '').trim();
   if(text){
-    aiSummary = text.slice(0, 500);
-    aiSummarySeat = seat;
+    const saved = aiSummaryByBot[requestKey] || { text:'', seat, round:g.roundNum||0, turn:g.turn };
+    saved.text = text.slice(0, 500);
+    saved.seat = seat;
+    aiSummaryByBot[requestKey] = saved;
+    if(aiSummaryKey===requestKey){
+      aiSummary = saved.text;
+      aiSummarySeat = seat;
+    }
   }
 }
 
@@ -255,10 +290,9 @@ async function callAiChooseIndex(opts){
     && aiTestAutopilot.active && aiTestAutopilot.seat===opts.seat;
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
   if(candidates.length<=1) return candidates.length===1 ? 0 : null;
-  // 【AI摘要】座位校验:座位变化(重连/换机器人)清空记忆;同座位累积。摘要只注入文本,
+  // 【AI摘要】按机器人稳定 cid 分仓；切换机器人只切换当前摘要，不清除其它机器人的记忆。
   // 不在这里重建可见状态——buildBotVisibleState 的开销留给各调用方已有的那次调用。
-  if(aiSummarySeat !== opts.seat) aiSummaryReset();
-  aiSummarySeat = opts.seat;
+  selectAiSummary(opts.g, opts.seat);
   // 摘要注入:有摘要且座位匹配时,追加进 systemPrompt
   const summaryNote = aiSummary && aiSummarySeat===opts.seat
     ? '\n\n本局记忆摘要(你自己维护的,参考即可):\n'+aiSummary
