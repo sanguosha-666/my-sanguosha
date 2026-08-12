@@ -2495,13 +2495,14 @@ function mengjinPick(choice) {
     // 不能往下 g.pending=null 把旋风覆盖掉(applyTrickOnHand 弃手牌不触发,快照对它无变化)。
     // 【v2】同 auto-single 分支,resume 类型改成 {type:'shaOffset',...},见上方注释说明。
     const pendingBefore = g.pending;
+    const discardedEquipName = choice === 'hand' ? null : target.equips[choice]?.name;
     if(choice === 'hand') {
       applyTrickOnHand(g, info);
     } else {
       applyTrickOnEquip(g, info, choice);
     }
 
-    g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' '+ (choice==='hand'?'一张手牌':'的装备【'+(target.equips[choice]?.name||choice)+'】'));
+    g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' '+ (choice==='hand'?'一张手牌':'的装备【'+(discardedEquipName||choice)+'】'));
     markSkillSound(g, '猛进');
 
     if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'shaOffset', from, to, sourceCard}; return g; } // 旋风挂起,保留
