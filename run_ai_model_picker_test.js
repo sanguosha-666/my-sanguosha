@@ -396,29 +396,35 @@ const testCode = String.raw`
   });
 
   // ---- D3:AI_DEFAULT_MODEL 单源 —— defaultModel 字段 + buildRequest 缺省用 defaultModel ----
-  await check('D3-1. 六家 PROVIDER_ADAPTERS.defaultModel 与既有默认档位一致', async function(){
+  await check('D3-1. 七家 PROVIDER_ADAPTERS.defaultModel 与既有默认档位一致', async function(){
     if(PROVIDER_ADAPTERS.claude.defaultModel !== 'claude-haiku-4-5-20251001') throw new Error('claude.defaultModel 应为 claude-haiku-4-5-20251001,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.claude.defaultModel));
     if(PROVIDER_ADAPTERS.openrouter.defaultModel !== 'openai/gpt-4o-mini') throw new Error('openrouter.defaultModel 应为 openai/gpt-4o-mini,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.openrouter.defaultModel));
     if(PROVIDER_ADAPTERS.groq.defaultModel !== 'groq/compound') throw new Error('groq.defaultModel 应为 groq/compound,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.groq.defaultModel));
     if(PROVIDER_ADAPTERS.hf.defaultModel !== 'openai/gpt-oss-120b') throw new Error('hf.defaultModel 应为 openai/gpt-oss-120b,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.hf.defaultModel));
     if(PROVIDER_ADAPTERS.cohere.defaultModel !== 'command-a-03-2025') throw new Error('cohere.defaultModel 应为 command-a-03-2025,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.cohere.defaultModel));
     if(PROVIDER_ADAPTERS.cerebras.defaultModel !== 'gpt-oss-120b') throw new Error('cerebras.defaultModel 应为 gpt-oss-120b,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.cerebras.defaultModel));
+    if(PROVIDER_ADAPTERS.tri.defaultModel !== 'cerebras:zai-glm-4.7') throw new Error('tri.defaultModel 应为 cerebras:zai-glm-4.7,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.tri.defaultModel));
   });
 
   // D3-2. AI_DEFAULT_MODEL 派生自 adapters(单源,不再各自写死)
-  await check('D3-2. AI_DEFAULT_MODEL 六家均派生自 PROVIDER_ADAPTERS.defaultModel', async function(){
-    ['claude','openrouter','groq','hf','cohere','cerebras'].forEach(function(p){
+  await check('D3-2. AI_DEFAULT_MODEL 七家均派生自 PROVIDER_ADAPTERS.defaultModel', async function(){
+    ['claude','openrouter','groq','hf','cohere','cerebras','tri'].forEach(function(p){
       if(AI_DEFAULT_MODEL[p] !== PROVIDER_ADAPTERS[p].defaultModel) throw new Error('AI_DEFAULT_MODEL.'+p+' 应等于 PROVIDER_ADAPTERS.'+p+'.defaultModel,实际 ' + JSON.stringify(AI_DEFAULT_MODEL[p]) + ' vs ' + JSON.stringify(PROVIDER_ADAPTERS[p].defaultModel));
     });
   });
 
   // D3-3. buildRequest 缺省 model 时 body.model === defaultModel(行为与旧硬编码等价)
+  //      tri 不直接构造请求(callAI 分发),单独断言其 buildRequest 抛错
   await check('D3-3. buildRequest 无 opts.model 时 body.model === defaultModel', async function(){
     ['claude','openrouter','groq','hf','cohere','cerebras'].forEach(function(p){
       var req = PROVIDER_ADAPTERS[p].buildRequest('k', { userPrompt:'hi' });
       var body = JSON.parse(req.body);
       if(body.model !== PROVIDER_ADAPTERS[p].defaultModel) throw new Error(p+' 缺省 model 应为 '+PROVIDER_ADAPTERS[p].defaultModel+',实际 ' + JSON.stringify(body.model));
     });
+    // tri:无独立请求构造,必须经 callAI 分发——buildRequest 应抛错
+    var triThrew = false;
+    try { PROVIDER_ADAPTERS.tri.buildRequest('k', { userPrompt:'hi' }); } catch(e){ triThrew = true; }
+    if(!triThrew) throw new Error('tri.buildRequest 应抛错(必须经 callAI 分发)');
   });
 
   // D3-4. 显式 opts.model 仍优先(回归:行为不变)

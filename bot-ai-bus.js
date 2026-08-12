@@ -274,10 +274,10 @@ async function callAiChooseIndex(opts){
     userPromptText = buildAutopilotUserPrompt(opts.userPrompt);
     aiTestLastCall = { prompt: sysText + '\n\n' + userPromptText, rawResponse: null };
   }
-  // 轮换模式判定:groq/hf/cerebras 且走多选轮换(aiApiModel 为空 = 不是手动单选)。
-  // 这三种场景才有"换下一个模型"可言;手动单选/非轮换 provider 重试只会打同一个模型,
-  // 维持单次。groq/cerebras 是 round-robin、hf 是优先级扫描,统一在这里进重试循环。
-  const rotating = (aiProvider==='groq'||aiProvider==='hf'||aiProvider==='cerebras')
+  // 轮换模式判定:groq/hf/cerebras/tri 且走多选轮换(aiApiModel 为空 = 不是手动单选)。
+  // 这四种场景才有"换下一个模型"可言;手动单选/非轮换 provider 重试只会打同一个模型,
+  // 维持单次。groq/cerebras 是 round-robin、hf/tri 是优先级扫描,统一在这里进重试循环。
+  const rotating = (aiProvider==='groq'||aiProvider==='hf'||aiProvider==='cerebras'||aiProvider==='tri')
     && !(typeof aiApiModel==='string' && aiApiModel)
     && Array.isArray(aiApiModels) && aiApiModels.length>0;
   showAiThinkingIndicator(g, seat);
