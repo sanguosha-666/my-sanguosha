@@ -782,7 +782,32 @@ const modelListCache = {};
 // null = 失败(不抛异常,与 callAI 同约定)。超时复用 AI_CALL_TIMEOUT_MS 的 15s
 // AbortController 竞速模式。成功后结果写进 modelListCache,同 provider 第二次调用
 // 直接命中缓存不再发请求。
+// fetchTriModels:tri 三密钥模式的模型列表——拆三段密钥,并发拉三家各自的模型列表
+// (复用 fetchProviderModels 各自逻辑/缓存),合并成一个池,条目 id 加 `provider:` 前缀
+// (与 callAI 分发层/triProviderOf/resolveAiModel 的格式约定一致,如 cerebras:zai-glm-4.7)。
+// 任何一家失败返回空数组也不影响其它两家(合并结果可能有缺,但优于整体回退静态表)。
+function fetchTriModels(apiKey){
+  const seg = String(apiKey||'').split('/').map(function(s){ return s.trim(); });
+  // 固定顺序:cohere 密钥/groq 密钥/cerebras 密钥(与 detectAiProvider 的拆段约定一致)
+  const subs = [ ['cohere', seg[0]], ['groq', seg[1]], ['cerebras', seg[2]] ];
+  return Promise.all(subs.map(function(pair){
+    return fetchProviderModels(pair[0], pair[1]).then(function(list){
+      return { prov: pair[0], list: list || [] };
+    });
+  })).then(function(results){
+    const out = [];
+    results.forEach(function(r){
+      r.list.forEach(function(m){
+        out.push({ id: r.prov + ':' + m.id, label: (HF_PROVIDER_LABEL[r.prov] || r.prov) + ': ' + (m.label || m.id) });
+      });
+    });
+    if(out.length) modelListCache.tri = { models: out, ts: Date.now() };
+    return out;
+  });
+}
+
 function fetchProviderModels(provider, apiKey){
+  if(provider==='tri') return fetchTriModels(apiKey);
   const cached = modelListCache[provider];
   if(cached) return Promise.resolve(cached.models);
   const spec = MODEL_LIST_API[provider];
