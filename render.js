@@ -69,10 +69,7 @@ const SKILL_PINYIN = {
   '巨象':'juxiang', '烈刃':'lieRen',
   '明策':'mingce', '智迟':'zhichi',
   '旋风':'xuanfeng',
-  '短兵':'duanbing',
-  '奋迅':'fenxun',
-  '恩怨':'enyuan',
-  '眩惑':'huanhuo',
+  // 短兵、奋迅、恩怨、眩惑的音频资源当前为空文件，补齐资源前不注册播放。
   '无言':'wuyan', '举荐':'jujian',
   '将驰':'jiangchi',
   '落英':'luoying', '酒诗':'jiushi'
