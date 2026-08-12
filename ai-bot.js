@@ -387,7 +387,7 @@ const PROVIDER_ADAPTERS = {
     // 过期),不是持续免费层——接入是满足"直连吃额度"的需求,实际是计费 API。已实测
     // CORS preflight 返回 200+ACAO:*(2026-08-11);成功路径有第三方生产实证(Big-AGI
     // 默认开启浏览器直连),真 key 复核过可用。OpenAI 兼容格式,适配器结构与 groq 一致。
-    label: 'Cerebras(计费·$5一次性)',
+    label: 'Cerebras(直连)',
     defaultModel: 'gpt-oss-120b',
     endpoint: 'https://api.cerebras.ai/v1/chat/completions',
     buildRequest(apiKey, opts){
@@ -473,7 +473,7 @@ const AI_MODEL_OPTIONS = {
     { id: 'command-r7b-12-2024', label: 'Command R7B(更快更省)' },
   ],
   cerebras: [
-    // Cerebras 直连(计费,$5一次性额度)。模型名实测自 /public/v1/models(2026-08-11)。
+    // Cerebras 直连。模型名实测自 /public/v1/models(2026-08-11)。
     { id: 'gpt-oss-120b', label: 'GPT-OSS 120B(默认)' },
     { id: 'zai-glm-4.7', label: 'GLM-4.7' },
     { id: 'gemma-4-31b', label: 'Gemma 4 31B' },
