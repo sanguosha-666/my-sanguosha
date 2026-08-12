@@ -147,6 +147,9 @@ function qiXi(cardIdx, targetSeat){
     if(!isBlack) return g;
     const target=g.players[targetSeat];
     if(targetSeat===mySeat || !target || !target.alive) return g;
+    const trickCard={...card, name:'过河拆桥', originalName:card.name};
+    const spec=CARD_PLAYS['过河拆桥'];
+    if(!spec || (spec.canTarget && !spec.canTarget(g,me,trickCard,targetSeat))) return g;
     const hasTargetCard = (target.hand||[]).length>0
       || EQUIP_SLOTS.some(s=>target.equips && target.equips[s])
       || (target.delays||[]).length>0;
