@@ -2748,23 +2748,13 @@ const CARD_PLAYS = {
       if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
       
       // 袁术【同疾】(锁定技):若袁术的手牌数大于体力值,且使用者在袁术的攻击范围内,只能选择袁术为目标
-      const yuanshuSeat = findPlayerWithCap(g, 'tongji');
-      if(yuanshuSeat !== null) {
-        const yuanshu = g.players[yuanshuSeat];
-        if(yuanshu && yuanshu.alive && yuanshuSeat !== mySeat) {
-          const handCount = (yuanshu.hand || []).length;
-          const hp = yuanshu.hp || 0;
-          if(handCount > hp) {
-            const dist = distance(g, mySeat, yuanshuSeat);
-            const range = attackRange(g, mySeat);
-            if(dist <= range) {
-              // 使用者在袁术的攻击范围内,只能选择袁术为目标
-              if(targetSeat !== yuanshuSeat) {
-                return false;
-              }
-            }
-          }
-        }
+      for(let tongjiSeat=0;tongjiSeat<g.players.length;tongjiSeat++){
+        const owner=g.players[tongjiSeat];
+        if(!owner || !owner.alive || tongjiSeat===mySeat || !hasCap(owner,'tongji')) continue;
+        if((owner.hand||[]).length<=owner.hp) continue;
+        // 正式条件是“使用者在【同疾】拥有者的攻击范围内”，因此距离/范围从拥有者视角计算；
+        // 每个满足条件的拥有者都形成独立限制，不能只取玩家数组里的第一人。
+        if(distance(g,tongjiSeat,mySeat)<=attackRange(g,tongjiSeat) && targetSeat!==tongjiSeat) return false;
       }
       
       // 太史慈【天义】:天义赢时无距离限制
