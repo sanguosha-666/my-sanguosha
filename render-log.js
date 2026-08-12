@@ -29,6 +29,17 @@ let lastToastedSeq = undefined;
 // 沿用正文默认文字色(暗色主题下强行标"黑色"对比度反而不够,不如不处理)。
 const SUIT_COLOR = { '♥':'var(--cinnabar-bright)', '♦':'var(--cinnabar-bright)' };
 
+// 无懈逐个轮询的 asking 属于内部调度信息。共享日志保留原始文本供结算/诊断使用，
+// 但所有客户端在展示日志或 toast 时统一隐藏当前被询问者姓名；本人仍由 controls banner
+// 显示具体操作提示和按钮，不依赖这条日志。
+function hideWuxiePollingPlayer(text){
+  if(typeof text!=='string') return text;
+  if(/^询问 .+ 是否(?:使用|反制)【无懈可击】…$/.test(text)){
+    return '等待其他玩家响应【无懈可击】…';
+  }
+  return text;
+}
+
 // colorizeSuits: 对一段"确定没有被姓名替换占用"的纯文本,逐字符扫描,给花色符号包色、
 // 其余字符正常转义。只处理未被姓名匹配占用的片段,不会和 formatLogEntry 的姓名替换重叠处理。
 function colorizeSuits(segment){
@@ -47,6 +58,7 @@ function colorizeSuits(segment){
 // 占坑、最后一次性拼出HTML"写法,避免嵌套/重叠替换,同时保证姓名区间不会被花色染色重复处理
 // (colorizeSuits 只作用于姓名匹配之间/之外的剩余片段)。
 function formatLogEntry(g, text){
+  text = hideWuxiePollingPlayer(text);
   const entries = (g.players||[]).map((p,i)=>({i,p}))
     .filter(o=>o.p && o.p.name)
     .map(o=>Object.assign(o, {label:getPlayerDisplayLabel(g, o.p)}))
