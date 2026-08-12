@@ -41,6 +41,29 @@ async function check(name, fn){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
+  // 0b2. cerebras 默认勾选:3 个模型全部(round-robin 轮换,用户指定像 groq 那样)
+  await check('默认勾选: cerebras 3模型全部', function(){
+    const d = vm.runInContext('DEFAULT_CEREBRAS_MODELS', sandbox);
+    if(!d || d.length!==3) throw new Error('应3个,实际 '+(d&&d.length));
+    ['zai-glm-4.7','gpt-oss-120b','gemma-4-31b'].forEach(function(m){
+      if(d.indexOf(m)<0) throw new Error('缺 '+m);
+    });
+  });
+  // 0c2. resolveAiModel: cerebras 走 round-robin(和 groq 同一套)
+  await check('resolveAiModel: cerebras 多选轮换顺序(round-robin)', function(){
+    vm.runInContext('aiProvider="cerebras"; aiApiModel=""; aiApiModels=["zai-glm-4.7","gpt-oss-120b","gemma-4-31b"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
+    const r1 = vm.runInContext('resolveAiModel', sandbox)('cerebras');
+    const r2 = vm.runInContext('resolveAiModel', sandbox)('cerebras');
+    const r3 = vm.runInContext('resolveAiModel', sandbox)('cerebras');
+    if(r1!=='zai-glm-4.7' || r2!=='gpt-oss-120b' || r3!=='gemma-4-31b')
+      throw new Error('cerebras轮换顺序错: '+r1+'/'+r2+'/'+r3);
+  });
+  // 0c3. resolveAiModel: cerebras 冷却跳过 → round-robin 指针到下一个
+  await check('resolveAiModel: cerebras 冷却中模型跳过', function(){
+    vm.runInContext('aiProvider="cerebras"; aiApiModel=""; aiApiModels=["zai-glm-4.7","gpt-oss-120b","gemma-4-31b"]; _modelRotateIdx=0; _modelCooldowns={"zai-glm-4.7": Date.now()+99999};', sandbox);
+    const r = vm.runInContext('resolveAiModel', sandbox)('cerebras');
+    if(r!=='gpt-oss-120b') throw new Error('冷却中的zai-glm-4.7应跳过选gpt-oss-120b,实际 '+r);
+  });
   // 0c. resolveAiModel: hf 走 provider 优先级(cerebras>groq>cohere),每次从头选最高优先级
   await check('resolveAiModel: hf 优先cerebras再groq再cohere', function(){
     vm.runInContext('aiProvider="hf"; aiApiModel=""; aiApiModels=["openai/gpt-oss-120b:groq","CohereLabs/c4ai-command-a-03-2025:cohere","openai/gpt-oss-120b:cerebras"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);

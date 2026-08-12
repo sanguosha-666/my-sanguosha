@@ -87,6 +87,9 @@ const DEFAULT_HF_MODELS = [
   'zai-org/GLM-4.7:cerebras',
   'CohereLabs/command-a-reasoning-08-2025:cohere',
 ];
+// 默认勾选(cerebras 直连:3 个模型全部勾选,round-robin + 429 冷却自动换下一个——
+// cerebras 免费层 RPM 5/分钟极易 429,多模型轮换分散请求,用户指定 2026-08-11 "像 groq 那样")。
+const DEFAULT_CEREBRAS_MODELS = ['zai-glm-4.7','gpt-oss-120b','gemma-4-31b'];
 let aiApiModels = [];
 let _modelRotateIdx = 0;          // round-robin 指针
 let _modelCooldowns = {};         // modelId → retryAt(时间戳);会话内有效,不持久化
@@ -109,14 +112,13 @@ function hfProviderOf(modelId){
   const idx = String(modelId||'').lastIndexOf(':');
   return idx>=0 ? String(modelId).slice(idx+1) : '';
 }
-// resolveAiModel:轮换选模型。非groq/hf/无多选/手动单选 → aiApiModel||undefined(零变化)。
-// groq 与 hf 都走多选,但策略不同:groq 是"免费层各模型独立配额池"用 round-robin 均匀
-// 分散绕过 TPD/TPM 墙;hf 是"用户在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,
-// 按用户指定的 provider 优先级选模型条目"(条目 id 自带 :provider 后缀,选谁就等于路由
-// 到谁,HF 服务端自动换 custom key)。hf 不用 round-robin——用户要求固定优先级,
-// 冷却降级天然实现"cerebras 挂了才用 groq、再挂才用 cohere"。
+// resolveAiModel:轮换选模型。非groq/hf/cerebras/无多选/手动单选 → aiApiModel||undefined(零变化)。
+// groq 与 cerebras 走同一套 round-robin:groq 是"免费层各模型独立配额池"均匀分散绕过
+// TPD/TPM 墙,cerebras 是"3 个模型(RPM 5/分钟 太容易 429)轮换 + 429 冷却自动换下一个"
+// (用户指定 2026-08-11,像 groq 那样)。hf 是"用户指定 provider 优先级"——固定顺序扫描,
+// 不是 round-robin,见 HF_PROVIDER_PRIORITY。
 function resolveAiModel(provider){
-  if(provider!=='groq' && provider!=='hf') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
+  if(provider!=='groq' && provider!=='hf' && provider!=='cerebras') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
   if(typeof aiApiModel==='string' && aiApiModel) return aiApiModel;   // 手动单选优先
   const list = (Array.isArray(aiApiModels) && aiApiModels.length) ? aiApiModels : null;
   if(!list) return undefined;
@@ -137,7 +139,7 @@ function resolveAiModel(provider){
     // 全部冷却中 → 返回空串哨兵:调用点据此短路,不再发起注定失败的请求
     return '';
   }
-  // groq:round-robin(免费层独立池,均匀分散)
+  // groq/cerebras:round-robin(免费层独立池 / RPM 易 429 的多模型池,均匀分散)
   for(let i=0;i<list.length;i++){
     const idx = (_modelRotateIdx + i) % list.length;
     const model = list[idx];
@@ -168,13 +170,16 @@ let aiTestAutopilotDisconnectRef = null;
       if(!Array.isArray(aiApiModels)) aiApiModels = [];
     }catch(e){ aiApiModels = []; }
     // 【多模型轮换】groq 密钥下若用户从未配置过多选,默认勾选 DEFAULT_GROQ_MODELS;
-    // hf 密钥下默认勾选 DEFAULT_HF_MODELS(三家各一,走 custom key 轮换)。
+    // hf 密钥下默认勾选 DEFAULT_HF_MODELS;cerebras 密钥下默认勾选 DEFAULT_CEREBRAS_MODELS。
     // 都只在内存生效、不写 sessionStorage——默认值随列表改动自动跟进,见 renderModelPicker。
     if(aiProvider==='groq' && aiApiModels.length===0){
       aiApiModels = DEFAULT_GROQ_MODELS.slice();
     }
     if(aiProvider==='hf' && aiApiModels.length===0){
       aiApiModels = DEFAULT_HF_MODELS.slice();
+    }
+    if(aiProvider==='cerebras' && aiApiModels.length===0){
+      aiApiModels = DEFAULT_CEREBRAS_MODELS.slice();
     }
   }catch(e){
     // 隐私模式等场景下 sessionStorage 可能整体不可用——静默回退到空值,不影响
@@ -929,12 +934,15 @@ function showAiKeyModal(onDone){
     if(!aiProvider) return;
     const provider = aiProvider;
     // 【多模型轮换】groq 密钥下默认勾选免费层模型、hf 密钥下默认勾选三家 custom key
-    // 模型(用户从未配置过多选时自动填入,只在内存生效、不写 sessionStorage——默认值随
-    // DEFAULT_GROQ_MODELS/DEFAULT_HF_MODELS 改动自动跟进;用户主动勾选/取消勾选时由
-    // onPick → persistAiState 持久化真实选择)。
+    // 模型、cerebras 密钥下默认勾选全部 3 个模型(用户从未配置过多选时自动填入,只在
+    // 内存生效、不写 sessionStorage——默认值随 DEFAULT_GROQ_MODELS/DEFAULT_HF_MODELS/
+    // DEFAULT_CEREBRAS_MODELS 改动自动跟进;用户主动勾选/取消勾选时由 onPick →
+    // persistAiState 持久化真实选择)。
     // 用户全部取消勾选后 aiApiModels 为空,下次进设置会恢复默认勾选——想彻底不用轮换
     // 可用自定义入口写手动单选(aiApiModel,优先级高于多选,见 resolveAiModel)。
-    const defaultModels = (provider==='groq') ? DEFAULT_GROQ_MODELS : (provider==='hf' ? DEFAULT_HF_MODELS : null);
+    const defaultModels = (provider==='groq') ? DEFAULT_GROQ_MODELS
+      : (provider==='hf') ? DEFAULT_HF_MODELS
+      : (provider==='cerebras') ? DEFAULT_CEREBRAS_MODELS : null;
     if(defaultModels && (!Array.isArray(aiApiModels) || aiApiModels.length===0)){
       aiApiModels = defaultModels.slice();
     }
@@ -950,7 +958,7 @@ function showAiKeyModal(onDone){
     statusNote.style.cssText = 'margin-top:4px;';
     modelWrap.appendChild(statusNote);
 
-    const isRotating = (provider==='groq' || provider==='hf');
+    const isRotating = (provider==='groq' || provider==='hf' || provider==='cerebras');
     function applyList(list, fromFallback){
       statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型')
         + (isRotating ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入;自定义输入会退出轮换(点勾选恢复)' : '');
