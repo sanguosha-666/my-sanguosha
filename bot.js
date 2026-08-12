@@ -842,13 +842,20 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     players: (g.players||[]).map((p,i)=>{
       if(!p) return null;
       const knownRole = botKnownRole(g, seat, i);
+      if(!p.alive){
+        return {
+          seat: i,
+          name: p.name,
+          knownRole: knownRole,
+          deadRole: g.gameMode==='identity' ? knownRole : undefined
+        };
+      }
       return {
         seat: i, name: p.name, isSelf: i===seat, alive: p.alive,
         hp: p.hp, maxHp: p.maxHp,
         handCount: (p.hand||[]).length, // 只给张数,不给内容
         equips: botPublicEquipsView(p), delays: botPublicDelaysView(p),
         knownRole: knownRole, // 复用既有的安全揭示逻辑,不知道就是 null
-        deadRole: !p.alive && g.gameMode==='identity' ? knownRole : undefined, // 已死玩家的身份
         team: Number.isInteger(p.team) ? p.team : null, // 队伍公开信息(组队模式);非team恒null
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
         generalSkill: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].skill||'') : undefined, // 武将技能常开(公开信息)

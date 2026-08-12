@@ -201,6 +201,22 @@ const testCode = String.raw`
     }
   });
 
+  await check('已死亡角色只保留身份识别字段', function(){
+    var g = mkIdentityG();
+    g.players[1].alive = false;
+    g.players[1].roleRevealed = true;
+    g.players[1].hand = [{ name:'桃' }, { name:'闪' }];
+    g.players[1].equips = { weapon:{ name:'青釭剑' } };
+    var dead = buildBotVisibleState(g, 0).players[1];
+    var keys = Object.keys(dead).sort();
+    var expected = ['deadRole','knownRole','name','seat'];
+    if(JSON.stringify(keys) !== JSON.stringify(expected)) throw new Error('死亡角色字段未精简: ' + JSON.stringify(keys));
+    if(dead.general !== undefined || dead.generalSkill !== undefined || dead.generalDesc !== undefined ||
+       dead.equips !== undefined || dead.handCount !== undefined){
+      throw new Error('死亡角色仍包含无用详情: ' + JSON.stringify(dead));
+    }
+  });
+
   // 2. 不传第三参(或显式 false)也有 skill —— 证明不依赖 isFirstTurn
   await check('不传第三参 generalSkill 仍存在(isFirstTurn 无关)', function(){
     var g = mkG();
