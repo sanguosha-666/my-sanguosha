@@ -937,6 +937,11 @@ function normalize(g){
       g.pendingHookQueue=null;
     }
   }
+  if(g.beigeQueue===undefined) g.beigeQueue=null;
+  if(g.beigeQueue && (!Array.isArray(g.beigeQueue.candidates) || !Number.isInteger(g.beigeQueue.index) ||
+      !Number.isInteger(g.beigeQueue.damagedSeat))){
+    g.beigeQueue=null;
+  }
   if(g.afterDamageEffects){
     const q=g.afterDamageEffects;
     if(!Number.isInteger(q.seat) || !g.players[q.seat] || !g.players[q.seat].alive ||
@@ -3911,15 +3916,14 @@ function continueAfterDamageEffects(g){
         g.log=pushLog(g.log,p.name+' 受到伤害，可发动【称象】');
       }
     }else if(action==='beige' && q.srcType==='sha'){
+      const candidates=[];
       for(let i=0;i<g.players.length;i++){
         const beigeP=g.players[i];
-        if(beigeP&&beigeP.alive&&hasCap(beigeP,'beige')&&i!==q.seat){
-          g.pending={type:'beigeChoose',sourceSeat:i,damagedSeat:q.seat,damageSource:q.sourceSeat,reason:q.reason};
-          g.phase='beigeChoose';
-          g.log=pushLog(g.log,beigeP.name+' 可以发动【悲歌】,是否弃置一张牌令 '+p.name+' 进行判定?');
-          markSkillSound(g,'悲歌');
-          break;
-        }
+        if(beigeP&&beigeP.alive&&hasCap(beigeP,'beige')&&i!==q.seat&&beigeCanDiscard(beigeP)) candidates.push(i);
+      }
+      if(candidates.length){
+        g.beigeQueue={candidates,index:0,damagedSeat:q.seat,damageSource:q.sourceSeat,reason:q.reason};
+        startNextBeigeOwner(g);
       }
     }
     if(g.pending!==pendingBefore && g.pending){
@@ -7057,6 +7061,33 @@ function isNormalTacticsCard(card) {
 
 // ===================== 蔡文姬技能实现 =====================
 
+function beigeCanDiscard(p){
+  return !!(p && ((p.hand||[]).length || EQUIP_SLOTS.some(slot=>p.equips&&p.equips[slot])));
+}
+function startNextBeigeOwner(g){
+  const q=g.beigeQueue;
+  if(!q) return false;
+  while(q.index<q.candidates.length){
+    const sourceSeat=q.candidates[q.index++];
+    const source=g.players[sourceSeat], damaged=g.players[q.damagedSeat];
+    if(!source||!source.alive||!damaged||!damaged.alive||!hasCap(source,'beige')||!beigeCanDiscard(source)) continue;
+    g.pending={type:'beigeChoose',sourceSeat,damagedSeat:q.damagedSeat,damageSource:q.damageSource,reason:q.reason,
+      resume:{type:'afterDamageEffects'}};
+    g.phase='beigeChoose';
+    g.log=pushLog(g.log,source.name+' 可以发动【悲歌】,是否弃置一张牌令 '+damaged.name+' 进行判定?');
+    return true;
+  }
+  g.beigeQueue=null;
+  return false;
+}
+function continueBeigeOwners(g){
+  const q=g.beigeQueue;
+  const damagedSeat=q&&q.damagedSeat;
+  g.pending=null;
+  if(startNextBeigeOwner(g)) return;
+  resumeAfterInterrupt(g,{type:'afterDamageEffects'},damagedSeat);
+}
+
 // 悲歌选择是否发动
 function triggerBeige(doTrigger) {
   tx(g => {
@@ -7065,9 +7096,8 @@ function triggerBeige(doTrigger) {
     
     if (!doTrigger) {
       // 不发动
-      g.pending = null;
-      g.phase = 'play';
       g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【悲歌】');
+      continueBeigeOwners(g);
       return g;
     }
     
@@ -7076,8 +7106,7 @@ function triggerBeige(doTrigger) {
     const damageSource = pending.damageSource;
     
     if (!source || !source.alive || !g.players[damagedSeat] || !g.players[damagedSeat].alive) {
-      g.pending = null;
-      g.phase = 'play';
+      continueBeigeOwners(g);
       return g;
     }
     
@@ -7087,8 +7116,7 @@ function triggerBeige(doTrigger) {
     
     if (!canDiscard) {
       g.log = pushLog(g.log, source.name + ' 没有牌可以弃置,无法发动【悲歌】');
-      g.pending = null;
-      g.phase = 'play';
+      continueBeigeOwners(g);
       return g;
     }
     
@@ -7118,8 +7146,7 @@ function beigeDiscard(cardIndex, isEquip, equipType) {
     const damageSource = pending.damageSource;
     
     if (!source || !source.alive || !g.players[damagedSeat] || !g.players[damagedSeat].alive) {
-      g.pending = null;
-      g.phase = 'play';
+      continueBeigeOwners(g);
       return g;
     }
     
@@ -7141,14 +7168,13 @@ function beigeDiscard(cardIndex, isEquip, equipType) {
     
     if (!discardedCard) {
       g.log = pushLog(g.log, source.name + ' 弃牌失败');
-      g.pending = null;
-      g.phase = 'play';
+      continueBeigeOwners(g);
       return g;
     }
     
     // 弃置牌到弃牌堆
     g.discard.push(discardedCard);
-    markDiscardReveal(g, sourceSeat, [discardedCard]);
+    markDiscardReveal(g, mySeat, [discardedCard]);
     g.log = pushLog(g.log, source.name + ' 弃置了【' + discardedCard.name + '】');
     
     // 进入判定阶段
@@ -7177,16 +7203,14 @@ function doBeigeJudge() {
     const damaged = g.players[damagedSeat];
     
     if (!source || !source.alive || !damaged || !damaged.alive) {
-      g.pending = null;
-      g.phase = 'play';
+      continueBeigeOwners(g);
       return g;
     }
     
     // 进行判定
     const judgeCard = judge(g);
     if(!judgeCard) {
-      g.pending = null;
-      g.phase = 'play';
+      continueBeigeOwners(g);
       return g;
     }
     
@@ -7215,8 +7239,7 @@ function processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSo
   const damaged = g.players[damagedSeat];
 
   if (!damaged || !damaged.alive) {
-    g.pending = null;
-    g.phase = 'play';
+    continueBeigeOwners(g);
     return g;
   }
 
@@ -7272,9 +7295,8 @@ function processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSo
       break;
   }
 
-  // 清理状态
-  g.pending = null;
-  g.phase = 'play';
+  // 当前拥有者结算完成后继续询问下一名悲歌拥有者；全部问完才恢复伤害后队列。
+  continueBeigeOwners(g);
 
   return g;
 }
@@ -7286,9 +7308,8 @@ function cancelBeige() {
                       g.pending.type === 'beigeDiscard' || 
                       g.pending.type === 'beigeJudge') &&
         g.pending.sourceSeat === mySeat) {
-      g.pending = null;
-      g.phase = 'play';
       g.log = pushLog(g.log, g.players[mySeat].name + ' 取消发动【悲歌】');
+      continueBeigeOwners(g);
     }
     return g;
   });
