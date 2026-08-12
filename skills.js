@@ -168,10 +168,12 @@ function guoSe(cardIdx, targetSeat){
     if(!card || card.suit!=='♦') return g;
     const target=g.players[targetSeat];
     if(targetSeat===mySeat || !target || !target.alive) return g;
-    target.delays = target.delays || [];
-    if(target.delays.some(c=>c && c.name==='乐不思蜀')) return g;
-    me.hand.splice(cardIdx,1);
     const trickCard={...card, name:'乐不思蜀', originalName:card.name};
+    // 国色只是改变牌名，目标合法性仍必须与真正的【乐不思蜀】完全一致。
+    // 统一复用 CARD_PLAYS，避免绕过【谦逊】、【帷幕】和判定区同名牌限制。
+    const spec=CARD_PLAYS['乐不思蜀'];
+    if(!spec || (spec.canTarget && !spec.canTarget(g,me,trickCard,targetSeat))) return g;
+    me.hand.splice(cardIdx,1);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【乐不思蜀】使用,发动【国色】,目标 '+target.name);
     markSkillSound(g, '国色');
     markCardSound(g, '乐不思蜀', mySeat, card, targetSeat);
