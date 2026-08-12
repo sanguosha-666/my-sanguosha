@@ -1549,6 +1549,18 @@ function markCardSound(g, cardName, seat, card, targets){
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
   g.exchangeCards.push({ name: cardName, seq: seq+1, seat: (Number.isInteger(seat) ? seat : null), card: card || null, targets: normTargets });
 }
+// markDiscardReveal: 只由业务上明确发生且允许公开的“弃置”入口调用。
+// 弃牌堆只是牌的去向，判定牌、使用/打出的牌、延时锦囊离场等均不得调用本函数。
+// 事件保留最近20条，seq 单调递增，支持同一事务内连续发生多个独立弃置动作。
+function markDiscardReveal(g, seat, cards){
+  const list=(Array.isArray(cards)?cards:[cards]).filter(Boolean);
+  if(list.length===0) return;
+  const seq=Number.isInteger(g.discardRevealSeq)?g.discardRevealSeq+1:1;
+  g.discardRevealSeq=seq;
+  if(!Array.isArray(g.discardRevealEvents)) g.discardRevealEvents=[];
+  g.discardRevealEvents.push({seq,seat:Number.isInteger(seat)?seat:null,cards:list});
+  if(g.discardRevealEvents.length>20) g.discardRevealEvents=g.discardRevealEvents.slice(-20);
+}
 // markSkillSound: 和 markCardSound 同一模式,独立字段(lastSkillSound),记录"这次真正发动了
 // 哪个技能"这个语音播放事件,供 render.js 的 maybePlaySkillSound 检测并播放对应语音
 // (assets/audio/{SKILL_PINYIN拼音}.mp3)。只在"确认真的发动/生效"的分支调用,不在"仅仅有
@@ -3731,6 +3743,7 @@ function respondLiuli(choice, newTargetSeat){
       g.discard.push(discarded);
       triggerHook(g, to, 'onLoseEquip', {count:1});
     } else return g;
+    markDiscardReveal(g, to, [discarded]);
     g.log=pushLog(g.log, me.name+' 弃置【'+discarded.name+'】发动【流离】,将此【杀】转移给 '+newTarget.name);
     markSkillSound(g, '流离');
     resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard);
@@ -3754,6 +3767,7 @@ function qiaobianDeclare(cardIdx, phaseChoice){
     if(!card) return g;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     const phaseLabel={judge:'判定阶段',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段'}[phaseChoice];
     g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【巧变】,跳过'+phaseLabel);
     g.pending=null;
@@ -4749,7 +4763,9 @@ function respondGanglieChoice(action, picks){
       if(!Array.isArray(picks) || picks.length!==2 || new Set(picks).size!==2 || (source.hand||[]).length<2) return g;
       const idxs=picks.map(x=>Number(x));
       if(idxs.some(x=>!Number.isInteger(x) || x<0 || x>=source.hand.length)) return g;
-      idxs.sort((a,b)=>b-a).forEach(idx=>g.discard.push(source.hand.splice(idx,1)[0]));
+      const discarded=idxs.sort((a,b)=>b-a).map(idx=>source.hand.splice(idx,1)[0]);
+      g.discard.push(...discarded);
+      markDiscardReveal(g, sourceSeat, discarded);
       g.log=pushLog(g.log, source.name+' 弃置2张手牌,抵消【刚烈】伤害');
       finishGanglie(g, resume, seat);
       return g;
@@ -4908,7 +4924,9 @@ function applyIdentityKillReward(g, victimSeat, killerSeat){
     return;
   }
   if(victim.role==='zhong' && killer.role==='zhu'){
+    const punishedCards = [];
     if((killer.hand||[]).length){
+      punishedCards.push(...killer.hand);
       g.discard.push(...killer.hand);
       killer.hand = [];
     }
@@ -4916,11 +4934,13 @@ function applyIdentityKillReward(g, victimSeat, killerSeat){
     EQUIP_SLOTS.forEach(s=>{
       const card = killer.equips && killer.equips[s];
       if(card){
+        punishedCards.push(card);
         g.discard.push(card);
         killer.equips[s] = null;
         lost++;
       }
     });
+    markDiscardReveal(g, killerSeat, punishedCards);
     // 判定区保留 — 不碰 killer.delays
     if(lost) triggerHook(g, killerSeat, 'onLoseEquip', {count:lost});
     g.log = pushLog(g.log, killer.name+' 误杀忠臣，弃置所有手牌和装备');
@@ -5339,7 +5359,7 @@ function applyTrickOnHand(g, info){
   const j=Math.floor(Math.random()*tgt.hand.length);
   const card=tgt.hand.splice(j,1)[0];
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 从 '+tgt.name+' 拿走一张手牌'); }
-  else { g.discard.push(card); g.log=pushLog(g.log, me.name+' 弃掉 '+tgt.name+' 一张手牌'); }
+  else { g.discard.push(card); markDiscardReveal(g, info.to, [card]); g.log=pushLog(g.log, me.name+' 弃掉 '+tgt.name+' 一张手牌'); }
 }
 // applyTrickOnEquip: 拿/拆目标某槽装备。装备是公开信息 -> 日志写明牌名。顺手获得的装备进使用者手牌。
 function applyTrickOnEquip(g, info, slot){
@@ -5347,7 +5367,7 @@ function applyTrickOnEquip(g, info, slot){
   const card=tgt.equips[slot]; if(!card) return;
   tgt.equips[slot]=null;
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 顺走 '+tgt.name+' 的装备【'+card.name+'】'); }
-  else { g.discard.push(card); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 的装备【'+card.name+'】'); }
+  else { g.discard.push(card); markDiscardReveal(g, info.to, [card]); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 的装备【'+card.name+'】'); }
   // 失主(info.to)的装备离开装备区 → 触发失去装备钩子(如孙尚香【枭姬】)。顺手/拆桥单次仅动一槽,恒失去 1 张。
   triggerHook(g, info.to, 'onLoseEquip', { count:1 });
 }
@@ -5359,7 +5379,7 @@ function applyTrickOnDelay(g, info, idx){
   tgt.delays.splice(idx,1);
   const me=g.players[info.from];
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 顺走 '+tgt.name+' 判定区的【'+card.name+'】'); }
-  else { g.discard.push(card); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 判定区的【'+card.name+'】'); }
+  else { g.discard.push(card); markDiscardReveal(g, info.to, [card]); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 判定区的【'+card.name+'】'); }
 }
 // pickResolve: 选牌子阶段结算。choice='hand' 或装备槽名 或 'delay:'+下标(判定区第几张)。
 // 仅使用者可操作;失效项(手牌已空/槽已空/判定区那张已不在)安全回 play 防软锁。
@@ -5854,6 +5874,7 @@ function discardYinghunCard(selection){
     }
     if(!card) return g;
     g.discard.push(card); d.remaining--;
+    markDiscardReveal(g, d.targetSeat, [card]);
     g.log=pushLog(g.log,target.name+' 因【英魂】弃置一张牌');
     const noCards=(target.hand||[]).length+EQUIP_SLOTS.filter(slot=>target.equips&&target.equips[slot]).length===0;
     if(d.remaining<=0 || noCards){
@@ -6053,6 +6074,7 @@ function discardCard(cardIdx){
     const me=g.players[mySeat];
     if(me.hand.length<=handCapLimit(g, mySeat)) return g;
     const card=me.hand.splice(cardIdx,1)[0]; g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
       g.liRangRecord.discarded = g.liRangRecord.discarded || [];
       g.liRangRecord.discarded.push(card);
@@ -6082,6 +6104,7 @@ function discardCards(cardIdxList){
     const sorted = [...uniqueIdx].sort((a,b)=>b-a);
     const discarded = sorted.map(i=>me.hand.splice(i,1)[0]);
     g.discard.push(...discarded);
+    markDiscardReveal(g, mySeat, discarded);
     // 凌统【旋风】:更新弃牌计数器
     g.discardedThisPhase = (g.discardedThisPhase || 0) + discarded.length;
     // 陆逊【连营】:检查是否触发连营（一次性检查整个操作后的手牌数）
@@ -6320,6 +6343,7 @@ function executeXuanfeng(g) {
       }
       if(card){
         g.discard.push(card);
+        markDiscardReveal(g, targetSeat, [card]);
         g.log=pushLog(g.log, `${me.name} 发动【旋风】,弃置了 ${target.name} 的【${card.name}】`);
       }
     }
@@ -6388,6 +6412,7 @@ function executeXuanfeng(g) {
     
     // 将弃置的牌放入弃牌堆
     g.discard.push(...cardsToDiscard);
+    markDiscardReveal(g, targetSeat, cardsToDiscard);
     
     g.log = pushLog(g.log, `${me.name} 发动【旋风】,令 ${target.name} 随机弃置${cardsToDiscard.length}张牌`);
   }
@@ -7101,6 +7126,7 @@ function beigeDiscard(cardIndex, isEquip, equipType) {
     
     // 弃置牌到弃牌堆
     g.discard.push(discardedCard);
+    markDiscardReveal(g, sourceSeat, [discardedCard]);
     g.log = pushLog(g.log, source.name + ' 弃置了【' + discardedCard.name + '】');
     
     // 进入判定阶段
@@ -7210,6 +7236,7 @@ function processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSo
         }
 
         g.discard.push(...cardsToDiscard);
+        markDiscardReveal(g, damageSource, cardsToDiscard);
         g.log = pushLog(g.log, sourcePlayer.name + ' 弃置了' + cardsToDiscard.length + '张牌');
       }
       break;
@@ -7328,6 +7355,7 @@ function pickFenxunDiscard(cardIndex) {
     const card = me.hand[cardIndex];
     me.hand.splice(cardIndex, 1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     
     // 进入目标选择阶段
     const availableTargets = [];
@@ -7944,6 +7972,7 @@ function chooseRenxinEquip(slot) {
     me.equips[slot] = null;
     g.discard = g.discard || [];
     g.discard.push(equipCard);
+    markDiscardReveal(g, seat, [equipCard]);
     triggerHook(g, seat, 'onLoseEquip', {count:1});
     
     // 翻面(真实字段 faceup)

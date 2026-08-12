@@ -35,6 +35,7 @@ function maybeStartQilin(g, attackerSeat, victimSeat){
 function discardMount(g, seat, slot, attackerName){
   const p=g.players[seat], card=p.equips[slot]; if(!card) return;
   p.equips[slot]=null; g.discard.push(card);
+  markDiscardReveal(g, seat, [card]);
   g.log=pushLog(g.log, (attackerName?attackerName+' 的':'')+'【麒麟弓】弃置了 '+p.name+' 的坐骑【'+card.name+'】');
   triggerHook(g, seat, 'onLoseEquip', { count:1 });
 }
@@ -290,13 +291,16 @@ function respondGuanshi(picks){
       if(p.startsWith('equip:')){
         const slot=p.slice(6);
         const card=me.equips[slot]; me.equips[slot]=null; g.discard.push(card);
+        markDiscardReveal(g, from, [card]);
         g.log=pushLog(g.log, me.name+' 弃置装备【'+card.name+'】(贯石斧)');
         triggerHook(g, from, 'onLoseEquip', {count:1});
       } else {
         handIdxs.push(Number(p.slice(5)));
       }
     }
-    handIdxs.sort((a,b)=>b-a).forEach(idx=>{ g.discard.push(me.hand.splice(idx,1)[0]); });
+    const discardedHands=handIdxs.sort((a,b)=>b-a).map(idx=>me.hand.splice(idx,1)[0]);
+    g.discard.push(...discardedHands);
+    markDiscardReveal(g, from, discardedHands);
     if(handIdxs.length) g.log=pushLog(g.log, me.name+' 弃置'+handIdxs.length+'张手牌(贯石斧)');
     g.log=pushLog(g.log, me.name+' 发动【贯石斧】,此【杀】依然对 '+g.players[to].name+' 造成伤害');
     // 两张弃牌(成本)已经全部真实结算完毕。若其中弃自己装备那一步触发了 onLoseEquip 钩子并
@@ -406,6 +410,7 @@ function respondCixiongChoice(choice, cardIdx){
       const card = (typeof cardIdx==='number') ? (target.hand||[])[cardIdx] : null;
       if(!card) return g;
       g.discard.push(target.hand.splice(cardIdx,1)[0]);
+      markDiscardReveal(g, to, [card]);
       g.log=pushLog(g.log, target.name+' 弃置手牌【'+card.name+'】（雌雄双股剑）');
       continueAfterCixiong(g);
       return g;

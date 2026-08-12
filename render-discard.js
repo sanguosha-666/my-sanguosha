@@ -1,19 +1,14 @@
 // render-discard.js — 公开弃牌的中央桌面展示。
-// 只观察已经写入 discard 的结果，不介入选牌和游戏结算；首次进入房间时仅建立基准，
-// 不补播历史弃牌。使用/打出的牌已有中央出牌动画，按实体牌 id 过滤，避免重复展示。
+// 只监听业务入口显式产生的 discardRevealEvents，不再根据整个 discard 数组猜测移动原因。
+// 首次进入房间时仅建立 seq 基准，不补播历史事件。
 
 const DISCARD_REVEAL_BASE_MS = 1200;
 const DISCARD_REVEAL_PER_CARD_MS = 300;
 const DISCARD_REVEAL_MAX_MS = 4000;
 
-let lastObservedDiscardKeys = null;
+let lastObservedDiscardRevealSeq = null;
 let discardRevealQueue = [];
 let discardRevealPlaying = false;
-
-function discardRevealCardKey(card, index){
-  if(card && card.id!=null) return 'id:'+card.id;
-  return 'card:'+index+':'+(card&&card.name||'')+':'+(card&&card.suit||'')+':'+(card&&card.rank||'');
-}
 
 function discardRevealDuration(cardCount){
   return Math.min(DISCARD_REVEAL_MAX_MS,
@@ -42,26 +37,22 @@ function playNextDiscardReveal(){
 }
 
 function observeDiscardReveal(g){
-  const discard=Array.isArray(g&&g.discard)?g.discard:[];
-  const keys=discard.map(discardRevealCardKey);
-  if(lastObservedDiscardKeys===null){
-    lastObservedDiscardKeys=keys;
+  const events=Array.isArray(g&&g.discardRevealEvents)?g.discardRevealEvents
+    .filter(event=>event&&Number.isInteger(event.seq)&&Array.isArray(event.cards)) : [];
+  const latestSeq=events.reduce((max,event)=>Math.max(max,event.seq),0);
+  if(lastObservedDiscardRevealSeq===null){
+    lastObservedDiscardRevealSeq=latestSeq;
     return;
   }
-  const prefixIntact=lastObservedDiscardKeys.length<=keys.length &&
-    lastObservedDiscardKeys.every((key,i)=>key===keys[i]);
-  if(!prefixIntact){
-    // 洗牌、重开或断线恢复到不同快照：重新建立基准，不把历史牌误当成刚弃置。
-    lastObservedDiscardKeys=keys;
+  if(latestSeq<lastObservedDiscardRevealSeq){
+    // 重开或恢复到更早快照：重新建立基准，不补播历史事件。
+    lastObservedDiscardRevealSeq=latestSeq;
     return;
   }
-  const added=discard.slice(lastObservedDiscardKeys.length);
-  lastObservedDiscardKeys=keys;
-  if(added.length===0) return;
-  const exchangeIds=new Set((Array.isArray(g.exchangeCards)?g.exchangeCards:[])
-    .map(entry=>entry&&entry.card&&entry.card.id).filter(id=>id!=null));
-  const reveal=added.filter(card=>!card || card.id==null || !exchangeIds.has(card.id));
-  if(reveal.length===0) return;
-  discardRevealQueue.push({cards:reveal,duration:discardRevealDuration(reveal.length)});
+  const added=events.filter(event=>event.seq>lastObservedDiscardRevealSeq).sort((a,b)=>a.seq-b.seq);
+  lastObservedDiscardRevealSeq=latestSeq;
+  added.forEach(event=>{
+    if(event.cards.length) discardRevealQueue.push({cards:event.cards,duration:discardRevealDuration(event.cards.length)});
+  });
   playNextDiscardReveal();
 }

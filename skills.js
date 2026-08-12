@@ -196,6 +196,7 @@ function liJian(cardIdx, fromSeat, toSeat){
     if(maleSeats(g).length<2) return g;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     g.liJianUsed=true;
     g.log=pushLog(g.log, me.name+' 弃置一张牌发动【离间】,令 '+from.name+' 视为对 '+to.name+' 使用【决斗】');
     markSkillSound(g, '离间');
@@ -1036,6 +1037,7 @@ function respondTianxiang(choice, targetSeat){
     if(!card || cardSuitForPlayer(me, card)!=='♥') return g;
     me.hand.splice(choice.idx,1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     g.pending=null;
     g.log=pushLog(g.log, me.name+' 弃置【'+card.name+'】发动【天香】,将此次伤害转移给 '+target.name);
     markSkillSound(g, '天香');
@@ -1489,6 +1491,7 @@ function respondHuogong(activate, cardIdx){
     if(!card || cardSuitForPlayer(me, card)!==d.suit) return g;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     const sourceCard=d.sourceCard;
     g.log=pushLog(g.log, me.name+' 弃置 '+d.suit+'【'+card.name+'】,【火攻】生效');
     g.pending=null;
@@ -1549,6 +1552,7 @@ function zhiHeng(cardIdxs){
     const moved=[];
     unique.forEach(i=>{ moved.push(me.hand.splice(i,1)[0]); });
     moved.forEach(c=>{ if(c) g.discard.push(c); });
+    markDiscardReveal(g, mySeat, moved);
     g.zhihengUsed=true;
     drawN(g, mySeat, moved.length);
     g.log=pushLog(g.log, me.name+' 发动【制衡】,弃'+moved.length+'张牌并摸'+moved.length+'张牌');
@@ -1608,6 +1612,7 @@ function qingNang(cardIdx, targetSeat){
     g.qingNangUsed=true;
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     tgt.hp=Math.min(tgt.maxHp, tgt.hp+1);
     g.log=pushLog(g.log, me.name+' 弃置一张牌,发动【青囊】,令 '+tgt.name+' 回复1点体力');
     const resolvedTargetSeat = g.players.findIndex(p => p === tgt);
@@ -1731,6 +1736,7 @@ function respondXiaoguo(activate, cardIdx){
     if(!card || !BASIC_CARDS.includes(card.name)) return g; // 不是基本牌:不生效,状态不变
     me.hand.splice(cardIdx,1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     g.log=pushLog(g.log, me.name+' 弃置一张【'+card.name+'】,发动【骁果】,询问 '+g.players[endingSeat].name+' 弃装备或受到1点伤害…');
     g.pending=setResponseAskedAt({type:'xiaoguoChoice', from:mySeat, endingSeat, to:endingSeat});
     g.phase='xiaoguoChoice';
@@ -1758,6 +1764,7 @@ function respondXiaoguoChoice(choice){
     const card=target.equips[choice];
     target.equips[choice]=null;
     g.discard.push(card);
+    markDiscardReveal(g, endingSeat, [card]);
     g.log=pushLog(g.log, target.name+' 弃置装备【'+card.name+'】,'+asker.name+' 摸一张牌');
     // 装备已经弃置，先清掉骁果的旧 pending，再触发失去装备钩子。旋风若挂起，必须保留它并
     // 记下骁果续接信息；旧实现触发后无条件 g.pending=null，导致只留下“可以发动旋风”的日志。
@@ -1935,6 +1942,7 @@ function pickTiaoxinDiscard(kind, value){
       card=target.hand.splice(idx,1)[0];
       if(card){
         g.discard.push(card);
+        markDiscardReveal(g, to, [card]);
         g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的一张手牌');
       }
     } else if(kind==='equip'){
@@ -1943,6 +1951,7 @@ function pickTiaoxinDiscard(kind, value){
       card=target.equips[slot];
       target.equips[slot]=null;
       g.discard.push(card);
+      markDiscardReveal(g, to, [card]);
       g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的装备【'+card.name+'】');
     } else {
       return g;
@@ -2141,6 +2150,7 @@ function sanyao(costKey, targetSeat) {
     }
     g.discard = g.discard || [];
     if(discardedCard && !discardedCard.virtual) g.discard.push(discardedCard);
+    if(discardedCard && !discardedCard.virtual) markDiscardReveal(g, mySeat, [discardedCard]);
     g.log = pushLog(g.log, me.name + ' 发动【散谣】,弃置了【' + discardedCard.name + '】');
     markSkillSound(g, '散谣');
 
@@ -2456,6 +2466,7 @@ function respondDimeng(seatA, seatB){
     // 弃置X张牌
     const cardsToDiscard = me.hand.splice(0, X);
     g.discard.push(...cardsToDiscard);
+    markDiscardReveal(g, mySeat, cardsToDiscard);
     
     // 交换两名角色的手牌
     const tempA = g.players[seatA].hand || [];
@@ -2613,6 +2624,7 @@ function discardShensuEquip(g, seat, equipInfo) {
   if (player.equips && player.equips[slot] === card) {
     player.equips[slot] = null;
     g.discard.push(card);
+    markDiscardReveal(g, seat, [card]);
     g.log = pushLog(g.log, player.name + ' 弃置了装备牌【' + card.name + '】');
   }
 }
@@ -2626,6 +2638,7 @@ function discardShensuCardFromHand(g, seat, cardIndex) {
   if (card) {
     player.hand.splice(cardIndex, 1);
     g.discard.push(card);
+    markDiscardReveal(g, seat, [card]);
     g.log = pushLog(g.log, player.name + ' 弃置了手牌中的装备牌【' + card.name + '】');
   }
 }
@@ -2866,6 +2879,7 @@ function pickQiaomengEquip(slot) {
       // 弃置非坐骑牌
       target.equips[slot] = null;
       g.discard.push(card);
+      markDiscardReveal(g, pending.targetSeat, [card]);
       g.log = pushLog(g.log, source.name + ' 弃置 ' + target.name + ' 的装备牌【' + card.name + '】');
       markSkillSound(g, 'qiaomeng');
     }
@@ -3108,6 +3122,7 @@ function pickQiangxiTarget(targetSeat) {
         if (me.equips && me.equips.weapon === weapon) {
           me.equips.weapon = null;
           g.discard.push(weapon);
+          markDiscardReveal(g, mySeat, [weapon]);
           g.log = pushLog(g.log, `${me.name} 弃置了装备区的武器牌【${weapon.name}】`);
         }
       } else if (weaponSource === 'hand' && typeof weaponIndex === 'number') {
@@ -3115,6 +3130,7 @@ function pickQiangxiTarget(targetSeat) {
         if (card) {
           me.hand.splice(weaponIndex, 1);
           g.discard.push(card);
+          markDiscardReveal(g, mySeat, [card]);
           g.log = pushLog(g.log, `${me.name} 弃置了手牌中的武器牌【${card.name}】`);
         }
       }
@@ -3806,6 +3822,7 @@ function respondJujianPickTarget(targetSeat){
     if(!isNonBasicCard(card)) return g;
     me.hand.splice(idx,1);
     g.discard.push(card);
+    markDiscardReveal(g, mySeat, [card]);
     g.pending={
       type:'jujianChooseEffect',
       sourceSeat:mySeat,
