@@ -3078,10 +3078,9 @@ function renderControls(g){
     const from=g.players[g.pending.from].name;
     // 目标是使用者自己(如无中生有)时,"对 X 使用"会念成"对自己使用",措辞改成"使用【trick】"更自然
     const useDesc = g.pending.from===g.pending.to ? from+' 使用【'+g.pending.trick+'】' : from+' 对 '+g.players[g.pending.to].name+' 使用【'+g.pending.trick+'】';
-    const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
     const text = g.pending.depth>0
-      ? (g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】,正在询问 '+asking+' 是否用【无懈可击】反制…'
-      : useDesc+',正在询问 '+asking+' 是否使用【无懈可击】…';
+      ? (g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】,等待其他玩家响应【无懈可击】…'
+      : useDesc+',等待其他玩家响应【无懈可击】…';
     setBanner(escapeHtml(text));
     return;
   }
