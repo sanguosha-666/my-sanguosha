@@ -734,7 +734,9 @@ function botCardPriority(name){
 // 了这一点,不需要额外判断),所以"仅在机器人控制者这一端显示"是这套调度结构天然带来的
 // 效果,不用专门加判断。纯提示、不拦截点击(CSS pointer-events:none,和 .my-turn-banner
 // 同一约定),不会挡住玩家同时进行的其它操作。
+let aiThinkingRequestCount = 0;
 function showAiThinkingIndicator(g, seat){
+  aiThinkingRequestCount += 1;
   const el = document.getElementById('aiThinkingIndicator');
   if(!el) return;
   const name = (g.players[seat] && g.players[seat].name) || ('机器人'+(seat+1));
@@ -742,6 +744,8 @@ function showAiThinkingIndicator(g, seat){
   el.classList.remove('hidden');
 }
 function hideAiThinkingIndicator(){
+  aiThinkingRequestCount = Math.max(0, aiThinkingRequestCount - 1);
+  if(aiThinkingRequestCount > 0) return;
   const el = document.getElementById('aiThinkingIndicator');
   if(el) el.classList.add('hidden');
 }
