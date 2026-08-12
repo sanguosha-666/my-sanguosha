@@ -206,5 +206,19 @@ check('对照:非贾诩回合完杀不生效,依次问所有存活玩家', ()=>{
   assert.strictEqual(dyingP.alive, false, '问完一圈无人救,濒死者应阵亡');
 });
 
+check('多个完杀拥有者:当前回合的后扫描拥有者仍正常发动', ()=>{
+  const first = mkPlayer('先扫描完杀','jiaxu');
+  const p1 = mkPlayer('玩家1','yuJi');
+  const dyingP = mkPlayer('濒死者','yuJi',{hp:0});
+  const current = mkPlayer('当前回合完杀','jiaxu');
+  const g={phase:'play',turn:3,started:true,players:[first,p1,dyingP,current],deck:[],discard:[],pending:null,log:[],exchangeCards:[],gameMode:'ffa',wanshaActive:false,wanshaDyingSeat:null};
+  bindG(g);
+  R('startDying')(g,2,'sha');
+  assert.strictEqual(g.wanshaActive,true,'不能因座位0先被扫描到而让座位3的完杀失效');
+  assert.ok((g.log||[]).some(entry=>(entry.text||entry).includes('当前回合完杀')),'日志应记录真正的当前回合完杀拥有者');
+  setSeat(2); R('respondDying')(false);
+  assert.strictEqual(g.pending.asking,3,'应跳过非当前回合的另一名完杀拥有者,直接问座位3');
+});
+
 console.log('\n结果: '+passed+' 通过, '+failed+' 失败\n');
 if(failed>0) process.exit(1);

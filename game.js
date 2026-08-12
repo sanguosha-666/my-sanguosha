@@ -4162,8 +4162,8 @@ function startDying(g, seat, resumeType, sourceSeat, amount){
   if(typeof amount==='number') resume.amount=amount;
   
   // 贾诩【完杀】：检查是否在贾诩的回合内
-  const jiaxuSeat = findPlayerWithCap(g, 'wansha');
-  if (jiaxuSeat !== null && jiaxuSeat === g.turn) {
+  const jiaxuSeat = Number.isInteger(g.turn) && g.players[g.turn] && g.players[g.turn].alive && hasCap(g.players[g.turn],'wansha') ? g.turn : null;
+  if (jiaxuSeat !== null) {
     // 濒死角色进入完杀效果范围
     g.wanshaActive = true;
     g.wanshaDyingSeat = seat;
@@ -4222,8 +4222,8 @@ function respondDying(useTao, jijiuChoice){
     
     // 辅诩【完杀】：检查是否受到完杀限制
     if(useTao && g.wanshaActive && g.wanshaDyingSeat === g.pending.seat) {
-      const jiaxuSeat = findPlayerWithCap(g, 'wansha');
-      if (jiaxuSeat !== null && jiaxuSeat === g.turn) {
+      const jiaxuSeat = Number.isInteger(g.turn) && g.players[g.turn] && g.players[g.turn].alive && hasCap(g.players[g.turn],'wansha') ? g.turn : null;
+      if (jiaxuSeat !== null) {
         // 只有贾诩和濒死角色自己可以使用桃
         if (mySeat !== jiaxuSeat && mySeat !== g.pending.seat) {
           g.log = pushLog(g.log, me.name + ' 因【完杀】效果,不能对 ' + dyingP.name + ' 使用【桃】');
@@ -5034,8 +5034,8 @@ function nextAskee(g, from, current){
 function nextDyingAskee(g, dyingSeat, current){
   let nxt = nextAskee(g, dyingSeat, current);
   if(g.wanshaActive && g.wanshaDyingSeat === dyingSeat){
-    const jiaxuSeat = findPlayerWithCap(g, 'wansha');
-    if(jiaxuSeat !== null && jiaxuSeat === g.turn){
+    const jiaxuSeat = Number.isInteger(g.turn) && g.players[g.turn] && g.players[g.turn].alive && hasCap(g.players[g.turn],'wansha') ? g.turn : null;
+    if(jiaxuSeat !== null){
       while(nxt !== null && nxt !== jiaxuSeat && nxt !== dyingSeat){
         nxt = nextAskee(g, dyingSeat, nxt);
       }
