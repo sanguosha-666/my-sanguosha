@@ -3743,11 +3743,18 @@ function respondLiuli(choice, newTargetSeat){
       discarded=me.equips[slot];
       me.equips[slot]=null;
       g.discard.push(discarded);
-      triggerHook(g, to, 'onLoseEquip', {count:1});
     } else return g;
     markDiscardReveal(g, to, [discarded]);
     g.log=pushLog(g.log, me.name+' 弃置【'+discarded.name+'】发动【流离】,将此【杀】转移给 '+newTarget.name);
     markSkillSound(g, '流离');
+    if(choice.kind==='equip'){
+      const pendingBefore=g.pending;
+      triggerHook(g,to,'onLoseEquip',{count:1});
+      if(g.pending!==pendingBefore && g.pending){
+        g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard};
+        return g;
+      }
+    }
     resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard);
     return g;
   });
@@ -4676,6 +4683,13 @@ function resumeAfterInterrupt(g, resume, seat){
     // 的选项,两者都不成立时自动等价于原来 {type:'sha'} 的收尾(finishSingleShaTarget),
     // 不需要在这里分别判断"有没有青龙"。
     continueShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard, ['qinglong','guanshifu']);
+  } else if(resume.type==='liuliAfterDiscard'){
+    // 流离用装备支付后，失装技能（如旋风）先取得控制权；完成后再从这里继续转移后的杀。
+    const attacker=g.players[resume.from];
+    const target=g.players[resume.newTargetSeat];
+    if(attacker&&attacker.alive&&target&&target.alive){
+      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard);
+    }else finishSingleShaTarget(g);
   } else { // 'sha' 及其它
     if(g.fangtianQueue){ advanceFangtianQueue(g); }
     else if(g.luanwuResume){ continueLuanwuAfterSha(g); }

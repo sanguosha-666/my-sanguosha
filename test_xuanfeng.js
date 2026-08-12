@@ -106,4 +106,28 @@ describe('凌统【旋风】修复', function() {
     assert.strictEqual(_g.pending.resume.endingSeat, 1);
     assert.strictEqual(_g.pending.resume.lastAsker, 0);
   });
+
+  it('流离弃装备触发旋风后暂停，并在旋风结束后继续转移的杀', function() {
+    mySeat = 1;
+    const attacker = player('攻击者', 'caocao');
+    const lingtong = player('兼具流离的凌统', 'lingtong');
+    lingtong.caps = { liuli: true };
+    lingtong.equips.armor = { id:'e-liuli', name:'八卦阵' };
+    const redirected = player('转移目标', 'liubei');
+    _g = {
+      players:[attacker,lingtong,redirected], turn:0, phase:'liuli',
+      pending:{type:'liuli',from:0,to:1,usedAs:'【杀】',shaColor:'red',targets:[2],sourceCard:{id:'sha-liuli',name:'杀',suit:'♥'}},
+      deck:[],discard:[],log:[]
+    };
+
+    respondLiuli({kind:'equip',slot:'armor'},2);
+    assert.strictEqual(_g.pending.type,'xuanfengPick','旋风 pending 不得被杀结算覆盖');
+    assert.strictEqual(_g.pending.resume.type,'liuliAfterDiscard');
+    assert.strictEqual(_g.pending.resume.newTargetSeat,2);
+
+    cancelXuanfeng();
+    assert.strictEqual(_g.phase,'respond','旋风完成后应继续转移目标的杀响应');
+    assert.strictEqual(_g.pending.to,2);
+    assert.strictEqual(_g.pending.from,0);
+  });
 });
