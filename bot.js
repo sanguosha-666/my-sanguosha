@@ -394,7 +394,7 @@ function scheduleBotTurn(g){
   const aiTestSelf = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
     && aiTestAutopilot.seat===mySeat;
   if(!isBotController(g)&&!aiTestSelf) return;
-  // 【AI摘要】游戏结束清空记忆;回合变化(roundNum/turn)且已有摘要时,异步更新记忆
+  // 【AI摘要】游戏结束清空记忆;回合变化(roundNum/turn)时异步生成或更新记忆
   // (fire-and-forget,不阻塞决策;更新完成后的下一轮决策才带上新摘要)
   if(g.phase==='over'){ aiSummaryReset(); return; }
   const seat=botSeatForState(g);
@@ -407,7 +407,7 @@ function scheduleBotTurn(g){
   if(seat >= 0 && aiSummarySeat !== seat) aiSummaryReset();
   if(seat >= 0){
     aiSummarySeat = seat;
-    if(aiSummary && (aiSummaryRound !== g.roundNum || aiSummaryTurn !== g.turn)){
+    if(aiSummaryRound !== g.roundNum || aiSummaryTurn !== g.turn){
       aiSummaryRound = g.roundNum; aiSummaryTurn = g.turn;
       updateAiSummary(g, seat);
     }

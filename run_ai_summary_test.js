@@ -48,12 +48,12 @@ const context = {
     location: { search: '', href: 'http://localhost', reload: function(){} },
     // detectAiProvider 会把未识别的密钥 fallback 到 cohere(2026-08-11 起),
     // test-key 触发 showAiKeyModal → renderModelPicker → fetchProviderModels('cohere')。
-    // 沙箱没有真网络,给 fetch stub 返回 null(走静态表回退),保证弹窗用例不炸。
-    fetch: function(){ return Promise.resolve(null); }
+    // 沙箱没有真网络,返回明确的非成功响应(走静态表回退),保证弹窗异步链不炸。
+    fetch: function(){ return Promise.resolve({ ok:false }); }
   },
   // fetchProviderModels 内部用裸 fetch(不是 window.fetch)——和 run_ai_model_picker_test.js
   // 同款处理:context 顶层也要有 fetch,否则裸标识符在沙箱里 ReferenceError。
-  fetch: function(){ return Promise.resolve(null); }
+  fetch: function(){ return Promise.resolve({ ok:false }); }
 };
 // 沙箱内裸 sessionStorage 与 window.sessionStorage 同源指向上面这个 stub
 context.window.sessionStorage = context.sessionStorage;
@@ -316,8 +316,8 @@ const testCode = String.raw`
 
   // ---- S2:scheduleBotTurn 回合检测 / over 清空 / 清除按钮 ----
 
-  // 9. scheduleBotTurn:回合号变化且已有摘要 → updateAiSummary 被调(spy);
-  //    回合不变 → 不调;首回合(摘要空)→ 不调。stub setTimeout/clearTimeout
+  // 9. scheduleBotTurn:回合号变化时 updateAiSummary 被调(spy);
+  //    回合不变 → 不调;首回合摘要为空时也应生成第一份。stub setTimeout/clearTimeout
   //    避免真实 650~1150ms 防抖定时器跑起来。
   await check('9 scheduleBotTurn 回合变化触发 updateAiSummary(spy)', async function(){
     var _origSt = setTimeout, _origCt = clearTimeout;
@@ -344,11 +344,13 @@ const testCode = String.raw`
       // b. 同一状态再来一次(回合没变)→ 不触发
       scheduleBotTurn(g2);
       if(spyCalls !== 1) throw new Error('回合不变不应再触发,实际 ' + spyCalls);
-      // c. 首回合:摘要空 → 不触发(第一次决策前没内容可总结)
+      // c. 首回合:摘要空也应触发,否则第一份摘要永远没有入口生成
       aiSummaryReset();
       g2.roundNum = 6;
       scheduleBotTurn(g2);
-      if(spyCalls !== 1) throw new Error('摘要为空不应触发,实际 ' + spyCalls);
+      if(spyCalls !== 2) throw new Error('摘要为空时应触发首次生成,实际 ' + spyCalls);
+      scheduleBotTurn(g2);
+      if(spyCalls !== 2) throw new Error('同一回合重复调度不应重复请求,实际 ' + spyCalls);
     } finally {
       setTimeout = _origSt; clearTimeout = _origCt;
     }
