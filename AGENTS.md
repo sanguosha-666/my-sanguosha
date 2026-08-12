@@ -14,3 +14,10 @@
 - Preserve UTF-8 when copying external text into the repository.
 - After writing, read the destination again as UTF-8 and scan for common mojibake indicators, including the characters represented by Unicode code points `U+8B5B`, `U+873F`, and `U+879F`.
 - If the encoding check fails, stop before committing, pushing, or creating GitHub Issues, and correct the file first.
+
+## Bug Management
+
+- GitHub Issues are the single source of truth for bugs; do not maintain a duplicate bug list in repository Markdown files.
+- Before fixing a bug, read only the target Issue unless broader triage is explicitly requested.
+- Use `Fixes #<issue-number>` in the fixing commit when automatic closure is intended.
+- Do not create, edit, close, or delete Issues unless the user explicitly requests it.
