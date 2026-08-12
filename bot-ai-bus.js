@@ -35,6 +35,29 @@ function parseBotPlayAiChoice(text){
 // 中文理由({"choice":N,"reason":"..."})。复用老解析的宽容策略(JSON.parse失败剥代码块
 // 重试一次);解析出 choice 时顺带提取 reason(无 reason 字段则为 null);整体失败回退
 // 老解析函数(仍失败则 idx=null)。返回 {idx, reason}。
+// 【reasoning 模型兜底(2026-08-11)】command-a-reasoning-08-2025 这类推理型模型即使
+// 响应里带 response_format json_object,部分实现仍会把思考链和最终 JSON 混在 content
+// 里(托管记录实证:content 是"Okay, let's see... 思考链",JSON 在最末尾)。因此再加
+// 一层"提取最后一个 JSON 对象"——从文本末尾向前找平衡的 { } 块,尝试解析;思考链在
+// JSON 之前的混合文本也能命中(JSON 通常排在最后)。提取仍失败才回退老解析。
+function extractTrailingJson(text){
+  const start=text.lastIndexOf('{');
+  if(start<0) return null;
+  let depth=0, inStr=false, esc=false;
+  for(let i=start;i<text.length;i++){
+    const ch=text[i];
+    if(inStr){
+      if(esc) esc=false;
+      else if(ch==='\\') esc=true;
+      else if(ch==='"') inStr=false;
+      continue;
+    }
+    if(ch==='"'){ inStr=true; continue; }
+    if(ch==='{') depth++;
+    else if(ch==='}'){ depth--; if(depth===0) return text.slice(start, i+1); }
+  }
+  return null;
+}
 function parseBotPlayAiChoiceWithReason(text){
   if(typeof text!=='string') return {idx:null, reason:null};
   const tryParse=(s)=>{
@@ -51,6 +74,12 @@ function parseBotPlayAiChoiceWithReason(text){
   const stripped=text.replace(/```(?:json)?/gi,'').trim();
   if(stripped!==text) r=tryParse(stripped);
   if(r!==null) return r;
+  // reasoning 模型混合文本:提取末尾 JSON 对象再试(思考链 + {"choice":N,...} 场景)
+  const trailing=extractTrailingJson(stripped);
+  if(trailing!==null && trailing!==stripped){
+    r=tryParse(trailing);
+    if(r!==null) return r;
+  }
   const old=parseBotPlayAiChoice(text);
   return {idx:old, reason:null};
 }

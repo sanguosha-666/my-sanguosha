@@ -106,6 +106,23 @@ const testCode = String.raw`
     if(r !== null) throw new Error('期望 null,实际 ' + r);
   });
 
+  // 2b. parseBotPlayAiChoiceWithReason:reasoning 模型混合文本
+  //     (思考链 + 末尾 JSON)能提取出 choice/reason——真实 cohere 托管失败案例
+  await check('parseBotPlayAiChoiceWithReason 混合文本提取末尾JSON', function(){
+    var text = 'Okay, let me think about this. The current phase is Luoshen, which is my general Zhenji\'s skill. '
+      + 'I should trigger it to make a judgment. The JSON at the end: '
+      + '{"choice":0,"reason":"洛神黑色牌可以拿,值得发动"}';
+    var r = parseBotPlayAiChoiceWithReason(text);
+    if(r.idx !== 0) throw new Error('期望 idx=0(从混合文本提取),实际 ' + JSON.stringify(r));
+    if(r.reason !== '洛神黑色牌可以拿,值得发动') throw new Error('应提取 reason,实际 ' + JSON.stringify(r));
+  });
+
+  // 2c. 混合文本无有效 JSON → 仍返回 null(不误报)
+  await check('parseBotPlayAiChoiceWithReason 混合文本无JSON → null', function(){
+    var r = parseBotPlayAiChoiceWithReason('just thinking about the game, no json here');
+    if(r.idx !== null) throw new Error('期望 null,实际 ' + JSON.stringify(r));
+  });
+
   // 准备:填密钥/提供商,mock callAI(函数声明绑定可直接整体替换)
   aiApiKey = 'test-key';
   aiProvider = 'claude';

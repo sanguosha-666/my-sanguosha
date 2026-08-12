@@ -356,6 +356,12 @@ const PROVIDER_ADAPTERS = {
     // 用 OpenAI 兼容端点 api.cohere.com/compatibility/v1/chat/completions(适配器结构
     // 与 groq 一致),不是原生 /v2/chat(非 OpenAI 格式)。⚠️ 系统提示用 developer 角色
     // 而不是 system(Cohere 兼容端点的要求)。
+    // 【reasoning 模型适配(2026-08-11)】command-a-reasoning-08-2025 这类推理型模型会
+    // 先输出大段思考链——默认 maxTokens=80 只够思考链开头、JSON 来不及输出(托管记录
+    // 实证:返回全是被截断的英文思考,解析 choice 失败走本地兜底)。修复:①无条件带
+    // response_format={type:'json_object'} 强制结构化 JSON 输出(Cohere 兼容端点支持
+    // structured output);②max_tokens 下限抬到 300——给思考链+最终 JSON 留足空间,
+    // 调用方传的 80 之类默认值不再截断。
     label: 'Cohere(免费Trial)',
     defaultModel: 'command-a-03-2025',
     endpoint: 'https://api.cohere.com/compatibility/v1/chat/completions',
@@ -371,8 +377,9 @@ const PROVIDER_ADAPTERS = {
         },
         body: JSON.stringify({
           model: opts.model || this.defaultModel,
-          max_tokens: opts.maxTokens || 512,
+          max_tokens: Math.max(opts.maxTokens || 0, 300),
           messages,
+          response_format: { type: 'json_object' },
         }),
       };
     },
