@@ -122,12 +122,14 @@ function duanLiang(cardIdx, targetSeat){
     const isBasicOrEquip = BASIC_CARDS.includes(card.name) || !!getEquip(card.name);
     if(!isBlack || !isBasicOrEquip) return g;
     if(targetSeat===mySeat || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
-    if(distance(g, mySeat, targetSeat) > 2) return g;
+    const trickCard={...card, name:'兵粮寸断', originalName:card.name};
+    // 断粮沿用兵粮寸断的全部目标规则，仅把技能允许的距离上限放宽为 2。
+    if(!canTargetDelayTrick(g,me,trickCard,targetSeat,2)) return g;
     g.duanliangUsed=true;
     me.hand.splice(cardIdx,1);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【兵粮寸断】使用,发动【断粮】,目标 '+g.players[targetSeat].name);
     markCardSound(g, '兵粮寸断', mySeat, card, targetSeat); // 念被当作使用的目标牌名(兵粮寸断),不是原始物理牌本身
-    startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:card});
+    startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:trickCard});
     return g;
   });
 }

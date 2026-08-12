@@ -2999,27 +2999,27 @@ Object.keys(EQUIPS).forEach(name=>{ CARD_PLAYS[name] = equipPlay; });
 // (真正放置动作在 startTrick 打开的无懈窗口问完之后,见 resolveTrick 的 DELAY_TRICKS 分支)。
 // allowSelf=true:playCard 默认拒绝自选目标,闪电这类"只能选自己"的延时锦囊需要放行这条限制。
 // 加新延时锦囊只需往 DELAY_TRICKS 加一项,下面的循环自动挂进 CARD_PLAYS(actionId=牌名)。
+function canTargetDelayTrick(g, me, card, targetSeat, bingliangMaxDistance){
+    const spec=DELAY_TRICKS[card.name];
+    if(!spec) return false;
+    const fromSeat=g.players.indexOf(me);
+    if(spec.onlySelf){ if(targetSeat!==fromSeat) return false; }
+    else { if(targetSeat===fromSeat) return false; }
+    if(card.name==='兵粮寸断' && distance(g, fromSeat, targetSeat) > (bingliangMaxDistance || 1)) return false;
+    // 陆逊【谦逊】:不能成为乐不思蜀的目标
+    if(card.name==='乐不思蜀' && hasCap(g.players[targetSeat],'qianxun')) return false;
+    // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
+    if(hasCap(g.players[targetSeat],'weimu') && isBlackTactics(card)) return false;
+    const tgt=g.players[targetSeat];
+    if(!tgt) return false;
+    return !(tgt.delays||[]).some(c=>c && c.name===card.name);
+}
 const delayTrickPlay = {
   target:true,
   noDiscard:true,
   allowSelf:true,
   canPlay:(g,me,card)=> !!DELAY_TRICKS[card.name],
-  canTarget:(g,me,card,targetSeat)=>{
-    const spec=DELAY_TRICKS[card.name];
-    if(spec.onlySelf){ if(targetSeat!==mySeat) return false; }
-    else { if(targetSeat===mySeat) return false; }
-    if(card.name==='兵粮寸断' && distance(g, mySeat, targetSeat) > 1) return false;
-    // 陆逊【谦逊】:不能成为乐不思蜀的目标
-    if(card.name==='乐不思蜀' && hasCap(g.players[targetSeat],'qianxun')) return false;
-    // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
-    if(hasCap(g.players[targetSeat],'weimu') && isBlackTactics(card)) return false;
-    // 官方规则:同一判定区不能有两张同名的延时类锦囊牌——之前只在闪电判定失败后的自动
-    // 传递里做了这个检查,玩家主动打出时完全没校验,导致能对同一目标连续打两张同名延时锦囊。
-    const tgt=g.players[targetSeat];
-    if(!tgt) return false;
-    const hasDup=(tgt.delays||[]).some(c=>c && c.name===card.name);
-    return !hasDup;
-  },
+  canTarget:(g,me,card,targetSeat)=>canTargetDelayTrick(g,me,card,targetSeat,1),
   effect:(g,me,card,targetSeat)=>{
     g.log=pushLog(g.log, me.name+' 对 '+g.players[targetSeat].name+' 使用【'+card.name+'】');
     // 打出时的无懈窗口:和决斗/顺手/拆桥同一套 startTrick,card 透传进 pending,
