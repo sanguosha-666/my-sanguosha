@@ -3101,10 +3101,31 @@ function attackRange(g, seat){
 function canReachSha(g, fromSeat, targetSeat){
   return distance(g, fromSeat, targetSeat) <= attackRange(g, fromSeat);
 }
+// 多个【祸首】同时触发时，按当前回合角色开始的行动顺序依次执行来源替换；后执行者覆盖前者，
+// 因而最终来源是该顺序中的最后一名合法拥有者。结果在南蛮指定目标时固定，不随数组扫描或
+// 结算中途状态变化而重新选择；若该来源随后死亡，依正式规则后续伤害变为无来源。
+function nanmanHuoshouSource(g, fromSeat){
+  const n=g.players.length;
+  const start=Number.isInteger(g.turn) ? g.turn : fromSeat;
+  let result=null;
+  for(let k=0;k<n;k++){
+    const seat=(start+k)%n;
+    const p=g.players[seat];
+    if(seat!==fromSeat && p&&p.alive&&hasCap(p,'huoshou')) result=seat;
+  }
+  return result;
+}
 // 群体锦囊效果:无目标,启动逐目标结算流程(南蛮要杀、万箭要闪)。
 function aoeEffect(g, me, card){
   const need = (card.name==='南蛮入侵')?'杀':'闪';
   g.aoe={trick:card.name, from:mySeat, need, sourceCard:card};
+  if(card.name==='南蛮入侵'){
+    const huoshouSourceSeat=nanmanHuoshouSource(g,mySeat);
+    if(huoshouSourceSeat!==null){
+      g.aoe.huoshouSourceSeat=huoshouSourceSeat;
+      g.log=pushLog(g.log,g.players[huoshouSourceSeat].name+'【祸首】成为本次【南蛮入侵】的伤害来源');
+    }
+  }
   g.log=pushLog(g.log, me.name+' 使用【'+card.name+'】');
   aoeAdvance(g, mySeat); // 从下家起结算第一个目标
 }
@@ -5632,13 +5653,11 @@ function aoeRespond(useCard, cardIdx){
     }
     let actualSourceSeat = g.pending.from;
     
-    // 祸首：若锦囊是南蛮入侵且场上有孟获（非当前目标），则孟获成为伤害来源
-    if(g.aoe.trick==='南蛮入侵'){
-      const huoshouSeat = g.players.findIndex(p => p && p.alive && hasCap(p, 'huoshou') && p !== me);
-      if(huoshouSeat !== -1){
-        actualSourceSeat = huoshouSeat;
-        g.log = pushLog(g.log, g.players[huoshouSeat].name + '【祸首】发动，成为南蛮入侵的伤害来源');
-      }
+    // 祸首来源已在南蛮指定目标时按行动顺序固定；来源中途死亡后不改选另一名孟获。
+    if(g.aoe.trick==='南蛮入侵' && Object.prototype.hasOwnProperty.call(g.aoe,'huoshouSourceSeat')){
+      const huoshouSeat=g.aoe.huoshouSourceSeat;
+      const huoshou=g.players[huoshouSeat];
+      actualSourceSeat=(huoshou&&huoshou.alive&&hasCap(huoshou,'huoshou')) ? huoshouSeat : null;
     }
     
     const dying = dealDamage(g, mySeat, 1, actualSourceSeat, '未打出【'+need+'】', 'aoe', g.aoe.sourceCard);
