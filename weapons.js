@@ -184,9 +184,8 @@ function respondQinglong(activate, cardIdx){
     const card=me.hand[cardIdx];
     if(!card || !canUseAs(me,card,'杀')) return g; // 没这张牌/不能当杀:状态不变(双重保险)
     me.hand.splice(cardIdx,1); g.discard.push(card);
-    // 青龙偃月刀连续杀本质是又使用了一张杀,同样计入出杀次数限制/破坏克己
-    if(!g.shaUsed) g.shaUsed=true;
-    else if(g.jiangchiExtraShaLeft > 0) g.jiangchiExtraShaLeft--;
+    // 青龙追杀发生在前一张杀被闪抵消后的武器响应时机，不占出牌阶段的普通杀次数，
+    // 也不消耗【将驰】提供的额外次数；但它仍是“使用杀”，会正常破坏克己等使用牌记录。
     const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
     g.log=pushLog(g.log, me.name+' 发动【青龙偃月刀】,'+usedAs);
     markCardSound(g, '杀', mySeat, card, targetSeat);
