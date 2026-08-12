@@ -159,14 +159,15 @@ function sanitizePendingForLog(value, depth){
 }
 
 const PENDING_ORPHAN_RATE_LIMIT_MS = 60000;
-let __pendingOrphanLastLogged = {}; // key(type+reason) -> 上次记录的ts,纯内存、不跨刷新持久化
+let __pendingOrphanLastLogged = {}; // key(roomId+type+reason) -> 上次记录的ts,纯内存、不跨刷新持久化
 function logPendingOrphan(g, reason){
   try{
     if(!g || !g.pending) return;
     const type = g.pending.type || 'unknown';
     const isRateLimited = typeof reason === 'string' && reason.indexOf('B:') === 0;
     if(isRateLimited){
-      const key = type + '|' + reason;
+      const roomKey = typeof roomId !== 'undefined' && roomId !== null ? String(roomId) : 'unknown-room';
+      const key = roomKey + '|' + type + '|' + reason;
       const now = Date.now();
       const last = __pendingOrphanLastLogged[key];
       if(last !== undefined && (now - last) < PENDING_ORPHAN_RATE_LIMIT_MS) return; // 60秒内已经记过同一种,跳过
