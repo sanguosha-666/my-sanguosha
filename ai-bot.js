@@ -785,14 +785,20 @@ const modelListCache = {};
 // fetchTriModels:tri 三密钥模式的模型列表——拆三段密钥,并发拉三家各自的模型列表
 // (复用 fetchProviderModels 各自逻辑/缓存),合并成一个池,条目 id 加 `provider:` 前缀
 // (与 callAI 分发层/triProviderOf/resolveAiModel 的格式约定一致,如 cerebras:zai-glm-4.7)。
-// 任何一家失败返回空数组也不影响其它两家(合并结果可能有缺,但优于整体回退静态表)。
+// 【失败兜底(2026-08-12)】某一家动态拉取失败(限流/超时/网络)时,用该家的静态表
+// AI_MODEL_OPTIONS[provider] 兜底补上,而不是返回空数组——否则合并结果里这家就缺失,
+// 且因为其它两家成功导致整个列表非空、renderModelPicker 不会回退到静态表,这家模型
+// 会悄悄消失(真实 bug:tri 模式下 cohere 动态拉取失败时 cohere 模型不显示)。
 function fetchTriModels(apiKey){
   const seg = String(apiKey||'').split('/').map(function(s){ return s.trim(); });
   // 固定顺序:cohere 密钥/groq 密钥/cerebras 密钥(与 detectAiProvider 的拆段约定一致)
   const subs = [ ['cohere', seg[0]], ['groq', seg[1]], ['cerebras', seg[2]] ];
   return Promise.all(subs.map(function(pair){
     return fetchProviderModels(pair[0], pair[1]).then(function(list){
-      return { prov: pair[0], list: list || [] };
+      if(list && list.length) return { prov: pair[0], list: list };
+      // 动态拉取失败 → 用该家静态表兜底(保证三家模型都展示)
+      const staticList = AI_MODEL_OPTIONS[pair[0]] || [];
+      return { prov: pair[0], list: staticList.map(function(m){ return { id: m.id, label: m.label }; }) };
     });
   })).then(function(results){
     const out = [];

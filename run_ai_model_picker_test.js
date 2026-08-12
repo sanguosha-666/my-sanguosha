@@ -226,6 +226,31 @@ const testCode = String.raw`
     if(ids.indexOf('Llama-3.3') >= 0) throw new Error('groq 非 live 的模型不应出现,实际 ' + ids);
   });
 
+  // 3c. tri:三家并发合并加 provider: 前缀;某一家动态拉取失败 → 该家静态表兜底
+  //     (真实 bug:tri 模式下 cohere 动态失败时模型缺失——cohere 密钥有效但模型列表
+  //     接口限流/超时,而 cerebras/groq 成功导致整个列表非空不回退静态表)
+  await check('3c. tri 合并三家 + cohere 动态失败静态表兜底', async function(){
+    delete modelListCache.tri;
+    delete modelListCache.cohere;
+    delete modelListCache.groq;
+    delete modelListCache.cerebras;
+    window.__fetchLog.length = 0;
+    // 并发三家:cohere 失败(非 2xx → null)、groq 成功、cerebras 成功
+    window.__fetchImpl = function(url, opts){
+      if(String(url).indexOf('api.cohere.com') >= 0) return Promise.resolve({ ok:false, status:500, json:function(){ return Promise.resolve({}); }, text:function(){ return Promise.resolve(''); } });
+      return jsonRes({ data: [ { id: 'llama-3.3-70b-versatile' }, { id: 'openai/gpt-oss-120b' } ] });
+    };
+    var r = await fetchProviderModels('tri', 'co_test/gsk_test/csk_test');
+    if(!r) throw new Error('tri 应返回合并列表');
+    var ids = r.map(function(x){ return x.id; }).join(',');
+    // groq/cerebras 动态成功,带 provider: 前缀
+    if(ids.indexOf('groq:llama-3.3-70b-versatile') < 0) throw new Error('应含 groq 动态模型,实际 ' + ids);
+    if(ids.indexOf('cerebras:llama-3.3-70b-versatile') < 0) throw new Error('应含 cerebras 动态模型,实际 ' + ids);
+    // cohere 动态失败 → 静态表兜底(cohere:command-a-plus-05-2026 等)
+    if(ids.indexOf('cohere:command-a-plus-05-2026') < 0) throw new Error('cohere 动态失败应回退静态表(cohere:command-a-plus-05-2026),实际 ' + ids);
+    if(ids.indexOf('cohere:command-a-03-2025') < 0) throw new Error('cohere 静态表应含 command-a-03-2025,实际 ' + ids);
+  });
+
   // 4. 结构不符(data 不是数组)→ null
   await check('4. data 不是数组 → null', async function(){
     delete modelListCache.claude;
