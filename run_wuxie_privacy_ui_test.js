@@ -2,6 +2,7 @@ const fs = require('fs');
 
 const source = fs.readFileSync('render-controls.js', 'utf8');
 const logSource = fs.readFileSync('render-log.js', 'utf8');
+const indexSource = fs.readFileSync('index.html', 'utf8');
 const ownStart = source.indexOf("if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===mySeat){");
 const spectatorStart = source.indexOf("if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie'){", ownStart + 1);
 const spectatorEnd = source.indexOf("if(g.phase==='guicai'", spectatorStart);
@@ -42,6 +43,9 @@ if(!logSource.includes("return '等待其他玩家响应【无懈可击】…';"
 }
 if(!logSource.includes('text = hideWuxiePollingPlayer(text);')){
   throw new Error('常驻日志与 toast 的共用格式化入口未应用匿名化');
+}
+if(!indexSource.includes('<script src="render-log.js?v=395"></script>')){
+  throw new Error('render-log.js 缓存版本未更新，浏览器可能继续使用旧脚本');
 }
 
 console.log('PASS: 无懈可击本人按钮保留，旁观 Banner/日志/toast 均不公开当前轮询玩家');
