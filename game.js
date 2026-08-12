@@ -3125,9 +3125,12 @@ function playCard(cardIdx, actionId, targetSeat, onCommitted){
       if(actionId==='铁索连环' && Array.isArray(targetSeat)){
         const targets=targetSeat
           .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
-          .slice(0,2)
-          .filter(seat=>g.players[seat] && g.players[seat].alive);
+          .slice(0,2);
         if(targets.length===0) return g;
+        // 多目标分支必须与单目标走同一 canTarget。任一目标非法时原子拒绝整次出牌，
+        // 不能静默删掉非法目标后仍消耗牌，也不能让帷幕/智迟等保护被数组路径绕过。
+        if(targets.some(seat=>!g.players[seat] || !g.players[seat].alive ||
+            (spec.canTarget && !spec.canTarget(g,me,card,seat)))) return g;
         targetSeat=targets;
       } else {
       // 默认拒绝自选目标;spec.allowSelf(如闪电这类延时锦囊)放行
