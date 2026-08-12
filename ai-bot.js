@@ -478,11 +478,17 @@ const AI_MODEL_OPTIONS = {
     { id: 'zai-org/GLM-4.7:cerebras', label: 'GLM-4.7·Cerebras' },
   ],
   cohere: [
-    // Cohere 直连(吃 Trial 免费额度)。模型名是 Cohere 自家 ID(compatibility 端点认这个),
-    // 不是 HF 的 CohereLabs/* 前缀。已从官方模型表核实(2026-08-11)。
+    // Cohere 直连(吃 Trial 免费额度)。模型名是 Cohere 自家 ID(chat 端点认这个),
+    // 不是 HF 的 CohereLabs/* 前缀。已从官方 models 文档核实(2026-08-11),列活跃
+    // (live)模型;弃用别名(command-r/command-r-plus 无版本号等)不列。
+    { id: 'command-a-plus-05-2026', label: 'Command A Plus(最新·最强)' },
     { id: 'command-a-03-2025', label: 'Command A(默认)' },
-    { id: 'command-a-reasoning-08-2025', label: 'Command A Reasoning(更强)' },
+    { id: 'command-a-reasoning-08-2025', label: 'Command A Reasoning(推理)' },
+    { id: 'command-a-vision-07-2025', label: 'Command A Vision(视觉)' },
+    { id: 'command-a-translate-08-2025', label: 'Command A Translate(翻译)' },
+    { id: 'command-r-plus-08-2024', label: 'Command R Plus' },
     { id: 'command-r7b-12-2024', label: 'Command R7B(更快更省)' },
+    { id: 'command-r-08-2024', label: 'Command R' },
   ],
   cerebras: [
     // Cerebras 直连。模型名实测自 /public/v1/models(2026-08-11)。
@@ -630,11 +636,22 @@ const MODEL_LIST_API = {
     },
   },
   cohere: {
-    // Cohere 兼容端点的模型列表接口(2026-08-11 实测存在,免认证 GET 返回
-    // {data:[{id,...}]} 平铺结构,labelOf 路径即可)。拉取失败回退静态表。
-    url: 'https://api.cohere.com/compatibility/v1/models',
-    headers(){ return {}; },
-    labelOf(m){ return (m && m.id) || ''; },
+    // Cohere 模型列表(2026-08-11 排查修复):原来用 /compatibility/v1/models 且不带
+    // 认证头 → 必然 401 → 回退静态表(只有3个模型,用户看到"模型不全")。正确用法:
+    // ①用原生 API GET /v1/models?endpoint=chat(官方文档定义,兼容端点没有稳定的
+    // OpenAI 格式列表);②必须带 Bearer key(无 key 返回 401 "no api key supplied");
+    // ③返回的是 Cohere 原生格式 {models:[{name,is_deprecated,...}]},不是 OpenAI 的
+    // {data:[{id}]}——用 entriesOf 解析,过滤已弃用模型,id 取 name(与 chat/completions
+    // 的 model 参数同一个名字)。模型列表请求也计入 trial 1000 calls/月,会话缓存已兜底。
+    url: 'https://api.cohere.com/v1/models?endpoint=chat&page_size=100',
+    headers(apiKey){ return { 'authorization': 'Bearer ' + apiKey }; },
+    labelOf(m){ return (m && m.name) || ''; },
+    entriesOf(json){
+      return (json && Array.isArray(json.models) ? json.models : [])
+        .filter(function(m){ return !m.is_deprecated; })
+        .map(function(m){ return { id: (m && m.name) || '', label: (m && m.name) || '' }; })
+        .filter(function(x){ return !!x.id; });
+    },
   },
   cerebras: {
     // Cerebras 模型列表免认证 GET /public/v1/models(2026-08-11 实测),返回
@@ -671,9 +688,12 @@ function fetchProviderModels(provider, apiKey){
     if(timeoutId) clearTimeout(timeoutId);
     if(!res.ok) return null;
     return res.json().then(function(json){
-      if(!json || !Array.isArray(json.data)) return null;
-      // hf 用 entriesOf 展开(同一模型多家 provider 拆成多条);其余 provider 走默认
-      // labelOf 平铺(它们的响应本来就是一张平铺模型表,没有 provider 维度)。
+      if(!json) return null;
+      // 默认要求 OpenAI 平铺结构 data[];有 entriesOf 的 provider(如 hf/cohere)用
+      // 自定义解析,可接受其它结构(cohere 原生格式是 models[],没有 data 数组)。
+      if(!Array.isArray(json.data) && typeof spec.entriesOf!=='function') return null;
+      // hf 用 entriesOf 展开(同一模型多家 provider 拆成多条);cohere 用它解析原生
+      // models[] 结构;其余 provider 走默认 labelOf 平铺(OpenAI 格式 data[])。
       const models = (typeof spec.entriesOf==='function')
         ? spec.entriesOf(json)
         : json.data.map(function(m){
