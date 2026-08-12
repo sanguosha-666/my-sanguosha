@@ -4704,6 +4704,9 @@ function resumeAfterInterrupt(g, resume, seat){
     g.pending=resume.dyingPending;
     g.phase='dying';
     finishDyingRescueCard(g,resume.responderSeat,resume.card,resume.asText,resume.soundName,resume.isJijiu);
+  } else if(resume.type==='hanbing'){
+    // 寒冰剑弃装备触发失装技能后，从下一次弃牌继续；不重复弃刚处理的牌。
+    startHanbingRound(g,resume.from,resume.to,resume.round);
   } else { // 'sha' 及其它
     if(g.fangtianQueue){ advanceFangtianQueue(g); }
     else if(g.luanwuResume){ continueLuanwuAfterSha(g); }

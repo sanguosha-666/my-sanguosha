@@ -151,4 +151,29 @@ describe('凌统【旋风】修复', function() {
     assert.strictEqual(dying.dying,false,'应正常脱离濒死');
     assert.strictEqual(_g.pending,null,'不得残留旋风或 dying pending');
   });
+
+  it('寒冰剑弃装备触发旋风后暂停，并从下一轮继续', function() {
+    mySeat=0;
+    const attacker=player('攻击者','caocao');
+    attacker.hand=[{id:'h1',name:'杀'}];
+    const lingtong=player('凌统','lingtong');
+    lingtong.equips.armor={id:'e1',name:'八卦阵'};
+    lingtong.equips.plus1={id:'e2',name:'的卢'};
+    _g={players:[attacker,lingtong],turn:0,phase:'hanbing',started:true,
+      pending:{type:'hanbing',from:0,to:1,round:0},deck:[],discard:[],log:[],gameMode:'ffa'};
+
+    hanbingPick('armor');
+    assert.strictEqual(_g.pending.type,'xuanfengPick','旋风 pending 不应被寒冰剑覆盖');
+    assert.strictEqual(_g.pending.resume.type,'hanbing');
+    assert.strictEqual(_g.pending.resume.round,1,'恢复时应从第二轮继续');
+
+    mySeat=1;
+    cancelXuanfeng();
+    assert.strictEqual(lingtong.equips.plus1,null,'旋风结束后寒冰剑应继续弃第二张牌');
+    assert.strictEqual(_g.pending.type,'xuanfengPick','第二次失去装备也应先完整结算旋风');
+    assert.strictEqual(_g.pending.resume.round,2,'第二次旋风后应恢复到寒冰剑收尾');
+    cancelXuanfeng();
+    assert.strictEqual(_g.pending,null,'寒冰剑完成后应清空自身状态');
+    assert.strictEqual(_g.phase,'play');
+  });
 });

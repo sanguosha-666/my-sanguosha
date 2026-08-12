@@ -99,7 +99,12 @@ function startHanbingRound(g, from, to, round){
   if(optCount===0){ finishHanbing(g); return; }
   if(optCount===1){
     const info={trick:'寒冰剑', from, to};
+    const pendingBefore=g.pending;
     if(handCount>0) applyTrickOnHand(g, info); else applyTrickOnEquip(g, info, equipSlots[0]);
+    if(g.pending!==pendingBefore && g.pending){
+      g.pending.resume={type:'hanbing',from,to,round:round+1};
+      return;
+    }
     startHanbingRound(g, from, to, round+1);
     return;
   }
@@ -123,12 +128,17 @@ function hanbingPick(choice){
     const tgt=g.players[to];
     if(!tgt || !tgt.alive){ finishHanbing(g); return g; }
     const info={trick:'寒冰剑', from, to};
+    const pendingBefore=g.pending;
     if(choice==='hand'){
       if((tgt.hand||[]).length===0){ finishHanbing(g); return g; } // 失效兜底
       applyTrickOnHand(g, info);
     } else {
       if(!EQUIP_SLOTS.includes(choice) || !tgt.equips[choice]){ finishHanbing(g); return g; } // 失效兜底
       applyTrickOnEquip(g, info, choice);
+    }
+    if(g.pending!==pendingBefore && g.pending){
+      g.pending.resume={type:'hanbing',from,to,round:round+1};
+      return g;
     }
     startHanbingRound(g, from, to, round+1);
     return g;
