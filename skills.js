@@ -237,7 +237,7 @@ function respondFanjianSuit(suit){
     if(!same){
       const interrupted=dealDamage(g, targetSeat, 1, seat, '【反间】', 'fanjian');
       if(interrupted){
-        if(g.pending) g.pending.resume={type:'fanjian'};
+        setInterruptedDamageResume(g,{type:'fanjian'});
         return g;
       }
       if(checkWin(g)) return g;
@@ -969,7 +969,10 @@ function finishTianxiangTransfer(g, originalResume, originalSeat, drawSeat){
 
 function wrapPendingForTianxiang(g, originalResume, originalSeat, drawSeat){
   if(g.pending && g.pending.resume){
-    g.pending.resume={type:'tianxiang', inner:g.pending.resume, originalResume, originalSeat, drawSeat};
+    if(g.afterDamageEffects && g.pending.resume.type==='afterDamageEffects'){
+      const inner=g.afterDamageEffects.originalResume;
+      g.afterDamageEffects.originalResume={type:'tianxiang',inner,originalResume,originalSeat,drawSeat};
+    }else g.pending.resume={type:'tianxiang',inner:g.pending.resume,originalResume,originalSeat,drawSeat};
   }
 }
 
@@ -1053,7 +1056,10 @@ function respondTianxiang(choice, targetSeat){
 
 function wrapPendingForZhengyi(g, originalResume, originalSeat){
   if(g.pending && g.pending.resume){
-    g.pending.resume={type:'zhengyi', inner:g.pending.resume, originalResume, originalSeat};
+    if(g.afterDamageEffects && g.pending.resume.type==='afterDamageEffects'){
+      const inner=g.afterDamageEffects.originalResume;
+      g.afterDamageEffects.originalResume={type:'zhengyi',inner,originalResume,originalSeat};
+    }else g.pending.resume={type:'zhengyi',inner:g.pending.resume,originalResume,originalSeat};
   }
 }
 
@@ -1146,7 +1152,7 @@ function respondQuhu(cardIdx){
     g.pending=null;
     const interrupted=dealDamage(g, seat, 1, targetSeat, '【驱虎】', 'quhu');
     if(interrupted){
-      if(g.pending) g.pending.resume={type:'quhu'};
+      setInterruptedDamageResume(g,{type:'quhu'});
       return g;
     }
     if(checkWin(g)) return g;
@@ -1165,7 +1171,7 @@ function respondQuhuDamage(targetSeat){
     g.pending=null;
     const interrupted=dealDamage(g, targetSeat, 1, sourceSeat, '【驱虎】', 'quhu');
     if(interrupted){
-      if(g.pending) g.pending.resume={type:'quhu'};
+      setInterruptedDamageResume(g,{type:'quhu'});
       return g;
     }
     if(checkWin(g)) return g;
@@ -1754,7 +1760,7 @@ function respondXiaoguoChoice(choice){
     const target=g.players[endingSeat], asker=g.players[from];
     if(choice==='damage'){
       const dying=dealDamage(g, endingSeat, 1, from, '【骁果】', 'xiaoguo');
-      if(dying){ g.pending.resume={type:'xiaoguo', endingSeat, lastAsker:from}; return g; }
+      if(dying){ setInterruptedDamageResume(g,{type:'xiaoguo', endingSeat, lastAsker:from}); return g; }
       g.pending=null;
       if(checkWin(g)) return g;
       advanceXiaoguo(g, endingSeat, from);
