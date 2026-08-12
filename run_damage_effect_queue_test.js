@@ -49,7 +49,24 @@ assert.strictEqual(g.afterDamageEffects,null,'全部受伤后技能完成后清�
 assert.strictEqual(g.pending,null,'不得残留旧 pending');
 assert.strictEqual(g.phase,'play','只在全部技能完成后恢复原流程');
 
+// CORE-02 独立复现：恩怨先挂起时，完成后必须继续同一角色的其它 onDamaged 技能。
+R(`GENERALS.fazheng.hooks={onDamaged:function(g,seat,ctx){
+  g.pending={type:'probeDamageHook',seat:seat,resume:{type:ctx.srcType}};
+  g.phase='probeDamageHook';
+}};`);
+const g2={players:[
+  {name:'无红桃伤害者',general:'caocao',hp:4,maxHp:4,hand:[],equips:emptyEq(),delays:[],alive:true},
+  {name:'恩怨复合目标',general:'fazheng',hp:3,maxHp:3,hand:[],equips:emptyEq(),delays:[],alive:true}
+],deck:[],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null};
+sandbox.__g=g2;
+assert.strictEqual(R('dealDamage(__g,1,1,0,"恩怨队列复现","sha")'),true);
+assert.strictEqual(g2.pending.type,'enyuanChoose','恩怨必须先进入交互');
+R('mySeat=0; triggerEnyuan()');
+assert.strictEqual(g2.players[0].hp,3,'无红桃时伤害来源因恩怨失去1点体力');
+assert.strictEqual(g2.pending.type,'probeDamageHook','恩怨完成后必须继续其它受伤后技能');
+assert.strictEqual(g2.pending.resume.type,'afterDamageEffects','后续技能仍由统一队列接管');
+
 const source=fs.readFileSync('game.js','utf8');
 assert.ok(source.includes("actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige']"));
 assert.ok(source.includes("resume.type==='afterDamageEffects'"));
-console.log('damage effect queue: 10/10 passed');
+console.log('damage effect queue: 15/15 passed');
