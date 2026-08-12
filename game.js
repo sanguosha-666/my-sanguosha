@@ -35,7 +35,8 @@ const RESPONSE_PENDING_TYPES = new Set([
   'wuxie', 'guicai', 'jiedaoChoice', 'ganglieChoice', 'guhuoQuestion', 'xiaoguo',
   'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
   'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick',
-  'jijiangAsk', 'hujiaAsk', 'zhibaAsk', 'zhibaGain', 'yinghunTarget', 'yinghunChoice', 'yinghunDiscard'
+  'jijiangAsk', 'hujiaAsk', 'zhibaAsk', 'zhibaGain', 'yinghunTarget', 'yinghunChoice', 'yinghunDiscard',
+  'duanbingChoose', 'mingcePickCard', 'qiaomengChoose', 'lianyingAsk', 'tieqi', 'liegong'
 ]);
 // setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
 // 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
@@ -2801,13 +2802,13 @@ const CARD_PLAYS = {
         
         if (aliveSeats.length > 0) {
           // 存储原始目标和卡牌信息，等待选择额外目标
-          g.pending = {
+          g.pending = setResponseAskedAt({
             type: 'duanbingChoose',
             sourceSeat: mySeat,
             baseTarget: targetSeat,
             card: card,
             availableTargets: aliveSeats
-          };
+          });
           g.phase = 'duanbingChoose';
           g.log = pushLog(g.log, `${me.name} 可以发动【短兵】,多选择一名距离为1的角色为目标`);
           return;
@@ -3189,7 +3190,7 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
   // 仁王/毅重无效已挪到 afterShaTargetSkills(雌雄之后),以便 FAQ「可先发动雌雄再因盾无效」。
   g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' '+usedAs });
   if(hasCap(me,'tieqi')){
-    g.pending={type:'tieqi', from:fromSeat, to:targetSeat, shaColor};
+    g.pending=setResponseAskedAt({type:'tieqi', from:fromSeat, to:targetSeat, shaColor});
     if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
     if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
     g.phase='tieqi';
@@ -3200,7 +3201,7 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
   if(hasCap(me,'liegong')){
     const targetHandCount=(g.players[targetSeat].hand||[]).length;
     if(targetHandCount>=me.hp || targetHandCount<=attackRange(g,fromSeat)){
-      g.pending={type:'liegong', from:fromSeat, to:targetSeat, shaColor};
+      g.pending=setResponseAskedAt({type:'liegong', from:fromSeat, to:targetSeat, shaColor});
       if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
       if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
       g.phase='liegong';
@@ -3338,7 +3339,7 @@ function startMingce(){
     const others = g.players.filter((p,i)=>p && p.alive && i!==mySeat);
     if(others.length===0) return g;
     g.mingceUsed = true;
-    g.pending = {type:'mingcePickCard', sourceSeat:mySeat};
+    g.pending = setResponseAskedAt({type:'mingcePickCard', sourceSeat:mySeat});
     g.phase = 'mingcePickCard';
     return g;
   });
@@ -3705,7 +3706,7 @@ function maybeStartQiaomeng(g, from, to, shaColor) {
   if(equipSlots.length === 0) return false;
   
   // 进入趫猛选择阶段
-  g.pending={type:'qiaomengChoose', sourceSeat:from, targetSeat:to, shaColor:shaColor};
+  g.pending=setResponseAskedAt({type:'qiaomengChoose', sourceSeat:from, targetSeat:to, shaColor:shaColor});
   g.phase='qiaomengChoose';
   g.log=pushLog(g.log, source.name + ' 发动【趫猛】,可以选择 ' + target.name + ' 的一张装备牌');
   markSkillSound(g, 'qiaomeng');
@@ -6939,7 +6940,7 @@ function tryFlushLianying(g){
     const seat = g.lianyingQueue.shift();
     const p = g.players[seat];
     if(!p || !p.alive || !hasCap(p,'lianying')) continue;
-    g.pending = { type:'lianyingAsk', seat };
+    g.pending = setResponseAskedAt({ type:'lianyingAsk', seat });
     g.phase = 'lianyingAsk';
     g.log = pushLog(g.log, p.name+' 是否发动【连营】,摸1张牌…');
     return true;

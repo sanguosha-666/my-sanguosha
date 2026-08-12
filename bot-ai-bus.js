@@ -526,6 +526,14 @@ function autoRespondAction(g){
   if(type==='shensuChoose1') return function(){ skipShensu1(); };
   if(type==='shensuChoose2') return function(){ skipShensu2(); };
   if(type==='qiaobianTurnStart') return function(){ qiaobianDecline(); };
+  // CORE-03：所有会阻塞真人操作的选择阶段必须有合法保守动作。这里与
+  // RESPONSE_PENDING_TYPES 同步登记，normalize 负责补时间戳，本表负责提交动作。
+  if(type==='duanbingChoose') return function(){ cancelDuanbing(); };
+  if(type==='mingcePickCard') return function(){ cancelMingce(); };
+  if(type==='qiaomengChoose') return function(){ cancelQiaomeng(); };
+  if(type==='lianyingAsk') return function(){ respondLianying(false); };
+  if(type==='tieqi') return function(){ respondTieqi(false); };
+  if(type==='liegong') return function(){ respondLiegong(false); };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且

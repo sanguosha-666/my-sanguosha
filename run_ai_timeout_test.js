@@ -416,6 +416,34 @@ const testCode = String.raw`
     if(g15.pending && g15.pending.type === 'huashenChangePickEnd') throw new Error('pending 不应仍是 huashenChangePickEnd(安全网对这个边界依然无效)');
   });
 
+  // CORE-03:源码确认的六个阻塞选择阶段必须同时具备 askedAt 和保守动作。
+  var timeoutCases = [
+    ['duanbingChoose','sourceSeat','cancelDuanbing'],
+    ['mingcePickCard','sourceSeat','cancelMingce'],
+    ['qiaomengChoose','sourceSeat','cancelQiaomeng'],
+    ['lianyingAsk','seat','respondLianying'],
+    ['tieqi','from','respondTieqi'],
+    ['liegong','from','respondLiegong']
+  ];
+  var timeoutHits = {};
+  cancelDuanbing=function(){timeoutHits.cancelDuanbing=(timeoutHits.cancelDuanbing||0)+1;};
+  cancelMingce=function(){timeoutHits.cancelMingce=(timeoutHits.cancelMingce||0)+1;};
+  cancelQiaomeng=function(){timeoutHits.cancelQiaomeng=(timeoutHits.cancelQiaomeng||0)+1;};
+  respondLianying=function(v){if(v===false)timeoutHits.respondLianying=(timeoutHits.respondLianying||0)+1;};
+  respondTieqi=function(v){if(v===false)timeoutHits.respondTieqi=(timeoutHits.respondTieqi||0)+1;};
+  respondLiegong=function(v){if(v===false)timeoutHits.respondLiegong=(timeoutHits.respondLiegong||0)+1;};
+  botInvoke=function(seat,fn){fn();};
+  for(var tc=0;tc<timeoutCases.length;tc++){
+    var row=timeoutCases[tc], pending={type:row[0]}; pending[row[1]]=0;
+    if(!RESPONSE_PENDING_TYPES.has(row[0])) throw new Error(row[0]+' 未登记 RESPONSE_PENDING_TYPES');
+    pending.askedAt=Date.now()-31000;
+    var tg=mkG({phase:row[0],pending:pending});
+    maybeAutoRespondTimeout(tg);
+  }
+  await check('CORE-03 六个阻塞阶段均有30秒保守动作',function(){
+    timeoutCases.forEach(function(row){if(timeoutHits[row[2]]!==1)throw new Error(row[0]+' 未执行 '+row[2]);});
+  });
+
   console.log('\n' + '='.repeat(60));
   console.log('  结果: ' + pass + ' 通过, ' + fail + ' 失败');
   console.log('='.repeat(60) + '\n');
