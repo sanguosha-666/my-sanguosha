@@ -61,4 +61,16 @@ run('guoSe(0,1)');
 assert.strictEqual(g.players[0].hand.length, 1, '目标已有乐不思蜀时国色不能重复放置');
 assert.strictEqual(g.pending, null, '重复延时锦囊不能开启结算');
 
-console.log('guose target validation: 8/8 passed');
+g = state();
+const physical = diamond('physical-1');
+const transformed = { ...physical, name: '乐不思蜀', originalName: physical.name };
+g.players[1].delays = [transformed];
+g.deck = [{ id: 'judge-1', name: '闪', suit: '♠', rank: 2 }];
+sandbox.__g = g;
+run('processOneDelayCard(__g,1)');
+const returned = g.discard.find(card => card.id === 'physical-1');
+assert.ok(returned, '国色牌判定结束后应按同一 card id 进入弃牌堆');
+assert.strictEqual(returned.name, '杀', '国色牌离开判定区后必须恢复原物理牌名');
+assert.strictEqual(returned.originalName, undefined, '恢复后不应残留临时 originalName 标记');
+
+console.log('guose target and identity validation: 11/11 passed');

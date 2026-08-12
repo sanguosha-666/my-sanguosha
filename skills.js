@@ -2281,6 +2281,7 @@ function zhimengAutoResolve(g, from, to, option) {
   } else if(option.type === 'delay') {
     if(target.delays && target.delays[option.index]) {
       gainedCard = target.delays.splice(option.index, 1)[0];
+      restoreOriginalCardName(gainedCard);
     }
   }
   

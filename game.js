@@ -5404,6 +5404,7 @@ function applyTrickOnDelay(g, info, idx){
   const tgt=g.players[info.to];
   const card=(tgt.delays||[])[idx]; if(!card) return;
   tgt.delays.splice(idx,1);
+  restoreOriginalCardName(card);
   const me=g.players[info.from];
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 顺走 '+tgt.name+' 判定区的【'+card.name+'】'); }
   else { g.discard.push(card); markDiscardReveal(g, info.to, [card]); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 判定区的【'+card.name+'】'); }
@@ -6366,7 +6367,10 @@ function executeXuanfeng(g) {
       } else if(selection.kind==='delay'){
         let idx=(target.delays||[]).findIndex(c=>c && selection.cardId!=null && c.id===selection.cardId);
         if(idx<0) idx=selection.value;
-        if(Number.isInteger(idx) && target.delays && target.delays[idx]) card=target.delays.splice(idx,1)[0];
+        if(Number.isInteger(idx) && target.delays && target.delays[idx]){
+          card=target.delays.splice(idx,1)[0];
+          restoreOriginalCardName(card);
+        }
       }
       if(card){
         g.discard.push(card);
@@ -6433,6 +6437,7 @@ function executeXuanfeng(g) {
       const delayIndex = delays.indexOf(card);
       if (delayIndex !== -1) {
         delays.splice(delayIndex, 1);
+        restoreOriginalCardName(card);
         cardsToDiscard.push(card);
       }
     }
@@ -6803,7 +6808,7 @@ function processOneDelayCard(g, seat){
   const p=g.players[seat];
   const card=p.delays[0];
   const spec=DELAY_TRICKS[card.name];
-  if(!spec){ p.delays.shift(); g.discard.push(card); return 'done'; } // 未知/尚未实现的延时锦囊,安全丢弃防卡死
+  if(!spec){ p.delays.shift(); restoreOriginalCardName(card); g.discard.push(card); return 'done'; } // 未知/尚未实现的延时锦囊,安全丢弃防卡死
   const judgeCard=judge(g);
   p.delays.shift();
   if(maybeGuicai(g, seat, judgeCard, {kind:'delayJudge', seat, trickName:card.name, card})==='pending') return 'pending';
@@ -6851,10 +6856,19 @@ function finishDelayCard(g, seat, spec, finalCard, card){
   }
   return result==='pending' ? 'pending' : 'done';
 }
+// restoreOriginalCardName: 转化牌离开判定区后恢复物理牌身份。国色等技能只在结算期间
+// 改变规则牌名，不能让修改后的 name 随弃牌堆重洗而永久污染牌堆。
+function restoreOriginalCardName(card){
+  if(!card || !card.originalName) return card;
+  card.name=card.originalName;
+  delete card.originalName;
+  return card;
+}
 // discardOrVanish: 延时锦囊的牌"离场"时的统一去向——真实牌进弃牌堆;虚拟牌(card.virtual,
 // 如徐晃【断粮】"视为使用一张兵粮寸断"临时构造的牌)用完即焚,直接消失、不进弃牌堆,
 // 否则会被 ensureDeck 当真牌重新洗回牌堆,凭空多出一张不在 buildDeck 统计里的牌、污染牌堆构成。
 function discardOrVanish(g, card){
+  restoreOriginalCardName(card);
   if(!card.virtual) g.discard.push(card);
 }
 // continueDelayResolution: resolveDelayTricks(g,seat) 结果的统一处理——startTurn、finishDying 的
