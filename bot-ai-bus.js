@@ -570,8 +570,8 @@ function autoRespondAction(g){
   if(type==='shensuChoose1') return function(){ skipShensu1(); };
   if(type==='shensuChoose2') return function(){ skipShensu2(); };
   if(type==='qiaobianTurnStart') return function(){ qiaobianDecline(); };
-  // CORE-03：所有会阻塞真人操作的选择阶段必须有合法保守动作。这里与
-  // RESPONSE_PENDING_TYPES 同步登记，normalize 负责补时间戳，本表负责提交动作。
+  // CORE-03：所有已知会阻塞真人操作的选择阶段保留经过验证的专用保守动作；新增阶段由
+  // 下方通用安全放弃接管，不再要求同步登记 type。
   if(type==='duanbingChoose') return function(){ cancelDuanbing(); };
   if(type==='mingcePickCard') return function(){ cancelMingce(); };
   if(type==='qiaomengChoose') return function(){ cancelQiaomeng(); };
@@ -639,7 +639,39 @@ function autoRespondAction(g){
   if(type==='shensuSha') return function(){ cancelShensuSha(); };
   if(type==='shaOffsetChoice') return function(){ respondShaOffsetChoice(null); };
   if(type==='fenxunDiscard' || type==='fenxunTarget') return function(){ cancelFenxun(); };
+  // 新增询问型 pending 的零登记兜底。已有类型继续保留上面的专用动作，避免改变已经验证过的
+  // 强制选择/技能结算语义；未知类型只在能证明有安全恢复出口时才取消，绝不盲清 pending。
+  if(canDefaultAbandonPending(g)) return function(){ defaultAbandonPending(g); };
   return null;
+}
+function canDefaultAbandonPending(g){
+  if(!g || !g.pending || !Number.isInteger(pendingResponderSeat(g,g.pending))) return false;
+  const d=g.pending;
+  if(d.resume && typeof d.resume.type==='string') return true;
+  if(typeof d.resumePhase==='string' || typeof d.previousPhase==='string') return true;
+  return Number.isInteger(g.turn) && pendingResponderSeat(g,d)===g.turn;
+}
+function defaultAbandonPending(snapshot){
+  if(!snapshot || !snapshot.pending) return;
+  const expectedType=snapshot.pending.type;
+  const expectedAskedAt=snapshot.pending.askedAt;
+  tx(function(g){
+    const d=g.pending;
+    if(!d || d.type!==expectedType || d.askedAt!==expectedAskedAt) return g;
+    const responder=pendingResponderSeat(g,d);
+    if(!Number.isInteger(responder) || responder!==mySeat) return g;
+    if(Date.now()-d.askedAt<RESPONSE_TIMEOUT_MS) return g;
+    const resume=d.resume;
+    const resumePhase=typeof d.resumePhase==='string' ? d.resumePhase
+      : (typeof d.previousPhase==='string' ? d.previousPhase : null);
+    const canReturnToPlay=Number.isInteger(g.turn) && responder===g.turn;
+    if(!(resume&&typeof resume.type==='string') && !resumePhase && !canReturnToPlay) return g;
+    g.pending=null;
+    if(resume && typeof resume.type==='string') resumeAfterInterrupt(g,resume,responder);
+    else g.phase=resumePhase||'play';
+    g.log=pushLog(g.log,(g.players[responder]&&g.players[responder].name||'玩家')+' 响应超时，自动放弃当前操作');
+    return g;
+  });
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且
 // 该阶段有保守动作,则 botInvoke 到被问者座位提交。幂等:服务端守卫通过才生效。
@@ -671,11 +703,7 @@ function maybeAutoRespondTimeout(g){
     act();
     return true;
   }
-  const actorField = (typeof BOT_PHASE_ACTOR!=='undefined' && BOT_PHASE_ACTOR) ? BOT_PHASE_ACTOR[g.phase] : undefined;
-  // 五谷的当前行动者存放在 order[idx]，不是单一字段；其余阶段继续复用权威行动者表。
-  const actor = g.pending.type==='wugu' && Array.isArray(g.pending.order)
-    ? g.pending.order[g.pending.idx||0]
-    : (actorField!==undefined ? g.pending[actorField] : null);
+  const actor = pendingResponderSeat(g,g.pending);
   if(typeof actor!=='number' || !g.players || !g.players[actor]) return false;
   if(typeof botInvoke==='function'){
     botInvoke(actor, act);

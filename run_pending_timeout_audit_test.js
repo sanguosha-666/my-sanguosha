@@ -8,9 +8,11 @@ const bot=fs.readFileSync('bot.js','utf8');
 const setBlock=game.match(/const RESPONSE_PENDING_TYPES = new Set\(\[[\s\S]*?\n\]\);/);
 const actionBlock=bus.match(/function autoRespondAction\(g\)\{[\s\S]*?\n\s*return null;\n\}/);
 const actorBlock=bot.match(/const BOT_PHASE_ACTOR = \{[\s\S]*?\n\};/);
-assert(setBlock&&actionBlock&&actorBlock,'应能定位超时托管三项核心定义');
-const ctx=vm.createContext({Math});
-vm.runInContext(`${setBlock[0]}\n${actionBlock[0]}\n${actorBlock[0]}`,ctx);
+const responderBlock=game.match(/function pendingResponderSeat\(g, pending\)\{[\s\S]*?\n\}/);
+const canAbandonBlock=bus.match(/function canDefaultAbandonPending\(g\)\{[\s\S]*?\n\}/);
+assert(setBlock&&actionBlock&&actorBlock&&responderBlock&&canAbandonBlock,'应能定位超时托管核心定义');
+const ctx=vm.createContext({Math,Number});
+vm.runInContext(`${setBlock[0]}\n${actorBlock[0]}\n${responderBlock[0]}\n${canAbandonBlock[0]}\n${actionBlock[0]}`,ctx);
 const read=expr=>vm.runInContext(expr,ctx);
 
 const expected=[
@@ -29,14 +31,19 @@ const expected=[
   'shaOffsetChoice','shensuChoose1','shensuChoose2','tiaoxinChoice','yijiAsk','zhijiChoice'
 ];
 for(const type of expected){
-  assert.strictEqual(read(`RESPONSE_PENDING_TYPES.has(${JSON.stringify(type)})`),true,`${type} 应登记 askedAt`);
   assert.strictEqual(read(`typeof autoRespondAction({phase:${JSON.stringify(type==='chengxiangChoose'?'chengxiangAsk':type)},pending:{type:${JSON.stringify(type)},cards:[],players:[],candidates:[],targets:[],options:[],available:[],availableSlots:[],pool:[]}})`),'function',`${type} 应有保守动作`);
   if(type!=='wugu'){
     const phase=type==='chengxiangChoose'?'chengxiangAsk':type;
     assert.strictEqual(read(`typeof BOT_PHASE_ACTOR[${JSON.stringify(phase)}]`),'string',`${type} 应能解析行动座位`);
   }
 }
-assert(game.includes("RESPONSE_PENDING_TYPES.has(result.pending.type)"),'tx 写回前必须统一补 askedAt');
+assert(!game.includes("RESPONSE_PENDING_TYPES.has(result.pending.type)"),'tx 新 pending 补戳不得依赖 type 白名单');
+assert(game.includes('isTimedResponsePending(result,result.pending)'),'tx 写回前应按通用响应者字段补 askedAt');
+assert(game.includes('actingSeat===responderAtStart'),'只有当前响应者操作才重置 askedAt');
+assert.strictEqual(read("pendingResponderSeat({phase:'futureSkill'},{type:'futureSkill',seat:2})"),2,'新增 pending 应零登记识别 seat');
+assert.strictEqual(read("pendingResponderSeat({phase:'futureSkill'},{type:'futureSkill',asking:3,seat:2})"),3,'asking 应优先于通用 seat');
+assert.strictEqual(read("typeof autoRespondAction({phase:'futureSkill',turn:2,pending:{type:'futureSkill',seat:2,askedAt:1}})"),'function','新增可取消 pending 应零登记获得默认放弃动作');
+assert.strictEqual(read("typeof autoRespondAction({phase:'futureSkill',turn:0,pending:{type:'futureSkill',seat:2,askedAt:1}})"),'object','无安全恢复出口的未知 pending 不得被盲清');
 assert(!game.match(/pending\s*=\s*\{\s*type:\s*['\"]sanyaoDamage['\"]/),'sanyaoDamage 只是 resume 类型，不是人工 pending');
 
-console.log(`pending timeout audit tests: ${expected.length*3-1} checks passed (wugu actor uses order[idx])`);
+console.log(`pending timeout audit tests: ${expected.length*2+6} checks passed (universal responder + safe abandon)`);

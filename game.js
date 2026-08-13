@@ -29,8 +29,8 @@ document.getElementById('joinBtn').onclick = joinRoom;
 // A1 响应超时托管:询问型 pending 的超时阈值(30s)。检测器(bot-ai-bus.js)按它判定超时
 // 提交保守动作,render.js 按它显示"⏱ Ns 后自动…"倒计时。
 const RESPONSE_TIMEOUT_MS = 30000;
-// 询问型 pending 的 type 集合(保守动作表 spec §2.2 + pick 选牌子阶段)。normalize 用它兜底
-// 补 askedAt;bot-ai-bus.js 的保守动作表与检测器复用同一份判定(有响应者字段的询问才计时)。
+// 已有询问型 pending 的兼容集合。老房间或结构不完整的既有状态仍可据此补 askedAt；新增
+// pending 不必登记，isTimedResponsePending 会按通用响应者字段自动识别。
 const RESPONSE_PENDING_TYPES = new Set([
   'wuxie', 'guicai', 'jiedaoChoice', 'ganglieChoice', 'guhuoQuestion', 'xiaoguo',
   'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
@@ -65,6 +65,32 @@ const RESPONSE_PENDING_TYPES = new Set([
 function setResponseAskedAt(pending){
   pending.askedAt = Date.now();
   return pending;
+}
+// pendingResponderSeat: 超时托管和 tx 活跃检测共用的响应者解析入口。
+// 已有阶段优先复用机器人调度表中逐项核验过的字段；新增阶段无需登记，按通用字段约定
+// 自动识别。这样新增 pending 不会再因为漏改一张超时白名单而永久卡局。
+function pendingResponderSeat(g, pending){
+  if(!pending || typeof pending!=='object') return null;
+  if(pending.type==='wugu' && Array.isArray(pending.order)){
+    const wuguSeat=pending.order[pending.idx||0];
+    return Number.isInteger(wuguSeat) ? wuguSeat : null;
+  }
+  const phase=g&&g.phase;
+  const actorField=(typeof BOT_PHASE_ACTOR!=='undefined' && BOT_PHASE_ACTOR && phase)
+    ? BOT_PHASE_ACTOR[phase] : null;
+  if(actorField && Number.isInteger(pending[actorField])) return pending[actorField];
+  const fields=['responderSeat','responseSeat','asking','active','currentSeat','seat','sourceSeat','targetSeat','damagerSeat',
+    'lordSeat','seatA','to','from'];
+  for(let i=0;i<fields.length;i++){
+    if(Number.isInteger(pending[fields[i]])) return pending[fields[i]];
+  }
+  return null;
+}
+function isTimedResponsePending(g, pending){
+  if(!pending || typeof pending!=='object') return false;
+  if(pending.type==='wuxiePublicWait') return true;
+  if(typeof pending.type==='string' && RESPONSE_PENDING_TYPES.has(pending.type)) return true;
+  return Number.isInteger(pendingResponderSeat(g,pending));
 }
 function normalize(g){
   if(!g) return g;
@@ -1511,15 +1537,12 @@ function normalize(g){
     }
   }
 
-  // A1 响应超时托管:对"询问型"pending 兜底补 askedAt(缺失时=首次读到,视为刚被询问)。
+  // A1 响应超时托管:对有明确响应者的 pending 兜底补 askedAt(缺失时=首次读到,视为刚被询问)。
   // normalize 在 tx 写路径和 render 读路径都跑,老存档/创建处漏打的 pending 在这里补齐;
   // 创建处/asking 切换处已用 setResponseAskedAt 打过,这里绝不覆盖原值(覆盖=倒计时重置,
-  // 永远等不到超时)。判断依据 = pending.type 在保守动作表集合里,或 respond 阶段(无 type)。
+  // 永远等不到超时)。不再依赖 type 白名单；新增 pending 只要沿用通用响应者字段就自动覆盖。
   if(g.pending && typeof g.pending.askedAt !== 'number'){
-    const pt = g.pending.type;
-    const isAskPending = (typeof pt === 'string' && RESPONSE_PENDING_TYPES.has(pt))
-      || (pt === undefined && g.phase === 'respond');
-    if(isAskPending) g.pending.askedAt = Date.now();
+    if(isTimedResponsePending(g,g.pending)) g.pending.askedAt = Date.now();
   }
 
   return g;
@@ -2630,13 +2653,17 @@ function tx(fn, onCommitted){
     try{
       normalize(g);
       pruneExchangeCards(g);
+      const pendingAtStart=g.pending;
+      const responderAtStart=pendingResponderSeat(g,pendingAtStart);
       const result = fn(g) || g;
       // 连营队列:本 tx 内 effect/杀结算可能覆盖 pending;收尾再尝试挂起询问
       tryFlushLianying(result);
-      // 所有询问型 pending 在事务写回前统一补戳。normalize 负责老状态/读路径，这里负责
-      // 本次回调刚创建的新 pending；两端合起来保证不会再因某个创建点忘调 helper 而卡死。
-      if(result.pending && typeof result.pending.askedAt!=='number' &&
-         typeof result.pending.type==='string' && RESPONSE_PENDING_TYPES.has(result.pending.type)){
+      // 当前被询问者仍在同一个 pending 中操作，说明玩家活跃，重置等待时间；其他玩家的 tx
+      // 不得延长倒计时。新创建的 pending 则不依赖 type 登记，只要能解析响应者就自动打戳。
+      if(result.pending===pendingAtStart && Number.isInteger(actingSeat) && actingSeat===responderAtStart){
+        setResponseAskedAt(result.pending);
+      }else if(result.pending && typeof result.pending.askedAt!=='number' &&
+               isTimedResponsePending(result,result.pending)){
         setResponseAskedAt(result.pending);
       }
       return stripUndefined(result);
