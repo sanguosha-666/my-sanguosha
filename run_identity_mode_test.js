@@ -11,7 +11,7 @@ const ROOT = __dirname;
 let passed = 0, failed = 0;
 function check(name, fn){
   try { fn(); console.log('  PASS', name); passed++; }
-  catch(e){ console.log('  FAIL', name, '-', e.message); failed++; }
+  catch(e){ console.log('  FAIL', name, '-', e.stack||e.message); failed++; }
 }
 
 const context = {
@@ -70,6 +70,9 @@ files.forEach(f=>{
       var _g = null;
       tx = function(fn){
         if(!_g) return;
+        // 与生产 tx 保持一致：Firebase 读回的空数组可能缺失，业务函数执行前必须 normalize。
+        // 否则随机选到左慈时 huashenPool 为 undefined，测试会偶发在 .length 处崩溃。
+        normalize(_g);
         const r = fn(_g);
         return r === undefined ? _g : r;
       };
