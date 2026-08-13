@@ -284,7 +284,12 @@ const PENDING_RENDERERS = {
   cixiongAsk:         {actor:'from',       skill:'雌雄双股剑', render:renderPendingCixiongAsk},
   hanbingAsk:         {actor:'from',       skill:'寒冰剑', render:renderPendingHanbingAsk},
   xiaoguo:            {actor:'asking',     skill:'骁果', render:renderPendingXiaoguo},
-  xiaoguoChoice:      {actor:'to',         skill:'骁果', render:renderPendingXiaoguoChoice}
+  xiaoguoChoice:      {actor:'to',         skill:'骁果', render:renderPendingXiaoguoChoice},
+  cixiongChoice:      {actor:'to',         skill:'雌雄双股剑', render:renderPendingCixiongChoice},
+  zhijiChoice:        {actor:'seat',       skill:'志继', render:renderPendingZhijiChoice},
+  luoshen:            {actor:'seat',       skill:'洛神', render:renderPendingLuoshen},
+  huogongReveal:      {actor:'to',         skill:'火攻', render:renderPendingHuogongReveal},
+  guicai:             {actor:'asking',     skill:'鬼才', render:renderPendingGuicai}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -582,6 +587,43 @@ function renderPendingXiaoguoChoice(g,c){
   EQUIP_SLOTS.forEach(s=>{if(!target.equips[s])return;const b=document.createElement('button');b.textContent='弃置'+slotLabel[s]+'【'+target.equips[s].name+'】';b.onclick=()=>respondXiaoguoChoice(s);c.appendChild(b);});
   const damage=document.createElement('button');damage.className='primary';damage.textContent='受到1点伤害';damage.onclick=()=>respondXiaoguoChoice('damage');c.appendChild(damage);
   setBanner(escapeHtml(askerName)+' 发动【骁果】,请选择:弃置一件装备(对方摸一张牌),或受到1点伤害。');
+}
+function renderPendingCixiongChoice(g,c){
+  const fromName=g.players[g.pending.from]&&g.players[g.pending.from].name;
+  if(cixiongDiscardMode){
+    setBanner('【雌雄双股剑】请选择一张手牌弃置(点牌即弃)。');
+    const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消选牌';cancel.onclick=()=>{resetCixiongDiscard();render(g);};c.appendChild(cancel);
+  }else{
+    const discard=document.createElement('button');discard.className='primary';discard.textContent='弃一张手牌';discard.onclick=()=>{cixiongDiscardMode=true;render(g);};c.appendChild(discard);
+    const draw=document.createElement('button');draw.textContent='令对方摸一张牌';draw.onclick=()=>{resetCixiongDiscard();respondCixiongChoice('draw');};c.appendChild(draw);
+    setBanner(escapeHtml(fromName||'')+' 发动【雌雄双股剑】:弃一张手牌,或令其摸一张牌。');
+  }
+}
+function renderPendingZhijiChoice(g,c){
+  const pName=g.players[mySeat].name;
+  const recover=document.createElement('button');recover.className='primary';recover.textContent='回复1点体力';recover.onclick=()=>respondZhijiChoice(true);c.appendChild(recover);
+  const draw=document.createElement('button');draw.textContent='摸两张牌';draw.onclick=()=>respondZhijiChoice(false);c.appendChild(draw);
+  setBanner(escapeHtml(pName)+' 【志继】觉醒,体力上限已-1,请选择:回复1点体力或摸两张牌');
+}
+function renderPendingLuoshen(g,c){
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【洛神】判定';yes.onclick=()=>respondLuoshen(true);c.appendChild(yes);
+  const no=document.createElement('button');no.textContent='不再发动';no.onclick=()=>respondLuoshen(false);c.appendChild(no);
+  setBanner('是否发动【洛神】进行判定?黑色可获得判定牌并继续发动,红色则结束。');
+}
+function renderPendingHuogongReveal(g,c){
+  setBanner('【火攻】请选择一张手牌展示。');
+  (g.players[mySeat].hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.className='primary';b.innerHTML='展示 '+cardFace(card)+'【'+escapeHtml(card.name)+'】';b.onclick=()=>respondHuogongReveal(idx);c.appendChild(b);});
+}
+function renderPendingGuicai(g,c){
+  const jc=g.pending.judgeCard,isSelf=g.pending.seat===mySeat,judgedName=g.players[g.pending.seat].name;
+  if(guicaiMode){
+    setBanner('发动【鬼才】:选择一张手牌替换'+(isSelf?'':'('+escapeHtml(judgedName)+' 的)')+'判定牌(当前判定：'+jc.suit+rankText(jc.rank)+')。');
+    const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消';cancel.onclick=()=>{resetGuicai();render(g);};c.appendChild(cancel);
+  }else{
+    const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【鬼才】替换判定牌';yes.onclick=()=>{guicaiMode=true;render(g);};c.appendChild(yes);
+    const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondGuicai(false);c.appendChild(no);
+    setBanner(isSelf?'你的判定得到 '+jc.suit+rankText(jc.rank)+',是否发动【鬼才】用一张手牌替换?':escapeHtml(judgedName)+' 判定得到 '+jc.suit+rankText(jc.rank)+',是否打出一张手牌替换 '+escapeHtml(judgedName)+' 的判定牌?');
+  }
 }
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
@@ -2252,29 +2294,6 @@ function renderControls(g){
   // 已经挪到上面 pickingGeneral 旁边,这里不再重复 =====
   // 雌雄双股剑:攻击者是否发动
   // 雌雄双股剑:目标二选一
-  if(g.phase==='cixiongChoice' && g.pending && g.pending.type==='cixiongChoice' && g.pending.to===mySeat){
-    const fromName=g.players[g.pending.from]&&g.players[g.pending.from].name;
-    if(cixiongDiscardMode){
-      setBanner('【雌雄双股剑】请选择一张手牌弃置(点牌即弃)。');
-      const cb=document.createElement('button'); cb.className='ghost';
-      cb.textContent='取消选牌'; cb.onclick=()=>{ resetCixiongDiscard(); render(g); }; c.appendChild(cb);
-    } else {
-      const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='弃一张手牌'; b1.onclick=()=>{ cixiongDiscardMode=true; render(g); };
-      c.appendChild(b1);
-      const b2=document.createElement('button');
-      b2.textContent='令对方摸一张牌'; b2.onclick=()=>{ resetCixiongDiscard(); respondCixiongChoice('draw'); };
-      c.appendChild(b2);
-      setBanner(escapeHtml(fromName||'')+' 发动【雌雄双股剑】:弃一张手牌,或令其摸一张牌。');
-    }
-    return;
-  }
-  if(g.phase==='cixiongChoice' && g.pending && g.pending.type==='cixiongChoice'){
-    const from=g.players[g.pending.from]&&g.players[g.pending.from].name;
-    const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
-    setBanner(escapeHtml(from||'')+' 发动了【雌雄双股剑】,等待 '+escapeHtml(to||'')+' 选择…');
-    return;
-  }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
   // 寒冰剑弃牌子阶段:和 pick 阶段同一套"随机手牌+具名装备"选项列表,只是这次响应函数是
   // hanbingPick,弃完一张可能还会自动/再问下一轮(由 startHanbingRound 决定,不在这里判断)。
@@ -2326,20 +2345,6 @@ function renderControls(g){
     return;
   }
   // 姜维【志继】:觉醒后选择回复体力或摸牌
-  if(g.phase==='zhijiChoice' && g.pending && g.pending.type==='zhijiChoice' && g.pending.seat===mySeat){
-    const pName = g.players[mySeat].name;
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='回复1点体力'; b1.onclick=()=>respondZhijiChoice(true); c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='摸两张牌'; b2.onclick=()=>respondZhijiChoice(false); c.appendChild(b2);
-    setBanner(escapeHtml(pName)+' 【志继】觉醒,体力上限已-1,请选择:回复1点体力或摸两张牌');
-    return;
-  }
-  if(g.phase==='zhijiChoice' && g.pending && g.pending.type==='zhijiChoice'){
-    const pName = g.players[g.pending.seat].name;
-    setBanner('等待 '+escapeHtml(pName)+' 选择【志继】觉醒效果…');
-    return;
-  }
   // 姜维【挑衅】:目标角色选择如何响应
   if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice' && g.pending.to===mySeat){
     const from=g.players[g.pending.from].name, to=g.players[mySeat].name;
@@ -2409,21 +2414,6 @@ function renderControls(g){
   // 排列顺序(不用拖拽库);两堆牌数之和等于总牌数时才出现"确认"。 =====
   if(g.phase==='guanxingReview' && g.pending && g.pending.type==='guanxingReview'){
     renderGuanxing(g, c);
-    return;
-  }
-  if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen' && g.pending.seat===mySeat){
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【洛神】判定'; b1.onclick=()=>respondLuoshen(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不再发动'; b2.onclick=()=>respondLuoshen(false);
-    c.appendChild(b2);
-    setBanner('是否发动【洛神】进行判定?黑色可获得判定牌并继续发动,红色则结束。');
-    return;
-  }
-  if(g.phase==='luoshen' && g.pending && g.pending.type==='luoshen'){
-    const p=g.players[g.pending.seat];
-    setBanner(escapeHtml(p.name)+' 是否发动【洛神】进行判定…');
     return;
   }
   // ===== 张郃【巧变】完整版:回合开始"是否发动"→"选牌+选阶段"→(仅出牌阶段)"是否移动一张牌" =====
@@ -2581,22 +2571,6 @@ function renderControls(g){
     setBanner('【决斗】进行中,轮到你打出【杀】,'+tail);
     return;
   }
-  if(g.phase==='huogongReveal' && g.pending && g.pending.type==='huogongReveal' && g.pending.to===mySeat){
-    setBanner('【火攻】请选择一张手牌展示。');
-    (me.hand||[]).forEach((card, idx)=>{
-      const b=document.createElement('button');
-      b.className='primary';
-      b.innerHTML='展示 '+cardFace(card)+'【'+escapeHtml(card.name)+'】';
-      b.onclick=()=>respondHuogongReveal(idx);
-      c.appendChild(b);
-    });
-    return;
-  }
-  if(g.phase==='huogongReveal' && g.pending && g.pending.type==='huogongReveal'){
-    const p=g.players[g.pending.to];
-    setBanner('等待 '+escapeHtml(p?p.name:'目标')+' 为【火攻】展示一张手牌…');
-    return;
-  }
   if(g.phase==='huogong' && g.pending && g.pending.type==='huogong' && g.pending.from===mySeat){
     setBanner('【火攻】请选择一张 '+g.pending.suit+' 手牌弃置,或不弃牌。');
     const choices=(me.hand||[]).map((card,idx)=>({card,idx})).filter(o=>cardSuitForPlayer(me,o.card)===g.pending.suit);
@@ -2658,32 +2632,6 @@ function renderControls(g){
       ? (g.players[g.pending.exclude]?g.players[g.pending.exclude].name:'?')+' 的【无懈可击】,等待其他玩家响应【无懈可击】…'
       : useDesc+',等待其他玩家响应【无懈可击】…';
     setBanner(escapeHtml(text));
-    return;
-  }
-  if(g.phase==='guicai' && g.pending && g.pending.type==='guicai' && g.pending.asking===mySeat){
-    const jc=g.pending.judgeCard;
-    const isSelf = g.pending.seat===mySeat;
-    const judgedName = g.players[g.pending.seat].name;
-    if(guicaiMode){
-      setBanner('发动【鬼才】:选择一张手牌替换'+(isSelf?'':'('+escapeHtml(judgedName)+' 的)')+'判定牌(当前判定：'+jc.suit+rankText(jc.rank)+')。');
-      const cb=document.createElement('button'); cb.className='ghost';
-      cb.textContent='取消'; cb.onclick=()=>{ resetGuicai(); render(g); }; c.appendChild(cb);
-    } else {
-      const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='发动【鬼才】替换判定牌'; b1.onclick=()=>{ guicaiMode=true; render(g); };
-      c.appendChild(b1);
-      const b2=document.createElement('button');
-      b2.textContent='不发动'; b2.onclick=()=>respondGuicai(false);
-      c.appendChild(b2);
-      setBanner(isSelf
-        ? '你的判定得到 '+jc.suit+rankText(jc.rank)+',是否发动【鬼才】用一张手牌替换?'
-        : escapeHtml(judgedName)+' 判定得到 '+jc.suit+rankText(jc.rank)+',是否打出一张手牌替换 '+escapeHtml(judgedName)+' 的判定牌?');
-    }
-    return;
-  }
-  if(g.phase==='guicai' && g.pending && g.pending.type==='guicai'){
-    const p=g.players[g.pending.seat], asker=g.players[g.pending.asking], jc=g.pending.judgeCard;
-    setBanner(escapeHtml(p?p.name:'?')+' 判定得到 '+escapeHtml(jc.suit+rankText(jc.rank))+',正在询问 '+escapeHtml(asker?asker.name:'?')+' 是否发动【鬼才】替换判定牌…');
     return;
   }
   if(g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===mySeat){

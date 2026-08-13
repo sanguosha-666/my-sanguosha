@@ -5,7 +5,9 @@ const logSource = fs.readFileSync('render-log.js', 'utf8');
 const indexSource = fs.readFileSync('index.html', 'utf8');
 const ownStart = source.indexOf("if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===mySeat){");
 const spectatorStart = source.indexOf("if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie'){", ownStart + 1);
-const spectatorEnd = source.indexOf("if(g.phase==='guicai'", spectatorStart);
+// 不依赖相邻阶段名称：pending renderer 注册表会逐步迁移/删除后续分支，测试只截取无懈
+// 旁观分支到下一个同级 phase 分支。
+const spectatorEnd = source.indexOf("  if(g.phase===", spectatorStart + 5);
 
 if(ownStart < 0 || spectatorStart < 0 || spectatorEnd < 0){
   throw new Error('无法定位无懈可击本人/旁观者渲染分支');
