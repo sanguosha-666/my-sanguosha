@@ -22,7 +22,8 @@
 
 ## 决策记录
 
-- 素材来源：用户自备视频文件，放入 `assets/video/bg.mp4`（H.264/AAC，兼容性最好）。
+- 素材来源：用户自备 **2~3 个视频文件**，放入 `assets/video/`，命名 `bg-1.mp4`/`bg-2.mp4`/`bg-3.mp4`（H.264/AAC，兼容性最好）。每个 **≤5MB**（GitHub Pages 静态托管无转码、单文件硬上限 100MB；>50MB 警告，≤5MB 保证首屏与移动端流量）。短片段（10~20 秒循环素材即可，loop 播放）。
+- 播放方式：进入大厅时从视频清单**随机选一个**播放（每次进大厅可换）。
 - 播放范围：大厅=背景视频；游戏中=Canvas 飘牌（两者独立，互不替代）。
 - 死亡特效：游戏中触发，分两种——自己死亡=血滴滴落晕染；其他角色死亡=全屏血雾弥漫。由 render.js 检测 alive 变化触发，game-bg.js 绘制。
 - 不做"关闭背景视频"开关（用户明确不要）。
@@ -34,12 +35,28 @@
 
 ```html
 <!-- 大厅背景视频：装饰性纯视觉层，muted+playsinline 满足自动播放策略；
+     src 由 game-bg.js 的 pickRandomBgVideo() 随机设置，无 src 时透明、body 渐变兜底；
      视频透明/加载失败时 body 渐变背景兜底 -->
-<video id="bgVideo" class="bg-video" autoplay muted loop playsinline aria-hidden="true" tabindex="-1">
-  <source src="assets/video/bg.mp4" type="video/mp4">
-</video>
+<video id="bgVideo" class="bg-video" autoplay muted loop playsinline aria-hidden="true" tabindex="-1"></video>
 <div id="bgVeil" class="bg-veil" aria-hidden="true"></div>
 ```
+
+### 1b. 随机播放（game-bg.js）
+
+```js
+const BG_VIDEOS = ['assets/video/bg-1.mp4','assets/video/bg-2.mp4','assets/video/bg-3.mp4'];
+function pickRandomBgVideo(){
+  const v=document.getElementById('bgVideo');
+  if(!v) return;
+  v.src = BG_VIDEOS[Math.floor(Math.random()*BG_VIDEOS.length)];
+  if(v.load) v.load();          // 重新加载新 src（autoplay 生效）
+  if(v.play){ const p=v.play(); if(p&&typeof p.catch==='function') p.catch(function(){}); }
+}
+```
+
+- 挂载：`resumeBgVideo()`（回大厅）内部调用 `pickRandomBgVideo()`——每次回大厅随机换一个。
+- 失败兜底：视频加载失败时 `<video>` 保持透明，body 渐变背景可见，无需额外重试逻辑。
+- 新文件 `game-bg.js`（见 §4.3）统一承载大厅视频与游戏内 Canvas 的视觉逻辑。
 
 层级（z-index）：
 - `video.bg-video`：`z-index:0`，全屏铺满
@@ -110,6 +127,7 @@ function resumeBgVideo(){
 #### 4.3 动画生命周期
 
 - 新文件 `game-bg.js`（与 #91 按域拆分方向一致，视觉层独立文件）：
+  - `pickRandomBgVideo()`：随机设置大厅视频 src（§1b）。
   - `startGameBg()`：进房启动 `requestAnimationFrame` 循环。
   - `stopGameBg()`：回大厅停止 rAF、清空 Canvas。
   - `document.visibilitychange`：页面隐藏时暂停 rAF，恢复可见时继续（省流量/CPU）。
@@ -175,10 +193,10 @@ Canvas 部分：`game-bg.js` 不进任何 `run_*.js` 的加载清单，沙箱中
 
 ## 验收标准
 
-1. 打开页面（未进房）：大厅背景播放视频，循环、静音、全屏铺满、不遮挡任何按钮与表单交互。
+1. 打开页面（未进房）：大厅背景播放**随机选中的**视频之一，循环、静音、全屏铺满、不遮挡任何按钮与表单交互。
 2. 标题「极简三国杀」、房间表单、页脚说明在视频上清晰可读（遮罩生效）。
 3. 进入房间：视频暂停（不继续后台耗流量/CPU）；游戏画面中开始飘落稀疏的牌。
-4. 回大厅（房间关闭/退出）：视频自动恢复播放；Canvas 停止并清空。
+4. 回大厅（房间关闭/退出）：视频恢复播放且**随机更换一个**；Canvas 停止并清空。
 5. 飘落的牌为纯装饰：不显示真实手牌/牌堆内容，不遮挡座位、手牌、按钮交互。
 6. 页面切后台：Canvas 动画暂停；切回继续，不累积卡顿。
 7. 角色死亡：自己死亡时背景血滴滴落→晕染→模糊→恢复；其他角色死亡时全屏血雾弥漫→退去；多客户端一致触发且只触发一次。
