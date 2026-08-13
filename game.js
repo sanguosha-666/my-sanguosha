@@ -3971,6 +3971,16 @@ function enqueueWangxi(g, item){
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
   g.wangxiQueue.push(item);
 }
+function enqueueDamageWangxi(g, seat, amount, sourceSeat){
+  if(!(amount>0) || typeof sourceSeat!=='number' || sourceSeat===seat || sourceSeat>=g.players.length) return;
+  const p=g.players[seat], other=g.players[sourceSeat];
+  if(p && p.alive && hasCap(p,'wangxi') && other && other.alive){
+    enqueueWangxi(g,{seat,otherSeat:sourceSeat,death:false,amount});
+  }
+  if(other && other.alive && p && p.alive && hasCap(other,'wangxi')){
+    enqueueWangxi(g,{seat:sourceSeat,otherSeat:seat,death:false,amount});
+  }
+}
 function startNextWangxi(g, resume){
   if(!Array.isArray(g.wangxiQueue) || g.wangxiQueue.length===0) return false;
   while(g.wangxiQueue.length>0){
@@ -4115,6 +4125,11 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
 
   // 致命优先:先不屈/濒死,再处理受伤后可选技能(恩怨/耀武等),避免 0 血僵尸
   if(p.hp<=0){
+    // 濒死/不屈只是暂时打断本次伤害。先保存尚未执行的受伤后队列；获救或不屈
+    // 防死后由 resumeAfterInterrupt 接回，真死时则因角色不存活而安全丢弃。
+    enqueueDamageWangxi(g,seat,amount,sourceSeat);
+    g.afterDamageEffects={seat,amount,sourceSeat,reason,srcType,sourceCard,jiushiFacedownAtDamage,
+      actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige'],index:0,originalResume:{type:srcType}};
     // 周泰【不屈】触发次数:"体力降到0或以下"这个区间里,这一下伤害一共有几点落在
     // 这个区间,就问几次(每点独立一次放置不屈牌的机会),不是"只要结算后≤0就问一次"。
     // 推导:把 amount 点伤害看成 amount 次连续的-1,第 k 次(k=1..amount)扣完后的体力是
@@ -4128,39 +4143,17 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     // 这个分支(不触发);hp=1挨1点→1-0=1(单点伤害维持改动前"触发1次"的行为,零回归)。
     const overkillPoints = Math.max(0, Math.min(amount, amount - Math.max(hpBeforeThisDamage-1, 0)));
     if(hasCap(p, 'buqu') && overkillPoints > 0 && (g.deck || []).length > 0) {
-      g.pending = { type:'buquAsk', seat, resume:{type:srcType, sourceSeat, amount}, remaining: overkillPoints };
+      g.pending = { type:'buquAsk', seat, resume:{type:'afterDamageEffects', sourceSeat, amount}, remaining: overkillPoints };
       g.phase = 'buquAsk';
       g.log = pushLog(g.log, p.name+' 体力降到0,是否发动【不屈】,放置一张不屈牌…'+(overkillPoints>1?'（本次伤害共需询问 '+overkillPoints+' 次）':''));
       return true;
     }
-    startDying(g, seat, srcType, sourceSeat, amount);
+    startDying(g, seat, 'afterDamageEffects', sourceSeat, amount);
     return true;
   }
   // 李典【忘隙】统一入口:先把本次伤害加入队列。属性伤害若随后发生连环传导,传导伤害也会
   // 继续入队;整条伤害链结束后再逐个询问,避免第一次 pending 截断后续传导目标。
-  if(amount>0){
-    if(typeof sourceSeat==='number' && sourceSeat !== seat && sourceSeat < g.players.length){
-      const other = g.players[sourceSeat];
-      // 受伤侧:受害者是李典
-      if(p && p.alive && hasCap(p, 'wangxi') && other && other.alive){
-        enqueueWangxi(g, {
-          seat: seat,
-          otherSeat: sourceSeat,
-          death: false,
-          amount: amount
-        });
-      }
-      // 造成侧:攻击者是李典
-      if(other && other.alive && p && p.alive && hasCap(other, 'wangxi')){
-        enqueueWangxi(g, {
-          seat: sourceSeat,
-          otherSeat: seat,
-          death: false,
-          amount: amount
-        });
-      }
-    }
-  }
+  enqueueDamageWangxi(g,seat,amount,sourceSeat);
 
   if(hasChainToPropagate){
     if(advanceChainedDamage(g)) return true;

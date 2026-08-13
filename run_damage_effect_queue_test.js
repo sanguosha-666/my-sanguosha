@@ -66,7 +66,41 @@ assert.strictEqual(g2.players[0].hp,3,'无红桃时伤害来源因恩怨失去1�
 assert.strictEqual(g2.pending.type,'probeDamageHook','恩怨完成后必须继续其它受伤后技能');
 assert.strictEqual(g2.pending.resume.type,'afterDamageEffects','后续技能仍由统一队列接管');
 
+// CORE-33：濒死获救不是伤害结算终点，必须接回同一套受伤后队列。
+const g3={players:[
+  {name:'攻击者',general:'caocao',hp:4,maxHp:4,hand:[],equips:emptyEq(),delays:[],alive:true},
+  {name:'曹冲',general:'caochong',hp:1,maxHp:3,hand:[],equips:emptyEq(),delays:[],alive:true}
+],deck:[],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null};
+sandbox.__g=g3;
+assert.strictEqual(R('dealDamage(__g,1,1,0,"濒死称象","sha")'),true);
+assert.strictEqual(g3.pending.type,'dying');
+assert.strictEqual(g3.pending.resume.type,'afterDamageEffects');
+g3.players[1].hp=1;
+R('finishDying(__g,false)');
+assert.strictEqual(g3.pending.type,'chengxiangAsk','曹冲获救后必须继续称象');
+
+const g4={players:[
+  {name:'攻击者',general:'caocao',hp:4,maxHp:4,hand:[],equips:emptyEq(),delays:[],alive:true},
+  {name:'李典',general:'lidian',hp:1,maxHp:3,hand:[],equips:emptyEq(),delays:[],alive:true}
+],deck:[],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null};
+sandbox.__g=g4;
+assert.strictEqual(R('dealDamage(__g,1,1,0,"濒死忘隙","sha")'),true);
+g4.players[1].hp=1;
+R('finishDying(__g,false)');
+assert.strictEqual(g4.pending.type,'wangxiAsk','李典获救后必须继续忘隙');
+
+const g5={players:[
+  {name:'攻击者',general:'caocao',hp:4,maxHp:4,hand:[],equips:emptyEq(),delays:[],alive:true},
+  {name:'普通角色',general:'caocao',hp:1,maxHp:4,hand:[],equips:emptyEq(),delays:[],alive:true}
+],deck:[],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null};
+sandbox.__g=g5;
+R('dealDamage(__g,1,1,0,"普通濒死","sha")');
+g5.players[1].hp=1;
+R('finishDying(__g,false)');
+assert.strictEqual(g5.pending,null,'普通角色获救后不得制造额外询问');
+assert.strictEqual(g5.phase,'play','普通角色获救后应恢复原流程');
+
 const source=fs.readFileSync('game.js','utf8');
 assert.ok(source.includes("actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige']"));
 assert.ok(source.includes("resume.type==='afterDamageEffects'"));
-console.log('damage effect queue: 15/15 passed');
+console.log('damage effect queue: 25/25 passed');
