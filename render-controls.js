@@ -299,7 +299,12 @@ const PENDING_RENDERERS = {
   tiaoxinChoice:      {actor:'to',         skill:'挑衅', render:renderPendingTiaoxinChoice},
   tiaoxinDiscard:     {actor:'from',       skill:'挑衅', render:renderPendingTiaoxinDiscard},
   qiaobianTurnStart:  {actor:'seat',       skill:'巧变', render:renderPendingQiaobianTurnStart},
-  qiaobianMove:       {actor:'seat',       skill:'巧变', render:renderPendingQiaobianMove}
+  qiaobianMove:       {actor:'seat',       skill:'巧变', render:renderPendingQiaobianMove},
+  leijiChoose:        {actor:'sourceSeat', skill:'雷击', render:renderPendingLeijiChoose},
+  leijiJudge:         {actor:'sourceSeat', skill:'雷击', render:renderPendingLeijiJudge},
+  guiduAsk:           {actor:'sourceSeat', skill:'鬼道', render:renderPendingGuiduAsk},
+  jijiangAsk:         {actor:'asking',     skill:'激将', render:renderPendingJijiangAsk},
+  hujiaAsk:           {actor:'asking',     skill:'护驾', render:renderPendingHujiaAsk}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -719,6 +724,39 @@ function renderPendingQiaobianMove(g,c){
   const skip=document.createElement('button');skip.className='primary';skip.textContent='不移动';skip.onclick=()=>{resetQiaobian();respondQiaobianMove(null);};c.appendChild(skip);
   setBanner('【巧变】跳过出牌阶段成功,是否移动一张装备/判定牌?');
 }
+function renderPendingLeijiChoose(g,c){
+  const div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent='【雷击】发动';div.appendChild(h4);
+  const p1=document.createElement('p');p1.textContent='你使用或打出了【闪】,可以选择一名角色进行判定';div.appendChild(p1);
+  const p2=document.createElement('p');p2.textContent='若判定为♠黑桃,你将对其造成2点雷电伤害';div.appendChild(p2);
+  const targets=document.createElement('div');targets.className='target-options';
+  (g.pending.availableTargets||[]).forEach(seat=>{const target=g.players[seat];if(!target||!target.alive)return;const b=document.createElement('button');b.className='target-btn';b.textContent='选择 '+escapeHtml(target.name);b.onclick=()=>triggerLeiji(seat);targets.appendChild(b);});
+  div.appendChild(targets);const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='不发动';cancel.onclick=()=>cancelLeiji();div.appendChild(cancel);c.appendChild(div);
+}
+function renderPendingLeijiJudge(g,c){
+  const target=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent='【雷击】判定中';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent='等待 '+escapeHtml(target?target.name:'目标')+' 的判定结果...';div.appendChild(p);
+  const b=document.createElement('button');b.className='skill-btn';b.style.background='#f39c12';b.textContent='进行判定';b.onclick=()=>doLeijiJudge();div.appendChild(b);c.appendChild(div);
+}
+function renderPendingGuiduAsk(g,c){
+  const judged=g.players[g.pending.judgedSeat],judgeCard=g.pending.judgeCard,div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent='【鬼道】发动';div.appendChild(h4);
+  const p1=document.createElement('p');p1.textContent=escapeHtml(judged?judged.name:'?')+' 判定得到 '+judgeCard.suit+rankText(judgeCard.rank);div.appendChild(p1);
+  const p2=document.createElement('p');p2.textContent='你可以打出一张黑色牌替换之';div.appendChild(p2);
+  const hand=document.createElement('div');hand.className='hand-options';(g.players[mySeat].hand||[]).forEach((card,i)=>{if(!card||(card.suit!=='♠'&&card.suit!=='♣'))return;const b=document.createElement('button');b.className='card-btn';b.style.background='#2c3e50';b.style.color='white';b.textContent='打出【'+escapeHtml(card.name)+'】('+card.suit+rankText(card.rank)+')';b.onclick=()=>triggerGuidu(i);hand.appendChild(b);});div.appendChild(hand);
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='不发动';cancel.onclick=()=>cancelGuidu();div.appendChild(cancel);c.appendChild(div);
+}
+function renderLordRequest(g,c){
+  const me=g.players[mySeat],need=g.pending.need,lordName=g.players[g.pending.lordSeat]?g.players[g.pending.lordSeat].name:'?',skillName=need==='杀'?'激将':'护驾';
+  const candidates=me.hand.filter(card=>canUseAs(me,card,need)),hasCard=!(need==='杀'&&me.jiangchiNoSlash)&&candidates.length>0,needsPick=hasCard&&candidates.length>1;
+  if(hasCard&&(!needsPick||selectedResponseCardIdx!==null)){const chosenIdx=selectedResponseCardIdx,b=document.createElement('button');b.className='primary';b.textContent='替主公打出【'+need+'】';b.onclick=needsPick?(()=>{resetSelectedResponseCard();(need==='杀'?respondJijiangAsk:respondHujiaAsk)(true,chosenIdx);}):(()=>(need==='杀'?respondJijiangAsk:respondHujiaAsk)(true));c.appendChild(b);}
+  const no=document.createElement('button');no.textContent='不出';no.onclick=()=>(need==='杀'?respondJijiangAsk:respondHujiaAsk)(false);c.appendChild(no);
+  const hint=needsPick&&selectedResponseCardIdx===null?'你有多张牌可以当【'+escapeHtml(need)+'】使用,请先在手牌区选择一张。':'';
+  setBanner(escapeHtml(lordName)+' 发动【'+skillName+'】,是否替主公打出【'+escapeHtml(need)+'】?'+(hint||(hasCard?'':'（你没有【'+escapeHtml(need)+'】,只能不出）')));
+}
+function renderPendingJijiangAsk(g,c){renderLordRequest(g,c);}
+function renderPendingHujiaAsk(g,c){renderLordRequest(g,c);}
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
 // 只有1个技能时跳过、直接进第二步收尾)点选具体技能名,respondFn(generalId,skillName)
@@ -1821,98 +1859,10 @@ function renderControls(g){
   }
 
   // 张角【雷击】:使用或打出闪后的触发选择
-  if(g.phase==='leijiChoose' && g.pending && g.pending.type==='leijiChoose' && g.pending.sourceSeat===mySeat){
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【雷击】发动';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='你使用或打出了【闪】,可以选择一名角色进行判定';
-    div.appendChild(p1);
-    const p2=document.createElement('p'); p2.textContent='若判定为♠黑桃,你将对其造成2点雷电伤害';
-    div.appendChild(p2);
-    const targetDiv=document.createElement('div'); targetDiv.className='target-options';
-    
-    (g.pending.availableTargets||[]).forEach(targetSeat=>{
-      const target = g.players[targetSeat];
-      if(target && target.alive){
-        const b=document.createElement('button');
-        b.className='target-btn';
-        b.textContent='选择 '+escapeHtml(target.name);
-        b.onclick=()=>triggerLeiji(targetSeat);
-        targetDiv.appendChild(b);
-      }
-    });
-    div.appendChild(targetDiv);
-    const cb=document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='不发动'; cb.onclick=()=>cancelLeiji();
-    div.appendChild(cb);
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='leijiChoose' && g.pending && g.pending.type==='leijiChoose'){
-    const source = g.players[g.pending.sourceSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 可以发动【雷击】,选择一名角色进行判定…');
-    return;
-  }
   
   // 张角【雷击】:雷击判定阶段
-  if(g.phase==='leijiJudge' && g.pending && g.pending.type==='leijiJudge' && g.pending.sourceSeat===mySeat){
-    const target = g.players[g.pending.targetSeat];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【雷击】判定中';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='等待 '+escapeHtml(target?target.name:'目标')+' 的判定结果...';
-    div.appendChild(p1);
-    const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#f39c12';
-    b1.textContent='进行判定';
-    b1.onclick=()=>doLeijiJudge();
-    div.appendChild(b1);
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='leijiJudge' && g.pending && g.pending.type==='leijiJudge'){
-    const source = g.players[g.pending.sourceSeat];
-    const target = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 对 '+escapeHtml(target?target.name:'?')+' 发动【雷击】,进行判定中…');
-    return;
-  }
 
   // 张角【鬼道】:询问是否发动鬼道
-  if(g.phase==='guiduAsk' && g.pending && g.pending.type==='guiduAsk' && g.pending.sourceSeat===mySeat){
-    const judgedPlayer = g.players[g.pending.judgedSeat];
-    const judgeCard = g.pending.judgeCard;
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【鬼道】发动';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent=escapeHtml(judgedPlayer?judgedPlayer.name:'?')+' 判定得到 '+judgeCard.suit+rankText(judgeCard.rank);
-    div.appendChild(p1);
-    const p2=document.createElement('p'); p2.textContent='你可以打出一张黑色牌替换之';
-    div.appendChild(p2);
-    const handDiv=document.createElement('div'); handDiv.className='hand-options';
-    
-    const hand = me.hand || [];
-    hand.forEach((card, i) => {
-      if(card && (card.suit === '♠' || card.suit === '♣')){
-        const b=document.createElement('button');
-        b.className='card-btn';
-        b.style.background='#2c3e50'; b.style.color='white';
-        b.textContent='打出【'+escapeHtml(card.name)+'】('+card.suit+rankText(card.rank)+')';
-        b.onclick=()=>triggerGuidu(i);
-        handDiv.appendChild(b);
-      }
-    });
-    div.appendChild(handDiv);
-    const cb=document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='不发动'; cb.onclick=()=>cancelGuidu();
-    div.appendChild(cb);
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='guiduAsk' && g.pending && g.pending.type==='guiduAsk'){
-    const source = g.players[g.pending.sourceSeat];
-    const judgedPlayer = g.players[g.pending.judgedSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 正在决定是否发动【鬼道】替换 '+escapeHtml(judgedPlayer?judgedPlayer.name:'?')+' 的判定牌…');
-    return;
-  }
 
   // 夏侯渊【神速】UI
   // 神速1：在判定阶段开始前的触发点
@@ -2590,36 +2540,6 @@ function renderControls(g){
   if(g.phase==='aoeResp' && g.pending){
     const to=g.players[g.pending.to]?g.players[g.pending.to].name:'?';
     setBanner('【'+escapeHtml(g.aoe?g.aoe.trick:'')+'】要求 '+escapeHtml(to)+' 打出【'+escapeHtml(g.pending.need)+'】…');
-    return;
-  }
-  if((g.phase==='jijiangAsk'||g.phase==='hujiaAsk') && g.pending && g.pending.asking===mySeat){
-    // 主公技求助:被求助者选择是否替主公打出【杀/闪】(候选>1 时先在手牌区点选,同响应阶段)
-    const need=g.pending.need;
-    const lordName=g.players[g.pending.lordSeat]?g.players[g.pending.lordSeat].name:'?';
-    const skillName=need==='杀'?'激将':'护驾';
-    const candidates=me.hand.filter(card=>canUseAs(me,card,need));
-    const hasCard = !(need==='杀' && me.jiangchiNoSlash) && candidates.length>0;
-    const needsPick = hasCard && candidates.length>1;
-    if(hasCard && (!needsPick || selectedResponseCardIdx!==null)){
-      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
-      const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='替主公打出【'+need+'】';
-      b1.onclick = needsPick
-        ? (()=>{ resetSelectedResponseCard(); (need==='杀'?respondJijiangAsk:respondHujiaAsk)(true, chosenIdx); })
-        : (()=> (need==='杀'?respondJijiangAsk:respondHujiaAsk)(true));
-      c.appendChild(b1);
-    }
-    const b2=document.createElement('button');
-    b2.textContent='不出'; b2.onclick=()=> (need==='杀'?respondJijiangAsk:respondHujiaAsk)(false);
-    c.appendChild(b2);
-    const pickHint=(needsPick && selectedResponseCardIdx===null)?'你有多张牌可以当【'+escapeHtml(need)+'】使用,请先在手牌区选择一张。':'';
-    setBanner(escapeHtml(lordName)+' 发动【'+skillName+'】,是否替主公打出【'+escapeHtml(need)+'】?'+(pickHint||(hasCard?'':'（你没有【'+escapeHtml(need)+'】,只能不出）')));
-    return;
-  }
-  if((g.phase==='jijiangAsk'||g.phase==='hujiaAsk') && g.pending){
-    const lordName=g.players[g.pending.lordSeat]?g.players[g.pending.lordSeat].name:'?';
-    const asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
-    setBanner(escapeHtml(lordName)+' 发动【'+(g.pending.need==='杀'?'激将':'护驾')+'】,正在询问 '+escapeHtml(asking)+' 是否替主公打出【'+escapeHtml(g.pending.need)+'】…');
     return;
   }
   if(g.phase==='pick' && g.pending && g.pending.from===mySeat){
