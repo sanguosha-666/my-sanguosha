@@ -1600,15 +1600,7 @@ function renDe(cardIdx, targetSeat){
       if(me.hp<me.maxHp) me.hp = Math.min(me.maxHp, me.hp+1);
       g.log=pushLog(g.log, me.name+' 【仁德】发动,回复1点体力');
       markSkillSound(g, '仁德');
-      // 周泰【不屈】:回复体力时移除一张不屈牌
-      if (hasCap(me,'buqu') && me.buquCards && me.buquCards.length > 0) {
-        const removedCard = me.buquCards.pop();
-        g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
-        if(me.buquCards.length === 0) {
-          me.hp = Math.min(me.maxHp, me.hp + 1);
-          g.log = pushLog(g.log, me.name+' 移除最后一张不屈牌,恢复1点体力（体力'+me.hp+'）');
-        }
-      }
+      removeBuquCard(g,mySeat);
     }
     g.phase='play';
     return g;
@@ -1637,15 +1629,7 @@ function qingNang(cardIdx, targetSeat){
       drawN(g, mySeat, 1);
       g.log = pushLog(g.log, tgt.name + ' 回复1点体力,' + me.name + ' 发动【恩怨】效果,摸一张牌');
     }
-    // 周泰【不屈】:回复体力时移除一张不屈牌
-    if (resolvedTargetSeat !== -1 && hasCap(tgt,'buqu') && tgt.buquCards && tgt.buquCards.length > 0) {
-      const removedCard = tgt.buquCards.pop();
-      g.log = pushLog(g.log, tgt.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
-      if(tgt.buquCards.length === 0) {
-        tgt.hp = Math.min(tgt.maxHp, tgt.hp + 1);
-        g.log = pushLog(g.log, tgt.name+' 移除最后一张不屈牌,恢复1点体力（体力'+tgt.hp+'）');
-      }
-    }
+    if(resolvedTargetSeat!==-1) removeBuquCard(g,resolvedTargetSeat);
     markSkillSound(g, '青囊');
     g.phase='play';
     return g;
@@ -1814,15 +1798,7 @@ function respondZhijiChoice(healOrDraw){
       // 选择回复1点体力
       p.hp = Math.min(p.hp + 1, p.maxHp);
       g.log = pushLog(g.log, p.name + ' 选择回复1点体力');
-      // 周泰【不屈】:回复体力时移除一张不屈牌
-      if (hasCap(p,'buqu') && p.buquCards && p.buquCards.length > 0) {
-        const removedCard = p.buquCards.pop();
-        g.log = pushLog(g.log, p.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
-        if(p.buquCards.length === 0) {
-          p.hp = Math.min(p.maxHp, p.hp + 1);
-          g.log = pushLog(g.log, p.name+' 移除最后一张不屈牌,恢复1点体力（体力'+p.hp+'）');
-        }
-      }
+      removeBuquCard(g,seat);
     } else {
       // 选择摸两张牌
       drawN(g, seat, 2);
@@ -2049,15 +2025,7 @@ function respondZaiqi() {
     const recoverAmount = Math.min(lostHp, heartCount);
     if (recoverAmount > 0) {
       me.hp = Math.min(me.maxHp, me.hp + recoverAmount);
-      // 周泰【不屈】:回复体力时移除一张不屈牌
-      if (hasCap(me,'buqu') && me.buquCards && me.buquCards.length > 0) {
-        const removedCard = me.buquCards.pop();
-        g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
-        if(me.buquCards.length === 0) {
-          me.hp = Math.min(me.maxHp, me.hp + 1);
-          g.log = pushLog(g.log, me.name+' 移除最后一张不屈牌,恢复1点体力（体力'+me.hp+'）');
-        }
-      }
+      removeBuquCard(g,mySeat);
     }
     
     // 记录日志

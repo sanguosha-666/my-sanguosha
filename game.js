@@ -4345,15 +4345,7 @@ function useNiepan(){
     me.nirvanaUsed=true;
     const hpBefore = me.hp;
     me.hp=Math.min(me.maxHp, 3);
-    // 周泰【不屈】:回复体力时移除一张不屈牌
-    if (hasCap(me,'buqu') && me.buquCards && me.buquCards.length > 0 && me.hp > hpBefore) {
-      const removedCard = me.buquCards.pop();
-      g.log = pushLog(g.log, me.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
-      if(me.buquCards.length === 0) {
-        me.hp = Math.min(me.maxHp, me.hp + 1);
-        g.log = pushLog(g.log, me.name+' 移除最后一张不屈牌,恢复1点体力（体力'+me.hp+'）');
-      }
-    }
+    if(me.hp>hpBefore) removeBuquCard(g,mySeat);
     drawN(g, mySeat, 3);
     g.log=pushLog(g.log, me.name+' 发动限定技【涅槃】,弃置所有牌,复原武将牌,摸3张牌并回复至'+me.hp+'点体力');
     markSkillSound(g, '涅槃');
@@ -4435,7 +4427,7 @@ function checkBuquUnique(player) {
 }
 
 // removeBuquCard: 处理回复体力时移除一张不屈牌的逻辑
-// 返回true表示移除了不屈牌且恢复了1点体力（最后一张被移除时）
+// 不屈状态下回复本身不改变体力，只移除一张不屈牌；最后一张移除后体力成为1。
 function removeBuquCard(g, seat) {
   const p = g.players[seat];
   // 走 hasCap,不硬编码武将 id(断肠 skillsLost 后也不再移除)
@@ -4445,13 +4437,13 @@ function removeBuquCard(g, seat) {
   const removedCard = p.buquCards.pop();
   g.log = pushLog(g.log, p.name+' 回复体力,移除一张不屈牌（'+removedCard.name+' '+removedCard.suit+removedCard.rank+'）');
   
-  // 如果不屈牌数组为空（即刚刚移除的是最后一张），则恢复1点体力
+  // 调用者可能已先写入回复值；这里必须覆盖为不屈规则结果，不能在其上再 +1。
   if(p.buquCards.length === 0) {
-    p.hp = Math.min(p.maxHp, p.hp + 1);
-    g.log = pushLog(g.log, p.name+' 移除最后一张不屈牌,恢复1点体力（体力'+p.hp+'）');
+    p.hp = Math.min(p.maxHp, 1);
+    g.log = pushLog(g.log, p.name+' 移除最后一张不屈牌,体力恢复至1点');
     return true;
   }
-  
+  p.hp=0;
   return false;
 }
 
