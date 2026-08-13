@@ -319,7 +319,12 @@ const PENDING_RENDERERS = {
   mingcePickTarget:   {actor:'sourceSeat', skill:'明策', render:renderPendingMingcePickTarget},
   mingcePickTarget2:  {actor:'sourceSeat', skill:'明策', render:renderPendingMingcePickTarget2},
   mingceChoice:       {actor:'targetSeat', skill:'明策', render:renderPendingMingceChoice},
-  luanjiConfirm:      {actor:'sourceSeat', skill:'乱击', render:renderPendingLuanjiConfirm}
+  luanjiConfirm:      {actor:'sourceSeat', skill:'乱击', render:renderPendingLuanjiConfirm},
+  yijiAssign:         {actor:'seat',       skill:'遗计', render:renderPendingYijiAssign},
+  luanwuChoose:       {actor:'currentSeat',skill:'乱武', render:renderPendingLuanwuChoose},
+  hanbing:            {actor:'from',       skill:'寒冰剑', render:renderPendingHanbing},
+  zhibaGain:          {actor:'lordSeat',   skill:'制霸', render:renderPendingZhibaGain},
+  yinghunTarget:      {actor:'seat',       skill:'英魂', render:renderPendingYinghunTarget}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -866,6 +871,33 @@ function renderPendingLuanjiConfirm(g,c){
   const p=document.createElement('p');p.textContent='确认使用【'+cards[0].name+'】和【'+cards[1].name+'】当【万箭齐发】使用吗?';div.appendChild(p);
   const ok=document.createElement('button');ok.className='primary';ok.textContent='确认';ok.onclick=()=>confirmLuanji();div.appendChild(ok);
   const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消';cancel.onclick=()=>cancelLuanji();div.appendChild(cancel);c.appendChild(div);setBanner('确认使用乱击吗?');
+}
+function renderPendingYijiAssign(g,c){
+  const cards=g.pending.cards,alive=g.players.map((p,i)=>({p,i})).filter(o=>o.p&&o.p.alive),idx=yijiPicks.length,isLast=idx===cards.length-1,card=cards[idx];
+  const box=document.createElement('div');box.className='card '+(card.name==='杀'?'sha':card.name==='桃'?'tao':card.name==='闪'?'shan':'trick');box.style.display='inline-block';box.style.marginRight='10px';box.innerHTML='<div class="corner">'+(cardFace(card)||card.name)+'</div><div class="big">'+card.name+'</div><div class="corner br">'+card.name+'</div>';c.appendChild(box);
+  alive.forEach(o=>{const b=document.createElement('button');b.textContent='给 '+(o.i===mySeat?'自己':o.p.name);b.onclick=isLast?()=>{const picks=[...yijiPicks,o.i];resetYiji();respondYijiAssign(picks);}:()=>{yijiPicks=[...yijiPicks,o.i];render(g);};c.appendChild(b);});
+  if(idx>0){const back=document.createElement('button');back.className='ghost';back.textContent='上一步(重选)';back.onclick=()=>{yijiPicks=yijiPicks.slice(0,-1);render(g);};c.appendChild(back);}setBanner('【遗计】选择第'+(idx+1)+'/'+cards.length+'张牌交给谁?');
+}
+function renderPendingLuanwuChoose(g,c){
+  const source=g.players[g.pending.sourceSeat],map=g.pending.targetMap||{},nearestSeat=map[mySeat],nearest=typeof nearestSeat==='number'&&nearestSeat!==mySeat?g.players[nearestSeat]:null;
+  const available=hasShaCard(g,mySeat)&&nearestSeat!==null&&canReachSha(g,mySeat,nearestSeat)&&nearest&&nearest.alive,div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent=source.name+' 发动【乱武】';div.appendChild(h4);const p=document.createElement('p');p.textContent='请选择：';div.appendChild(p);
+  if(available){const sha=document.createElement('button');sha.className='skill-btn';sha.style.background='#e74c3c';sha.textContent='对 '+nearest.name+' 使用【杀】';sha.onclick=()=>chooseLuanwuOption('sha');div.appendChild(sha);}
+  const hp=document.createElement('button');hp.className='skill-btn';hp.style.background='#8e44ad';hp.textContent='失去1点体力';hp.onclick=()=>chooseLuanwuOption('hp');div.appendChild(hp);
+  if(!available){const note=document.createElement('p');note.style.color='#7f8c8d';note.textContent='（无法使用杀，只能选择失去体力）';div.appendChild(note);}c.appendChild(div);setBanner(source.name+' 发动【乱武】,你需要选择:使用杀或失去1点体力');
+}
+function renderPendingHanbing(g,c){
+  const target=g.players[g.pending.to];if(target&&(target.hand||[]).length){const b=document.createElement('button');b.className='primary';b.textContent='弃随机一张手牌';b.onclick=()=>hanbingPick('hand');c.appendChild(b);}
+  if(target)EQUIP_SLOTS.forEach(slot=>{if(!target.equips[slot])return;const b=document.createElement('button');b.textContent='弃装备【'+target.equips[slot].name+'】';b.onclick=()=>hanbingPick(slot);c.appendChild(b);});
+  setBanner('【寒冰剑】选择弃置 '+escapeHtml(target?target.name:'目标')+' 的第'+((g.pending.round||0)+1)+'张牌（手牌随机、装备可指定）。');
+}
+function renderPendingZhibaGain(g,c){
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='获得两张拼点牌';yes.onclick=()=>respondZhibaGain(true);c.appendChild(yes);
+  const no=document.createElement('button');no.textContent='不获得';no.onclick=()=>respondZhibaGain(false);c.appendChild(no);setBanner('【制霸】拼点对方没赢,是否获得两张拼点牌?');
+}
+function renderPendingYinghunTarget(g,c){
+  g.players.forEach((p,i)=>{if(!p||!p.alive||i===mySeat)return;const b=document.createElement('button');b.textContent='选择 '+p.name;b.onclick=()=>chooseYinghunTarget(i);c.appendChild(b);});
+  const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='不发动';cancel.onclick=()=>cancelYinghun();c.appendChild(cancel);setBanner('【英魂】选择一名其他角色。');
 }
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
@@ -1904,39 +1936,6 @@ function renderControls(g){
   // 郭嘉【遗计】分配阶段:g.pending.cards 是共享状态里的真实牌面,理论上任何客户端都能读到——
   // 必须严格只在 mySeat===pending.seat 时才把牌面画出来,其余客户端只看不剧透的 banner,
   // 和现有对手手牌只显示牌背的处理原则一致(见 CLAUDE.md 的技术债提示)。
-  if(g.phase==='yijiAssign' && g.pending && g.pending.type==='yijiAssign' && g.pending.seat===mySeat){
-    const cards=g.pending.cards;
-    const alivePlayers=g.players.map((p,i)=>({p,i})).filter(o=>o.p && o.p.alive);
-    const idx=yijiPicks.length; // 当前正在为第几张牌选接收者(0-based),渲染这一刻冻结,不在 onclick 里读可变的 yijiPicks
-    const isLast=(idx===cards.length-1);
-    const card=cards[idx];
-    const cardBox=document.createElement('div'); cardBox.className='card '+(card.name==='杀'?'sha':card.name==='桃'?'tao':card.name==='闪'?'shan':'trick');
-    cardBox.style.display='inline-block'; cardBox.style.marginRight='10px';
-    cardBox.innerHTML='<div class="corner">'+(cardFace(card)||card.name)+'</div><div class="big">'+card.name+'</div><div class="corner br">'+card.name+'</div>';
-    c.appendChild(cardBox);
-    alivePlayers.forEach(o=>{
-      const b=document.createElement('button');
-      b.textContent='给 '+(o.i===mySeat?'自己':o.p.name);
-      // 选到最后一张牌时,这次点击就直接提交(不是"选满再点确认"那套,少一步交互);
-      // 不是最后一张就只是累积选择、留在同一 tx 之外继续问下一张。
-      b.onclick = isLast
-        ? ()=>{ const picks=[...yijiPicks, o.i]; resetYiji(); respondYijiAssign(picks); }
-        : ()=>{ yijiPicks=[...yijiPicks, o.i]; render(g); };
-      c.appendChild(b);
-    });
-    if(idx>0){
-      const back=document.createElement('button'); back.className='ghost';
-      back.textContent='上一步(重选)'; back.onclick=()=>{ yijiPicks=yijiPicks.slice(0,-1); render(g); };
-      c.appendChild(back);
-    }
-    setBanner('【遗计】选择第'+(idx+1)+'/'+cards.length+'张牌交给谁?');
-    return;
-  }
-  if(g.phase==='yijiAssign' && g.pending && g.pending.type==='yijiAssign'){
-    const p=g.players[g.pending.seat].name;
-    setBanner(escapeHtml(p)+' 正在分配【遗计】看到的牌…'); // 不渲染牌面,严格保密
-    return;
-  }
   // 华雄【耀武】:伤害来源选择回复体力或摸牌
   // 李典【忘隙】:伤害后可选发动,双方各摸牌
   // 李典【恂恂】选择阶段:选择获得的牌和置底顺序
@@ -1946,18 +1945,6 @@ function renderControls(g){
   }
   // 太史慈【天义】拼点响应
   // 孙策【制霸】:被请求的主公选择拼点牌;魂姿觉醒后可以拒绝。
-  if(g.phase==='zhibaGain' && g.pending && g.pending.type==='zhibaGain' && g.pending.lordSeat===mySeat){
-    const yes=document.createElement('button'); yes.className='primary'; yes.textContent='获得两张拼点牌'; yes.onclick=()=>respondZhibaGain(true); c.appendChild(yes);
-    const no=document.createElement('button'); no.textContent='不获得'; no.onclick=()=>respondZhibaGain(false); c.appendChild(no);
-    setBanner('【制霸】拼点对方没赢,是否获得两张拼点牌?'); return;
-  }
-  if(g.phase==='yinghunTarget' && g.pending && g.pending.type==='yinghunTarget' && g.pending.seat===mySeat){
-    g.players.forEach((p,i)=>{ if(p && p.alive && i!==mySeat){
-      const b=document.createElement('button'); b.textContent='选择 '+p.name; b.onclick=()=>chooseYinghunTarget(i); c.appendChild(b);
-    }});
-    const cancel=document.createElement('button'); cancel.className='ghost'; cancel.textContent='不发动'; cancel.onclick=()=>cancelYinghun(); c.appendChild(cancel);
-    setBanner('【英魂】选择一名其他角色。'); return;
-  }
   if(g.phase==='yinghunChoice' && g.pending && g.pending.type==='yinghunChoice' && g.pending.seat===mySeat){
     const x=g.pending.x||1,target=g.players[g.pending.targetSeat];
     const a=document.createElement('button'); a.textContent='摸1张，弃'+x+'张'; a.onclick=()=>respondYinghunChoice('draw1'); c.appendChild(a);
@@ -1978,24 +1965,6 @@ function renderControls(g){
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
   // 寒冰剑弃牌子阶段:和 pick 阶段同一套"随机手牌+具名装备"选项列表,只是这次响应函数是
   // hanbingPick,弃完一张可能还会自动/再问下一轮(由 startHanbingRound 决定,不在这里判断)。
-  if(g.phase==='hanbing' && g.pending && g.pending.from===mySeat){
-    const tgt=g.players[g.pending.to];
-    if(tgt && (tgt.hand||[]).length>0){
-      const b=document.createElement('button'); b.className='primary';
-      b.textContent='弃随机一张手牌'; b.onclick=()=>hanbingPick('hand'); c.appendChild(b);
-    }
-    if(tgt) EQUIP_SLOTS.forEach(s=>{ if(tgt.equips[s]){
-      const b=document.createElement('button');
-      b.textContent='弃装备【'+tgt.equips[s].name+'】'; b.onclick=()=>hanbingPick(s); c.appendChild(b);
-    }});
-    setBanner('【寒冰剑】选择弃置 '+escapeHtml(tgt?tgt.name:'目标')+' 的第'+((g.pending.round||0)+1)+'张牌（手牌随机、装备可指定）。');
-    return;
-  }
-  if(g.phase==='hanbing' && g.pending){
-    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    setBanner(escapeHtml(from)+' 发动了【寒冰剑】,正在选择弃置 '+escapeHtml(to)+' 的第'+((g.pending.round||0)+1)+'张牌…');
-    return;
-  }
   // 姜维【志继】:觉醒后选择回复体力或摸牌
   // 姜维【挑衅】:目标角色选择如何响应
   if(g.phase==='wugu' && g.pending && g.pending.type==='wugu'){
@@ -2212,54 +2181,6 @@ function renderControls(g){
     return;
   }
   // 贾诩【乱武】:乱武选择阶段（当前选择的角色）
-  if(g.phase==='luanwuChoose' && g.pending && g.pending.type==='luanwuChoose' && g.pending.currentSeat===mySeat) {
-    const sourcePlayer = g.players[g.pending.sourceSeat];
-    const map = g.pending.targetMap || {};
-    const nearestSeat = map[mySeat];
-    const nearestPlayer = (typeof nearestSeat === 'number' && nearestSeat !== mySeat) ? g.players[nearestSeat] : null;
-    
-    // 检查是否有杀
-    const hasSha = hasShaCard(g, mySeat);
-    // 检查距离
-    const canAttack = nearestSeat !== null && canReachSha(g, mySeat, nearestSeat);
-    const shaAvailable = hasSha && canAttack && nearestPlayer && nearestPlayer.alive;
-    
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent=sourcePlayer.name + ' 发动【乱武】';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='请选择：';
-    div.appendChild(p1);
-    
-    // 选项1：使用杀（如果可行）
-    if (shaAvailable) {
-      const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#e74c3c';
-      b1.textContent='对 ' + nearestPlayer.name + ' 使用【杀】';
-      b1.onclick=()=>chooseLuanwuOption('sha');
-      div.appendChild(b1);
-    }
-    
-    // 选项2：失去体力
-    const b2=document.createElement('button'); b2.className='skill-btn'; b2.style.background='#8e44ad';
-    b2.textContent='失去1点体力';
-    b2.onclick=()=>chooseLuanwuOption('hp');
-    div.appendChild(b2);
-    
-    // 如果选项1不可行，只能选择选项2
-    if (!shaAvailable) {
-      const p2=document.createElement('p'); p2.style.color='#7f8c8d'; p2.textContent='（无法使用杀，只能选择失去体力）';
-      div.appendChild(p2);
-    }
-    
-    c.appendChild(div);
-    setBanner(sourcePlayer.name + ' 发动【乱武】,你需要选择:使用杀或失去1点体力');
-    return;
-  }
-  if(g.phase==='luanwuChoose' && g.pending && g.pending.type==='luanwuChoose'){
-    const currentPlayer = g.players[g.pending.currentSeat];
-    const sourcePlayer = g.players[g.pending.sourceSeat];
-    setBanner(escapeHtml(sourcePlayer?sourcePlayer.name:'?')+' 发动【乱武】,正在询问 '+escapeHtml(currentPlayer?currentPlayer.name:'?')+' 选择…');
-    return;
-  }
   if(g.phase==='dying' && g.pending && g.pending.type==='dying'){
     const dyingP=g.players[g.pending.seat], asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
     setBanner(escapeHtml(dyingP?dyingP.name:'?')+' 濒死！正在询问 '+escapeHtml(asking)+' 是否使用【桃】…');
