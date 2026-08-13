@@ -3968,9 +3968,16 @@ function nextWuxieAskee(g, pending, current){
   // 桃园结义/五谷丰登/南蛮入侵/万箭齐发又是逐目标结算，于是多人局会连续转好几圈，
   // 即使所有人都根本没有无懈也必须逐个点“不出”。所有锦囊及反制无懈统一从这里
   // 过滤，既不改变“每个目标分别可被无懈”的规则，也避免无意义的重复询问。
+  // 值得被问的玩家 = 真实持有【无懈可击】,或拥有【蛊惑】且本回合未使用过
+  // (蛊惑可把任意一张手牌当【无懈可击】打出,与 canStartGuhuoResponse 的守卫对齐:
+  // hasCap 已覆盖化身/新生借用,skillsLost/缠怨锁技能也随 hasCap 一起失效;
+  // "未使用过"用全局 g.guhuoUsed,本回合已蛊惑过就不再问。手牌非空才可能扣置,
+  // 空手问毫无意义,符合 #67"只询问值得问的玩家"结论。能力/手牌数均为公开信息,不泄露)。
   const canWuxie = seat=>{
     const p=g.players[seat];
-    return !!(p && p.alive && Array.isArray(p.hand) && p.hand.some(c=>c && c.name==='无懈可击'));
+    if(!p || !p.alive || !Array.isArray(p.hand)) return false;
+    if(p.hand.some(c=>c && c.name==='无懈可击')) return true;
+    return p.hand.length>0 && hasCap(p,'guhuo') && !g.guhuoUsed;
   };
   if(pending && pending.askAll && pending.depth===0){
     const n=g.players.length;

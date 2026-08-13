@@ -32,6 +32,7 @@ function joinRoom(){
             log:['房间已创建,等待玩家加入'] };
     }
     g.players = g.players || [];
+    ensureOwner(g); // #104 存量房间迁移:修复前创建的房间 players 无 owner,任何玩家刷新/重进即补记
     // bug2:先按本地标识找"我自己"(刷新重连),能回到原座位
     const mine = g.players.findIndex(p=>p && p.cid===myClientId);
     if(mine>=0){ mySeat = mine; return g; }
@@ -41,7 +42,10 @@ function joinRoom(){
     if(g.started){ return g; } // 这局已开始,且不是原座位的人 -> 事务外提示
     if(g.players.length >= SEATS) return g; // full
     mySeat = g.players.length;
-    g.players.push({ name, cid:myClientId, hp:MAX_HP, maxHp:MAX_HP, hand:[], alive:true });
+    const p = { name, cid:myClientId, hp:MAX_HP, maxHp:MAX_HP, hand:[], alive:true };
+    // 第一个加入者是房主(#104):打 owner 稳定标记,座位重排后仍能识别房主
+    if(g.players.length===0) p.owner = true;
+    g.players.push(p);
     g.log = pushLog(g.log, name+' 加入了房间（座位'+(mySeat+1)+'）');
     return g;
   }, (err, committed, snap)=>{
@@ -82,15 +86,16 @@ function enterGame(){
 }
 
 // 大厅机器人座位。机器人仍是标准 player，只以 isBot 区分；距离、身份、回合和胜负逻辑
-// 继续复用同一套 players 数组。只有座位0的真人可增删，避免多人同时操作造成争抢。
-// addBot(team):team 模式必须传队伍号(房主 mySeat===0 在选队面板指定),机器人入指定队;
+// 继续复用同一套 players 数组。只有房主可增删，避免多人同时操作造成争抢。
+// addBot(team):team 模式必须传队伍号(房主在选队面板指定),机器人入指定队;
 // 传了队伍号=选队即锁定 gameMode='team'(对齐 joinTeam,修游离机器人软锁:旧实现大厅
 // gameMode 恒 null,面板"+机器人"在选队前点会 botTeam=null 产游离机器人,选队锁定后
 // 开始按钮 hasNoTeam 校验永远拦截)。team 房间无参调用(通用"添加机器人"入口)直接拒绝,
 // 不产游离机器人。非 team 房间调用 addBot() 不带参,行为零变化(botTeam 恒 null)。
 function addBot(team){
   tx(g=>{
-    if(g.started || g.phase!=='lobby' || mySeat!==0 || g.players.length>=SEATS) return g;
+    ensureOwner(g); // #104 迁移:老房间无 owner 先补记,守卫才可能放行
+    if(g.started || g.phase!=='lobby' || !isRoomOwner(g,mySeat) || g.players.length>=SEATS) return g;
     const wantTeam = Number.isInteger(team);
     if(g.gameMode && g.gameMode!=='team') return g;          // 已锁非team房间拒绝
     if(wantTeam && g.gameMode!=='team') g.gameMode='team';   // 传了队伍号=选队即锁定(对齐joinTeam)
@@ -110,7 +115,8 @@ function addBot(team){
 }
 function removeBot(){
   tx(g=>{
-    if(g.started || g.phase!=='lobby' || mySeat!==0) return g;
+    ensureOwner(g); // #104 迁移:老房间无 owner 先补记,守卫才可能放行
+    if(g.started || g.phase!=='lobby' || !isRoomOwner(g,mySeat)) return g;
     for(let i=g.players.length-1;i>=0;i--){
       if(g.players[i]&&g.players[i].isBot){
         const name=g.players[i].name;
@@ -162,12 +168,44 @@ function createNewTeam(){
 //   gameMode = 'ffa' | 'identity' | 'team'  对战模式(乱斗/身份局/组队);缺省或非法当 'ffa'
 // 身份局(identity)仅允许 pick、人数 4~8;先发身份再主公 5 选 1。
 // 守卫须同时检查 pickingGeneral / pickingLordGeneral,不能只查 g.started。
+// 房主判定按 owner 标记,不再硬编码座位 0(见 #104:开局前座位会随机重排,房主会离开
+// 座位 0,必须靠玩家身上的稳定 owner 标记来识别)。owner:true 由 joinRoom 在首个加入者
+// 身上写入、resetPlayerForNewGame 跨局保留;isBot 防御保留(owner 玩家不可能同时是机器人,
+// 但多一道防御无害)。
 function isRoomOwner(g, seat){
-  return !!(g && seat===0 && g.players && g.players[0] && !g.players[0].isBot);
+  return !!(g && g.players && g.players[seat] && g.players[seat].owner && !g.players[seat].isBot);
+}
+
+// shuffleSeats(g):开局事务内随机重排 g.players 的座位顺序(#104 修复核心)。
+// 只打乱数组顺序,每个 player 对象内容(含 cid/owner/team/role 等)原样保留——各客户端
+// 靠 render.js 每次渲染用 cid 重定位 mySeat 自动同步新座位,不需要新增同步通道。
+// 用降序 Fisher-Yates(项目 shuffle 惯例的上限洗牌),原地操作、无副作用返回。
+function shuffleSeats(g){
+  const players = g.players || [];
+  for(let i = players.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = players[i];
+    players[i] = players[j];
+    players[j] = tmp;
+  }
+  return g;
+}
+
+// 旧房间兼容(#104):修复前创建的房间 players 无 owner 标记,isRoomOwner 会全员
+// false,导致无人能开局/加机器人/关房。任一事务发现无人持有 owner 时,把第一个
+// 非 bot 玩家补记为 owner(老房间从未重排过,数组首位即原房主),随事务写回持久化。
+function ensureOwner(g){
+  const players = g.players || [];
+  if(!players.some(p=>p && p.owner)){
+    const firstHuman = players.find(p=>p && !p.isBot);
+    if(firstHuman) firstHuman.owner = true;
+  }
+  return g;
 }
 
 function startGame(mode, gameMode){
   tx(g=>{
+    ensureOwner(g); // #104 迁移:老房间无 owner 先补记,守卫才可能放行
     if(!isRoomOwner(g,mySeat)) return g;
     if(g.started || g.phase==='pickingGeneral' || g.phase==='pickingLordGeneral') return g;
     const gm = (gameMode==='identity') ? 'identity' : (gameMode==='team') ? 'team' : 'ffa';
@@ -200,6 +238,10 @@ function startGame(mode, gameMode){
     if(gm!=='identity'){
       g.players.forEach(p=>{ if(p){ p.role=null; p.roleRevealed=false; } });
     }
+
+    // 开局前随机重排座位(#104):加入顺序不再决定座位号。乱斗 startTurn(g,0) 的座位 0
+    // 因此也随机化先手;身份局身份分配紧跟其后,主公由 role 定位,均不受重排影响。
+    shuffleSeats(g);
 
     const allIds = Object.keys(GENERALS);
     const shuffled = [...allIds].sort(()=>Math.random()-0.5);
@@ -523,6 +565,7 @@ function debugPickGeneral(generalId){
 
 function resetPlayerForNewGame(p){
   const persistent={name:p.name,cid:p.cid};
+  if(p.owner) persistent.owner=true;        // 房主标记跨局保留(#104)
   if(p.isBot) persistent.isBot=true;
   if(p.botLevel) persistent.botLevel=p.botLevel;
   if(Number.isInteger(p.team)) persistent.team=p.team;
@@ -536,6 +579,7 @@ function resetPlayerForNewGame(p){
 }
 function newGame(){
   tx(g=>{
+    ensureOwner(g); // #104 迁移:老房间无 owner 先补记,守卫才可能放行
     if(!isRoomOwner(g,mySeat)) return g;
     g.started=false; g.phase='lobby'; g.pending=null; g.winner=null; g.aoe=null;
     g.gameMode=null; g.winSide=null; g.lordGeneralPool=null; g.generalMode=null;

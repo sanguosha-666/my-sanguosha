@@ -182,7 +182,8 @@ check('canSeeRole 规则', ()=>{
 
 function mkPlayers(n){
   return Array.from({length:n}, (_,i)=>({
-    name:'P'+i, cid:'c'+i, hp:4, maxHp:4, hand:[], alive:true, equips:R('emptyEquips')(), delays:[]
+    name:'P'+i, cid:'c'+i, hp:4, maxHp:4, hand:[], alive:true, equips:R('emptyEquips')(), delays:[],
+    ...(i===0 ? {owner:true} : {}) // 座位0是房主(#104:isRoomOwner 改为按 owner 标记判定)
   }));
 }
 

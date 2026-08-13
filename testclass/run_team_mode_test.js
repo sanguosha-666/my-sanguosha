@@ -88,7 +88,7 @@ function check(name, fn){
     if(g.teamCount!==2) throw new Error('teamCount应2,实际 '+g.teamCount);
   });
   await check('addBot(team): 机器人入指定队', function(){
-    const g = { players:[{name:'a',isBot:false,team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
+    const g = { players:[{name:'a',isBot:false,owner:true,team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
     context.g = g; context.mySeat = 0;
     vm.runInContext('addBot', sandbox)(1);
     const bots = g.players.filter(p=>p.isBot);
@@ -99,7 +99,7 @@ function check(name, fn){
   // 真实乱斗大厅 gameMode 恒 null(全项目只有 startGame 才写 ffa/identity),通用"添加机器人"
   // 按钮(handleAddBotClick)无参调 addBot()——必须保持旧行为零变化:能加、不写队、不锁模式。
   await check('addBot(): 非team(默认/乱斗)房间不写队不锁模式(零变化)', function(){
-    const g = { players:[], log:[], phase:'lobby', started:false };
+    const g = { players:[{name:'a',isBot:false,owner:true}], log:[], phase:'lobby', started:false };
     context.g = g; context.mySeat = 0;
     vm.runInContext('addBot', sandbox)();
     const bots = g.players.filter(p=>p.isBot);
@@ -108,7 +108,7 @@ function check(name, fn){
     if(g.gameMode!==null) throw new Error('非team房间addBot不应锁定gameMode,实际 '+g.gameMode);
   });
   await check('addBot(team): 非法队伍号拒绝入队', function(){
-    const g = { players:[{name:'a',isBot:false,team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
+    const g = { players:[{name:'a',isBot:false,owner:true,team:0}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
     context.g = g; context.mySeat = 0;
     vm.runInContext('addBot', sandbox)(99); // 越界队伍号 → team 落 null(仍加机器人)
     const bots = g.players.filter(p=>p.isBot);
@@ -119,7 +119,7 @@ function check(name, fn){
   // g.gameMode 仍 null)→ 面板出现 → 点"+机器人"(addBot(t))→ 旧实现 gameMode!=='team' 导致
   // botTeam=null → 机器人游离无队 → 选队锁定模式后开始按钮 hasNoTeam 校验永远拦截。
   await check('addBot(team): gameMode未锁定(null)指定队伍=选队即锁定', function(){
-    const g = { players:[{name:'a',isBot:false,team:null}], log:[], phase:'lobby', started:false };
+    const g = { players:[{name:'a',isBot:false,owner:true,team:null}], log:[], phase:'lobby', started:false };
     context.g = g; context.mySeat = 0;
     vm.runInContext('addBot', sandbox)(1); // 面板"+机器人"传队伍号
     const bots = g.players.filter(p=>p.isBot);
@@ -128,7 +128,7 @@ function check(name, fn){
     if(g.gameMode!=='team') throw new Error('应锁定gameMode=team,实际 '+g.gameMode);
   });
   await check('addBot(): team房间无参(通用入口)拒绝游离机器人', function(){
-    const g = { players:[{name:'a',isBot:false,team:0},{name:'b',isBot:false,team:1}], log:[], gameMode:'team', phase:'lobby', started:false };
+    const g = { players:[{name:'a',isBot:false,owner:true,team:0},{name:'b',isBot:false,team:1}], log:[], gameMode:'team', phase:'lobby', started:false };
     context.g = g; context.mySeat = 0;
     const before = g.players.length;
     vm.runInContext('addBot', sandbox)(); // 通用入口无参(既有路径 render-controls.js:1811)
@@ -140,7 +140,7 @@ function check(name, fn){
   // startGame 是最终兜底;tx 开头 normalize 在 gameMode='team' 时才保留 p.team,故用例传
   // gameMode:'team' 模拟锁定后的真实状态(传 null 会被 normalize 清空 team,测不到校验)。
   await check('startGame: team队数<2拒绝', function(){
-    const g = { players:[{team:0,name:'a'},{team:0,name:'b'}], log:[], gameMode:'team', phase:'lobby', started:false };
+    const g = { players:[{team:0,name:'a',owner:true},{team:0,name:'b'}], log:[], gameMode:'team', phase:'lobby', started:false };
     context.g = g;
     vm.runInContext('startGame', sandbox)('pick','team');
     if(g.started || g.gameMode!=='team') throw new Error('队数1应拒绝开始,实际 gameMode='+g.gameMode+' started='+g.started);
@@ -148,13 +148,13 @@ function check(name, fn){
   await check('startGame: team全员同一队拒绝', function(){
     // 注:brief 原数据 {team:0},{team:0},{team:2} 在 teamSet 遍历下队伍数=2(不连续但≥2)
     // 会通过校验,与"缺队1应拒绝"断言自相矛盾——按实现语义改为"全员同一队"(teamSet仅1队)拒绝。
-    const g = { players:[{team:0,name:'a'},{team:0,name:'b'},{team:0,name:'c'}], log:[], gameMode:'team', phase:'lobby', started:false };
+    const g = { players:[{team:0,name:'a',owner:true},{team:0,name:'b'},{team:0,name:'c'}], log:[], gameMode:'team', phase:'lobby', started:false };
     context.g = g;
     vm.runInContext('startGame', sandbox)('pick','team');
     if(g.started || g.gameMode!=='team') throw new Error('全员同一队应拒绝开始,实际 gameMode='+g.gameMode+' started='+g.started);
   });
   await check('startGame: team合法进入选将', function(){
-    const g = { players:[{team:0,name:'a'},{team:1,name:'b'}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
+    const g = { players:[{team:0,name:'a',owner:true},{team:1,name:'b'}], log:[], gameMode:'team', phase:'lobby', started:false, teamCount:2 };
     context.g = g;
     vm.runInContext('startGame', sandbox)('pick','team');
     if(g.gameMode!=='team') throw new Error('应进入team模式,实际 '+g.gameMode);

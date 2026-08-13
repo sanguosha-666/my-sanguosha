@@ -1583,7 +1583,7 @@ function renderControls(g){
   if(!g.started){
     const cnt=(g.players||[]).filter(Boolean).length;
     const botCnt=(g.players||[]).filter(p=>p&&p.isBot).length;
-    if(mySeat===0){
+    if(isRoomOwner(g,mySeat)){
       const add=document.createElement('button');
       add.className='ghost'; add.textContent='添加机器人（当前 '+botCnt+'）';
       // handleAddBotClick(ai-bot.js)包装了 addBot——第一次点击(这个会话内还没设置
@@ -1596,7 +1596,7 @@ function renderControls(g){
         remove.onclick=removeBot; c.appendChild(remove);
       }
       // AI机器人设置入口(ai-bot.js)——和上面添加/移除机器人按钮同一个身份边界
-      // (mySeat===0,持有密钥的只有触发 addBot() 的这个人),常驻小按钮,随时可点开
+      // (isRoomOwner,持有密钥的只有触发 addBot() 的这个人),常驻小按钮,随时可点开
       // 密钥弹窗查看/修改当前配置,不受"这个会话是否已经回应过密钥询问"影响。留空
       // 则机器人保持现有的本地规则行为,不接入任何游戏逻辑(见 ai-bot.js 文件头部
       // 范围声明)。
@@ -1604,7 +1604,7 @@ function renderControls(g){
     }
     // 1) 对战模式:乱斗 / 身份局 / 组队。生命周期入口只对房主显示；
     // 业务函数仍有独立 guard，不能只依赖 UI 隐藏。
-    if(mySeat!==0){
+    if(!isRoomOwner(g,mySeat)){
       if(g.gameMode!=='team'){
         const waiting=document.createElement('button');
         waiting.className='ghost'; waiting.disabled=true;
@@ -1621,7 +1621,7 @@ function renderControls(g){
       b.onclick=()=>{ selectedGameMode=mode; if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
       c.appendChild(b);
     };
-    if(mySeat===0){
+    if(isRoomOwner(g,mySeat)){
       mkModeBtn('乱斗', 'ffa');
       mkModeBtn('身份局', 'identity');
       mkModeBtn('组队', 'team');
@@ -1638,7 +1638,7 @@ function renderControls(g){
       btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)（'+cnt+'/'+SEATS+'）';
       btnPick.disabled = cnt<MIN_PLAYERS;
       btnPick.onclick=()=>startGame('pick','ffa');
-      if(mySeat===0) c.appendChild(btnPick);
+      if(isRoomOwner(g,mySeat)) c.appendChild(btnPick);
     } else if(selectedGameMode==='identity'){
       // 身份局仅三选一,不提供随机武将
       const btnPick=document.createElement('button');
@@ -1668,7 +1668,7 @@ function renderControls(g){
         if(g.players[mySeat] && g.players[mySeat].team===t) btn.disabled=true;
         btn.onclick=()=>{ joinTeam(t); if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
         row.appendChild(btn);
-        if(mySeat===0){
+        if(isRoomOwner(g,mySeat)){
           const addBotBtn=document.createElement('button');
           addBotBtn.className='ghost'; addBotBtn.textContent='+机器人';
           addBotBtn.onclick=()=>{ addBot(t); if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
@@ -1692,7 +1692,7 @@ function renderControls(g){
         if(Object.keys(teams).length<2 || hasNoTeam){ alert('组队模式需至少 2 个队伍且每队至少 1 人,请先在大厅选队'); return; }
         startGame('pick','team');
       };
-      if(mySeat===0) c.appendChild(btnPick);
+      if(isRoomOwner(g,mySeat)) c.appendChild(btnPick);
     } else {
       const tip=document.createElement('button');
       tip.className='ghost'; tip.disabled=true;
@@ -1712,7 +1712,7 @@ function renderControls(g){
     return;
   }
   if(g.phase==='over'){
-    if(mySeat===0){
+    if(isRoomOwner(g,mySeat)){
       const btn=document.createElement('button'); btn.className='primary';
       btn.textContent='再来一局'; btn.onclick=()=>{ selectedGameMode=null; newGame(); }; c.appendChild(btn);
     }
