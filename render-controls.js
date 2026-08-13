@@ -289,7 +289,12 @@ const PENDING_RENDERERS = {
   zhijiChoice:        {actor:'seat',       skill:'志继', render:renderPendingZhijiChoice},
   luoshen:            {actor:'seat',       skill:'洛神', render:renderPendingLuoshen},
   huogongReveal:      {actor:'to',         skill:'火攻', render:renderPendingHuogongReveal},
-  guicai:             {actor:'asking',     skill:'鬼才', render:renderPendingGuicai}
+  guicai:             {actor:'asking',     skill:'鬼才', render:renderPendingGuicai},
+  ganglieChoice:      {actor:'sourceSeat', skill:'刚烈', render:renderPendingGanglieChoice},
+  yaowu_choose:       {actor:'seat',       skill:'耀武', render:renderPendingYaowuChoose},
+  wangxiAsk:          {actor:'seat',       skill:'忘隙', render:renderPendingWangxiAsk},
+  quhuDamageChoice:   {actor:'seat',       skill:'驱虎', render:renderPendingQuhuDamageChoice},
+  fanjianSuit:        {actor:'targetSeat', skill:'反间', render:renderPendingFanjianSuit}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -624,6 +629,38 @@ function renderPendingGuicai(g,c){
     const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondGuicai(false);c.appendChild(no);
     setBanner(isSelf?'你的判定得到 '+jc.suit+rankText(jc.rank)+',是否发动【鬼才】用一张手牌替换?':escapeHtml(judgedName)+' 判定得到 '+jc.suit+rankText(jc.rank)+',是否打出一张手牌替换 '+escapeHtml(judgedName)+' 的判定牌?');
   }
+}
+function renderPendingGanglieChoice(g,c){
+  const me=g.players[mySeat],victim=g.players[g.pending.seat],hand=me.hand||[];
+  if(hand.length>=2){
+    hand.forEach((card,idx)=>{const picked=gangliePicks.includes(idx),b=document.createElement('button');if(picked)b.className='primary';b.textContent=(picked?'✓ ':'')+'弃【'+card.name+'】';b.onclick=()=>{if(picked)gangliePicks=gangliePicks.filter(x=>x!==idx);else if(gangliePicks.length<2)gangliePicks=[...gangliePicks,idx];render(g);};c.appendChild(b);});
+    if(gangliePicks.length===2){const ok=document.createElement('button');ok.className='primary';ok.textContent='确认弃置2张';ok.onclick=()=>{const picks=gangliePicks.slice();resetGanglie();respondGanglieChoice('discard',picks);};c.appendChild(ok);}
+  }
+  const hurt=document.createElement('button');hurt.textContent='受到1点伤害';hurt.onclick=()=>{resetGanglie();respondGanglieChoice('damage');};c.appendChild(hurt);
+  setBanner('【刚烈】判定不为红桃,'+(hand.length>=2?'可弃置2张手牌或':'手牌不足2张,只能')+'受到 '+escapeHtml(victim?victim.name:'夏侯惇')+' 造成的1点伤害。已选 '+gangliePicks.length+'/2');
+}
+function renderPendingYaowuChoose(g,c){
+  const src=g.players[g.pending.seat],disabledRecover=src&&src.hp>=src.maxHp;
+  if(!disabledRecover){const recover=document.createElement('button');recover.className='primary';recover.textContent='回复1点体力';recover.onclick=()=>respondYaowu('recover');c.appendChild(recover);}
+  const draw=document.createElement('button');draw.textContent='摸一张牌';draw.onclick=()=>respondYaowu('draw');c.appendChild(draw);
+  const tgt=g.players[g.pending.target];setBanner('【耀武】 '+escapeHtml(src?src.name:'你')+' 选择：'+(disabledRecover?'摸一张牌':'回复1点体力 或 摸一张牌')+'（由 '+escapeHtml(tgt?tgt.name:'华雄')+' 受到红色【杀】伤害触发）');
+}
+function renderPendingWangxiAsk(g,c){
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【忘隙】';yes.onclick=()=>respondWangxi(true);c.appendChild(yes);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondWangxi(false);c.appendChild(no);
+  const other=g.players[g.pending.otherSeat],amount=g.pending.amount||1;
+  if(g.pending.death)setBanner('你造成了致命伤害,是否发动【忘隙】?你将摸'+amount+'张牌。');
+  else setBanner((other?'你与 '+escapeHtml(other.name):'你与伤害来源')+' 各摸'+amount+'张牌,是否发动【忘隙】?');
+}
+function renderPendingQuhuDamageChoice(g,c){
+  const source=g.players[g.pending.targetSeat];
+  (g.pending.targets||[]).forEach(seat=>{const target=g.players[seat];if(!target||!target.alive)return;const b=document.createElement('button');b.textContent='令 '+source.name+' 对 '+target.name+' 造成1点伤害';b.onclick=()=>respondQuhuDamage(seat);c.appendChild(b);});
+  setBanner('【驱虎】拼点赢,选择 '+escapeHtml(source?source.name:'目标')+' 攻击范围内一名角色受到1点伤害。');
+}
+function renderPendingFanjianSuit(g,c){
+  const zhou=g.players[g.pending.seat];
+  ['♠','♥','♣','♦'].forEach(suit=>{const b=document.createElement('button');b.textContent='选择 '+suit;b.onclick=()=>respondFanjianSuit(suit);c.appendChild(b);});
+  setBanner(escapeHtml(zhou?zhou.name:'周瑜')+' 对你发动【反间】,请选择一种花色。');
 }
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
@@ -2141,89 +2178,8 @@ function renderControls(g){
     setBanner(escapeHtml(p)+' 正在分配【遗计】看到的牌…'); // 不渲染牌面,严格保密
     return;
   }
-  if(g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice' && g.pending.sourceSeat===mySeat){
-    const victim=g.players[g.pending.seat];
-    const hand=me.hand||[];
-    if(hand.length>=2){
-      hand.forEach((card, idx)=>{
-        const picked=gangliePicks.includes(idx);
-        const b=document.createElement('button');
-        if(picked) b.className='primary';
-        b.textContent=(picked?'✓ ':'')+'弃【'+card.name+'】';
-        b.onclick=()=>{
-          if(picked) gangliePicks=gangliePicks.filter(x=>x!==idx);
-          else if(gangliePicks.length<2) gangliePicks=[...gangliePicks, idx];
-          render(g);
-        };
-        c.appendChild(b);
-      });
-      if(gangliePicks.length===2){
-        const ok=document.createElement('button'); ok.className='primary';
-        ok.textContent='确认弃置2张';
-        ok.onclick=()=>{ const picks=gangliePicks.slice(); resetGanglie(); respondGanglieChoice('discard', picks); };
-        c.appendChild(ok);
-      }
-    }
-    const hurt=document.createElement('button');
-    hurt.textContent='受到1点伤害';
-    hurt.onclick=()=>{ resetGanglie(); respondGanglieChoice('damage'); };
-    c.appendChild(hurt);
-    const discardText=hand.length>=2 ? '可弃置2张手牌或' : '手牌不足2张,只能';
-    setBanner('【刚烈】判定不为红桃,'+discardText+'受到 '+escapeHtml(victim?victim.name:'夏侯惇')+' 造成的1点伤害。已选 '+gangliePicks.length+'/2');
-    return;
-  }
-  if(g.phase==='ganglieChoice' && g.pending && g.pending.type==='ganglieChoice'){
-    const source=g.players[g.pending.sourceSeat], victim=g.players[g.pending.seat];
-    setBanner('【刚烈】判定不为红桃,等待 '+escapeHtml(source?source.name:'伤害来源')+' 选择弃牌或受到 '+escapeHtml(victim?victim.name:'夏侯惇')+' 造成的1点伤害…');
-    return;
-  }
   // 华雄【耀武】:伤害来源选择回复体力或摸牌
-  if(g.phase==='yaowu_choose' && g.pending && g.pending.type==='yaowu_choose' && g.pending.seat===mySeat){
-    const b1=document.createElement('button'); b1.className='primary';
-    const src = g.players[g.pending.seat];
-    const disabledRecover = src && src.hp >= src.maxHp;
-    if (!disabledRecover) {
-      b1.textContent='回复1点体力';
-      b1.onclick=()=>respondYaowu('recover');
-      c.appendChild(b1);
-    }
-    const b2=document.createElement('button');
-    b2.textContent='摸一张牌';
-    b2.onclick=()=>respondYaowu('draw');
-    c.appendChild(b2);
-    const tgt = g.players[g.pending.target];
-    setBanner('【耀武】 '+escapeHtml(src?src.name:'你')+' 选择：'+(disabledRecover?'摸一张牌':'回复1点体力 或 摸一张牌')+'（由 '+escapeHtml(tgt?tgt.name:'华雄')+' 受到红色【杀】伤害触发）');
-    return;
-  }
-  if(g.phase==='yaowu_choose' && g.pending && g.pending.type==='yaowu_choose'){
-    const chooser = g.players[g.pending.seat];
-    const target = g.players[g.pending.target];
-    setBanner('【耀武】 等待 '+escapeHtml(chooser?chooser.name:'伤害来源')+' 选择…（由 '+escapeHtml(target?target.name:'华雄')+' 受到红色【杀】伤害触发）');
-    return;
-  }
   // 李典【忘隙】:伤害后可选发动,双方各摸牌
-  if(g.phase==='wangxiAsk' && g.pending && g.pending.type==='wangxiAsk' && g.pending.seat===mySeat){
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【忘隙】'; b1.onclick=()=>respondWangxi(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不发动'; b2.onclick=()=>respondWangxi(false);
-    c.appendChild(b2);
-    const otherP = g.players[g.pending.otherSeat];
-    const amount = g.pending.amount || 1;
-    if(g.pending.death){
-      setBanner('你造成了致命伤害,是否发动【忘隙】?你将摸'+amount+'张牌。');
-    } else {
-      const desc = otherP ? '你与 '+escapeHtml(otherP.name) : '你与伤害来源';
-      setBanner(desc+' 各摸'+amount+'张牌,是否发动【忘隙】?');
-    }
-    return;
-  }
-  if(g.phase==='wangxiAsk' && g.pending && g.pending.type==='wangxiAsk'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'李典', '忘隙');
-    return;
-  }
   // 李典【恂恂】选择阶段:选择获得的牌和置底顺序
   if(g.phase==='xunxunPick' && g.pending && g.pending.type==='xunxunPick'){
     renderXunxun(g, c);
@@ -2253,40 +2209,6 @@ function renderControls(g){
     (me.hand||[]).forEach((card,idx)=>{ const b=document.createElement('button'); b.textContent='弃置【'+card.name+'】'+card.suit+rankText(card.rank); b.onclick=()=>discardYinghunCard(idx); c.appendChild(b); });
     EQUIP_SLOTS.forEach(slot=>{ const card=me.equips&&me.equips[slot]; if(card){ const b=document.createElement('button'); b.textContent='弃置装备【'+card.name+'】'; b.onclick=()=>discardYinghunCard({kind:'equip',slot}); c.appendChild(b); } });
     setBanner('【英魂】请选择弃置的牌（还需 '+escapeHtml(String(g.pending.remaining||0))+' 张）。'); return;
-  }
-  if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice' && g.pending.seat===mySeat){
-    const source=g.players[g.pending.targetSeat];
-    (g.pending.targets||[]).forEach(seat=>{
-      const target=g.players[seat];
-      if(!target || !target.alive) return;
-      const b=document.createElement('button');
-      b.textContent='令 '+source.name+' 对 '+target.name+' 造成1点伤害';
-      b.onclick=()=>respondQuhuDamage(seat);
-      c.appendChild(b);
-    });
-    setBanner('【驱虎】拼点赢,选择 '+escapeHtml(source?source.name:'目标')+' 攻击范围内一名角色受到1点伤害。');
-    return;
-  }
-  if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice'){
-    const xun=g.players[g.pending.seat], source=g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(xun?xun.name:'荀彧')+' 【驱虎】拼点赢,正在选择 '+escapeHtml(source?source.name:'目标')+' 造成伤害的对象…');
-    return;
-  }
-  if(g.phase==='fanjianSuit' && g.pending && g.pending.type==='fanjianSuit' && g.pending.targetSeat===mySeat){
-    const zhou=g.players[g.pending.seat];
-    ['♠','♥','♣','♦'].forEach(suit=>{
-      const b=document.createElement('button');
-      b.textContent='选择 '+suit;
-      b.onclick=()=>respondFanjianSuit(suit);
-      c.appendChild(b);
-    });
-    setBanner(escapeHtml(zhou?zhou.name:'周瑜')+' 对你发动【反间】,请选择一种花色。');
-    return;
-  }
-  if(g.phase==='fanjianSuit' && g.pending && g.pending.type==='fanjianSuit'){
-    const zhou=g.players[g.pending.seat], target=g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(zhou?zhou.name:'周瑜')+' 发动【反间】,等待 '+escapeHtml(target?target.name:'目标')+' 选择花色…');
-    return;
   }
   // 左慈【新生】:简单的"是否发动"二选一(参照寒冰剑respondHanbingAsk同款写法),
   // 每受到1点伤害问一次,g.pending.remaining 提示还剩几次。

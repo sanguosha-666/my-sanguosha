@@ -19,7 +19,8 @@ const migrated=[
   'quhuRespond','tianyiRespond','zhibaAsk','jiemingAsk','xinshengAsk','liuli','tianxiang',
   'huashenChangeAskStart','huashenChangePickStart','huashenChangeAskEnd','huashenChangePickEnd',
   'biyue','cixiongAsk','hanbingAsk','xiaoguo','xiaoguoChoice','cixiongChoice','zhijiChoice',
-  'luoshen','huogongReveal','guicai'
+  'luoshen','huogongReveal','guicai','ganglieChoice','yaowu_choose','wangxiAsk',
+  'quhuDamageChoice','fanjianSuit'
 ];
 migrated.forEach(function(type){
   assert(new RegExp('\\b'+type+'\\s*:\\s*\\{actor:').test(table[0]),type+' 应登记 actor');
@@ -31,9 +32,8 @@ assert(!banner[0].includes("escapeHtml(name"),'旁观提示不得再渲染响应
 let rendered=0;
 let shown='';
 const context={Number,mySeat:1,setBanner:function(text){shown=text;}};
-migrated.forEach(function(type){
-  const fn='renderPending'+type.charAt(0).toUpperCase()+type.slice(1);
-  context[fn]=function(){rendered++;};
+Array.from(table[0].matchAll(/render:(renderPending[A-Za-z0-9_]+)/g)).forEach(function(match){
+  context[match[1]]=function(){rendered++;};
 });
 vm.createContext(context);
 vm.runInContext(banner[0],context);
@@ -46,4 +46,4 @@ assert.strictEqual(context.renderRegisteredPending({phase:'haoshiPick',pending:{
 assert.strictEqual(shown,'等待其他玩家响应【好施】…','旁观阶段应显示匿名技能提示');
 assert.strictEqual(context.renderRegisteredPending({phase:'play',pending:{type:'haoshiPick',seat:1}},{}),false,'phase 不匹配不得误分派');
 
-console.log('pending renderer registry tests: 96 checks passed (45 phases migrated)');
+console.log('pending renderer registry tests: 106 checks passed (50 phases migrated)');
