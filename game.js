@@ -2774,8 +2774,12 @@ const CARD_PLAYS = {
     },
     canTarget:(g,me,card,targetSeat)=>{
       const target=g.players[targetSeat];
+      const sourceSeat=g.players.indexOf(me);
+      if(sourceSeat<0 || !target || !target.alive || targetSeat===sourceSeat) return false;
       // 陈宫【智迟】：检查免疫状态
-      if(isZhichiImmune(g, targetSeat, card)) return false;
+      // canTarget 的语义已经确定是“作为【杀】使用”，不能再按转化前的实体牌名判断；
+      // 否则武圣/龙胆等转化杀会绕过智迟。
+      if(isZhichiImmune(g, targetSeat, {name:'杀'})) return false;
       // 诸葛亮【空城】(锁定技):若目标没有手牌,不能成为【杀】的目标——距离校验之外额外叠加的
       // 一层限制,和距离一样都是"canTarget"这个 seam 的用途(见架构约定:只有杀挂了canTarget)。
       if(target && hasCap(target,'kongcheng') && (target.hand||[]).length===0) return false;
@@ -2783,21 +2787,21 @@ const CARD_PLAYS = {
       // 袁术【同疾】(锁定技):若袁术的手牌数大于体力值,且使用者在袁术的攻击范围内,只能选择袁术为目标
       for(let tongjiSeat=0;tongjiSeat<g.players.length;tongjiSeat++){
         const owner=g.players[tongjiSeat];
-        if(!owner || !owner.alive || tongjiSeat===mySeat || !hasCap(owner,'tongji')) continue;
+        if(!owner || !owner.alive || tongjiSeat===sourceSeat || !hasCap(owner,'tongji')) continue;
         if((owner.hand||[]).length<=owner.hp) continue;
         // 正式条件是“使用者在【同疾】拥有者的攻击范围内”，因此距离/范围从拥有者视角计算；
         // 每个满足条件的拥有者都形成独立限制，不能只取玩家数组里的第一人。
-        if(distance(g,tongjiSeat,mySeat)<=attackRange(g,tongjiSeat) && targetSeat!==tongjiSeat) return false;
+        if(distance(g,tongjiSeat,sourceSeat)<=attackRange(g,tongjiSeat) && targetSeat!==tongjiSeat) return false;
       }
       
       // 太史慈【天义】:天义赢时无距离限制
-      if(g.tianyiWin && hasCap(me,'tianyi')) return true;
+      if(g.tianyiWin && g.turn===sourceSeat && hasCap(me,'tianyi')) return true;
       // 曹彰【将驰】选项2:本回合使用杀无距离限制(仍过空城等合法性)
-      if(me.jiangchiNoDistance && g.turn === mySeat) return true;
+      if(me.jiangchiNoDistance && g.turn === sourceSeat) return true;
       // 【神速】等“视为使用一张无距离限制的杀”仍必须走本 canTarget 的智迟、空城、
       // 同疾等目标合法性；只在全部规则检查通过后跳过最后的距离判断。
       if(card && card.ignoreShaDistance) return true;
-      return canReachSha(g, mySeat, targetSeat); // 只有杀受攻击距离限制
+      return canReachSha(g, sourceSeat, targetSeat); // 只有杀受攻击距离限制
     },
     effect:(g,me,card,targetSeat)=>{
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
@@ -3465,7 +3469,9 @@ function pickMingceTarget(targetSeat){
     // 接收牌的人必须是"其他角色"(排除陈宫自己),而被杀的第二目标只说"另一名角色",只相对
     // 接收者而言,并没有排除陈宫。所以这里【不能】再加 i!==mySeat —— 陈宫可以指自己
     // (常见打法:配合【智迟】主动吃一刀)。
-    const candidates = g.players.filter((p,i)=>p && p.alive && i!==targetSeat && canReachSha(g, targetSeat, i));
+    const virtualSha={name:'杀',virtual:true};
+    const candidates = g.players.filter((p,i)=>p && p.alive && i!==targetSeat &&
+      CARD_PLAYS['杀'].canTarget(g, target, virtualSha, i));
     if(candidates.length===0){
       // 无可选第二目标，直接进入选择阶段
       g.pending = {
@@ -3496,6 +3502,8 @@ function pickMingceTarget2(seat){
   tx(g=>{
     if(g.phase!=='mingcePickTarget2'||!g.pending||g.pending.type!=='mingcePickTarget2'||g.pending.sourceSeat!==mySeat) return g;
     if(!g.pending.candidates.includes(seat)) return g;
+    const attacker=g.players[g.pending.targetSeat];
+    if(!attacker || !CARD_PLAYS['杀'].canTarget(g,attacker,{name:'杀',virtual:true},seat)) return g;
     g.pending = {
       type:'mingceChoice',
       sourceSeat:mySeat,
@@ -3531,7 +3539,8 @@ function chooseMingceOption(option){
     // 服务端兜底:没有第二目标时"视为使用杀"不是合法选项(官方FAQ:此时只能选摸牌)。
     // UI 已经不渲染该按钮,这里再挡一层,避免出现"牌交出去了、两个选项的效果都不执行"
     // 这种半吊子状态(既有实现就是这样,牌白给)。
-    if(option==='sha' && !(target2 && target2.alive)) return g;
+    if(option==='sha' && (!(target2 && target2.alive) ||
+       !CARD_PLAYS['杀'].canTarget(g,target,{name:'杀',virtual:true},g.pending.target2Seat))) return g;
     if(option!=='sha' && option!=='draw') return g;
     // 先把牌交给目标
     if(cardToGive && cardToGive.length>0){
@@ -3643,12 +3652,7 @@ function playShaFangtian(cardIdx, targets){
     for(const t of targets){
       if(seen.has(t)) return g; // 目标不能重复
       seen.add(t);
-      const tp=g.players[t];
-      if(!tp || !tp.alive || t===mySeat) return g;
-      if(!(me.jiangchiNoDistance && g.turn===mySeat) && !canReachSha(g, mySeat, t)) return g;
-      // 诸葛亮【空城】:方天画戟这条路径同样不走 CARD_PLAYS['杀'].canTarget,逐个目标补上
-      // 同一条限制——多目标里任何一个是空城状态的诸葛亮都不能被列入。
-      if(hasCap(tp,'kongcheng') && (tp.hand||[]).length===0) return g;
+      if(!CARD_PLAYS['杀'].canTarget(g,me,{name:'杀',virtual:true},t)) return g;
     }
     // 按现有回合方向(nextAlive)从攻击者起重排,不用玩家提交的原始顺序
     const order=[]; let s=mySeat;

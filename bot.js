@@ -2852,8 +2852,7 @@ function botFangtianTargets(g, seat){
   if(!me) return out;
   g.players.forEach(function(p, i){
     if(!p || !p.alive || i===seat) return;
-    if(!(me.jiangchiNoDistance && g.turn===seat) && !canReachSha(g, seat, i)) return;
-    if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
+    if(!CARD_PLAYS['杀'].canTarget(g,me,{name:'杀',virtual:true},i)) return;
     out.push(i);
   });
   return out;

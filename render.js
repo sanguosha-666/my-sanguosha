@@ -1371,10 +1371,9 @@ function render(g){
     // 方天画戟选目标模式:点存活的、在攻击距离内的其他玩家 = 切换选中/取消,上限 min(3,范围内合法目标数)。
     // 不强制选满(选够1个即可点"确认发动");距离限制是推断而非确证的官方规则(见 EQUIPS['方天画戟'].desc)。
     if(fangtianMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
-      const reach = canReachSha(g, mySeat, i);
-      const fangtianKongcheng = hasCap(p,'kongcheng') && (p.hand||[]).length===0; // 【空城】同样限制方天画戟的额外目标
+      const legalTarget = CARD_PLAYS['杀'].canTarget(g,me,{name:'杀',virtual:true},i);
       const picked = fangtianPicks.includes(i);
-      const selectable = reach && !fangtianKongcheng && (picked || fangtianPicks.length<3);
+      const selectable = legalTarget && (picked || fangtianPicks.length<3);
       if(selectable){
         d.style.cursor='pointer';
         if(picked) d.style.outline='3px solid var(--gold)';
@@ -1384,14 +1383,10 @@ function render(g){
           else if(fangtianPicks.length<3) fangtianPicks.push(i);
           render(g);
         };
-      } else if(fangtianKongcheng){
+      } else if(!legalTarget){
         d.style.outline='2px dotted #6b5b4d';
-        d.title = '【空城】：该角色没有手牌,不能成为杀的目标';
-        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">空城</span>';
-      } else if(!reach){
-        d.style.outline='2px dotted #6b5b4d';
-        d.title='攻击距离外（距离 '+distance(g,mySeat,i)+' ＞ 射程 '+attackRange(g,mySeat)+'）';
-        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
+        d.title='当前不能成为【杀】的目标（距离或技能限制）';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">不可选</span>';
       }
     }
     // 徐晃【断粮】选目标:已选中一张黑色基本牌/黑色装备牌后,点距离2以内的其他存活玩家提交

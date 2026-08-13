@@ -66,6 +66,19 @@ assert.strictEqual(g2.players[0].hp,3,'无红桃时伤害来源因恩怨失去1�
 assert.strictEqual(g2.pending.type,'probeDamageHook','恩怨完成后必须继续其它受伤后技能');
 assert.strictEqual(g2.pending.resume.type,'afterDamageEffects','后续技能仍由统一队列接管');
 
+// CORE-55：左慈借用【恩怨】时，借来的 cap 先挂起也不能吞掉左慈本体【新生】hook。
+const gZuoci={players:[
+  {name:'伤害者',general:'caocao',hp:4,maxHp:4,hand:[],equips:emptyEq(),delays:[],alive:true},
+  {name:'借恩怨的左慈',general:'zuoci',hp:3,maxHp:3,hand:[],equips:emptyEq(),delays:[],alive:true,
+   huashenPool:['fazheng'],huashenGeneral:'fazheng',huashenSkillName:'恩怨'}
+],deck:[],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null};
+sandbox.__g=gZuoci;
+assert.strictEqual(R('dealDamage(__g,1,1,0,"化身恩怨与新生组合","sha")'),true);
+assert.strictEqual(gZuoci.pending.type,'enyuanChoose','左慈借用的恩怨应先进入交互');
+R('mySeat=0; triggerEnyuan()');
+assert.strictEqual(gZuoci.pending.type,'xinshengAsk','借用恩怨完成后必须继续左慈本体新生');
+assert.strictEqual(gZuoci.pending.resume.type,'afterDamageEffects','新生仍由统一受伤后队列接管');
+
 // CORE-33：濒死获救不是伤害结算终点，必须接回同一套受伤后队列。
 const g3={players:[
   {name:'攻击者',general:'caocao',hp:4,maxHp:4,hand:[],equips:emptyEq(),delays:[],alive:true},
@@ -103,4 +116,4 @@ assert.strictEqual(g5.phase,'play','普通角色获救后应恢复原流程');
 const source=fs.readFileSync('game.js','utf8');
 assert.ok(source.includes("actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige']"));
 assert.ok(source.includes("resume.type==='afterDamageEffects'"));
-console.log('damage effect queue: 25/25 passed');
+console.log('damage effect queue: 29/29 passed');

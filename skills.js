@@ -3175,18 +3175,11 @@ function findNearestTarget(g, seat, excludeSeat) {
   
   if (aliveSeats.length === 0) return null;
   
-  let nearestSeat = null;
-  let minDistance = Infinity;
-  
-  for (const targetSeat of aliveSeats) {
-    const dist = distance(g, seat, targetSeat);
-    if (dist < minDistance) {
-      minDistance = dist;
-      nearestSeat = targetSeat;
-    }
-  }
-  
-  return nearestSeat;
+  const minDistance = Math.min(...aliveSeats.map(targetSeat=>distance(g,seat,targetSeat)));
+  const source=g.players[seat], virtualSha={name:'杀',virtual:true};
+  const nearestSeat=aliveSeats.find(targetSeat=>distance(g,seat,targetSeat)===minDistance &&
+    CARD_PLAYS['杀'].canTarget(g,source,virtualSha,targetSeat));
+  return typeof nearestSeat==='number' ? nearestSeat : null;
 }
 
 // hasShaCard: 检查角色是否有杀
@@ -3269,14 +3262,16 @@ function chooseLuanwuOption(option) {
       return g;
     }
     
-    // 处理选择——目标只信 pending.targetMap(全客户端同步)
+    // 处理选择——pending.targetMap 供全客户端显示；提交时仍按当前状态重算，防止旧快照绕过规则。
     if (option === 'sha') {
-      const map = g.pending.targetMap || {};
-      const targetSeat = map[currentSeat];
+      const map = g.pending.targetMap || (g.pending.targetMap={});
+      // 前面角色的乱武结算可能改变存活、手牌或体力，提交时重新计算并同步当前最近合法目标。
+      const targetSeat = findNearestTarget(g,currentSeat,sourceSeat);
+      map[currentSeat]=targetSeat;
       
       if (typeof targetSeat === 'number' && targetSeat !== currentSeat) {
         const hasSha = hasShaCard(g, currentSeat);
-        const canAttack = canReachSha(g, currentSeat, targetSeat);
+        const canAttack = CARD_PLAYS['杀'].canTarget(g,currentPlayer,{name:'杀',virtual:true},targetSeat);
         
         if (hasSha && canAttack) {
           useShaForLuanwu(g, currentSeat, targetSeat);
@@ -3300,7 +3295,8 @@ function useShaForLuanwu(g, sourceSeat, targetSeat) {
   const source = g.players[sourceSeat];
   const target = g.players[targetSeat];
   
-  if (!source || !source.alive || !target || !target.alive) return g;
+  if (!source || !source.alive || !target || !target.alive ||
+      !CARD_PLAYS['杀'].canTarget(g,source,{name:'杀',virtual:true},targetSeat)) return g;
   
   // 找到一张杀
   let shaCard = null;
@@ -3390,6 +3386,8 @@ function proceedToNextLuanwu(g) {
     // 还有角色需要选择
     g.pending.currentSeat = remainingSeats[0];
     g.pending.remainingSeats = remainingSeats.slice(1);
+    if(!g.pending.targetMap) g.pending.targetMap={};
+    g.pending.targetMap[g.pending.currentSeat]=findNearestTarget(g,g.pending.currentSeat,g.pending.sourceSeat);
     setResponseAskedAt(g.pending); // 换下一名乱武响应者时重新开始其独立30秒倒计时
     g.phase = 'luanwuChoose';
   } else {
