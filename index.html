@@ -2044,8 +2044,9 @@
 </style>
 </head>
 <body>
-<!-- 大厅背景视频：装饰性纯视觉层，muted+playsinline 满足自动播放策略；
-     src 由 game-bg.js 的 pickRandomBgVideo() 随机设置；透明/加载失败时 body 渐变兜底 -->
+<!-- 大厅背景视频：装饰性视觉层。autoplay 策略要求 muted 才能无手势自动播放,
+     故初始静音,用户首次交互后由 game-bg.js 自动恢复声音;
+     src 由 pickRandomBgVideo() 随机设置；透明/加载失败时 body 渐变兜底 -->
 <video id="bgVideo" class="bg-video" autoplay muted loop playsinline aria-hidden="true" tabindex="-1"></video>
 <div id="bgVeil" class="bg-veil" aria-hidden="true"></div>
 <!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
@@ -2164,20 +2165,20 @@
 <script src="data.js?v=399"></script>
 <script src="stages/stage-table.js?v=401"></script>
 <script src="debug-log.js?v=396"></script>
-<script src="room-lifecycle.js?v=400"></script>
-<script src="game.js?v=422"></script>
+<script src="room-lifecycle.js?v=401"></script>
+<script src="game.js?v=423"></script>
 <script src="sha/sha-resolution.js?v=403"></script>
 <script src="weapons.js?v=398"></script>
 <script src="skills.js?v=407"></script>
 <script src="skills/late-generals.js?v=402"></script>
 <script src="bot-ai-bus.js?v=402"></script>
 <script src="bot.js?v=401"></script>
-<script src="ai-bot.js?v=394"></script>
+<script src="ai-bot.js?v=395"></script>
 <script src="render.js?v=402"></script>
 <script src="render-table.js?v=394"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=394"></script>
-<script src="render-controls.js?v=415"></script>
+<script src="render-controls.js?v=416"></script>
 <script src="render-log.js?v=395"></script>
 <script src="game-bg.js?v=1"></script>
 </body>

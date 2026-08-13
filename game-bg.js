@@ -33,6 +33,23 @@ function resumeBgVideo(){
   pickRandomBgVideo();
 }
 
+// 取消大厅视频静音。autoplay 策略要求视频必须 muted 才能无手势自动播放,
+// 因此初始静音,用户首次交互(点击/触摸/按键)后恢复声音,并移除监听只生效一次。
+function unmuteBgVideo(){
+  var v = document.getElementById('bgVideo');
+  if(v && 'muted' in v && v.muted) v.muted = false;
+  if(typeof document.removeEventListener === 'function'){
+    document.removeEventListener('click', unmuteBgVideo);
+    document.removeEventListener('touchstart', unmuteBgVideo);
+    document.removeEventListener('keydown', unmuteBgVideo);
+  }
+}
+if(typeof document !== 'undefined' && typeof document.addEventListener === 'function'){
+  document.addEventListener('click', unmuteBgVideo);
+  document.addEventListener('touchstart', unmuteBgVideo);
+  document.addEventListener('keydown', unmuteBgVideo);
+}
+
 // ============ 游戏内飘牌 Canvas ============
 var bgCanvas = null, bgCtx = null, bgRafId = 0, bgRunning = false, bgLastTs = 0;
 var fallingCards = [];
