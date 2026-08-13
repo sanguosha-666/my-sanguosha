@@ -26,6 +26,7 @@ function isBotController(g){
 // 未覆盖兜底(能走,但不如查表精确)。
 const BOT_PHASE_ACTOR = {
   huashenPick:'seat', guanxingReview:'seat', xunxunPick:'seat',
+  guhuoTarget:'sourceSeat', quhuDamageChoice:'seat',
   respond:'to', aoeResp:'to', huogongReveal:'to',
   duel:'active',
   dying:'asking', wuxie:'asking', guicai:'asking',

@@ -63,7 +63,7 @@
 - 技能有三种表达方式：
   - **`caps`（被动能力）**：声明在武将上，业务点用 `generalHasCap(player, cap)`（布尔）或 `generalCapValue(player, cap, fallback)`（数值）查询。
     - 例：张飞咆哮 `caps:{unlimitedSha:true}`（布尔）；数值型 cap 如 `extraDrawPhase`（摸牌阶段多摸 N 张，`doDraw` 摸牌处 `generalCapValue(me,'extraDrawPhase',0)` 已接入），周瑜【英姿】即复用这条 seam。
-    - **能力可来自武将或装备——统一走 `hasCap(player, cap)`**：`hasCap = generalHasCap(player,cap) || equipHasCap(player,cap)`，业务层只问「有没有这个能力」，不关心来源、也不硬编码武将名/装备名。装备侧在 `EQUIPS` 里用 `cap:'xxx'` 声明（见「装备区」），如诸葛连弩 `cap:'unlimitedSha'`。**新增「无武将/无装备来源之分」的布尔能力时，判定一律调 `hasCap`，不要只调 `generalHasCap`**（后者只查武将来源，会漏掉装备）。实时查询无缓存，装备卸下/替换即失效。
+    - **能力统一走 `hasCap(player, cap)`**：当前来源包括武将声明、运行时 `player.caps`、装备能力和左慈化身借用能力，业务层只问「有没有这个能力」，不关心来源、也不硬编码武将名/装备名。装备侧在 `EQUIPS` 里用 `cap:'xxx'` 声明（见「装备区」），如诸葛连弩 `cap:'unlimitedSha'`。**新增布尔能力判定时一律调 `hasCap`，不要只调 `generalHasCap`**，否则会漏掉装备、化身等动态来源。实时查询无缓存，来源移除后立即失效。
   - **`hooks`（触发型）**：在某时机执行一段效果，用 `triggerHook(g, seat, hookName, ctx)` 分发。
     - 例：郭嘉遗计、司马懿反馈都挂在 `hooks.onDamaged` 上（在 `dealDamage` 里触发，ctx 含 `{amount, sourceSeat, srcType}`，牌伤害还会带 `sourceCard`）。孙尚香枭姬挂在 `hooks.onLoseEquip` 上（失去装备时触发，ctx 含 `{count}`，见「失去装备钩子」）。
   - **牌的转化**：`canUseAs(player, card, role)` 判断"这张牌能否当某用途用"，`findUsableAs(hand, player, role)` 找可用牌（优先本名牌）。
@@ -202,15 +202,13 @@
 
 ## 四、已知的待优化点（不是 bug，心里有数）
 
-- **响应阶段无超时**：轮到某人响应（出闪/无懈/决斗/AOE）时若挂机或关页面，整局会永久卡死。尚未做超时/托管。
+- **响应阶段超时覆盖持续由自动测试对账**：询问型 pending 统一使用 30 秒超时托管；新增 pending 时必须同步登记响应者和合法保守动作，避免覆盖回退。
 - **手牌非真隐藏**：手牌存在共享状态、数据库读权限全开，会看控制台的人能看到所有人的牌。当前是朋友局，接受此边界。
 - **数据库写权限全开**：任何知道房间号的人能改/删数据。朋友局接受。
 - **代码已是多文件结构，但 `game.js`/`render.js` 各自仍是很大的单文件**（`game.js` 约 3700+ 行，`render.js` 约 3000 行，`data.js` 约 450 行）：再加大型系统（如身份场）时，可考虑按域进一步拆分（比如把武将技能/装备特效从 `game.js` 里拆出来）。
 - **铁索连环队列推进时中央出牌区不显示牌面**：`advanceTieSuoQueue` 拿不到牌对象（原始那张梅花实体牌在更早的 `lianHuan`/`recastLianHuan` 里已经处理完，跨函数没有传递），`markCardSound(g,'铁索连环',q.from,null,to)` 第4个参数只能传 `null`。要修需要把牌对象存进 `g.tiesuoQueue` 状态跨函数传递（还要确认所有调用 `startTieSuoTargets` 的入口是否都要改传牌），是设计层面的改动，暂缓——不要当成新 bug 重新排查一遍，已知且刻意不修。
 - **`run_startgame_wiring_test.js` 场景4存在一个低概率随机性导致的 flaky 失败**：`startGame('pick')` 按 `shuffled` 随机切片把候选武将分给各玩家（每人3个、互不重叠），但这条切片规则只保证"正常走 `respondPickGeneral` 选择"时不会重复；场景4改用 `debugPickGeneral('zuoci')` **绕开候选池限制**强制座位0变成左慈，如果这次随机切片恰好把 `'zuoci'` 分进了另一个座位的候选池、且那个座位又调 `debugPickGeneral(generalChoices[0])` 选到了它，就会出现"两个座位都是左慈、都要走 huashenPick"的边界——测试断言"declare完就该 `g.started===true`"这时会失败，因为还有另一个左慈没声明完。开发左慈【新生】那次任务里连续跑 8 次复现过一次、随后 8/8 通过，确认是已存在的、和左慈开发本身无关的测试脚本随机性问题（`room-lifecycle.js` 的候选切片逻辑本身没有改过），不是本次改动引入的回归。要根治得让测试构造时显式排除这个碰撞（比如 debug 强制指定的武将也要从候选池里摘掉），暂不处理，遇到时重跑一次即可。
-- **法正【眩惑】(`huanhuo`) 本体损坏**：`startHuanhuo()` 读 `window.mySeat`/`window.g`，全项目从未给这两个 `window.` 属性赋过值，技能触发后必然报错/无效。左慈借用 `huanhuo` 后 `hasCap` 判定已修正（能正确识别拥有该能力），但底层函数本身独立损坏，和左慈借用机制无关，需要单独修复 `startHuanhuo`（连带 `pickHuanhuoTarget`/`pickHuanhuoHeartCard`/`pickHuanhuoGotCard`/`pickHuanhuoSecondTarget`/`cancelHuanhuo` 这一整组）的实现——大概率是要改成和项目里其它 `respond*`/`start*` 函数一致的 `tx(g=>{...})`+ 顶层 `mySeat` 写法。这次未处理，`huanhuo` 仍保留在 `HUASHEN_SKILL_TABLE` 里（不像散谣需要先移除，因为 `hasCap` 本身已经修对，等本体函数修好后这条借用会自动生效）。
-- **左慈【新生】会阻塞 `dealDamage` 中排在它之后的其它 `onDamaged` 判断（已验证影响酒诗/称象/悲歌，可能还有其它未测到的同类判断）**——触发条件是"受伤的角色恰好是左慈本人"，和"谁借用了新生/谁拥有该能力"无关（用蔡文姬本人受伤作为对照组验证过，蔡文姬悲歌正常触发；把受伤对象换成左慈，悲歌即失效）。这意味着只要对局中存在左慈这名角色，左慈受伤这个事件会让原本无关的其它玩家的技能（只要恰好也挂在 `onDamaged`、且判断顺序排在新生之后）失效，影响面不局限于左慈自身或借用者。需要重新设计 `dealDamage`/`triggerHook` 对多个 `onDamaged` 判断的调度顺序/隔离方式，不在本次左慈化身借用改动范围内处理。已用回归测试锁定当前的真实行为（`run_huashen_generalhascap_test.js` 场景11/12/13/13b），后续排期修复时可以直接参考这份测试里已经验证过的复现步骤。
-- **左慈【新生】和法正【恩怨】(enyuan) 存在互斥冲突**：若左慈本人受伤时借用的技能是恩怨，`dealDamage` 中 `enyuanChoose` 的判断位置严格早于 `triggerHook(onDamaged)`，其响应链（`triggerEnyuan`→`chooseEnyuanOption`→可能的 `giveEnyuanCard`）走完直接 `resumeAfterInterrupt` 回到 `play`，新生的 `onDamaged` 永远不会被触发到——不同于第一步已解决的"两个 `onDamaged` 互相覆盖"这类问题，这次的根源是 enyuan 判断的代码位置本身就在 `onDamaged` 分发之前，不属于同一调度点，队列机制无法覆盖这种情况。是"左慈新生阻塞其它 `onDamaged` 判断"那条已知问题的镜像版本（这次反过来是恩怨挡住新生），在本次测试修复过程中发现，暂不处理，需要专门排查 `dealDamage` 内各判断点相对 `triggerHook(onDamaged)` 的调度顺序。
+- **受伤后多个技能的连续调度已统一处理**：恩怨、武将 hooks、新生、酒诗、称象、悲歌等效果通过 `afterDamageEffects` 队列按序续接；历史上的“新生阻塞后续技能”与“恩怨阻挡新生”记录均已失效。修改受伤后技能时应继续复用该队列，并运行相应连续调度测试。
 - **【历史记录，已被整体替换】马谡【散谣】`respondSanyao`/`respondSanyaoTarget` 曾经补过身份守卫，这两个函数连同它们所在的两阶段服务端 pending 架构（`sanyao`/`sanyaoChooseTarget`）已在"服务端核心逻辑"那次任务里整体作废删除**，改成新的原子函数 `sanyao(costKey, targetSeat)`（见 `docs/progress-log-*.md`）。**这不代表当初补身份守卫那次修复是白做的**：那次的目标本来就是"死代码也要有正确的卫生习惯，不该在一段代码还活着的任何时刻缺少调用者身份校验"，不是承诺"这段具体代码会被长期保留"——事后设计重构决定放弃两阶段 pending 架构（改用巧变已经确立的"单人无需响应、客户端本地累积选择、一次性原子提交"模式），是架构层面的独立判断，和当初那次身份守卫修复的正确性无关。
 
 

@@ -1743,6 +1743,8 @@ function renderControls(g){
     // 添加目标选择按钮
     g.players.forEach((tgt, seat) => {
       if(!tgt || !tgt.alive || seat === mySeat) return;
+      const virtualSha={name:'杀',virtual:true,ignoreShaDistance:true};
+      if(!CARD_PLAYS['杀'].canTarget(g,p,virtualSha,seat)) return;
       const b=document.createElement('button');
       b.className='target-btn';
       b.textContent='攻击 ' + tgt.name;

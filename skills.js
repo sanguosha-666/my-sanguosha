@@ -2490,13 +2490,13 @@ function triggerShensu1() {
     g.shensuShaRemaining = 1;
     
     // 设置杀的目标选择
-    g.pending = {
+    g.pending = setResponseAskedAt({
       type: 'shensuSha',
       seat: seat,
       remaining: 1,
       noDistance: true,
       fromShensu: 'shensu1'
-    };
+    });
     
     g.phase = 'shensuSha';
     g.log = pushLog(g.log, p.name + ' 发动【神速1】,跳过判定和摸牌阶段,需使用1张无距离限制的【杀】');
@@ -2552,13 +2552,13 @@ function triggerShensu2() {
     g.shensuShaRemaining = shaCount;
     
     // 设置杀的目标选择
-    g.pending = {
+    g.pending = setResponseAskedAt({
       type: 'shensuSha',
       seat: seat,
       remaining: shaCount,
       noDistance: true,
       fromShensu: shaCount > 1 ? 'shensu1+2' : 'shensu2'
-    };
+    });
     
     g.phase = 'shensuSha';
     g.log = pushLog(g.log, p.name + ' 发动【神速2】,跳过出牌阶段并弃置装备牌,需使用' + shaCount + '张无距离限制的【杀】');
@@ -2647,7 +2647,12 @@ function respondShensuSha(targetSeat) {
 
     const target = g.players[targetSeat];
 
-    if (!target || !target.alive) return g;
+    if (!target || !target.alive || targetSeat===mySeat) return g;
+
+    // 神速只无视距离，不无视【杀】的其它目标限制。复用统一 canTarget，并通过
+    // ignoreShaDistance 只跳过最后的距离判断，确保空城、同疾、智迟等仍然生效。
+    const virtualSha = {name:'杀', virtual:true, ignoreShaDistance:true};
+    if(!CARD_PLAYS['杀'].canTarget(g, g.players[mySeat], virtualSha, targetSeat)) return g;
 
     // 调用 resolveShaUse 之前先把需要的字段读出来存成局部变量/挪到 g.shensuResume,
     // 不要指望调用后还能从 g.pending 读到这个 shensuSha pending 原来的东西。
@@ -3385,6 +3390,7 @@ function proceedToNextLuanwu(g) {
     // 还有角色需要选择
     g.pending.currentSeat = remainingSeats[0];
     g.pending.remainingSeats = remainingSeats.slice(1);
+    setResponseAskedAt(g.pending); // 换下一名乱武响应者时重新开始其独立30秒倒计时
     g.phase = 'luanwuChoose';
   } else {
     // 所有角色都选择完毕

@@ -38,7 +38,26 @@ const RESPONSE_PENDING_TYPES = new Set([
   'jijiangAsk', 'hujiaAsk', 'zhibaAsk', 'zhibaGain', 'yinghunTarget', 'yinghunChoice', 'yinghunDiscard',
   'duanbingChoose', 'mingcePickCard', 'qiaomengChoose', 'lianyingAsk', 'tieqi', 'liegong',
   'qiangxiChooseCost', 'qiangxiChooseWeaponFromHand', 'qiangxiPickTarget',
-  'luanjiChoose', 'luanjiConfirm'
+  'luanjiChoose', 'luanjiConfirm',
+  // CORE-43/50：全项目人工选择 pending 对账。这里登记后 normalize 和 tx 出口都会
+  // 自动补 askedAt；对应保守动作集中在 bot-ai-bus.js，避免创建点逐个漏接。
+  'haoshiPick', 'leijiChoose', 'leijiJudge', 'mengjin', 'mingcePickTarget', 'mingceChoice',
+  'qiaobianMove', 'enyuanChoose', 'jiushiFlipAsk', 'wangxiAsk', 'buquAsk', 'luanwuChoose', 'wugu',
+  'hanbingAsk', 'jujianPickCard', 'jushouChoose', 'shuangxiongAsk', 'luoyiAsk',
+  'xunxunPick', 'luoshen', 'enyuanChooseOption', 'enyuanGiveCard', 'guhuoTarget',
+  'guanxingReview', 'quhuDamageChoice', 'tianyiRespond', 'jiemingAsk', 'xinshengAsk',
+  'yijiAssign', 'tiaoxinDiscard', 'qiaomengPickEquip', 'lieRenRespond', 'jujianPickTarget',
+  'jujianChooseEffect', 'luoyingAsk', 'cixiongAsk', 'chengxiangAsk', 'chengxiangChoose',
+  'renxinChoose', 'xuanfengPick', 'beigeChoose', 'beigeDiscard', 'beigeJudge',
+  'tianyiPickCard', 'tianyiPickTarget', 'zhimengAsk', 'zhimengPick',
+  'biyue', 'yaowu_choose', 'shensuSha', 'fenxunDiscard', 'fenxunTarget',
+  // 这些阶段原本在创建点显式打戳且多数已有保守动作；也纳入统一集合，使老状态缺戳时
+  // normalize 能补齐，并让“所有人工 pending”对账真正收敛到单一清单。
+  'ganglieAsk', 'guiduAsk', 'huanhuoPick', 'huanhuoPickCard', 'huanhuoPickGotCard',
+  'huanhuoPickSecond', 'huashenChangeAskEnd', 'huashenChangeAskStart',
+  'huashenChangePickStart', 'huashenChangePickEnd', 'jiangchiAsk', 'lieRenChoose',
+  'lieRenPickCard', 'mingcePickTarget2', 'qiaobianTurnStart', 'shaOffsetChoice',
+  'shensuChoose1', 'shensuChoose2', 'tiaoxinChoice', 'yijiAsk', 'zhijiChoice'
 ]);
 // setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
 // 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
@@ -2614,6 +2633,12 @@ function tx(fn, onCommitted){
       const result = fn(g) || g;
       // 连营队列:本 tx 内 effect/杀结算可能覆盖 pending;收尾再尝试挂起询问
       tryFlushLianying(result);
+      // 所有询问型 pending 在事务写回前统一补戳。normalize 负责老状态/读路径，这里负责
+      // 本次回调刚创建的新 pending；两端合起来保证不会再因某个创建点忘调 helper 而卡死。
+      if(result.pending && typeof result.pending.askedAt!=='number' &&
+         typeof result.pending.type==='string' && RESPONSE_PENDING_TYPES.has(result.pending.type)){
+        setResponseAskedAt(result.pending);
+      }
       return stripUndefined(result);
     } finally {
       mySeat=visibleSeat;
@@ -2769,6 +2794,9 @@ const CARD_PLAYS = {
       if(g.tianyiWin && hasCap(me,'tianyi')) return true;
       // 曹彰【将驰】选项2:本回合使用杀无距离限制(仍过空城等合法性)
       if(me.jiangchiNoDistance && g.turn === mySeat) return true;
+      // 【神速】等“视为使用一张无距离限制的杀”仍必须走本 canTarget 的智迟、空城、
+      // 同疾等目标合法性；只在全部规则检查通过后跳过最后的距离判断。
+      if(card && card.ignoreShaDistance) return true;
       return canReachSha(g, mySeat, targetSeat); // 只有杀受攻击距离限制
     },
     effect:(g,me,card,targetSeat)=>{

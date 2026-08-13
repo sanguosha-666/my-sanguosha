@@ -209,6 +209,9 @@ const GENERALS = {
     desc:'礼让:每轮限一次,其他角色的摸牌阶段开始时,你可以交给其两张牌;其本回合弃牌阶段结束时,你可以获得其在此弃牌阶段弃置的牌。争义:每回合首次受到伤害时,本轮内因礼让获得过你牌的角色可以替你承受此次伤害。',
     caps:{ lirang:true, zhengyi:true } },
   zhaoyun:       { id:'zhaoyun',       name:'赵云',   gender:'male', faction:'shu',   maxHp:4, skill:'龙胆', desc:'你可以将【杀】当【闪】、【闪】当【杀】使用(1:1 转化)。', caps:{ longdan:true } },
+  luxun:         { id:'luxun',         name:'陆逊',   gender:'male', faction:'wu',    maxHp:3, skill:'谦逊/连营',
+    desc:'谦逊:锁定技,你不能成为【顺手牵羊】和【乐不思蜀】的目标。连营:当你失去最后一张手牌时,你可以摸1张牌。',
+    caps:{ qianxun:true, lianying:true } },
   lvmeng:        { id:'lvmeng',        name:'吕蒙',   gender:'male', faction:'wu',   maxHp:4, skill:'克己', desc:'若你于出牌阶段未使用或打出过【杀】,你可以跳过弃牌阶段(手牌超过体力上限也不必弃牌)。', caps:{ keji:true } },
   simayi:        { id:'simayi',        name:'司马懿', gender:'male', faction:'wei', maxHp:3, skill:'反馈', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。你进行判定时,可以打出一张手牌替换之(鬼才)。',
     caps:{ guicai:true },
@@ -360,7 +363,7 @@ const GENERALS = {
   zhanghe:       { id:'zhanghe',       name:'张郃',   gender:'male', faction:'wei', maxHp:4, skill:'巧变',
     desc:'回合开始时(限一次),你可以弃置一张手牌并选择判定/摸牌/出牌/弃牌阶段之一跳过。若跳过的是出牌阶段,你可以将场上一张装备牌移到另一名角色的对应空槽,或将一张延时锦囊移到另一名角色没有同名锦囊的判定区。',
     caps:{ qiaobian:true } },
-  lvbu:          { id:'lvbu',          name:'吕布',   gender:'male', faction:'qun', maxHp:4, skill:'无双(锁定技)',
+  lvbu:          { id:'lvbu',          name:'吕布',   gender:'male', faction:'qun', maxHp:4, skill:'无双',
     desc:'你使用【杀】指定目标后,该角色需要连续使用两张【闪】才能抵消。你或你的对手使用/成为【决斗】的目标时,每次响应需要连续打出两张【杀】。',
     caps:{ wushuang:true } },
   zhuge:         { id:'zhuge',         name:'诸葛亮', gender:'male', faction:'shu', maxHp:3, skill:'观星/空城',
@@ -701,6 +704,10 @@ const HUASHEN_SKILL_TABLE = {
   ],
   taishici: [
     { name:'天义', caps:['tianyi'] }
+  ],
+  luxun: [
+    { name:'谦逊', caps:['qianxun'] },
+    { name:'连营', caps:['lianying'] }
   ],
   dianwei: [
     { name:'强袭', caps:['qiangxi'] }

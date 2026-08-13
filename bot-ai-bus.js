@@ -448,6 +448,15 @@ function autoRespondAction(g){
   if(phase==='duel') return function(){ duelResponse(false); };                 // 决斗:不出杀
   if(phase==='dying') return function(){ respondDying(false); };                // 求桃:不救
   if(type==='wuxie') return function(){ respondWuxie(false); };                 // 无懈:不出
+  if(type==='pick') return function(){                                          // 顺手/拆桥:固定选首个合法对象
+    const target=g.players[g.pending.to];
+    if(target&&(target.hand||[]).length) pickResolve('hand');
+    else{
+      const slot=target&&target.equips&&EQUIP_SLOTS.find(function(s){return target.equips[s];});
+      if(slot) pickResolve(slot);
+      else if(target&&(target.delays||[]).length) pickResolve('delay:0');
+    }
+  };
   if(type==='guicai') return function(){ respondGuicai(false); };               // 鬼才:不发动
   if(type==='jiedaoChoice') return function(){ respondJiedao(false); };         // 借刀:弃武器
   if(type==='ganglieChoice') return function(){ respondGanglieChoice('damage',[]); }; // 刚烈:受伤
@@ -576,6 +585,60 @@ function autoRespondAction(g){
     if(typeof target==='number') pickQiangxiTarget(target);
   };
   if(type==='luanjiChoose' || type==='luanjiConfirm') return function(){ cancelLuanji(); };
+  // CORE-43/50：此前漏出超时体系的人工选择阶段。可取消的技能统一不发动/取消；
+  // 已经支付代价或必须完成的流程选第一个合法项，确保动作一定能推进而不改变规则。
+  if(type==='haoshiPick') return function(){ const target=(g.pending.candidates||[])[0]; if(typeof target==='number') respondHaoshi(target); };
+  if(type==='leijiChoose') return function(){ cancelLeiji(); };
+  if(type==='leijiJudge') return function(){ doLeijiJudge(); };
+  if(type==='mengjin') return function(){ const choice=(g.pending.available||[])[0]; if(choice) mengjinPick(choice); };
+  if(type==='mingcePickTarget') return function(){ cancelMingce(); };
+  if(type==='mingcePickTarget2') return function(){ cancelMingce(); };
+  if(type==='mingceChoice') return function(){ chooseMingceOption('draw'); };
+  if(type==='qiaobianMove') return function(){ respondQiaobianMove(null); };
+  if(type==='enyuanChoose') return function(){ triggerEnyuan(); };
+  if(type==='jiushiFlipAsk') return function(){ respondJiushiFlip(false); };
+  if(type==='wangxiAsk') return function(){ respondWangxi(false); };
+  if(type==='buquAsk') return function(){ respondBuqu(true); };
+  if(type==='luanwuChoose') return function(){ chooseLuanwuOption('hp'); };
+  if(type==='wugu') return function(){ const d=g.pending,card=(d.pool||[])[0]; if(card) wuguPick(0,d.idx,card.id); };
+  if(type==='hanbingAsk') return function(){ respondHanbingAsk(false); };
+  if(type==='jujianPickCard') return function(){ cancelJujian(); };
+  if(type==='jushouChoose') return function(){ cancelJushou(); };
+  if(type==='shuangxiongAsk') return function(){ respondShuangxiong(false); };
+  if(type==='luoyiAsk') return function(){ respondLuoyi(false); };
+  if(type==='xunxunPick') return function(){ const d=g.pending,all=(d.cards||[]).map(function(_,i){return i;}),take=d.takeN||2; respondXunxun(all.slice(0,take),all.slice(take)); };
+  if(type==='luoshen') return function(){ respondLuoshen(false); };
+  if(type==='enyuanChooseOption') return function(){ chooseEnyuanOption('giveCard'); };
+  if(type==='enyuanGiveCard') return function(){ const p=g.players[g.pending.damagerSeat],idx=(p&&p.hand||[]).findIndex(function(c){return c&&c.suit==='♥';}); if(idx>=0) giveEnyuanCard(idx); };
+  if(type==='guhuoTarget') return function(){ cancelGuhuoTarget(); };
+  if(type==='guanxingReview') return function(){ const all=(g.pending.cards||[]).map(function(_,i){return i;}); respondGuanxing(all,[]); };
+  if(type==='quhuDamageChoice') return function(){ const target=(g.pending.targets||[])[0]; if(typeof target==='number') respondQuhuDamage(target); };
+  if(type==='tianyiRespond') return function(){ respondTianyi(0); };
+  if(type==='jiemingAsk') return function(){ respondJieming(null); };
+  if(type==='xinshengAsk') return function(){ respondXinshengAsk(false); };
+  if(type==='yijiAssign') return function(){ respondYijiAssign((g.pending.cards||[]).map(function(){return g.pending.seat;})); };
+  if(type==='tiaoxinDiscard') return function(){ const target=g.players[g.pending.to],opt=target&&tiaoxinDiscardOptions(target)[0]; if(opt) pickTiaoxinDiscard(opt.kind,opt.kind==='hand'?opt.idx:opt.slot); };
+  if(type==='qiaomengPickEquip') return function(){ const slot=(g.pending.availableSlots||[])[0]; if(slot) pickQiaomengEquip(slot); };
+  if(type==='lieRenRespond') return function(){ respondLieRen(0); };
+  if(type==='jujianPickTarget') return function(){ const target=(g.pending.candidates||[])[0]; if(typeof target==='number') respondJujianPickTarget(target); else cancelJujian(); };
+  if(type==='jujianChooseEffect') return function(){ respondJujianEffect('draw'); };
+  if(type==='luoyingAsk') return function(){ respondLuoying(false); };
+  if(type==='cixiongAsk') return function(){ respondCixiongAsk(false); };
+  if(type==='chengxiangAsk') return function(){ cancelChengxiangAsk(); };
+  if(type==='chengxiangChoose') return function(){ cancelChengxiang(); };
+  if(type==='renxinChoose') return function(){ cancelRenxin(); };
+  if(type==='xuanfengPick') return function(){ cancelXuanfeng(); };
+  if(type==='beigeChoose') return function(){ triggerBeige(false); };
+  if(type==='beigeDiscard') return function(){ const p=g.players[g.pending.sourceSeat],slot=p&&p.equips&&EQUIP_SLOTS.find(function(s){return p.equips[s];}); if(p&&(p.hand||[]).length) beigeDiscard(0,false,null); else if(slot) beigeDiscard(null,true,slot); };
+  if(type==='beigeJudge') return function(){ doBeigeJudge(); };
+  if(type==='tianyiPickCard' || type==='tianyiPickTarget') return function(){ cancelTianyi(); };
+  if(type==='zhimengAsk') return function(){ respondZhimeng(false); };
+  if(type==='zhimengPick') return function(){ const opt=(g.pending.options||[])[0]; if(opt) respondZhimengPick(opt.type,opt.index); };
+  if(type==='biyue') return function(){ respondBiyue(false); };
+  if(type==='yaowu_choose') return function(){ const p=g.players[g.pending.seat]; respondYaowu(p&&p.hp<p.maxHp?'recover':'draw'); };
+  if(type==='shensuSha') return function(){ cancelShensuSha(); };
+  if(type==='shaOffsetChoice') return function(){ respondShaOffsetChoice(null); };
+  if(type==='fenxunDiscard' || type==='fenxunTarget') return function(){ cancelFenxun(); };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且
@@ -609,7 +672,10 @@ function maybeAutoRespondTimeout(g){
     return true;
   }
   const actorField = (typeof BOT_PHASE_ACTOR!=='undefined' && BOT_PHASE_ACTOR) ? BOT_PHASE_ACTOR[g.phase] : undefined;
-  const actor = actorField!==undefined ? g.pending[actorField] : null;
+  // 五谷的当前行动者存放在 order[idx]，不是单一字段；其余阶段继续复用权威行动者表。
+  const actor = g.pending.type==='wugu' && Array.isArray(g.pending.order)
+    ? g.pending.order[g.pending.idx||0]
+    : (actorField!==undefined ? g.pending[actorField] : null);
   if(typeof actor!=='number' || !g.players || !g.players[actor]) return false;
   if(typeof botInvoke==='function'){
     botInvoke(actor, act);

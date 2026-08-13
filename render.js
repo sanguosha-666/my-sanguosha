@@ -67,7 +67,7 @@ const SKILL_PINYIN = {
   '空城':'kongcheng', '突袭':'tuxi', '红颜':'hongyan', '缔盟':'dimeng', '缠怨':'chanyuan',
   '耀武':'yaowu', '节命':'jieming', '苦肉':'kurou', '英姿':'yingzi', '英魂':'yinghun',
   '落英':'luoying', '蛊惑':'guhuo', '血裔':'xueyi', '裸衣':'luoyi', '观星':'guanxing',
-  '趫猛':'qiaomeng', '连环':'lianhuan', '连营':'lianying', '遗计':'yiji', '酒诗':'jiushi',
+  '趫猛':'qiaomeng', '连环':'lianhuan', '连营':'lianying', '谦逊':'qianxun', '遗计':'yiji', '酒诗':'jiushi',
   '铁骑':'tieqi', '闭月':'biyue', '集智':'jizhi', '雷击':'leiji', '青囊':'qingnang',
   '马术':'mashu', '驱虎':'quhu', '骁果':'xiaoguo', '鬼才':'guicai', '鬼道':'guidao',
   '魂姿':'hunzi', '黄天':'huangtian', '龙胆':'longdan'

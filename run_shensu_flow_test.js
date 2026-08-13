@@ -22,6 +22,7 @@ function game(){return {players:[
 let g=game(); sandbox.__g=g;
 R('triggerShensu1()');
 assert.strictEqual(g.phase,'shensuSha'); assert.strictEqual(g.pending.noDistance,true);
+assert.strictEqual(typeof g.pending.askedAt,'number','神速选目标应自带30秒超时戳');
 assert.strictEqual(g.shensuSkipJudgingAndDraw,true);
 g.shensuResume={seat:0,remaining:0,fromShensu:'shensu1'}; R('finishShensuSha(__g)');
 assert.strictEqual(g.phase,'play'); assert.strictEqual(g.shensuSkipJudgingAndDraw,false);
@@ -41,4 +42,19 @@ assert.strictEqual(g.phase,'discard'); assert.strictEqual(g.shensuSkipJudgingAnd
 
 const source=fs.readFileSync('skills.js','utf8');
 assert(source.includes('noDistance: true')); assert(source.includes('skipShaLimit: true'));
-console.log('shensu flow tests: 18/18 passed');
+
+// 神速只无视距离，不能绕过【杀】的其它目标合法性。
+g=game(); g.players[1].general='zhuge'; g.players[1].hand=[];
+g.phase='shensuSha'; g.pending={type:'shensuSha',seat:0,remaining:1,noDistance:true,fromShensu:'shensu1'};
+sandbox.__g=g; R('respondShensuSha(1)');
+assert.strictEqual(g.phase,'shensuSha','空城目标必须被服务端拒绝');
+assert.strictEqual(g.pending.type,'shensuSha','拒绝非法目标后应保留原选择阶段');
+
+g=game();
+g.players.push({name:'同疾拥有者',general:'yuanshu',hp:1,maxHp:4,hand:[{id:'h1',name:'闪',suit:'♣',rank:3},{id:'h2',name:'桃',suit:'♥',rank:4}],equips:eq(),delays:[],alive:true});
+g.phase='shensuSha'; g.pending={type:'shensuSha',seat:0,remaining:1,noDistance:true,fromShensu:'shensu1'};
+sandbox.__g=g; R('respondShensuSha(1)');
+assert.strictEqual(g.phase,'shensuSha','同疾生效时不能绕过袁术指定其它目标');
+assert.strictEqual(g.pending.type,'shensuSha');
+
+console.log('shensu flow tests: 23/23 passed');
