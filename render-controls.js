@@ -38,10 +38,10 @@ function hasWeaponToDiscard(player) {
   // 检查装备区
   if (player.equips && player.equips.weapon) return true;
   
-  // 检查手牌中的装备牌（所有装备牌，包括武器、防具、马匹等）
+  // 与业务层共用 isWeaponCard，避免 UI 和最终提交规则分叉。
   const hand = player.hand || [];
   for (let i = 0; i < hand.length; i++) {
-    if (hand[i] && EQUIPS[hand[i].name]) {
+    if (isWeaponCard(hand[i])) {
       return true;
     }
   }

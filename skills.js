@@ -2928,6 +2928,10 @@ function cancelQiaomeng() {
 
 // ========== 典韦【强袭】技能函数 ==========
 
+function isWeaponCard(card){
+  const equip=card&&getEquip(card.name);
+  return !!(equip&&equip.slot==='weapon');
+}
 // hasWeaponToDiscard: 检查玩家是否有可弃置的武器牌（装备区或手牌）
 function hasWeaponToDiscard(player) {
   if (!player || !player.alive) return false;
@@ -2935,10 +2939,10 @@ function hasWeaponToDiscard(player) {
   // 检查装备区
   if (player.equips && player.equips.weapon) return true;
   
-  // 检查手牌中的装备牌（所有装备牌，包括武器、防具、马匹等）
+  // 手牌支付只接受武器槽装备，防具和坐骑都不符合【强袭】规则。
   const hand = player.hand || [];
   for (let i = 0; i < hand.length; i++) {
-    if (hand[i] && EQUIPS[hand[i].name]) {
+    if (isWeaponCard(hand[i])) {
       return true;
     }
   }
@@ -2984,7 +2988,7 @@ function chooseQiangxiCost(costType) {
       
       if (me.hand) {
         for (let i = 0; i < me.hand.length; i++) {
-          if (me.hand[i] && EQUIPS[me.hand[i].name]) {
+          if (isWeaponCard(me.hand[i])) {
             weaponInHand.push(i);
           }
         }
@@ -3102,7 +3106,7 @@ function chooseQiangxiWeaponFromHand(cardIndex) {
     if (!g.pending.weaponIndices.includes(cardIndex)) return g;
     
     const weapon = me.hand[cardIndex];
-    if (!weapon || !EQUIPS[weapon.name]) return g;
+    if (!isWeaponCard(weapon)) return g;
     
     // 进入目标选择阶段
     proceedWithWeaponDiscard(g, 'hand', weapon, cardIndex);
