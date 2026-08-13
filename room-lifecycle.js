@@ -49,7 +49,8 @@ function joinRoom(){
     if(joinError){ errEl.textContent=joinError; return; }
     const g = snap.val();
     if(mySeat===null && (g.players||[]).length>=SEATS && !g.started){
-      errEl.textContent='房间已满（已有3人）。'; return;
+      const playerCount=(g.players||[]).filter(Boolean).length;
+      errEl.textContent='房间已满（'+playerCount+'/'+SEATS+'）。'; return;
     }
     if(mySeat===null && g.started){
       errEl.textContent='这局已经开始了,换个房间号或等下一局。'; return;
