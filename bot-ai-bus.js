@@ -442,6 +442,7 @@ function renderResponseCountdown(g){
 function autoRespondAction(g){
   const phase = g.phase;
   const type = (g.pending && g.pending.type) || '';
+  if(type==='wuxiePublicWait') return function(){ finishWuxiePublicWait(); };
   if(phase==='respond') return function(){ respondShan(false); };               // 出闪:不出
   if(phase==='aoeResp') return function(){ aoeRespond(false); };                // AOE:不出
   if(phase==='duel') return function(){ duelResponse(false); };                 // 决斗:不出杀
@@ -582,7 +583,8 @@ function autoRespondAction(g){
 // 返回 true 表示本次提交了动作(供测试断言用),未提交返回 false。
 function maybeAutoRespondTimeout(g){
   if(!g || !g.pending || typeof g.pending.askedAt !== 'number') return false;
-  if(Date.now() - g.pending.askedAt < RESPONSE_TIMEOUT_MS) return false;
+  const timeoutMs=g.pending.type==='wuxiePublicWait' ? 1000 : RESPONSE_TIMEOUT_MS;
+  if(Date.now() - g.pending.askedAt < timeoutMs) return false;
   const act = autoRespondAction(g);
   if(!act){
     // 30秒超时后没有保守动作可提交:pending 会一直悬在这里直到有人手动操作,是"卡死"
@@ -599,6 +601,12 @@ function maybeAutoRespondTimeout(g){
       });
     }
     return false;
+  }
+  // 公共无懈窗口没有真正的响应玩家，任意客户端直接提交幂等收尾事务即可；
+  // 不经过 botInvoke，避免被误当成某个座位的私人决策并异步延后。
+  if(g.pending.type==='wuxiePublicWait'){
+    act();
+    return true;
   }
   const actorField = (typeof BOT_PHASE_ACTOR!=='undefined' && BOT_PHASE_ACTOR) ? BOT_PHASE_ACTOR[g.phase] : undefined;
   const actor = actorField!==undefined ? g.pending[actorField] : null;

@@ -5122,12 +5122,31 @@ function startTrick(g, info){
 // openWuxieRound: (重新)计算这一轮该问谁;问不到人(exclude 是唯一存活者,极端边界)则直接收尾。
 function openWuxieRound(g){
   const asking=nextWuxieAskee(g, g.pending);
-  if(asking===null){ finishWuxieRound(g); return; }
+  if(asking===null){
+    // 无人持有无懈时也保留统一的短暂公共响应窗口，避免旁观者通过“是否立即结算”
+    // 反推出全场手牌中是否存在【无懈可击】。不让无资格玩家逐个等待。
+    g.pending.type='wuxiePublicWait';
+    g.pending.asking=Number.isInteger(g.pending.from)?g.pending.from:0;
+    g.pending.publicUntil=Date.now()+1000;
+    setResponseAskedAt(g.pending);
+    return;
+  }
   g.pending.asking=asking;
   setResponseAskedAt(g.pending); // A1:每次轮到下一位无懈候选人即重新计时
   markWuxieAsked(g);
   const verb = g.pending.depth>0 ? '反制' : '使用';
   g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
+}
+function finishWuxiePublicWait(){
+  tx(g=>{
+    if(g.phase!=='wuxie'||!g.pending||g.pending.type!=='wuxiePublicWait') return g;
+    if(typeof g.pending.publicUntil==='number' && Date.now()<g.pending.publicUntil) return g;
+    g.pending.type='wuxie';
+    delete g.pending.publicUntil;
+    delete g.pending.asking;
+    finishWuxieRound(g);
+    return g;
+  });
 }
 // finishWuxieRound: 一轮问完无人再出(或问不到人)时收尾。depth 奇数=原锦囊/该 AOE 目标作废,
 // 偶数(含0,从未被无懈或被反制回来)=正常生效。ctx==='aoe' 时走群体锦囊自己的推进函数。

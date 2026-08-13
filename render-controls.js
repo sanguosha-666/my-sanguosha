@@ -3067,6 +3067,15 @@ function renderControls(g){
     setBanner('【决斗】进行中,轮到 '+escapeHtml(a)+' 打出【杀】…');
     return;
   }
+  if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxiePublicWait'){
+    const from=g.players[g.pending.from];
+    const to=g.players[g.pending.to];
+    const useDesc=g.pending.from===g.pending.to
+      ? (from?from.name:'玩家')+' 使用【'+g.pending.trick+'】'
+      : (from?from.name:'玩家')+' 对 '+(to?to.name:'目标')+' 使用【'+g.pending.trick+'】';
+    setBanner(escapeHtml(useDesc+',等待其他玩家响应【无懈可击】…'));
+    return;
+  }
   if(g.phase==='wuxie' && g.pending && g.pending.type==='wuxie' && g.pending.asking===mySeat){
     // 此分支只在"被询问者本人"的客户端渲染(旁观者走下面 asking!==mySeat 分支,只看到等待提示、
     // 完全不渲染这两个按钮),所以按钮是否 disable 只影响本人自己的界面,不会向其他人泄露谁有无懈。
