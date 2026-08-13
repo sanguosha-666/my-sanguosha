@@ -254,7 +254,7 @@ function drawBgFx(now, dt){
     // 全屏血雾：0→0.35→0 alpha，从边缘向中心
     var fade = prog < 0.5 ? prog / 0.5 : (1 - prog) / 0.5;
     var a = Math.min(0.35 * fade, 0.35);
-    var w = bgCanvas.width, h = bgCanvas.height;
+    var w = bgCanvas.clientWidth || bgCanvas.width, h = bgCanvas.clientHeight || bgCanvas.height;
     var grd = bgCtx.createRadialGradient(w/2, h/2, Math.min(w, h) * 0.25, w/2, h/2, Math.max(w, h) * 0.75);
     grd.addColorStop(0, 'rgba(140,28,18,0)');
     grd.addColorStop(1, 'rgba(140,28,18,' + a + ')');
