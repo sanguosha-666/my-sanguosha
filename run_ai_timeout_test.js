@@ -224,6 +224,42 @@ const testCode = String.raw`
     if(window.__aiCalls !== 0) throw new Error('callAI 不应被调用,实际 ' + window.__aiCalls);
   });
 
+  // CORE-03 补充：后续新增的强袭/乱击人工选择阶段也必须补戳并有保守动作。
+  await check('强袭/乱击五个阻塞 pending 均由 normalize 补 askedAt', function(){
+    ['qiangxiChooseCost','qiangxiChooseWeaponFromHand','qiangxiPickTarget','luanjiChoose','luanjiConfirm'].forEach(function(type){
+      var actorField = type.indexOf('luanji')===0 ? 'sourceSeat' : 'seat';
+      var pending = { type:type }; pending[actorField]=0;
+      if(type==='qiangxiChooseWeaponFromHand') pending.weaponIndices=[0];
+      if(type==='qiangxiPickTarget') { pending.candidates=[1]; pending.costType='hp'; }
+      if(type==='luanjiChoose') pending.availablePairs=[[0,1]];
+      if(type==='luanjiConfirm') pending.cardIndices=[0,1];
+      var state=mkG({phase:type,pending:pending});
+      normalize(state);
+      if(typeof state.pending.askedAt!=='number') throw new Error(type+' 缺 askedAt');
+    });
+  });
+
+  await check('强袭/乱击五个阻塞 pending 超时均能提交保守动作', function(){
+    var calls=[];
+    cancelQiangxi=function(){ calls.push('cancelQiangxi'); };
+    pickQiangxiTarget=function(seat){ calls.push('pickQiangxiTarget:'+seat); };
+    cancelLuanji=function(){ calls.push('cancelLuanji'); };
+    var cases=[
+      {type:'qiangxiChooseCost',seat:0},
+      {type:'qiangxiChooseWeaponFromHand',seat:0,weaponIndices:[0]},
+      {type:'qiangxiPickTarget',seat:0,candidates:[1],costType:'hp'},
+      {type:'luanjiChoose',sourceSeat:0,availablePairs:[[0,1]]},
+      {type:'luanjiConfirm',sourceSeat:0,cardIndices:[0,1]}
+    ];
+    cases.forEach(function(pending){
+      pending.askedAt=Date.now()-31000;
+      var state=mkG({phase:pending.type,pending:pending}); window.__g=state;
+      if(!maybeAutoRespondTimeout(state)) throw new Error(pending.type+' 未提交动作');
+    });
+    var expected=['cancelQiangxi','cancelQiangxi','pickQiangxiTarget:1','cancelLuanji','cancelLuanji'];
+    if(JSON.stringify(calls)!==JSON.stringify(expected)) throw new Error('动作不符 '+JSON.stringify(calls));
+  });
+
   // ---- 左慈【化身/新生】超时兜底修复(真实bug:huashenChangeAskStart/AskEnd/
   // PickStart/PickEnd 此前既没登记进 autoRespondAction 白名单,创建时也没打 askedAt
   // 时间戳——两处都要修,只改一处等于没修。这四项都用真实respond函数(不是spy)全链路

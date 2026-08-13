@@ -568,6 +568,13 @@ function autoRespondAction(g){
   if(type==='lianyingAsk') return function(){ respondLianying(false); };
   if(type==='tieqi') return function(){ respondTieqi(false); };
   if(type==='liegong') return function(){ respondLiegong(false); };
+  if(type==='qiangxiChooseCost') return function(){ cancelQiangxi(); };
+  if(type==='qiangxiChooseWeaponFromHand') return function(){ cancelQiangxi(); };
+  if(type==='qiangxiPickTarget') return function(){
+    const target=(g.pending.candidates||[])[0];
+    if(typeof target==='number') pickQiangxiTarget(target);
+  };
+  if(type==='luanjiChoose' || type==='luanjiConfirm') return function(){ cancelLuanji(); };
   return null;
 }
 // maybeAutoRespondTimeout: 检测器单次 tick。读当前 g,若存在超时的询问型 pending 且

@@ -36,7 +36,9 @@ const RESPONSE_PENDING_TYPES = new Set([
   'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
   'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick',
   'jijiangAsk', 'hujiaAsk', 'zhibaAsk', 'zhibaGain', 'yinghunTarget', 'yinghunChoice', 'yinghunDiscard',
-  'duanbingChoose', 'mingcePickCard', 'qiaomengChoose', 'lianyingAsk', 'tieqi', 'liegong'
+  'duanbingChoose', 'mingcePickCard', 'qiaomengChoose', 'lianyingAsk', 'tieqi', 'liegong',
+  'qiangxiChooseCost', 'qiangxiChooseWeaponFromHand', 'qiangxiPickTarget',
+  'luanjiChoose', 'luanjiConfirm'
 ]);
 // setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
 // 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
