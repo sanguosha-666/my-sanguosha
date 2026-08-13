@@ -511,19 +511,26 @@ function debugPickGeneral(generalId){
   });
 }
 
+function resetPlayerForNewGame(p){
+  const persistent={name:p.name,cid:p.cid};
+  if(p.isBot) persistent.isBot=true;
+  if(p.botLevel) persistent.botLevel=p.botLevel;
+  if(Number.isInteger(p.team)) persistent.team=p.team;
+  Object.keys(p).forEach(key=>{ delete p[key]; });
+  Object.assign(p,persistent);
+  p.general=randomGeneralId();
+  p.maxHp=generalMaxHp(p.general);
+  p.hp=p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false;
+  p.faceup=true; p.turnedOver=false; p.delays=[]; p.equips=emptyEquips();
+  p.role=null; p.roleRevealed=false; p.generalChoices=null;
+}
 function newGame(){
   tx(g=>{
     g.started=false; g.phase='lobby'; g.pending=null; g.winner=null; g.aoe=null;
     g.gameMode=null; g.winSide=null; g.lordGeneralPool=null; g.generalMode=null;
     g.aiRebelSuspicion={};
     g.deck=[]; g.discard=[];
-    g.players.forEach(p=>{
-      p.general = randomGeneralId();     // 每局重新随机换将
-      p.maxHp = generalMaxHp(p.general); // 异常回退 MAX_HP
-      p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.faceup=true; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.delays=[];
-      p.equips = emptyEquips();          // 装备区:每局重置为四槽全空
-      p.role=null; p.roleRevealed=false; p.generalChoices=null;
-    });
+    g.players.forEach(resetPlayerForNewGame);
     g.log=pushLog(g.log,'重置房间,可再次开始');
     return g;
   });
