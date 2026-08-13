@@ -314,7 +314,12 @@ const PENDING_RENDERERS = {
   qilin:               {actor:'from',       skill:'麒麟弓', render:renderPendingQilin},
   qiangxiChooseCost:  {actor:'seat',       skill:'强袭', render:renderPendingQiangxiChooseCost},
   qiangxiChooseWeaponFromHand:{actor:'seat',skill:'强袭', render:renderPendingQiangxiChooseWeaponFromHand},
-  qiangxiPickTarget:  {actor:'seat',       skill:'强袭', render:renderPendingQiangxiPickTarget}
+  qiangxiPickTarget:  {actor:'seat',       skill:'强袭', render:renderPendingQiangxiPickTarget},
+  mingcePickCard:     {actor:'sourceSeat', skill:'明策', render:renderPendingMingcePickCard},
+  mingcePickTarget:   {actor:'sourceSeat', skill:'明策', render:renderPendingMingcePickTarget},
+  mingcePickTarget2:  {actor:'sourceSeat', skill:'明策', render:renderPendingMingcePickTarget2},
+  mingceChoice:       {actor:'targetSeat', skill:'明策', render:renderPendingMingceChoice},
+  luanjiConfirm:      {actor:'sourceSeat', skill:'乱击', render:renderPendingLuanjiConfirm}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -828,6 +833,40 @@ function renderPendingQiangxiPickTarget(g,c){
   const p=document.createElement('p');p.textContent='请选择攻击范围内的目标角色';div.appendChild(p);
   (g.pending.candidates||[]).forEach(seat=>{const target=g.players[seat];if(!target||!target.alive)return;const b=document.createElement('button');b.className='target-btn';b.textContent=escapeHtml(target.name);b.onclick=()=>pickQiangxiTarget(seat);div.appendChild(b);});c.appendChild(div);setBanner('请选择攻击范围内的目标角色');
 }
+function renderPendingMingcePickCard(g,c){
+  const me=g.players[mySeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【明策】选择牌';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent='请选择一张装备牌或【杀】';div.appendChild(p);
+  const hand=document.createElement('div');hand.className='card-options';(me.hand||[]).forEach((card,i)=>{if(!card||(!isEquipment(card)&&!canUseAs(me,card,'杀')))return;const b=document.createElement('button');b.className='card-btn';b.textContent='【'+escapeHtml(card.name)+'】';b.onclick=()=>pickMingceCard(i,false);hand.appendChild(b);});div.appendChild(hand);
+  const equips=document.createElement('div');equips.className='equip-options';const names={weapon:'武器',armor:'防具',plus1:'+1马',minus1:'-1马'};['weapon','armor','plus1','minus1'].forEach((slot,idx)=>{const card=me.equips&&me.equips[slot];if(!card)return;const b=document.createElement('button');b.className='equip-btn';b.textContent=names[slot]+'【'+escapeHtml(card.name)+'】';b.onclick=()=>pickMingceCard(idx,true);equips.appendChild(b);});div.appendChild(equips);
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消';cancel.onclick=()=>cancelMingce();div.appendChild(cancel);c.appendChild(div);
+}
+function renderPendingMingcePickTarget(g,c){
+  const div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【明策】选择目标';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent='请选择接收 【'+escapeHtml(g.pending.cardName)+'】 的角色';div.appendChild(p);
+  g.players.forEach((target,seat)=>{if(seat===mySeat||!target||!target.alive||!isSeatClickable(seat))return;const b=document.createElement('button');b.className='target-btn';b.textContent='选择 '+escapeHtml(target.name);b.onclick=()=>pickMingceTarget(seat);div.appendChild(b);});
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消';cancel.onclick=()=>cancelMingce();div.appendChild(cancel);c.appendChild(div);
+}
+function renderPendingMingcePickTarget2(g,c){
+  const first=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【明策】选择攻击目标';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent='请选择 '+escapeHtml(first?first.name:'目标')+' 攻击范围内的角色作为【杀】的目标';div.appendChild(p);
+  (g.pending.candidates||[]).forEach(seat=>{const target=g.players[seat];if(!target||!target.alive||!isSeatClickable(seat))return;const b=document.createElement('button');b.className='target-btn';b.textContent='选择 '+escapeHtml(target.name);b.onclick=()=>pickMingceTarget2(seat);div.appendChild(b);});
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消';cancel.onclick=()=>cancelMingce();div.appendChild(cancel);c.appendChild(div);
+}
+function renderPendingMingceChoice(g,c){
+  const source=g.players[g.pending.sourceSeat],target2=g.pending.target2Seat!==null?g.players[g.pending.target2Seat]:null,div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent=escapeHtml(source?source.name:'?')+' 发动【明策】';div.appendChild(h4);
+  const p1=document.createElement('p');p1.textContent=escapeHtml(source?source.name:'?')+' 将 【'+escapeHtml(g.pending.cardName)+'】 交给你,'+(target2&&target2.alive?'并选择了 '+escapeHtml(target2.name)+' 为目标':'其攻击范围内无其他角色');div.appendChild(p1);
+  const p2=document.createElement('p');p2.textContent='请选择：';div.appendChild(p2);
+  if(target2&&target2.alive){const sha=document.createElement('button');sha.className='skill-btn';sha.style.background='#e74c3c';sha.textContent='对 '+escapeHtml(target2.name)+' 使用普通【杀】';sha.onclick=()=>chooseMingceOption('sha');div.appendChild(sha);}
+  const draw=document.createElement('button');draw.className='skill-btn';draw.style.background='#4a90d9';draw.textContent='摸一张牌';draw.onclick=()=>chooseMingceOption('draw');div.appendChild(draw);c.appendChild(div);
+}
+function renderPendingLuanjiConfirm(g,c){
+  const hand=g.players[mySeat].hand||[],indices=g.pending.cardIndices,cards=[hand[indices[0]],hand[indices[1]]],div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent='【乱击】确认使用';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent='确认使用【'+cards[0].name+'】和【'+cards[1].name+'】当【万箭齐发】使用吗?';div.appendChild(p);
+  const ok=document.createElement('button');ok.className='primary';ok.textContent='确认';ok.onclick=()=>confirmLuanji();div.appendChild(ok);
+  const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消';cancel.onclick=()=>cancelLuanji();div.appendChild(cancel);c.appendChild(div);setBanner('确认使用乱击吗?');
+}
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
 // 只有1个技能时跳过、直接进第二步收尾)点选具体技能名,respondFn(generalId,skillName)
@@ -1314,86 +1353,8 @@ function renderControls(g){
   // 公孙瓒【趫猛】:选择装备牌
 
   // 陈宫【明策】:选择牌阶段
-  if(g.phase==='mingcePickCard' && g.pending && g.pending.type==='mingcePickCard' && g.pending.sourceSeat===mySeat){
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【明策】选择牌';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='请选择一张装备牌或【杀】';
-    div.appendChild(p1);
-    
-    // 显示可选的手牌
-    if(me && me.hand) {
-      const handDiv=document.createElement('div'); handDiv.className='card-options';
-      me.hand.forEach((card, i) => {
-        if(card && (isEquipment(card) || canUseAs(me, card, '杀'))) {
-          const b=document.createElement('button');
-          b.className='card-btn';
-          b.textContent='【'+escapeHtml(card.name)+'】';
-          b.onclick=()=>pickMingceCard(i, false);
-          handDiv.appendChild(b);
-        }
-      });
-      div.appendChild(handDiv);
-    }
-    
-    // 显示可选的装备
-    if(me && me.equips) {
-      const equipDiv=document.createElement('div'); equipDiv.className='equip-options';
-      const equips = me.equips;
-      const equipSlots = ['weapon', 'armor', 'plus1', 'minus1'];
-      const equipNames = { weapon:'武器', armor:'防具', plus1:'+1马', minus1:'-1马' };
-      
-      equipSlots.forEach((slot, idx) => {
-        const equip = equips[slot];
-        if(equip) {
-          const b=document.createElement('button');
-          b.className='equip-btn';
-          b.textContent=(equipNames[slot]||slot)+'【'+escapeHtml(equip.name)+'】';
-          b.onclick=()=>pickMingceCard(idx, true);
-          equipDiv.appendChild(b);
-        }
-      });
-      div.appendChild(equipDiv);
-    }
-    
-    const cb=document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='取消'; cb.onclick=()=>cancelMingce();
-    div.appendChild(cb);
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='mingcePickCard' && g.pending && g.pending.type==='mingcePickCard'){
-    const p = g.players[g.pending.sourceSeat];
-    setBanner(escapeHtml(p?p.name:'?')+' 正在选择【明策】的牌…');
-    return;
-  }
   
   // 陈宫【明策】:选择接收牌的目标阶段
-  if(g.phase==='mingcePickTarget' && g.pending && g.pending.type==='mingcePickTarget' && g.pending.sourceSeat===mySeat){
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【明策】选择目标';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='请选择接收 【'+escapeHtml(g.pending.cardName)+'】 的角色';
-    div.appendChild(p1);
-    
-    // 显示所有其他存活角色
-    for (let i = 0; i < g.players.length; i++) {
-      if(i === mySeat) continue;
-      const target = g.players[i];
-      if(target && target.alive && isSeatClickable(i)) {
-        const b=document.createElement('button');
-        b.className='target-btn';
-        b.textContent='选择 '+escapeHtml(target.name);
-        b.onclick=()=>pickMingceTarget(i);
-        div.appendChild(b);
-      }
-    }
-    const cb=document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='取消'; cb.onclick=()=>cancelMingce();
-    div.appendChild(cb);
-    c.appendChild(div);
-    return;
-  }
   
   // 法正【恩怨】:伤害后的触发阶段
   if(g.pending && g.pending.type==='enyuanChoose' && g.pending.damagerSeat===mySeat){
@@ -1457,39 +1418,8 @@ function renderControls(g){
     return;
   }
 
-  if(g.phase==='mingcePickTarget' && g.pending && g.pending.type==='mingcePickTarget'){
-    const source = g.players[g.pending.sourceSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 正在选择【明策】的目标…');
-    return;
-  }
   
   // 陈宫【明策】:选择第二个目标阶段
-  if(g.phase==='mingcePickTarget2' && g.pending && g.pending.type==='mingcePickTarget2' && g.pending.sourceSeat===mySeat){
-    const target1 = g.players[g.pending.targetSeat];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【明策】选择攻击目标';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='请选择 '+escapeHtml(target1?target1.name:'目标')+' 攻击范围内的角色作为【杀】的目标';
-    div.appendChild(p1);
-    
-    // 显示可选的目标
-    const candidates = g.pending.candidates || [];
-    candidates.forEach(seat => {
-      const target = g.players[seat];
-      if(target && target.alive && isSeatClickable(seat)) {
-        const b=document.createElement('button');
-        b.className='target-btn';
-        b.textContent='选择 '+escapeHtml(target.name);
-        b.onclick=()=>pickMingceTarget2(seat);
-        div.appendChild(b);
-      }
-    });
-    const cb=document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='取消'; cb.onclick=()=>cancelMingce();
-    div.appendChild(cb);
-    c.appendChild(div);
-    return;
-  }
   
   // 法正【眩惑】:选择目标阶段
   if(g.pending && g.pending.type==='huanhuoPick' && g.pending.sourceSeat===mySeat){
@@ -1599,56 +1529,8 @@ function renderControls(g){
     return;
   }
 
-  if(g.phase==='mingcePickTarget2' && g.pending && g.pending.type==='mingcePickTarget2'){
-    const source = g.players[g.pending.sourceSeat];
-    const target1 = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 正在选择【明策】的第二个目标…');
-    return;
-  }
   
   // 陈宫【明策】:接收牌的角色选择阶段
-  if(g.phase==='mingceChoice' && g.pending && g.pending.type==='mingceChoice' && g.pending.targetSeat===mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    const target2 = g.pending.target2Seat !== null ? g.players[g.pending.target2Seat] : null;
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent=escapeHtml(source?source.name:'?')+' 发动【明策】';
-    div.appendChild(h4);
-    
-    if(target2 && target2.alive) {
-      const p1=document.createElement('p'); p1.textContent=escapeHtml(source?source.name:'?')+' 将 【'+escapeHtml(g.pending.cardName)+'】 交给你,并选择了 '+escapeHtml(target2.name)+' 为目标';
-      div.appendChild(p1);
-      const p2=document.createElement('p'); p2.textContent='请选择：';
-      div.appendChild(p2);
-      
-      const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#e74c3c';
-      b1.textContent='对 '+escapeHtml(target2.name)+' 使用普通【杀】';
-      b1.onclick=()=>chooseMingceOption('sha');
-      div.appendChild(b1);
-      
-      const b2=document.createElement('button'); b2.className='skill-btn'; b2.style.background='#4a90d9';
-      b2.textContent='摸一张牌';
-      b2.onclick=()=>chooseMingceOption('draw');
-      div.appendChild(b2);
-    } else {
-      const p1=document.createElement('p'); p1.textContent=escapeHtml(source?source.name:'?')+' 将 【'+escapeHtml(g.pending.cardName)+'】 交给你,其攻击范围内无其他角色';
-      div.appendChild(p1);
-      const p2=document.createElement('p'); p2.textContent='请选择：';
-      div.appendChild(p2);
-      
-      const b2=document.createElement('button'); b2.className='skill-btn'; b2.style.background='#4a90d9';
-      b2.textContent='摸一张牌';
-      b2.onclick=()=>chooseMingceOption('draw');
-      div.appendChild(b2);
-    }
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='mingceChoice' && g.pending && g.pending.type==='mingceChoice'){
-    const source = g.players[g.pending.sourceSeat];
-    const target = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 发动【明策】,等待 '+escapeHtml(target?target.name:'?')+' 选择…');
-    return;
-  }
 
   // 袁绍【乱击】:选择牌对阶段。【渲染层bug修复】这四个 luanji 分支原来嵌套在
   // }else if(g.phase==='play'){ 大分支内部——但 startLuanji() 把 g.phase 切到
@@ -1718,44 +1600,11 @@ function renderControls(g){
   }
 
   // 袁绍【乱击】:确认阶段
-  if(g.phase==='luanjiConfirm' && g.pending && g.pending.type==='luanjiConfirm' && g.pending.sourceSeat===mySeat){
-    const cardIndices = g.pending.cardIndices;
-    const hand = me.hand || [];
-    const cards = [hand[cardIndices[0]], hand[cardIndices[1]]];
-
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【乱击】确认使用';
-    div.appendChild(h4);
-    const p = document.createElement('p');
-    p.textContent = '确认使用【' + cards[0].name + '】和【' + cards[1].name + '】当【万箭齐发】使用吗?';
-    div.appendChild(p);
-
-    const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'primary';
-    confirmBtn.textContent = '确认';
-    confirmBtn.onclick = () => confirmLuanji();
-    div.appendChild(confirmBtn);
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'ghost';
-    cancelBtn.textContent = '取消';
-    cancelBtn.onclick = () => cancelLuanji();
-    div.appendChild(cancelBtn);
-
-    c.appendChild(div);
-    setBanner('确认使用乱击吗?');
-    return;
-  }
 
   // 袁绍【乱击】:观察者界面（其他玩家发动乱击时）
   if(g.phase==='luanjiChoose' && g.pending && g.pending.type==='luanjiChoose' && g.pending.sourceSeat!==mySeat){
     const source = g.players[g.pending.sourceSeat];
     setBanner(source ? source.name + ' 正在选择【乱击】的牌…' : '有人正在选择【乱击】的牌…');
-    return;
-  }
-  if(g.phase==='luanjiConfirm' && g.pending && g.pending.type==='luanjiConfirm' && g.pending.sourceSeat!==mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    setBanner(source ? source.name + ' 正在确认【乱击】…' : '有人正在确认【乱击】…');
     return;
   }
 
