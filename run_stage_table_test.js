@@ -2,10 +2,10 @@ const fs=require('fs');
 const vm=require('vm');
 const assert=require('assert');
 
-const data=fs.readFileSync('data.js','utf8');
+const stages=fs.readFileSync('stages/stage-table.js','utf8');
 const game=fs.readFileSync('game.js','utf8');
-const dataBlock=data.match(/const STAGE_TABLE = Object\.create\(null\);[\s\S]*?\}\)\.forEach\(\(\[type,actor\]\)=>registerStage\(type,\{actor\}\)\);/);
-const normalizeBlock=game.match(/function normalizeRegisteredStage\(g\)\{[\s\S]*?\n\}/);
+const dataBlock=stages.match(/const STAGE_TABLE = Object\.create\(null\);[\s\S]*?\}\)\.forEach\(\(\[type,actor\]\)=>registerStage\(type,\{actor\}\)\);/);
+const normalizeBlock=stages.match(/function normalizeRegisteredStage\(g\)\{[\s\S]*?\n\}/);
 assert(dataBlock&&normalizeBlock,'应能提取统一阶段表和声明式校验入口');
 const logs=[];
 const ctx=vm.createContext({Number,Array,logPendingOrphan:(g,msg)=>logs.push(msg)});

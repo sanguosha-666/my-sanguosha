@@ -116,7 +116,7 @@ const sandbox = vm.createContext(context, { name: 'sgs-ai-bus-l1-sandbox' });
 console.log('Loading AI 总线 L1 测试环境...\n');
 
 // 加载顺序遵循 index.html:room-lifecycle 必须在 game.js 之前;render-controls 最后(真实文件)
-const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render-controls.js'];
+const files = ['config.js', 'data.js', 'stages/stage-table.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'weapons.js', 'skills.js', 'skills/late-generals.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render-controls.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

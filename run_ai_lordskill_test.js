@@ -92,7 +92,7 @@ context.window.firebase = context.firebase;
 context.global = context;
 
 const sandbox = vm.createContext(context);
-const files = ['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js','ai-bot.js','render.js','render-hand.js','render-controls.js'];
+const files = ['config.js','data.js', 'stages/stage-table.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js', 'skills/late-generals.js','bot-ai-bus.js','bot.js','ai-bot.js','render.js','render-hand.js','render-controls.js'];
 console.log('Loading B2a 主公技测试环境...\n');
 files.forEach(f=>{
   const code = fs.readFileSync(path.join(ROOT, f), 'utf8');

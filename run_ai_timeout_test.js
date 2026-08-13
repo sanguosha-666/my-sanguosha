@@ -78,7 +78,7 @@ console.log('Loading A1 超时托管测试环境...\n');
 // 只加载真实源文件:data.js(常量表)、game.js(服务端逻辑+打戳+normalize)、skills.js
 // (技能响应函数)、bot-ai-bus.js(检测器/保守动作表/倒计时)、bot.js(botInvoke/BOT_PHASE_ACTOR)。
 // ai-bot.js 不加载:检测器不碰 AI,加载它只会引入 sessionStorage/callAI 依赖。
-const files = ['data.js', 'room-lifecycle.js', 'game.js', 'skills.js', 'bot-ai-bus.js', 'bot.js'];
+const files = ['data.js', 'stages/stage-table.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'skills.js', 'skills/late-generals.js', 'bot-ai-bus.js', 'bot.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

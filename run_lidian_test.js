@@ -84,7 +84,7 @@ console.log('Loading Li Dian test environment...\n');
 console.log('Loading dependencies...\n');
 
 // 加载所有依赖文件
-var files = ['config.js', 'data.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'skills.js'];
+var files = ['config.js', 'data.js', 'stages/stage-table.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'skills.js'];
 var loaded = 0;
 
 files.forEach(function(file) {

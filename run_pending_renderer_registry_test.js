@@ -2,7 +2,7 @@ const fs=require('fs');
 const vm=require('vm');
 const assert=require('assert');
 
-const stageSource=fs.readFileSync('data.js','utf8');
+const stageSource=fs.readFileSync('stages/stage-table.js','utf8');
 const source=fs.readFileSync('render-controls.js','utf8');
 const table=source.match(/Object\.entries\(\{[\s\S]*?\r?\n\}\)\.forEach\(function\(entry\)\{ registerStage\(entry\[0\],entry\[1\]\); \}\);/);
 const dispatch=source.match(/function renderRegisteredPending\(g,c\)\{[\s\S]*?\r?\n\}/);

@@ -70,7 +70,7 @@ console.log('Loading 调试日志测试环境...\n');
 // 加载顺序遵循 index.html:debug-log.js 在 data.js 之后、room-lifecycle.js 之前
 // (writeDebugLog/logPendingOrphan 定义要早于依赖它们的 game.js/bot-ai-bus.js/bot.js,
 // 但这几个都是运行期才调用,顺序其实不敏感——这里仍照抄 index.html 真实顺序)。
-const files = ['config.js', 'data.js', 'debug-log.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
+const files = ['config.js', 'data.js', 'stages/stage-table.js', 'debug-log.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'weapons.js', 'skills.js', 'skills/late-generals.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

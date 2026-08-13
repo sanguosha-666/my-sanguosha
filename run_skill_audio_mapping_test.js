@@ -25,7 +25,7 @@ function check(condition, message) {
 const read = expression => vm.runInContext(expression, context);
 
 const emittedSkills = new Set();
-for (const file of ['game.js', 'skills.js']) {
+for (const file of ['game.js', 'sha/sha-resolution.js', 'skills.js']) {
   const code = fs.readFileSync(file, 'utf8');
   for (const match of code.matchAll(/markSkillSound\(g,\s*['"]([^'"]+)['"]/g)) {
     emittedSkills.add(match[1]);
@@ -35,7 +35,7 @@ for (const skill of emittedSkills) {
   check(read(`typeof SKILL_PINYIN[${JSON.stringify(skill)}] === 'string'`), `${skill} 应注册技能音频`);
 }
 const configuredSkills = new Set();
-const dataSource = fs.readFileSync('data.js', 'utf8');
+const dataSource = fs.readFileSync('data.js','utf8');
 for (const match of dataSource.matchAll(/gender:'(?:male|female)'.*?skill:'([^']+)'/g)) {
   for (const rawSkill of match[1].split('/')) {
     configuredSkills.add(rawSkill.replace(/\([^)]*\)/g, '').trim());

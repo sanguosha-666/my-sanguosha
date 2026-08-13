@@ -25,7 +25,7 @@ const context = {
 };
 context.window.document = context.document;
 const sandbox = vm.createContext(context);
-const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js','render-log.js'];
+const files = ['config.js','data.js', 'stages/stage-table.js','debug-log.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js', 'skills/late-generals.js','render-log.js'];
 files.forEach(f=>{ vm.runInContext(fs.readFileSync(f,'utf8'), sandbox); });
 let pass=0, fail=0;
 function check(name, fn){

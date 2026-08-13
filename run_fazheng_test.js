@@ -98,7 +98,7 @@ console.log('Loading dependencies...\n');
 // 写在bot-ai-bus.js从bot.js拆分出来(2940b65)之前,后续没有同步补上,导致眩惑/恩怨这几个
 // "真实渲染不抛错"的场景在依赖缺失上直接ReferenceError崩溃,根本没跑到断言逻辑本身。
 // 按真实index.html的加载顺序补在game.js之后、render.js之前。
-var files = ['config.js', 'data.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'bot-ai-bus.js', 'skills.js', 'render.js', 'render-controls.js'];
+var files = ['config.js', 'data.js', 'stages/stage-table.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'bot-ai-bus.js', 'skills.js', 'skills/late-generals.js', 'render.js', 'render-controls.js'];
 var loaded = 0;
 
 files.forEach(function(file) {

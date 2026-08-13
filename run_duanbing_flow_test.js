@@ -1,9 +1,9 @@
 const fs=require('fs');
 const assert=require('assert');
 const game=fs.readFileSync('game.js','utf8');
-const data=fs.readFileSync('data.js','utf8');
+const data=fs.readFileSync('stages/stage-table.js','utf8');
 const ui=fs.readFileSync('render-controls.js','utf8');
-const timeout=fs.readFileSync('bot-ai-bus.js','utf8');
+const timeout=fs.readFileSync('stages/stage-table.js','utf8');
 
 assert(game.includes("hasCap(me, 'duanbing') && g.phase === 'play'"));
 assert(game.includes('dist === 1'));

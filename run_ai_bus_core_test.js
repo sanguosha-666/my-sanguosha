@@ -64,7 +64,7 @@ console.log('Loading AI 总线测试环境...\n');
 // (总线核心:parseBotPlayAiChoice/BOT_DECISIONS/callAiChooseIndex/botDecide)与 bot.js
 // (注册项 + 调度)。bot.js 顶层无立即执行的
 // 函数调用,CARD_PLAYS/EQUIP_SLOTS 等只在函数体内引用,不加载也无碍。
-const files = ['data.js', 'ai-bot.js', 'bot-ai-bus.js', 'bot.js'];
+const files = ['data.js', 'stages/stage-table.js', 'ai-bot.js', 'bot-ai-bus.js', 'bot.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

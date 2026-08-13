@@ -32,7 +32,7 @@ assert.strictEqual(removed,0,'guest must not remove room');
 const controls=fs.readFileSync('render-controls.js','utf8');
 assert(controls.includes("waiting.textContent='等待房主开始游戏'"));
 assert(controls.includes("if(mySeat===0) c.appendChild(btnPick)"));
-assert(controls.includes("if(mySeat===0){\n      const btn=document.createElement('button'); btn.className='primary';"));
+assert(/if\(mySeat===0\)\{\r?\n\s+const btn=document\.createElement\('button'\); btn\.className='primary';/.test(controls));
 const render=fs.readFileSync('render.js','utf8');
 assert(render.includes("closeRoomBtn.classList.toggle('hidden', !isRoomOwner(g,mySeat))"));
 

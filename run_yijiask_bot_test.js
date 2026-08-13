@@ -59,7 +59,7 @@ const sandbox = vm.createContext(context, { name: 'sgs-yijiask-bot-sandbox' });
 
 console.log('Loading 遗计/刚烈/鬼道/将驰 机器人接线测试环境...\n');
 
-const files = ['config.js', 'data.js', 'debug-log.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
+const files = ['config.js', 'data.js', 'stages/stage-table.js', 'debug-log.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'weapons.js', 'skills.js', 'skills/late-generals.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

@@ -3,7 +3,7 @@ const el=()=>({onclick:null,style:{},classList:{add(){},remove(){},toggle(){}}})
 const db=()=>({ref(){return{on(){},once(){},transaction(){},set(){},update(){},child(){return this;},remove(){}};}});
 const c={firebase:{initializeApp(){return{database:db};},database:db},document:{getElementById:el,createElement:el,querySelector(){return null;},querySelectorAll(){return[];},addEventListener(){}},window:{location:{search:'',href:''},localStorage:{getItem(){return null;},setItem(){}},addEventListener(){},setTimeout,clearTimeout},console,Math,Date,JSON,RegExp,Array,Object,String,Number,Boolean,parseInt,isNaN,setTimeout,clearTimeout};
 c.window.document=c.document;c.window.firebase=c.firebase;c.global=c;const s=vm.createContext(c);
-['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js'].forEach(f=>vm.runInContext(fs.readFileSync(f,'utf8'),s,{filename:f}));
+['config.js','data.js', 'stages/stage-table.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js'].forEach(f=>vm.runInContext(fs.readFileSync(f,'utf8'),s,{filename:f}));
 const R=x=>vm.runInContext(x,s);R('mySeat=0;');const eq=()=>R('emptyEquips')();
 const p=(name,active)=>({name,general:'liubei',caps:{tongji:true},hp:active?1:2,maxHp:4,hand:active?[{name:'闪'},{name:'桃'}]:[],equips:eq(),delays:[],alive:true});
 const attacker={name:'攻击者',general:'caocao',hp:4,maxHp:4,hand:[],equips:eq(),delays:[],alive:true};

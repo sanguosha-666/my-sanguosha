@@ -3,7 +3,7 @@ const vm=require('vm');
 const assert=require('assert');
 
 const game=fs.readFileSync('game.js','utf8');
-const data=fs.readFileSync('data.js','utf8');
+const data=fs.readFileSync('stages/stage-table.js','utf8');
 const bus=fs.readFileSync('bot-ai-bus.js','utf8');
 const stageBlock=data.match(/const STAGE_TABLE = Object\.create\(null\);[\s\S]*?\}\)\.forEach\(\(\[type,actor\]\)=>registerStage\(type,\{actor\}\)\);/);
 const responderBlock=game.match(/function pendingResponderSeat\(g, pending\)\{[\s\S]*?\n\}/);

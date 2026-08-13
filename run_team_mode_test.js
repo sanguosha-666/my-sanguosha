@@ -15,7 +15,7 @@ const sandbox = vm.createContext(context);
 // 顶层无立即执行的函数调用,只注册 BOT_DECISIONS,加载安全(run_ai_bus_core_test 同款)。
 // render.js 追加在末尾:顶层只有 document/window 监听注册与 onclick 绑定(document stub
 // 已支持),无 BOT_DECISIONS 依赖;assignSeatZones 是纯函数,供最终审查 M-2 断言使用。
-const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js','render.js'];
+const files = ['config.js','data.js', 'stages/stage-table.js','debug-log.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js', 'skills/late-generals.js','bot-ai-bus.js','bot.js','render.js'];
 files.forEach(f=>{ vm.runInContext(fs.readFileSync(f,'utf8'), sandbox); });
 let pass=0, fail=0;
 function check(name, fn){

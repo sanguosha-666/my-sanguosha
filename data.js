@@ -9,57 +9,6 @@ const BASIC_CARDS = ['杀','火杀','雷杀','闪','桃','酒']; // 基本牌:�
 
 // 询问型 pending 的唯一阶段配置源。data.js 是浏览器与各类测试共同加载的最早底座；
 // 后续模块只向同一个 stage 项补 render / timeoutAction / botDecision / required / alive。
-const STAGE_TABLE = Object.create(null);
-function registerStage(type, spec){
-  if(typeof type!=='string'||!type) throw new Error('stage type required');
-  const current=STAGE_TABLE[type]||(STAGE_TABLE[type]={});
-  if(spec&&spec.actor&&current.actor&&current.actor!==spec.actor){
-    throw new Error('stage actor conflict: '+type+' ('+current.actor+' / '+spec.actor+')');
-  }
-  Object.assign(current,spec||{});
-  return current;
-}
-function stageActorField(type){
-  const spec=type&&STAGE_TABLE[type];
-  return spec&&typeof spec.actor==='string'?spec.actor:null;
-}
-Object.entries({
-  huashenPick:'seat',guanxingReview:'seat',xunxunPick:'seat',guhuoTarget:'sourceSeat',
-  respond:'to',aoeResp:'to',duel:'active',dying:'asking',wuxie:'asking',
-  tieqi:'from',huogong:'from',pick:'from',hanbing:'from',duanbingChoose:'sourceSeat',fanjianSuit:'targetSeat',
-  enyuanChoose:'damagerSeat',jiedaoChoice:'seatA',luoyingAsk:'seat',
-  huashenChangeAskStart:'seat',guhuoQuestion:'asking',yijiAsk:'seat',yijiAssign:'seat',
-  lirangAsk:'from',liuli:'to',xiaoguo:'asking',xiaoguoChoice:'to',jijiangAsk:'asking',
-  zhibaAsk:'lordSeat',yinghunTarget:'seat',beigeChoose:'sourceSeat',beigeDiscard:'sourceSeat',
-  beigeJudge:'sourceSeat',luanwuChoose:'currentSeat',xuanfengPick:'from',
-  lieRenRespond:'targetSeat',qiangxiPickTarget:'seat',qiangxiChooseCost:'seat',
-  jujianPickCard:'sourceSeat',jushouChoose:'seat',cixiongAsk:'from',guanshi:'from',
-  hanbingAsk:'from',qinglong:'from',shuangxiongAsk:'seat',leijiChoose:'sourceSeat',
-  haoshiPick:'seat',tiaoxinDiscard:'from',biyue:'seat',buquAsk:'seat',renxinChoose:'seat',
-  chengxiangAsk:'seat',luoyiAsk:'seat',jiemingAsk:'seat',xinshengAsk:'seat',
-  jiushiFlipAsk:'seat',lianyingAsk:'seat',mingcePickCard:'sourceSeat',mingceChoice:'targetSeat',
-  tianyiPickCard:'seat',tianyiPickTarget:'seat',fenxunDiscard:'seat',fenxunTarget:'seat',
-  qiaomengChoose:'sourceSeat',wangxiAsk:'seat',ganglieAsk:'seat',guiduAsk:'sourceSeat',
-  jiangchiAsk:'seat',zhijiChoice:'seat',tiaoxinChoice:'to',huanhuoPick:'sourceSeat',
-  huanhuoPickGotCard:'sourceSeat',lieRenChoose:'sourceSeat',shensuChoose1:'seat',
-  qiaobianTurnStart:'seat',yaowu_choose:'seat',shensuSha:'seat',zhimengAsk:'from',
-  zhimengPick:'from',huashenChangePickStart:'seat',luanjiChoose:'sourceSeat',
-  jujianPickTarget:'sourceSeat',jujianChooseEffect:'targetSeat',liegong:'from',
-  shaOffsetChoice:'from',mengjin:'from',lirangRecover:'from',zhengyi:'asking',
-  quhuRespond:'targetSeat',tianyiRespond:'targetSeat',tianxiang:'seat',
-  huashenChangeAskEnd:'seat',huashenChangePickEnd:'seat',cixiongChoice:'to',luoshen:'seat',
-  huogongReveal:'to',guicai:'asking',ganglieChoice:'sourceSeat',quhuDamageChoice:'seat',
-  qiaobianMove:'seat',leijiJudge:'sourceSeat',hujiaAsk:'asking',lieRenPickCard:'sourceSeat',
-  shensuChoose2:'seat',qiaomengPickEquip:'sourceSeat',qilin:'from',
-  qiangxiChooseWeaponFromHand:'seat',mingcePickTarget:'sourceSeat',
-  mingcePickTarget2:'sourceSeat',luanjiConfirm:'sourceSeat',zhibaGain:'lordSeat',
-  yinghunChoice:'seat',yinghunDiscard:'targetSeat',enyuanChooseOption:'damagerSeat',
-  enyuanGiveCard:'damagerSeat',huanhuoPickCard:'sourceSeat',huanhuoPickSecond:'sourceSeat'
-}).forEach(([type,actor])=>registerStage(type,{actor}));
-
-// ---------- 身份局(主公局)配比与查询 ----------
-// 仅 4~8 人。数组元素为 role id,开局洗牌后按座位发放。
-// 规格: docs/superpowers/specs/2026-07-19-identity-mode-design.md
 const IDENTITY_TABLE = {
   4: ['zhu','zhong','fan','nei'],
   5: ['zhu','zhong','fan','fan','nei'],

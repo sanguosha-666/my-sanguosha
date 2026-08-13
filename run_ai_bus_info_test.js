@@ -78,7 +78,7 @@ console.log('Loading AI 总线信息层测试环境...\n');
 
 // 加载真实源文件:data.js(GENERALS 武将表)必须排在 bot.js 之前,
 // bot.js 的 buildBotVisibleState 在运行时查 GENERALS。
-const files = ['data.js', 'ai-bot.js', 'bot-ai-bus.js', 'bot.js'];
+const files = ['data.js', 'stages/stage-table.js', 'ai-bot.js', 'bot-ai-bus.js', 'bot.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');
@@ -92,11 +92,9 @@ files.forEach(function(file){
 });
 try {
   const gameCode = fs.readFileSync('game.js', 'utf8');
-  const stageHelpersStart = gameCode.indexOf('function normalizeRegisteredStage(g){');
   const normalizeStart = gameCode.indexOf('function normalize(g){');
   const normalizeEnd = gameCode.indexOf('\nfunction logEvent(', normalizeStart);
-  if(stageHelpersStart < 0 || normalizeStart < 0 || normalizeEnd < 0) throw new Error('无法定位 normalize');
-  vm.runInContext(gameCode.slice(stageHelpersStart, normalizeStart), sandbox, { filename: 'game.js:stage-normalize' });
+  if(normalizeStart < 0 || normalizeEnd < 0) throw new Error('无法定位 normalize');
   vm.runInContext(gameCode.slice(normalizeStart, normalizeEnd), sandbox, { filename: 'game.js:normalize' });
   console.log('  OK game.js:normalize');
 } catch (e) {

@@ -74,7 +74,7 @@ context.window.firebase = context.firebase;
 context.global = context;
 const sandbox = vm.createContext(context);
 
-['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js'].forEach(f=>{
+['config.js','data.js', 'stages/stage-table.js','debug-log.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js'].forEach(f=>{
   vm.runInContext(fs.readFileSync(path.join(ROOT,f),'utf8'), sandbox, { filename:f });
   if(f==='game.js'){
     vm.runInContext(`
@@ -133,7 +133,7 @@ console.log('\n== 刘备【激将】主动入口 resume.pending=null 被 Firebas
 
 // 场景0:确认 normalize 的 jijiangAsk 校验已拆层——resume 缺 pending 键时补默认而非判死
 check('确认:normalize的jijiangAsk校验已拆层(resume缺pending键补null不判死)', ()=>{
-  const src = fs.readFileSync(path.join(ROOT,'game.js'), 'utf8');
+  const src = fs.readFileSync(path.join(ROOT,'stages/stage-table.js'), 'utf8');
   const m = src.match(/if\(g\.pending && \(g\.pending\.type==='jijiangAsk'\|\|g\.pending\.type==='hujiaAsk'\)\)\{[\s\S]{0,600}/);
   assert.ok(m, '应找到 jijiangAsk/hujiaAsk 校验块');
   assert.ok(m[0].indexOf('d.resume.pending = null') >= 0, '应存在 resume 缺 pending 键补 null 的分支');

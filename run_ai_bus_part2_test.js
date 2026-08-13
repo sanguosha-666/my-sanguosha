@@ -115,7 +115,7 @@ console.log('Loading AI 总线 L3 测试环境...\n');
 // 加载顺序遵循 index.html:room-lifecycle 必须在 game.js 之前(game.js 顶层
 // onclick 绑定 joinRoom);bot-ai-bus.js 在 bot.js 之前(TDZ:const BOT_DECISIONS
 // 必须先于注册项);ai-bot.js 最后、render.js 殿后。
-const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
+const files = ['config.js', 'data.js', 'stages/stage-table.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'weapons.js', 'skills.js', 'skills/late-generals.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
 function loadAll(sb){
   files.forEach(function(file){
     try {

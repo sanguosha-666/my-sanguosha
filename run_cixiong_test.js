@@ -55,7 +55,7 @@ context.window.firebase = context.firebase;
 context.global = context;
 const sandbox = vm.createContext(context);
 
-['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js'].forEach(f=>{
+['config.js','data.js', 'stages/stage-table.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js'].forEach(f=>{
   vm.runInContext(fs.readFileSync(path.join(ROOT,f),'utf8'), sandbox, { filename:f });
   if(f==='game.js'){
     vm.runInContext(`

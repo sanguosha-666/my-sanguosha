@@ -9,7 +9,7 @@ const context={
 };
 context.window.document=context.document; context.window.firebase=context.firebase; context.global=context;
 const sandbox=vm.createContext(context);
-['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js'].forEach(f=>vm.runInContext(fs.readFileSync(f,'utf8'),sandbox,{filename:f}));
+['config.js','data.js', 'stages/stage-table.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js'].forEach(f=>vm.runInContext(fs.readFileSync(f,'utf8'),sandbox,{filename:f}));
 const R=code=>vm.runInContext(code,sandbox);
 R('tx=function(fn){return fn(__g);}; mySeat=0;');
 const eq=()=>R('emptyEquips')();

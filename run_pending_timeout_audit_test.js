@@ -3,17 +3,17 @@ const vm=require('vm');
 const assert=require('assert');
 
 const game=fs.readFileSync('game.js','utf8');
-const data=fs.readFileSync('data.js','utf8');
+const data=fs.readFileSync('stages/stage-table.js','utf8');
 const bus=fs.readFileSync('bot-ai-bus.js','utf8');
 const bot=fs.readFileSync('bot.js','utf8');
-const timeoutBlock=bus.match(/function registerStageTimeoutAction\([\s\S]*?\nfunction autoRespondAction\(g\)\{[\s\S]*?\n\}/);
-const actionBlock=bus.match(/function autoRespondAction\(g\)\{[\s\S]*?\n\s*return null;\n\}/);
+const timeoutBlock=data.match(/function registerStageTimeoutAction\([\s\S]*$/);
+const actionBlock=bus.match(/function autoRespondAction\(g\)\{[\s\S]*?\n\}/);
 const stageBlock=data.match(/const STAGE_TABLE = Object\.create\(null\);[\s\S]*?\}\)\.forEach\(\(\[type,actor\]\)=>registerStage\(type,\{actor\}\)\);/);
 const responderBlock=game.match(/function pendingResponderSeat\(g, pending\)\{[\s\S]*?\n\}/);
 const canAbandonBlock=bus.match(/function canDefaultAbandonPending\(g\)\{[\s\S]*?\n\}/);
 assert(timeoutBlock&&actionBlock&&stageBlock&&responderBlock&&canAbandonBlock,'应能定位超时托管核心定义');
 const ctx=vm.createContext({Math,Number});
-vm.runInContext(`${stageBlock[0]}\n${responderBlock[0]}\n${canAbandonBlock[0]}\n${timeoutBlock[0]}`,ctx);
+vm.runInContext(`${stageBlock[0]}\n${responderBlock[0]}\n${canAbandonBlock[0]}\n${timeoutBlock[0]}\n${actionBlock[0]}`,ctx);
 const read=expr=>vm.runInContext(expr,ctx);
 
 const expected=[

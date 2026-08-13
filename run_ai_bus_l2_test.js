@@ -77,7 +77,7 @@ console.log('Loading AI 总线 B2 测试环境...\n');
 // onclick 绑定 joinRoom);bot.js 在 game.js 之后、ai-bot.js 之后殿后加载 render.js
 // (G1 起 runBotDecision play 分支会走 seatPick,其武圣/双雄 match 引用 render.js 的
 // resolveActionId/canShuangxiongDuelCard)。
-const files = ['config.js', 'data.js', 'room-lifecycle.js', 'game.js', 'weapons.js', 'skills.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
+const files = ['config.js', 'data.js', 'stages/stage-table.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'weapons.js', 'skills.js', 'skills/late-generals.js', 'bot-ai-bus.js', 'bot.js', 'ai-bot.js', 'render.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

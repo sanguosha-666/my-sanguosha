@@ -12,7 +12,7 @@ context.window.document=context.document;
 context.window.firebase=context.firebase;
 context.global=context;
 const sandbox=vm.createContext(context);
-['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js'].forEach(file=>{
+['config.js','data.js', 'stages/stage-table.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js'].forEach(file=>{
   vm.runInContext(fs.readFileSync(file,'utf8'),sandbox,{filename:file});
 });
 function R(code){return vm.runInContext(code,sandbox);}

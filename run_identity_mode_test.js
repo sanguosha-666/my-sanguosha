@@ -59,7 +59,7 @@ context.window.firebase = context.firebase;
 context.global = context;
 
 const sandbox = vm.createContext(context);
-const files = ['config.js','data.js','room-lifecycle.js','game.js','weapons.js','skills.js'];
+const files = ['config.js','data.js', 'stages/stage-table.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js'];
 console.log('Loading...\n');
 files.forEach(f=>{
   const code = fs.readFileSync(path.join(ROOT,f),'utf8');

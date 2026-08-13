@@ -90,7 +90,7 @@ console.log('Loading dependencies...\n');
 
 // 加载所有依赖文件(和 run_lidian_test.js/run_fazheng_test.js 同一份清单:
 // test_xuanfeng.js 只调用 game.js/skills.js 里的函数,不涉及渲染,不需要 render*.js)
-var files = ['config.js', 'data.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'skills.js'];
+var files = ['config.js', 'data.js', 'stages/stage-table.js', 'weapons.js', 'room-lifecycle.js', 'game.js', 'sha/sha-resolution.js', 'skills.js'];
 var loaded = 0;
 
 files.forEach(function(file) {

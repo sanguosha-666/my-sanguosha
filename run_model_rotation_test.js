@@ -15,7 +15,7 @@ context.window.document = context.document;
 // 测试里覆写 window.fetch 即对 callAI 生效。
 context.fetch = function(url, opts){ return context.window.fetch(url, opts); };
 const sandbox = vm.createContext(context);
-const files = ['config.js','data.js','debug-log.js','room-lifecycle.js','game.js','weapons.js','skills.js','bot-ai-bus.js','bot.js','ai-bot.js'];
+const files = ['config.js','data.js', 'stages/stage-table.js','debug-log.js','room-lifecycle.js','game.js', 'sha/sha-resolution.js','weapons.js','skills.js', 'skills/late-generals.js','bot-ai-bus.js','bot.js','ai-bot.js'];
 files.forEach(f=>{ vm.runInContext(fs.readFileSync(f,'utf8'), sandbox); });
 let pass=0, fail=0;
 async function check(name, fn){
