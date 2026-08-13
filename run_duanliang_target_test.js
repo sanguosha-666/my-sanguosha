@@ -25,6 +25,7 @@ assert.strictEqual(g.players[0].hand.length,1,'断粮不能对已有兵粮寸断
 assert.strictEqual(g.players[2].delays.length,1,'非法断粮不能改变目标判定区');
 
 g=state();sandbox.__g=g;run('duanLiang(0,2)');
+g.pending.publicUntil=0;run('finishWuxiePublicWait()');
 assert.strictEqual(g.players[0].hand.length,0,'断粮应允许距离 2 的合法目标');
 assert.strictEqual(g.players[2].delays.length,1,'合法断粮应放入目标判定区');
 assert.strictEqual(g.players[2].delays[0].name,'兵粮寸断','结算期间应表现为兵粮寸断');

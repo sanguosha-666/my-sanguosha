@@ -19,6 +19,7 @@ assert.strictEqual(g.players[0].hand.length,1,'借刀杀人专用路径不能穿
 assert.strictEqual(g.pending,null,'智迟保护目标不能进入借刀结算');
 
 g=state();sandbox.__g=g;run('jieDaoShaRen(0,1,2)');
+g.pending.publicUntil=0;run('finishWuxiePublicWait()');
 assert.strictEqual(g.players[0].hand.length,0,'合法借刀目标应正常消耗锦囊');
 assert.strictEqual(g.pending&&g.pending.type,'jiedaoChoice','合法 A/B 目标应进入借刀选择阶段');
 assert.strictEqual(g.pending.seatA,1,'借刀第一目标应保持为持武器角色');

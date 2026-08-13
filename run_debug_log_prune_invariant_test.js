@@ -171,6 +171,11 @@ const testCode = String.raw`
     _g = g;
     playCard(0, '桃园结义', null);
     if(g.exchangeCards.length === 0) throw new Error('打出桃园结义后exchangeCards应非空,实际为空');
+    var publicGuard=0;
+    while(g.pending && g.pending.type==='wuxiePublicWait' && publicGuard++<10){
+      g.pending.publicUntil=0;
+      finishWuxiePublicWait();
+    }
     if(g.pending !== null) throw new Error('桃园结义无需响应,pending应为null,实际 ' + JSON.stringify(g.pending));
     doDraw();
     if(g.exchangeCards.length !== 0) throw new Error('下一次tx(doDraw)后exchangeCards应被清空,实际长度 ' + g.exchangeCards.length);

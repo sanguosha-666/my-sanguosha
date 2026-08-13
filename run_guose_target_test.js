@@ -50,6 +50,7 @@ assert.strictEqual(g.pending, null, '非法国色目标不能开启锦囊结算'
 g = state();
 sandbox.__g = g;
 run('guoSe(0,1)');
+g.pending.publicUntil=0; run('finishWuxiePublicWait()');
 assert.strictEqual(g.players[0].hand.length, 0, '国色对合法目标应正常消耗方块牌');
 assert.strictEqual(g.players[1].delays.length, 1, '无人使用无懈可击时国色应正常放置乐不思蜀');
 assert.strictEqual(g.players[1].delays[0].name, '乐不思蜀', '国色放入判定区的牌名应为乐不思蜀');

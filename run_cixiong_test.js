@@ -67,6 +67,7 @@ const sandbox = vm.createContext(context);
   }
   console.log('  OK', f);
 });
+vm.runInContext("var EQUIP_SLOT_LABEL={weapon:'武器',armor:'防具',plus1:'防御马',minus1:'进攻马'};",sandbox);
 
 function R(code){ return vm.runInContext(code, sandbox); }
 function bindG(g){ sandbox.__tg = g; vm.runInContext('_g = __tg;', sandbox); }
@@ -337,7 +338,7 @@ check('丁奉短兵选择后按队列依次结算两个目标', ()=>{
   R('respondShan')(true,0);
   gg=G();
   assert.strictEqual(gg.phase,'play');
-  assert.strictEqual(gg.fangtianQueue,null);
+  assert.ok(gg.fangtianQueue==null);
   assert.strictEqual(first.hand.length,0);
   assert.strictEqual(second.hand.length,0);
 });
@@ -361,7 +362,7 @@ check('丁奉取消短兵后只结算原目标', ()=>{
   const gg=G();
   assert.strictEqual(gg.phase,'respond');
   assert.strictEqual(gg.pending.to,1);
-  assert.strictEqual(gg.fangtianQueue,null);
+  assert.ok(gg.fangtianQueue==null);
 });
 
 check('闪电令首名连环角色死亡后继续传导下一名角色', ()=>{

@@ -27,12 +27,12 @@ const read = expression => vm.runInContext(expression, context);
 for (const skill of ['短兵', '奋迅', '恩怨', '眩惑']) {
   check(read(`SKILL_PINYIN['${skill}']`) === undefined, `${skill} 不应注册空音频资源`);
 }
-check(read("SKILL_PINYIN['天妒']") === 'tiandu', '正常技能音频映射应保留');
+check(read("SKILL_PINYIN['神速']") === 'shensu', '真实存在的技能音频映射应保留');
 
 read('lastPlayedSkillSeq = 1');
 read("maybePlaySkillSound({ lastSkillSound: { seq: 2, name: '短兵' } })");
 check(audioCreated === 0, '未注册技能不应创建 Audio');
-read("maybePlaySkillSound({ lastSkillSound: { seq: 3, name: '天妒' } })");
+read("maybePlaySkillSound({ lastSkillSound: { seq: 3, name: '神速' } })");
 check(audioCreated === 1, '已注册技能应正常创建 Audio');
 
 console.log(`skill audio mapping tests: ${passed}/7 passed`);

@@ -114,8 +114,13 @@ const testCode = String.raw`
     var guard = 0;
     while((g.phase === 'aoeResp' || g.phase === 'wuxie') && guard++ < 20){
       if(g.phase === 'wuxie'){
-        mySeat = (typeof g.pending.asking === 'number') ? g.pending.asking : g.pending.to;
-        respondWuxie(false);
+        if(g.pending.type==='wuxiePublicWait'){
+          g.pending.publicUntil=0;
+          finishWuxiePublicWait();
+        }else{
+          mySeat = (typeof g.pending.asking === 'number') ? g.pending.asking : g.pending.to;
+          respondWuxie(false);
+        }
       } else {
         mySeat = g.pending.to;
         aoeRespond(false);
@@ -169,8 +174,13 @@ const testCode = String.raw`
     var guard = 0;
     while((g.phase === 'aoeResp' || g.phase === 'wuxie') && guard++ < 20){
       if(g.phase === 'wuxie'){
-        mySeat = (typeof g.pending.asking === 'number') ? g.pending.asking : g.pending.to;
-        respondWuxie(false);
+        if(g.pending.type==='wuxiePublicWait'){
+          g.pending.publicUntil=0;
+          finishWuxiePublicWait();
+        }else{
+          mySeat = (typeof g.pending.asking === 'number') ? g.pending.asking : g.pending.to;
+          respondWuxie(false);
+        }
       } else {
         mySeat = g.pending.to;
         if(g.pending.to === 1) aoeRespond(true); // 玩家1打出闪抵消
@@ -191,6 +201,12 @@ const testCode = String.raw`
       throw new Error('【这是用户报告的真实症状】下一次独立动作后,exchangeCards里还残留着上一条链(乱击/万箭齐发)的记录,说明没有被正确prune,实际 ' + JSON.stringify(namesAfterNext));
     if(namesAfterNext.length !== 1 || namesAfterNext[0] !== '桃园结义')
       throw new Error('下一次独立动作后,exchangeCards应该只有这次新打出的桃园结义1条,实际 ' + JSON.stringify(namesAfterNext));
+
+    var publicGuard=0;
+    while(g.pending && g.pending.type==='wuxiePublicWait' && publicGuard++<10){
+      g.pending.publicUntil=0;
+      finishWuxiePublicWait();
+    }
 
     // 再叠加第3条完全独立的动作(杀→座位2,距离1默认可达),确认不是"侥幸只清了一次",
     // 而是这条链路持续正常工作

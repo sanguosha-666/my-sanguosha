@@ -22,6 +22,8 @@ assert.strictEqual(g.players[0].hand.length,1,'单目标同样执行 canTarget �
 
 g=state();sandbox.__g=g;
 R('playCard(0,"铁索连环",[0,2])');
+g.pending.publicUntil=0;R('finishWuxiePublicWait()');
+g.pending.publicUntil=0;R('finishWuxiePublicWait()');
 assert.strictEqual(g.players[0].hand.length,0,'两个合法目标正常消耗牌');
 assert.strictEqual(g.players[0].chained,true,'第一个合法目标正常结算');
 assert.strictEqual(g.players[2].chained,true,'第二个合法目标正常结算');

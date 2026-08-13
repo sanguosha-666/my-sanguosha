@@ -19,6 +19,7 @@ assert.strictEqual(g.players[0].hand.length,1,'奇袭不能穿透智迟');
 assert.strictEqual(g.pending,null,'智迟保护目标不能开启奇袭锦囊结算');
 
 g=state();sandbox.__g=g;run('qiXi(0,1)');
+g.pending.publicUntil=0;run('finishWuxiePublicWait()');
 assert.strictEqual(g.players[0].hand.length,0,'奇袭对合法目标应正常消耗黑色牌');
 assert.ok(g.discard.some(card=>card.id==='b1'),'奇袭使用的物理牌应进入弃牌堆');
 assert.strictEqual(g.players[1].hand.length,0,'奇袭对合法目标应正常结算过河拆桥效果');

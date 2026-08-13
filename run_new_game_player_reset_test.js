@@ -16,6 +16,8 @@ const state={
 };
 const context={
   Number,Object,
+  mySeat:0,
+  isRoomOwner:(g,seat)=>seat===0&&!!(g&&g.players&&g.players[0]&&!g.players[0].isBot),
   randomGeneralId:()=> 'guanyu', generalMaxHp:()=>4,
   emptyEquips:()=>({weapon:null,armor:null,plus1:null,minus1:null}),
   pushLog:(log,text)=>log.concat({text}), tx:fn=>fn(state)

@@ -324,6 +324,7 @@ check('主公选将后他人3张+公开武将', ()=>{
 });
 
 check('全员选完:主公+1血且从主公起手', ()=>{
+  R('__setSeat')(0);
   const g = freshG(4);
   bindG(g);
   R('startGame')('pick','identity');
@@ -632,6 +633,7 @@ check('killerSeat=NaN(非法数字) → 同样安全提前return', ()=>{
 console.log('\n== Task8: newGame() 清空身份局残留字段 ==\n');
 
 check('newGame() 应清空 gameMode/winSide/role/roleRevealed,不残留上一局身份信息', ()=>{
+  R('__setSeat')(0);
   const g = freshG(4);
   g.gameMode = 'identity'; g.winSide = 'lord'; g.winner = '主公与忠臣'; g.phase = 'over'; g.started = true;
   g.players[0].role='zhu';   g.players[0].roleRevealed=true;
@@ -664,6 +666,7 @@ check('startGame identity n=9(超过8人) 拒绝', ()=>{
 });
 
 check('startGame identity n=8(边界内,应接受) 对照', ()=>{
+  R('__setSeat')(0);
   const g = freshG(8);
   bindG(g);
   R('startGame')('pick','identity');
