@@ -49,7 +49,9 @@ const CARD_PINYIN = {
 const SKILL_PINYIN = {
   // 只登记仓库中真实存在、非空且可播放的技能音频。新增映射时必须通过
   // run_skill_audio_integrity_test.js，避免技能触发时产生静默 404。
-  '神速':'shensu'
+  '神速':'shensu',
+  '武圣':'wusheng', '龙胆':'longdan', '奇袭':'qixi', '苦肉':'kurou', '刚烈':'ganglie',
+  '驱虎':'quhu', '乱武':'luanwu', '烈刃':'lieren', '短兵':'duanbing', '强袭':'qiangxi'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
