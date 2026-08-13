@@ -110,7 +110,7 @@ const testCode = String.raw`
 
   // ================= 大乔【流离】(liuli) =================
   await check('BOT_PHASE_ACTOR 已登记 liuli:to(此前已有,验证不受影响)', function(){
-    if(BOT_PHASE_ACTOR.liuli !== 'to') throw new Error('应为to,实际 ' + BOT_PHASE_ACTOR.liuli);
+    if(stageActorField('liuli') !== 'to') throw new Error('应为to,实际 ' + stageActorField('liuli'));
   });
   await check('liuli:无密钥模式下机器人应主动发动流离(respondLiuli非null,转移目标)', async function(){
     window.__liuliCalls = [];
@@ -181,8 +181,8 @@ const testCode = String.raw`
 
   // ================= 祝融【烈刃】发动+选牌(lieRenChoose/lieRenPickCard) =================
   await check('BOT_PHASE_ACTOR 已登记 lieRenChoose:sourceSeat / lieRenPickCard:sourceSeat', function(){
-    if(BOT_PHASE_ACTOR.lieRenChoose !== 'sourceSeat') throw new Error('lieRenChoose应为sourceSeat,实际 ' + BOT_PHASE_ACTOR.lieRenChoose);
-    if(BOT_PHASE_ACTOR.lieRenPickCard !== 'sourceSeat') throw new Error('lieRenPickCard应为sourceSeat,实际 ' + BOT_PHASE_ACTOR.lieRenPickCard);
+    if(stageActorField('lieRenChoose') !== 'sourceSeat') throw new Error('lieRenChoose应为sourceSeat,实际 ' + stageActorField('lieRenChoose'));
+    if(stageActorField('lieRenPickCard') !== 'sourceSeat') throw new Error('lieRenPickCard应为sourceSeat,实际 ' + stageActorField('lieRenPickCard'));
   });
   await check('lieRenChoose:无密钥模式下机器人应主动发动烈刃(triggerLieRen),推进到lieRenPickCard', async function(){
     var g = mkSeatG({ n: 3 });
@@ -217,8 +217,8 @@ const testCode = String.raw`
 
   // ================= 夏侯渊【神速1】/【神速2】(shensuChoose1/shensuChoose2) =================
   await check('BOT_PHASE_ACTOR 已登记 shensuChoose1:seat / shensuChoose2:seat(两个独立决策点)', function(){
-    if(BOT_PHASE_ACTOR.shensuChoose1 !== 'seat') throw new Error('shensuChoose1应为seat,实际 ' + BOT_PHASE_ACTOR.shensuChoose1);
-    if(BOT_PHASE_ACTOR.shensuChoose2 !== 'seat') throw new Error('shensuChoose2应为seat,实际 ' + BOT_PHASE_ACTOR.shensuChoose2);
+    if(stageActorField('shensuChoose1') !== 'seat') throw new Error('shensuChoose1应为seat,实际 ' + stageActorField('shensuChoose1'));
+    if(stageActorField('shensuChoose2') !== 'seat') throw new Error('shensuChoose2应为seat,实际 ' + stageActorField('shensuChoose2'));
   });
   await check('shensuChoose1:无密钥模式下机器人保守默认不发动(skipShensu1)', async function(){
     window.__skipShensu1Calls = 0;
@@ -247,7 +247,7 @@ const testCode = String.raw`
 
   // ================= 张郃【巧变】回合开始(qiaobianTurnStart) =================
   await check('BOT_PHASE_ACTOR 已登记 qiaobianTurnStart:seat', function(){
-    if(BOT_PHASE_ACTOR.qiaobianTurnStart !== 'seat') throw new Error('应为seat,实际 ' + BOT_PHASE_ACTOR.qiaobianTurnStart);
+    if(stageActorField('qiaobianTurnStart') !== 'seat') throw new Error('应为seat,实际 ' + stageActorField('qiaobianTurnStart'));
   });
   await check('qiaobianTurnStart:无密钥模式下机器人保守默认不发动(qiaobianDecline)', async function(){
     window.__qiaobianDeclineCalls = 0;

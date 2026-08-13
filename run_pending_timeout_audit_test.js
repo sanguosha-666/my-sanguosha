@@ -3,16 +3,17 @@ const vm=require('vm');
 const assert=require('assert');
 
 const game=fs.readFileSync('game.js','utf8');
+const data=fs.readFileSync('data.js','utf8');
 const bus=fs.readFileSync('bot-ai-bus.js','utf8');
 const bot=fs.readFileSync('bot.js','utf8');
-const setBlock=game.match(/const RESPONSE_PENDING_TYPES = new Set\(\[[\s\S]*?\n\]\);/);
+const timeoutBlock=bus.match(/function registerStageTimeoutAction\([\s\S]*?\nfunction autoRespondAction\(g\)\{[\s\S]*?\n\}/);
 const actionBlock=bus.match(/function autoRespondAction\(g\)\{[\s\S]*?\n\s*return null;\n\}/);
-const actorBlock=bot.match(/const BOT_PHASE_ACTOR = \{[\s\S]*?\n\};/);
+const stageBlock=data.match(/const STAGE_TABLE = Object\.create\(null\);[\s\S]*?\}\)\.forEach\(\(\[type,actor\]\)=>registerStage\(type,\{actor\}\)\);/);
 const responderBlock=game.match(/function pendingResponderSeat\(g, pending\)\{[\s\S]*?\n\}/);
 const canAbandonBlock=bus.match(/function canDefaultAbandonPending\(g\)\{[\s\S]*?\n\}/);
-assert(setBlock&&actionBlock&&actorBlock&&responderBlock&&canAbandonBlock,'应能定位超时托管核心定义');
+assert(timeoutBlock&&actionBlock&&stageBlock&&responderBlock&&canAbandonBlock,'应能定位超时托管核心定义');
 const ctx=vm.createContext({Math,Number});
-vm.runInContext(`${setBlock[0]}\n${actorBlock[0]}\n${responderBlock[0]}\n${canAbandonBlock[0]}\n${actionBlock[0]}`,ctx);
+vm.runInContext(`${stageBlock[0]}\n${responderBlock[0]}\n${canAbandonBlock[0]}\n${timeoutBlock[0]}`,ctx);
 const read=expr=>vm.runInContext(expr,ctx);
 
 const expected=[
@@ -34,10 +35,11 @@ for(const type of expected){
   assert.strictEqual(read(`typeof autoRespondAction({phase:${JSON.stringify(type==='chengxiangChoose'?'chengxiangAsk':type)},pending:{type:${JSON.stringify(type)},cards:[],players:[],candidates:[],targets:[],options:[],available:[],availableSlots:[],pool:[]}})`),'function',`${type} 应有保守动作`);
   if(type!=='wugu'){
     const phase=type==='chengxiangChoose'?'chengxiangAsk':type;
-    assert.strictEqual(read(`typeof BOT_PHASE_ACTOR[${JSON.stringify(phase)}]`),'string',`${type} 应能解析行动座位`);
+    assert.strictEqual(read(`typeof stageActorField(${JSON.stringify(phase)})`),'string',`${type} 应能解析行动座位`);
   }
 }
 assert(!game.includes("RESPONSE_PENDING_TYPES.has(result.pending.type)"),'tx 新 pending 补戳不得依赖 type 白名单');
+assert(!game.includes('const RESPONSE_PENDING_TYPES'),'不得保留平行的超时阶段白名单');
 assert(game.includes('isTimedResponsePending(result,result.pending)'),'tx 写回前应按通用响应者字段补 askedAt');
 assert(game.includes('actingSeat===responderAtStart'),'只有当前响应者操作才重置 askedAt');
 assert.strictEqual(read("pendingResponderSeat({phase:'futureSkill'},{type:'futureSkill',seat:2})"),2,'新增 pending 应零登记识别 seat');

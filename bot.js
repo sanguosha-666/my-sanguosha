@@ -24,263 +24,6 @@ function isBotController(g){
 // 只会退化成"不行动"(=修复前的行为),绝不会让错误的机器人替别人行动。
 // 新增技能/阶段时:在 runBotDecision 里加分支,就要在这里补一条,否则该阶段会掉进下面的
 // 未覆盖兜底(能走,但不如查表精确)。
-const BOT_PHASE_ACTOR = {
-  huashenPick:'seat', guanxingReview:'seat', xunxunPick:'seat',
-  guhuoTarget:'sourceSeat', quhuDamageChoice:'seat',
-  respond:'to', aoeResp:'to', huogongReveal:'to',
-  duel:'active',
-  dying:'asking', wuxie:'asking', guicai:'asking',
-  tieqi:'from', liegong:'from', huogong:'from', pick:'from', qilin:'from',
-  hanbing:'from', mengjin:'from', shaOffsetChoice:'from',
-  duanbingChoose:'sourceSeat', ganglieChoice:'sourceSeat',
-  fanjianSuit:'targetSeat', quhuRespond:'targetSeat', tianyiRespond:'targetSeat',
-  enyuanChoose:'damagerSeat', enyuanChooseOption:'damagerSeat', enyuanGiveCard:'damagerSeat',
-  jiedaoChoice:'seatA',
-  // 新增(机器人兜底词汇盲区修复,问题3+4):这几个phase的按钮文案("获得"/"不获得"、
-  // "不再发动"、"更改【化身】"/"不更改"、"质疑"/"不质疑"、"移动到XX"/"不移动")没有一个被
-  // botSafePrompt 的正则(/不发动|不使用|不出|取消|跳过|放弃|结束/ 和 /选择|交给|弃置|摸牌|
-  // 回复|打出/)覆盖到,兜底探测不出可点按钮,必然卡死。这里不是简单扩充正则(那治标不治本,
-  // 且 guhuoQuestion 本身是有策略含义的判断题,随便点安全按钮=瞎选而不是决策),而是照
-  // huashenPick/guanxingReview 等既有先例补专门决策分支——补分支就必须同时在这张表里登记,
-  // 否则 botSeatForState 会继续把这些phase当"未覆盖阶段"扔给 botFallbackSeats+
-  // botSafePrompt(=修复前的broken路径),新分支永远不会被调用到。
-  luoyingAsk:'seat', luoshen:'seat',
-  huashenChangeAskStart:'seat', huashenChangeAskEnd:'seat',
-  guhuoQuestion:'asking', qiaobianMove:'seat',
-  // 【真实bug修复】郭嘉【遗计】是否发动这第一问(yijiAsk):行动者是 pending.seat 本人
-  // (服务端 respondYijiAsk 守卫 g.pending.seat!==mySeat)。此前只登记了第二步的
-  // yijiAssign(分配看到的两张牌),这一步完全没有登记过——botSeatForState 解析不出
-  // 行动者,请求掉进 botFallbackSeats+botSafePrompt 兜底,而"不发动"按钮的文案精确命中
-  // botSafePrompt 的安全正则(/不发动|.../),于是每次都被无条件点掉"不发动",机器人
-  // 因此永远不会主动发动遗计(第二步的分配逻辑接线再完整也用不上,因为永远走不到那一步)。
-  yijiAsk:'seat',
-  // 【G4】遗计分配:行动者是 pending.seat 本人,补登记后 botSeatForState 才能解析出
-  // 行动者走 runBotDecision 专用分支;不登记会掉进 botFallbackSeats+botSafePrompt
-  // (按钮文案"给 自己/给 玩家X"不命中任一正则 → 只告警不动作,机器人遗计必然卡死)。
-  yijiAssign:'seat',
-  // 【G5】礼让发动:行动者是 pending.from(孔融本人,服务端 respondLiRang 守卫
-  // g.pending.from!==mySeat)。补登记后 botSeatForState 才能解析出行动者走 runBotDecision
-  // 专用分支;不登记会掉进 botFallbackSeats+botSafePrompt(改动前即如此,靠安全正则点
-  // "不发动"按钮收尾,见 BOT_DECISIONS.lirangAsk 上方注释)。
-  lirangAsk:'from',
-  // 【A类修复,机器人技能覆盖审计】这四个此前只靠L1 controlsChoice(且不在
-  // CONTROLS_CHOICE_ALLOWLIST里,无密钥时L1直接放弃)接管,没有专属分支——落到最终
-  // botSafePrompt兜底时,四个按钮文案("不发动"/"不获得")都命中safe正则,机器人因此
-  // 永远不会主动发动,和郭嘉遗计是同一类"机器人技能形同虚设"问题(只是不卡死)。actor
-  // 字段登记早就存在,这次补的是专属决策分支,见下方runBotDecision对应注释。
-  liuli:'to', tianxiang:'seat', lirangRecover:'from', zhengyi:'asking',
-  // 【A1】骁果:行动者是 pending.asking(乐进,服务端 respondXiaoguo 守卫
-  // g.pending.asking!==mySeat)。登记后 botSeatForState 才能解析出行动者走 runBotDecision
-  // 专用分支(botDecide('xiaoguo'));不登记会掉进 botFallbackSeats+botSafePrompt。
-  xiaoguo:'asking',
-  // 【A1】骁果询问目标的二选一(弃装备/受伤害):行动者是 pending.to(服务端
-  // respondXiaoguoChoice 守卫 g.pending.to!==mySeat)。登记后 L1(有密钥)才能解析出
-  // 行动者镜像"弃置X【装备】/受到1点伤害"按钮;不登记 botSeatForState -1,L1 够不到。
-  xiaoguoChoice:'to',
-  // 【B2a】主公技求助(激将/护驾):行动者是 pending.asking(被求助者,服务端
-  // respondLordAskCore 守卫 g.pending.asking!==mySeat)。登记后 botSeatForState 才能
-  // 解析出行动者走 runBotDecision 专用分支(botDecide('jijiangAsk'/'hujiaAsk'));
-  // 不登记会掉进 botFallbackSeats+botSafePrompt(按钮文案"替主公打出【X】/不出"不命中
-  // 任一正则 → 只告警不动作,机器人求助必然卡死)。
-  jijiangAsk:'asking', hujiaAsk:'asking',
-  // 【B2b】制霸拼点:行动者是 pending.lordSeat(被请求的主公)。
-  // runBotDecision 专用分支(botDecide('zhibaAsk'))。
-  zhibaAsk:'lordSeat', zhibaGain:'lordSeat',
-  yinghunTarget:'seat', yinghunChoice:'seat', yinghunDiscard:'targetSeat',
-  // 【调度盲区收尾】蔡文姬【悲歌】三段(是否发动/选弃置的牌/进行判定),行动者始终是
-  // pending.sourceSeat(悲歌发动者本人,服务端 triggerBeige/beigeDiscard/doBeigeJudge
-  // 三个函数守卫都是 pending.sourceSeat!==mySeat)。此前三个 phase 都不在这张表里,
-  // botSeatForState 恒返回 -1,调度请求走 botFallbackSeats+botSafePrompt 兜底——
-  // 兜底能点掉"不发动"（安全正则命中），但即便配置了AI密钥也永远碰不到 runBotDecision，
-  // 更碰不到 L1 的 AI 判断入口(真实dump用mock callAI验证过:决策请求根本没有转发到
-  // runBotDecision，callAI 从未被调用)。登记后 BOT_DECISIONS.beigeChoose 才能被
-  // botDecide 调用到，无密钥回退＝不发动(与改动前逐字一致)，有密钥时才能真正问AI。
-  beigeChoose:'sourceSeat', beigeDiscard:'sourceSeat', beigeJudge:'sourceSeat',
-  // 【调度盲区收尾】贾诩【乱武】:行动者是 pending.currentSeat(被依次询问的角色本人,
-  // 服务端 chooseLuanwuOption 守卫 g.pending.currentSeat!==mySeat)。同上，此前不在表里，
-  // 机器人永远只能被 botSafePrompt 兜底，而兜底的正则够不到"对X使用【杀】"/"失去1点体力"
-  // 这两个自定义文案按钮——两个按钮同时存在时(可以出杀的情况)botSafePrompt 连"只有一个
-  // 按钮就点它"这条最后兜底都用不上，真正点不到任何按钮、卡死；只有不能出杀只剩一个按钮
-  // 时才侥幸能靠"唯一按钮"兜底走通。登记后这条彻底走 runBotDecision 专用分支，不再依赖
-  // 这种侥幸。
-  luanwuChoose:'currentSeat',
-  // 【调度盲区收尾】凌统【旋风】:行动者是 pending.from(旋风发动者本人，服务端
-  // pickXuanfengTarget/pickXuanfengCard/finishXuanfengSelection/cancelXuanfeng 四个函数
-  // 守卫都是 pending.from!==mySeat)。BOT_SEAT_PICKS.xuanfeng(本文件更下方，seatPick
-  // 协议里"旋风目标"这一项)其实早就写好了 match/buildSeatCandidates/fallbackSeat/execute
-  // 四件套、且已经在 runBotDecision 里接了线(g.phase==='xuanfengPick'&&...stage==='selecting'
-  // 分支)——但这条接线全程都是死代码，因为 xuanfengPick 没登记进这张表，调度请求根本
-  // 到不了 runBotDecision。登记后这套已经写好的 AI 接入立刻生效，不需要再补新代码。
-  xuanfengPick:'from',
-  // 【系统性扫描发现的紧急盲区】祝融【烈刃】拼点响应:行动者是 pending.targetSeat(被拼点
-  // 的目标本人,服务端 respondLieRen 守卫 g.pending.targetSeat!==mySeat)。真实dump确认过
-  // 这个不只是"没有智能判断"——目标手牌数>1时,按钮文案是"【牌名】♠5"这种纯牌面拼接,不
-  // 命中 botSafePrompt 任何正则、也没有取消选项,6轮驱动状态完全不变,真正永久卡死。
-  lieRenRespond:'targetSeat',
-  // 【系统性扫描发现的紧急盲区】典韦【强袭】选目标:行动者是 pending.seat(强袭发动者本人,
-  // 服务端 pickQiangxiTarget 守卫 g.pending.seat!==mySeat)。按钮文案就是目标的纯姓名(代码
-  // 里明确注释"消耗支付后不可取消,因此不提供取消按钮"),候选≥2个时同样不命中任何正则,
-  // 真实dump确认过真正永久卡死。
-  qiangxiPickTarget:'seat',
-  // 【渲染层bug修复顺带补上,和luanjiChoose/luanjiConfirm同一批】典韦【强袭】前两段:
-  // qiangxiChooseCost/qiangxiChooseWeaponFromHand 行动者都是 pending.seat(典韦本人,
-  // 自主发动、机器人目前没有入口主动调用startQiangxi——防御性收录)。qiangxiPickTarget
-  // 早就注册过(系统性扫描紧急排查那批),这次只补前两段。
-  qiangxiChooseCost:'seat', qiangxiChooseWeaponFromHand:'seat',
-  // 【第二批-第1组,每回合结束都可能触发,优先级最高】徐庶【举荐】三段:jujianPickCard/
-  // jujianPickTarget 的行动者是 pending.sourceSeat(徐庶本人,服务端 respondJujianPickCard/
-  // respondJujianPickTarget/cancelJujian 守卫都是 g.pending.sourceSeat!==mySeat);
-  // jujianChooseEffect 的行动者是 pending.targetSeat(被举荐的目标,可能是另一个人,服务端
-  // respondJujianEffect 守卫 g.pending.targetSeat!==mySeat)——三段行动者不是同一个字段,
-  // 不能只登记一次。这三个 phase 都有"取消"按钮能命中 botSafePrompt 安全正则(不卡死),
-  // 只是缺乏真正判断(永远"不发动"/永远随机点)，属于第二批"有兜底但不智能"批量修复项。
-  jujianPickCard:'sourceSeat', jujianPickTarget:'sourceSeat', jujianChooseEffect:'targetSeat',
-  // 【第二批-第1组】曹仁【据守】:行动者是 pending.seat(曹仁本人,服务端 confirmJushou/
-  // cancelJushou 守卫都是 pending.seat!==mySeat)。有"取消"按钮能命中安全正则,不卡死，
-  // 同上属于"有兜底但不智能"。
-  jushouChoose:'seat',
-  // 【第二批-第2组,装备类4个,同一套结构】雌雄双股剑:cixiongAsk 的行动者是 pending.from
-  // (装备者/攻击者本人,服务端 respondCixiongAsk 守卫 g.pending.from!==mySeat);
-  // cixiongChoice 的行动者是 pending.to(被指定的异性目标,服务端 respondCixiongChoice
-  // 守卫 g.pending.to!==mySeat)——和举荐一样，前后两段行动者字段不同。
-  cixiongAsk:'from', cixiongChoice:'to',
-  // 贯石斧:行动者是 pending.from(装备者/攻击者本人,服务端 respondGuanshi 守卫
-  // g.pending.from!==mySeat)。
-  guanshi:'from',
-  // 寒冰剑:是否发动这一问的行动者是 pending.from(装备者/攻击者本人,服务端
-  // respondHanbingAsk 守卫 g.pending.from!==mySeat)。发动后进入的弃牌子阶段
-  // (pending.type==='hanbing')已经登记过(见上方 hanbing:'from')，这里补的是"是否发动"
-  // 这第一问。
-  hanbingAsk:'from',
-  // 青龙偃月刀:行动者是 pending.from(装备者/攻击者本人,服务端 respondQinglong 守卫
-  // g.pending.from!==mySeat)。
-  qinglong:'from',
-  // 【第二批-第3组】颜良文丑【双雄】:摸牌阶段开始"是否发动"询问,行动者是 pending.seat
-  // (双雄拥有者本人,服务端 respondShuangxiong 守卫 g.pending.seat!==mySeat)。
-  shuangxiongAsk:'seat',
-  // 【第二批-第3组】张角【雷击】:leijiChoose(是否发动+选目标)/leijiJudge(进行判定的
-  // 确认点击)行动者都是 pending.sourceSeat(张角本人,服务端 triggerLeiji/cancelLeiji/
-  // doLeijiJudge 对 leijiChoose 的守卫是 sourceSeat!==mySeat；leijiJudge 本身函数体没有
-  // seat校验，但渲染层用 sourceSeat===mySeat 把关，行动者语义一致)。
-  leijiChoose:'sourceSeat', leijiJudge:'sourceSeat',
-  // 【第二批-剩余清单批量处理】鲁肃【好施】:行动者是 pending.seat(好施拥有者本人,
-  // 服务端 respondHaoshi 守卫隐含在 pending.seat 上——只有平手多候选时才会开这个 pending)。
-  haoshiPick:'seat',
-  // 姜维【挑衅】发起者选弃哪张牌:行动者是 pending.from(挑衅发起者,服务端
-  // pickTiaoxinDiscard 守卫 from!==mySeat)。目前机器人从不主动发起挑衅(无入口),这条
-  // registration 是防御性收录,万一以后接了入口不会掉进盲区。
-  tiaoxinDiscard:'from',
-  // 貂蝉【闭月】:行动者是 pending.seat(服务端 respondBiyue 守卫 seat!==mySeat)。
-  biyue:'seat',
-  // 周泰【不屈】:行动者是 pending.seat(服务端 respondBuqu 守卫 seat!==mySeat)。
-  buquAsk:'seat',
-  // 曹冲【仁心】:行动者是 pending.seat(保护者本人,服务端 chooseRenxinEquip/cancelRenxin
-  // 守卫 seat!==mySeat——注意不是被保护的目标 pending.target)。
-  renxinChoose:'seat',
-  // 曹冲【称象】:行动者是 pending.seat(曹冲本人)。注意 confirmChengxiangAsk 把
-  // pending.type 从'chengxiangAsk'切到'chengxiangChoose'时,从来没有同步改g.phase——
-  // g.phase 全程停留在'chengxiangAsk'不变(渲染层 renderCaochong 本来就只按
-  // pending.type分派,不看phase),所以这里只登记一次'chengxiangAsk',不需要也不能
-  // 登记'chengxiangChoose'(那个key在botSeatForState里永远查不到,登记了也是死代码)。
-  chengxiangAsk:'seat',
-  // 许褚【裸衣】:行动者是 pending.seat(服务端 respondLuoyi 守卫 seat!==mySeat)。
-  luoyiAsk:'seat',
-  // 荀彧【节命】:行动者是 pending.seat(服务端 respondJieming 守卫 seat!==mySeat)。
-  jiemingAsk:'seat',
-  // 左慈【新生】:行动者是 pending.seat(服务端 respondXinshengAsk 守卫 seat!==mySeat)。
-  xinshengAsk:'seat',
-  // 曹植【酒诗】翻面询问(受伤且背面朝上时):行动者是 pending.seat(服务端
-  // respondJiushiFlip 守卫 seat!==mySeat)。
-  jiushiFlipAsk:'seat',
-  // 陆逊【连营】:行动者是 pending.seat(服务端 respondLianying 守卫 seat!==mySeat)。
-  lianyingAsk:'seat',
-  // 陈宫【明策】四段:mingcePickCard/mingcePickTarget/mingcePickTarget2 的行动者都是
-  // pending.sourceSeat(陈宫本人,自主发动、机器人目前没有入口主动调用startMingce——
-  // 这三段是防御性收录);mingceChoice 的行动者是 pending.targetSeat(接收牌的那个人,
-  // 可能是另一个人的机器人,真实可达)。
-  mingcePickCard:'sourceSeat', mingcePickTarget:'sourceSeat', mingcePickTarget2:'sourceSeat',
-  mingceChoice:'targetSeat',
-  // 【Part2补全】太史慈【天义】前两段(选拼点牌/选目标):行动者是 pending.seat(天义
-  // 发动者本人,服务端 pickTianyiCard/pickTianyiTarget 守卫 pending.seat!==mySeat)。
-  // 拼点响应段 tianyiRespond(目标本人)早就注册过(见上方 targetSeat 那一组)。
-  tianyiPickCard:'seat', tianyiPickTarget:'seat',
-  // 【Part2补全】丁奉【奋迅】两段:行动者是 pending.seat(奋迅发动者本人,服务端
-  // pickFenxunDiscard/pickFenxunTarget 守卫 pending.seat!==mySeat)。
-  fenxunDiscard:'seat', fenxunTarget:'seat',
-  // 公孙瓒【趫猛】:qiaomengChoose/qiaomengPickEquip 行动者都是 pending.sourceSeat
-  // (公孙瓒本人,被动触发——黑色杀命中且目标有装备,真实可达)。
-  qiaomengChoose:'sourceSeat', qiaomengPickEquip:'sourceSeat',
-  // 李典【忘隙】:行动者是 pending.seat(服务端 respondWangxi 守卫 seat!==mySeat)。
-  wangxiAsk:'seat',
-  // 【系统性扫描发现的遗漏,和郭嘉遗计yijiAsk同一批】夏侯惇【刚烈】是否发动这第一问:
-  // 行动者是 pending.seat(服务端 respondGanglieAsk 守卫 g.pending.seat!==mySeat)。此前
-  // 完全没有登记过,机器人永远被botSafePrompt兜底点掉"不发动"按钮。
-  ganglieAsk:'seat',
-  // 【系统性扫描发现的遗漏】张角【鬼道】是否发动:行动者是 pending.sourceSeat(被依次询问
-  // 的候选人本人,服务端 triggerGuidu/cancelGuidu 守卫 g.pending.sourceSeat!==mySeat)。
-  guiduAsk:'sourceSeat',
-  // 【系统性扫描发现的遗漏】曹彰【将驰】摸牌阶段三选一:行动者是 pending.seat(曹彰本人,
-  // 服务端 respondJiangchi 守卫 g.pending.seat!==mySeat)。
-  jiangchiAsk:'seat',
-  // 【B类修复,机器人技能覆盖审计】姜维【志继】觉醒选择:行动者是 pending.seat(姜维本人,
-  // 服务端 respondZhijiChoice 守卫 g.pending.seat!==mySeat)。此前完全没有登记,且两个
-  // 按钮("回复1点体力"/"摸两张牌")都不命中botSafePrompt任何安全正则、又恒为两个按钮
-  // 同时存在(不是"唯一按钮"的侥幸边界)——姜维体力上限降到阈值后这是强制触发的觉醒,
-  // 不是可选发动,机器人玩姜维、条件一满足就100%卡死,审计标为B类最高优先级。
-  zhijiChoice:'seat',
-  // 【B类修复,机器人技能覆盖审计】姜维【挑衅】目标二选一:行动者是 pending.to(被挑衅的
-  // 目标本人,服务端 respondTiaoxinChoice 守卫 g.pending.to!==mySeat)。注意这和"是否
-  // 发动挑衅"这个前置决策(BOT_SEAT_PICKS.tiaoxin,发动方)是两个不同座位视角——发动方
-  // 早就接好了,被挑衅的目标如果是机器人,此前完全没有任何决策代码。目标有可用杀时会
-  // 渲染两个按钮("对其使用【杀】"/"被弃置一张牌"),都不命中安全正则,真卡死;目标没有
-  // 可用杀时只渲染"被弃置一张牌"一个按钮,能被botSafePrompt"唯一按钮"兜底侥幸点掉——
-  // 这次补上确定性分支后不再依赖这个侥幸。
-  tiaoxinChoice:'to',
-  // 【B类修复,机器人技能覆盖审计,标注"潜在"风险的收尾】法正【眩惑】四个子阶段:行动者
-  // 都是 pending.sourceSeat(法正本人,自主发动、服务端各自函数守卫都是
-  // g.pending.sourceSeat!==mySeat)。这四个子阶段目前不会被机器人真正触发到(发动入口
-  // startHuanhuo 本身没有任何机器人代码调用它,是此前"机器人主动技能解锁"任务里评估过的
-  // 保守决策,这次不改),但既然审计已经指出"以后如果入口被接上、子阶段没预先补上决策会
-  // 变成新的卡死点",这次一并把子阶段的决策补齐,不留隐患。
-  huanhuoPick:'sourceSeat', huanhuoPickCard:'sourceSeat',
-  huanhuoPickGotCard:'sourceSeat', huanhuoPickSecond:'sourceSeat',
-  // 【A类修复,机器人技能覆盖审计】祝融【烈刃】发动+选牌:行动者都是 pending.sourceSeat
-  // (祝融本人,服务端 triggerLieRen/pickLieRenCard/cancelLieRen 守卫都是
-  // g.pending.sourceSeat!==mySeat)。此前完全没有登记,落到botFallbackSeats+
-  // botSafePrompt,"不发动"命中safe正则,机器人从未主动拼点过。
-  lieRenChoose:'sourceSeat', lieRenPickCard:'sourceSeat',
-  // 【A类修复】夏侯渊【神速1】/【神速2】:是两个独立的决策点(分别在准备阶段判定/摸牌前、
-  // 摸牌阶段结束出牌前触发,各自有自己的限一次标志shensuUsed1/shensuUsed2),不是同一
-  // 决策的两个分支。行动者都是pending.seat(夏侯渊本人)。此前完全没有登记。
-  shensuChoose1:'seat', shensuChoose2:'seat',
-  // 【A类修复】张郃【巧变】回合开始询问:行动者是pending.seat(张郃本人,服务端
-  // qiaobianDecline等守卫g.pending.seat!==mySeat)。此前完全没有登记。注意这和已经
-  // 接线的qiaobianMove(出牌阶段中途版本)是同一技能的两个不同触发时机,分开处理。
-  qiaobianTurnStart:'seat',
-  // 华雄【耀武】:行动者是 pending.seat(造成伤害的那个人,服务端 respondYaowu 守卫
-  // seat!==mySeat)。
-  yaowu_choose:'seat',
-  // 夏侯渊【神速】"视为杀"选目标:行动者是 pending.seat(夏侯渊本人,自主发动、机器人
-  // 目前没有入口主动调用triggerShensu1/2——防御性收录)。
-  shensuSha:'seat',
-  // 马谡【制蛮】:zhimengAsk/zhimengPick 行动者都是 pending.from(马谡本人,被动触发——
-  // 马谡即将造成伤害时,真实可达)。
-  zhimengAsk:'from', zhimengPick:'from',
-  // 左慈"更改化身"第二步(选具体武将+技能):huashenChangePickStart/huashenChangePickEnd
-  // 行动者都是 pending.seat(左慈本人)。第一步(是否更改,huashenChangeAskStart/AskEnd)
-  // 早就注册过、无密钥默认"不更改"——这两个第二步只有配了AI密钥且AI选择"更改"才会真正
-  // 走到,此前一直未注册、属于"只在AI路径才会暴露"的潜在盲区,这次一并补上,防御性收录。
-  huashenChangePickStart:'seat', huashenChangePickEnd:'seat',
-  // 【渲染层bug修复顺带补上】袁绍【乱击】:luanjiChoose/luanjiConfirm 行动者都是
-  // pending.sourceSeat(袁绍本人,自主发动、机器人目前没有入口主动调用startLuanji——
-  // 防御性收录,和明策/神速等其它"自主发动类"技能同一类)。这两个phase此前从未在
-  // BOT_PHASE_ACTOR里出现过,是配合render-controls.js渲染层bug一起修的:渲染bug修好后
-  // 这两步对人类/机器人都变得可达,如果不补机器人分支,机器人反而会新出现"卡在这两步"
-  // 的风险(此前渲染都渲染不出来,机器人靠botSafePrompt兜底点不到任何东西但至少不会
-  // 被误判成"该我行动"——现在渲染修好,botSeatForState若查不到这两个key会走
-  // botFallbackSeats兜底,同样安全,但既然要修就一并补齐,不留新盲区)。
-  luanjiChoose:'sourceSeat', luanjiConfirm:'sourceSeat'
-};
 function botSeatForState(g){
   const d=g.pending||{};
   // 【AI托管】托管中的真人座位视同机器人:isBotSeat 覆盖为"托管座位即真"。
@@ -309,7 +52,7 @@ function botSeatForState(g){
     return isBotSeat(g.turn)?g.turn:-1;
   }
   // B. 其余已覆盖阶段:查表直取,不猜
-  const field=BOT_PHASE_ACTOR[g.phase];
+  const field=stageActorField(g.phase);
   if(field!==undefined){
     return isBotSeat(d[field])?d[field]:-1;
   }
@@ -320,7 +63,7 @@ function botSeatForState(g){
 // 上面 A/B 两段能解析出行动者的阶段集合。已知阶段就算解析结果是"该真人行动"(返回 -1),
 // 也不该再去兜底试点 —— 那是真人的回合,机器人不该插手,试点只会白白渲染+刷告警。
 const BOT_KNOWN_PHASES = new Set(
-  Object.keys(BOT_PHASE_ACTOR).concat(
+  Object.keys(STAGE_TABLE).filter(function(type){ return typeof STAGE_TABLE[type].actor==='string'; }).concat(
     ['wugu','pickingLordGeneral','pickingGeneral','draw','play','discard'])
 );
 // 未覆盖阶段的兜底候选:所有存活机器人。只在确实有人被询问(g.pending 非空)时才给,
@@ -3712,6 +3455,17 @@ function botSafePrompt(g,seat){
 // 多数分支都是 botInvoke(seat, fn) 后直接 return,fire-and-forget、没有等提交回调,要接入
 // "提交前后状态是否真的变化"需要给每个分支都补 onCommitted 参数,改动面较大,这次不做——
 // 留 TODO,以后要接的话优先从 seatPick/botTwoStepA 这类高频分支开始。
+Object.entries({
+  huashenPick:'huashenSkill', guanxingReview:'guanxing', yijiAssign:'yijiAssign',
+  lirangAsk:'lirangAsk', xiaoguo:'xiaoguo', jijiangAsk:'jijiangAsk', hujiaAsk:'hujiaAsk',
+  zhibaAsk:'zhibaAsk', aoeResp:'aoeResp', duel:'duel', dying:'dying', wugu:'wuguPick',
+  pick:'pickSlot', jiedaoChoice:'jiedaoResponse', guicai:'guicaiHandPick',
+  enyuanChooseOption:'enyuanOption', enyuanGiveCard:'enyuanGiveCard', ganglieChoice:'ganglieChoice',
+  beigeChoose:'beigeChoose', luanwuChoose:'luanwuChoice',
+  huashenChangeAskStart:'huashenChangeStart', huashenChangeAskEnd:'huashenChangeEnd',
+  guhuoQuestion:'guhuoQuestion', qiaobianMove:'qiaobianMove'
+}).forEach(function(entry){ registerStage(entry[0],{botDecision:entry[1]}); });
+
 async function runBotDecision(g,seat){
   const p=g.players[seat];
   if(!p||!p.alive&&g.phase!=='pickingGeneral') return;
@@ -3742,6 +3496,10 @@ async function runBotDecision(g,seat){
     }catch(e){ /* 防御:采集异常不影响决策主流程 */ }
   }
   const d=g.pending||{};
+  const stageSpec=STAGE_TABLE[g.phase];
+  if(stageSpec && typeof stageSpec.botDecision==='string'){
+    if(await botDecide(stageSpec.botDecision,g,seat)) return;
+  }
   if(g.phase==='pickingLordGeneral'){
     // 决策已进 BOT_DECISIONS.pickGeneral(无密钥回退=botPickGeneral 打分,与旧分支逐字
     // 一致,见注册表上方注释)。phase 守卫保留作双保险。

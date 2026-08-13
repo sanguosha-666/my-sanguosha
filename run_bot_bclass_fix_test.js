@@ -163,7 +163,7 @@ const testCode = String.raw`
 
   // ================= 姜维【志继】觉醒(zhijiChoice) =================
   await check('BOT_PHASE_ACTOR 已登记 zhijiChoice:seat', function(){
-    if(BOT_PHASE_ACTOR.zhijiChoice !== 'seat') throw new Error('应登记zhijiChoice:seat,实际 ' + BOT_PHASE_ACTOR.zhijiChoice);
+    if(stageActorField('zhijiChoice') !== 'seat') throw new Error('应登记zhijiChoice:seat,实际 ' + stageActorField('zhijiChoice'));
   });
 
   await check('zhijiChoice askedAt:准备阶段触发觉醒时应正确设置(30秒超时兜底才能生效)', function(){
@@ -208,7 +208,7 @@ const testCode = String.raw`
 
   // ================= 姜维【挑衅】目标二选一(tiaoxinChoice) =================
   await check('BOT_PHASE_ACTOR 已登记 tiaoxinChoice:to', function(){
-    if(BOT_PHASE_ACTOR.tiaoxinChoice !== 'to') throw new Error('应登记tiaoxinChoice:to,实际 ' + BOT_PHASE_ACTOR.tiaoxinChoice);
+    if(stageActorField('tiaoxinChoice') !== 'to') throw new Error('应登记tiaoxinChoice:to,实际 ' + stageActorField('tiaoxinChoice'));
   });
 
   await check('tiaoxinChoice askedAt:发动挑衅时应正确设置', function(){
@@ -288,7 +288,7 @@ const testCode = String.raw`
   // ================= 法正【眩惑】huanhuoPickGotCard(真正的无安全按钮子阶段) =================
   await check('BOT_PHASE_ACTOR 已登记 huanhuoPick/huanhuoPickCard/huanhuoPickGotCard/huanhuoPickSecond:sourceSeat', function(){
     ['huanhuoPick','huanhuoPickCard','huanhuoPickGotCard','huanhuoPickSecond'].forEach(function(k){
-      if(BOT_PHASE_ACTOR[k] !== 'sourceSeat') throw new Error(k + ' 应登记sourceSeat,实际 ' + BOT_PHASE_ACTOR[k]);
+      if(stageActorField(k) !== 'sourceSeat') throw new Error(k + ' 应登记sourceSeat,实际 ' + stageActorField(k));
     });
   });
 

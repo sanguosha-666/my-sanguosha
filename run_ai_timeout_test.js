@@ -471,7 +471,8 @@ const testCode = String.raw`
   botInvoke=function(seat,fn){fn();};
   for(var tc=0;tc<timeoutCases.length;tc++){
     var row=timeoutCases[tc], pending={type:row[0]}; pending[row[1]]=0;
-    if(!RESPONSE_PENDING_TYPES.has(row[0])) throw new Error(row[0]+' 未登记 RESPONSE_PENDING_TYPES');
+    if(!STAGE_TABLE[row[0]] || typeof STAGE_TABLE[row[0]].timeoutAction!=='function')
+      throw new Error(row[0]+' 未登记 STAGE_TABLE.timeoutAction');
     pending.askedAt=Date.now()-31000;
     var tg=mkG({phase:row[0],pending:pending});
     maybeAutoRespondTimeout(tg);

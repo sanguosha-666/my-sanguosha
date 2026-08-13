@@ -92,9 +92,11 @@ files.forEach(function(file){
 });
 try {
   const gameCode = fs.readFileSync('game.js', 'utf8');
+  const stageHelpersStart = gameCode.indexOf('function normalizeRegisteredStage(g){');
   const normalizeStart = gameCode.indexOf('function normalize(g){');
   const normalizeEnd = gameCode.indexOf('\nfunction logEvent(', normalizeStart);
-  if(normalizeStart < 0 || normalizeEnd < 0) throw new Error('无法定位 normalize');
+  if(stageHelpersStart < 0 || normalizeStart < 0 || normalizeEnd < 0) throw new Error('无法定位 normalize');
+  vm.runInContext(gameCode.slice(stageHelpersStart, normalizeStart), sandbox, { filename: 'game.js:stage-normalize' });
   vm.runInContext(gameCode.slice(normalizeStart, normalizeEnd), sandbox, { filename: 'game.js:normalize' });
   console.log('  OK game.js:normalize');
 } catch (e) {

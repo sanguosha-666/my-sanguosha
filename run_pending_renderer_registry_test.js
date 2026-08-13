@@ -2,8 +2,9 @@ const fs=require('fs');
 const vm=require('vm');
 const assert=require('assert');
 
+const stageSource=fs.readFileSync('data.js','utf8');
 const source=fs.readFileSync('render-controls.js','utf8');
-const table=source.match(/const PENDING_RENDERERS = \{[\s\S]*?\r?\n\};/);
+const table=source.match(/Object\.entries\(\{[\s\S]*?\r?\n\}\)\.forEach\(function\(entry\)\{ registerStage\(entry\[0\],entry\[1\]\); \}\);/);
 const dispatch=source.match(/function renderRegisteredPending\(g,c\)\{[\s\S]*?\r?\n\}/);
 const banner=source.match(/function waitAskBanner\(name, skill\)\{[\s\S]*?\r?\n\}/);
 const controlsStart=source.indexOf('function renderControls(g){');
@@ -31,7 +32,8 @@ const migrated=[
   'duanbingChoose'
 ];
 migrated.forEach(function(type){
-  assert(new RegExp('\\b'+type+'\\s*:\\s*\\{actor:').test(table[0]),type+' 应登记 actor');
+  assert(new RegExp(`\\b${type}\\s*:\\s*\\{[^}]*render:renderPending`).test(table[0]),type+' 应向统一表登记 render');
+  assert(new RegExp(`\\b${type}:\\s*['"]?[A-Za-z0-9_]+['"]?`).test(stageSource),type+' 应在统一表登记 actor');
   assert(!new RegExp("g\\.phase===['\"]"+type+"['\"]").test(controls[0]),type+' 旧 if 分支应已移除');
 });
 assert(banner[0].includes('等待其他玩家响应【'),'旁观提示应统一匿名');
@@ -39,7 +41,8 @@ assert(!banner[0].includes("escapeHtml(name"),'旁观提示不得再渲染响应
 
 let rendered=0;
 let shown='';
-const context={Number,mySeat:1,setBanner:function(text){shown=text;}};
+const stageTable={haoshiPick:{actor:'seat'}};
+const context={Number,mySeat:1,setBanner:function(text){shown=text;},STAGE_TABLE:stageTable,registerStage:function(type,spec){Object.assign(stageTable[type]||(stageTable[type]={}),spec);}};
 Array.from(table[0].matchAll(/render:(renderPending[A-Za-z0-9_]+)/g)).forEach(function(match){
   context[match[1]]=function(){rendered++;};
 });

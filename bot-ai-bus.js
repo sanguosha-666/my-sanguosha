@@ -439,16 +439,20 @@ function renderResponseCountdown(g){
 // autoRespondAction: 保守动作表(spec §2.2 逐条)。返回"该阶段超时该提交的动作闭包",
 // 非保守表阶段返回 null(只计时不自动提交)。闭包体内引用响应函数标识符是运行时查找,
 // 测试可直接把响应函数替换成 spy 验证"被调"。
-function autoRespondAction(g){
-  const phase = g.phase;
-  const type = (g.pending && g.pending.type) || '';
-  if(type==='wuxiePublicWait') return function(){ finishWuxiePublicWait(); };
-  if(phase==='respond') return function(){ respondShan(false); };               // 出闪:不出
-  if(phase==='aoeResp') return function(){ aoeRespond(false); };                // AOE:不出
-  if(phase==='duel') return function(){ duelResponse(false); };                 // 决斗:不出杀
-  if(phase==='dying') return function(){ respondDying(false); };                // 求桃:不救
-  if(type==='wuxie') return function(){ respondWuxie(false); };                 // 无懈:不出
-  if(type==='pick') return function(){                                          // 顺手/拆桥:固定选首个合法对象
+// 每个阶段的超时动作直接登记在统一 STAGE_TABLE；同一阶段保持旧 if 链的首个匹配语义。
+function registerStageTimeoutAction(types, factory){
+  (Array.isArray(types)?types:[types]).forEach(function(type){
+    const spec=STAGE_TABLE[type]||registerStage(type,{});
+    if(typeof spec.timeoutAction!=='function') registerStage(type,{timeoutAction:factory});
+  });
+}
+registerStageTimeoutAction("wuxiePublicWait", function(g){ return function(){ finishWuxiePublicWait(); }; });
+registerStageTimeoutAction("respond", function(g){ return function(){ respondShan(false); }; });
+registerStageTimeoutAction("aoeResp", function(g){ return function(){ aoeRespond(false); }; });
+registerStageTimeoutAction("duel", function(g){ return function(){ duelResponse(false); }; });
+registerStageTimeoutAction("dying", function(g){ return function(){ respondDying(false); }; });
+registerStageTimeoutAction("wuxie", function(g){ return function(){ respondWuxie(false); }; });
+registerStageTimeoutAction("pick", function(g){ return function(){                                          // 顺手/拆桥:固定选首个合法对象
     const target=g.players[g.pending.to];
     if(target&&(target.hand||[]).length) pickResolve('hand');
     else{
@@ -456,191 +460,151 @@ function autoRespondAction(g){
       if(slot) pickResolve(slot);
       else if(target&&(target.delays||[]).length) pickResolve('delay:0');
     }
-  };
-  if(type==='guicai') return function(){ respondGuicai(false); };               // 鬼才:不发动
-  if(type==='jiedaoChoice') return function(){ respondJiedao(false); };         // 借刀:弃武器
-  if(type==='ganglieChoice') return function(){ respondGanglieChoice('damage',[]); }; // 刚烈:受伤
-  if(type==='guhuoQuestion') return function(){ respondGuhuoQuestion(false); }; // 蛊惑:不质疑
-  if(type==='xiaoguo') return function(){ respondXiaoguo(false); };             // 骁果:不发动
-  if(type==='xiaoguoChoice') return function(){ respondXiaoguoChoice('damage'); }; // 骁果目标:受伤害
-  if(type==='lirangAsk') return function(){ respondLiRang(false,[]); };         // 礼让:不发动
-  if(type==='lirangRecover') return function(){ respondLiRangRecover(false); }; // 礼让回收:不获得
-  if(type==='zhengyi') return function(){ respondZhengyi(false); };             // 争义:不发动
-  if(type==='tianxiang') return function(){ respondTianxiang(null,null); };     // 天香:不发动
-  if(type==='liuli') return function(){ respondLiuli(null,null); };             // 流离:不发动
-  if(type==='quhuRespond') return function(){ respondQuhu(0); };                // 驱虎拼点:出第0张
-  if(type==='fanjianSuit') return function(){ respondFanjianSuit(SUITS[Math.floor(Math.random()*SUITS.length)]); }; // 反间:随机花色
-  if(type==='huogong') return function(){ respondHuogong(false); };             // 火攻:不弃牌
-  if(type==='huogongReveal') return function(){ respondHuogongReveal(0); };     // 火攻亮牌:亮第0张
-  if(type==='jijiangAsk') return function(){ respondJijiangAsk(false); };       // 激将求助:不出
-  if(type==='hujiaAsk') return function(){ respondHujiaAsk(false); };           // 护驾求助:不出
-  if(type==='zhibaAsk') return function(){ respondZhiba(0); };                  // 制霸拼点:出第0张
-  if(type==='zhibaGain') return function(){ respondZhibaGain(true); };          // 制霸:获得拼点牌
-  if(type==='yinghunTarget') return function(){ cancelYinghun(); };             // 英魂:不发动
-  if(type==='yinghunChoice') return function(){ respondYinghunChoice('drawX'); }; // 英魂:摸X弃1
-  if(type==='yinghunDiscard') return function(){ const p=g.players[g.pending.targetSeat],slot=EQUIP_SLOTS.find(function(s){return p.equips&&p.equips[s];}); discardYinghunCard((p.hand||[]).length?0:{kind:'equip',slot:slot}); }; // 英魂:优先弃手牌,否则弃装备
-  // 左慈【化身/新生】"是否更改化身"超时兜底(真实bug修复:这四个pending此前既没有登记
-  // 在这张白名单里,创建时也没有setResponseAskedAt补时间戳——两处都不改,30秒超时机制
-  // 对这四个phase形同虚设,机器人一旦在这四步没有正常响应就永久卡死,重试也救不回来。
-  // AskStart/AskEnd:直接提交"不更改",和respondHuashenChangeAskStart/End的参数语义
-  // 一致(activate=false)。
-  if(type==='huashenChangeAskStart') return function(){ respondHuashenChangeAskStart(false); };
-  if(type==='huashenChangeAskEnd') return function(){ respondHuashenChangeAskEnd(false); };
-  // PickStart/PickEnd:不能传null/undefined——respondHuashenChangePickStart/End内部用
-  // validateHuashenPick(me.huashenPool, generalId, skillName)校验,generalId必须在
-  // huashenPool里、skillName必须是HUASHEN_SKILL_TABLE[generalId]里真实存在的技能名,
-  // 传非法值会被守卫直接拒绝、pending原地不动、等于没修。这里镜像runBotDecision里
-  // 已有的huashenChangePickStart/PickEnd确定性分支同一条兜底规则:选huashenPool里第一个
-  // 技能表非空的武将+它的第一个技能条目,必然合法。
-  // 【真实bug修复,和bot.js里runBotDecision的同款分支同一处根因】generalId找不到时
-  // (huashenPool里没有任何一个在HUASHEN_SKILL_TABLE里有可用技能条目的武将)不能什么都
-  // 不做——那样这条30秒超时安全网本身也形同虚设,遇到同一个边界条件照样永久卡死。
-  // 回退到abandonHuashenChangePickStart/End(等价于respondHuashenChangeAskStart/End的
-  // activate=false分支,按"放弃这次更改"处理,推进到continueGuanxingCheck/
-  // continueBiyueCheck),不重新发明收尾逻辑。
-  if(type==='huashenChangePickStart') return function(){
+  }; });
+registerStageTimeoutAction("guicai", function(g){ return function(){ respondGuicai(false); }; });
+registerStageTimeoutAction("jiedaoChoice", function(g){ return function(){ respondJiedao(false); }; });
+registerStageTimeoutAction("ganglieChoice", function(g){ return function(){ respondGanglieChoice('damage',[]); }; });
+registerStageTimeoutAction("guhuoQuestion", function(g){ return function(){ respondGuhuoQuestion(false); }; });
+registerStageTimeoutAction("xiaoguo", function(g){ return function(){ respondXiaoguo(false); }; });
+registerStageTimeoutAction("xiaoguoChoice", function(g){ return function(){ respondXiaoguoChoice('damage'); }; });
+registerStageTimeoutAction("lirangAsk", function(g){ return function(){ respondLiRang(false,[]); }; });
+registerStageTimeoutAction("lirangRecover", function(g){ return function(){ respondLiRangRecover(false); }; });
+registerStageTimeoutAction("zhengyi", function(g){ return function(){ respondZhengyi(false); }; });
+registerStageTimeoutAction("tianxiang", function(g){ return function(){ respondTianxiang(null,null); }; });
+registerStageTimeoutAction("liuli", function(g){ return function(){ respondLiuli(null,null); }; });
+registerStageTimeoutAction("quhuRespond", function(g){ return function(){ respondQuhu(0); }; });
+registerStageTimeoutAction("fanjianSuit", function(g){ return function(){ respondFanjianSuit(SUITS[Math.floor(Math.random()*SUITS.length)]); }; });
+registerStageTimeoutAction("huogong", function(g){ return function(){ respondHuogong(false); }; });
+registerStageTimeoutAction("huogongReveal", function(g){ return function(){ respondHuogongReveal(0); }; });
+registerStageTimeoutAction("jijiangAsk", function(g){ return function(){ respondJijiangAsk(false); }; });
+registerStageTimeoutAction("hujiaAsk", function(g){ return function(){ respondHujiaAsk(false); }; });
+registerStageTimeoutAction("zhibaAsk", function(g){ return function(){ respondZhiba(0); }; });
+registerStageTimeoutAction("zhibaGain", function(g){ return function(){ respondZhibaGain(true); }; });
+registerStageTimeoutAction("yinghunTarget", function(g){ return function(){ cancelYinghun(); }; });
+registerStageTimeoutAction("yinghunChoice", function(g){ return function(){ respondYinghunChoice('drawX'); }; });
+registerStageTimeoutAction("yinghunDiscard", function(g){ return function(){ const p=g.players[g.pending.targetSeat],slot=EQUIP_SLOTS.find(function(s){return p.equips&&p.equips[s];}); discardYinghunCard((p.hand||[]).length?0:{kind:'equip',slot:slot}); }; });
+registerStageTimeoutAction("huashenChangeAskStart", function(g){ return function(){ respondHuashenChangeAskStart(false); }; });
+registerStageTimeoutAction("huashenChangeAskEnd", function(g){ return function(){ respondHuashenChangeAskEnd(false); }; });
+registerStageTimeoutAction("huashenChangePickStart", function(g){ return function(){
     const me = g.players[g.pending.seat];
     const generalId = me && (me.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
     if(!generalId){ abandonHuashenChangePickStart(); return; }
     const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
     respondHuashenChangePickStart(generalId, entry && entry.name);
-  };
-  if(type==='huashenChangePickEnd') return function(){
+  }; });
+registerStageTimeoutAction("huashenChangePickEnd", function(g){ return function(){
     const me = g.players[g.pending.seat];
     const generalId = me && (me.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
     if(!generalId){ abandonHuashenChangePickEnd(); return; }
     const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
     respondHuashenChangePickEnd(generalId, entry && entry.name);
-  };
-  // 【真实bug修复】郭嘉【遗计】是否发动这第一问:超时默认"不发动"(respondYijiAsk(false)),
-  // 和这批"询问型pending超时兜底"的既有基调一致(激将/护驾/制霸等亦是保守默认,不是照抄
-  // runBotDecision里"默认发动"这条正常决策路径——这里管的是"真人/机器人都没能在30秒内
-  // 响应"这种异常情况,统一走最保守的分支,不重新引入判断)。
-  if(type==='yijiAsk') return function(){ respondYijiAsk(false); };
-  // 【系统性扫描发现的遗漏,和yijiAsk同一批】夏侯惇【刚烈】/张角【鬼道】/曹彰【将驰】:
-  // 超时统一走各自最保守的"不发动"分支,和上面这批既有兜底同一基调。
-  if(type==='ganglieAsk') return function(){ respondGanglieAsk(false); };
-  if(type==='guiduAsk') return function(){ cancelGuidu(); };
-  if(type==='jiangchiAsk') return function(){ respondJiangchi('none'); };
-  // 【B类修复,机器人技能覆盖审计】超时兜底统一走各自最保守/最省判断的分支:
-  // 志继两个选项都是纯收益,固定回复体力(不用再判断局面);骁果二选一优先弃装备,没有
-  // 装备时受伤害;挑衅目标超时默认被弃牌(不主动出杀,和这批既有兜底同一保守基调);
-  // 眩惑四个子阶段固定选候选/手牌第一项,和明策的确定性兜底同一写法。
-  if(type==='zhijiChoice') return function(){ respondZhijiChoice(true); };
-  if(type==='xiaoguoChoice') return function(){
-    const target=g.players[g.pending.to];
-    const slot=target&&target.equips&&EQUIP_SLOTS.find(function(s){ return target.equips[s]; });
-    respondXiaoguoChoice(slot||'damage');
-  };
-  if(type==='tiaoxinChoice') return function(){ respondTiaoxinChoice(false); };
-  if(type==='huanhuoPick') return function(){
+  }; });
+registerStageTimeoutAction("yijiAsk", function(g){ return function(){ respondYijiAsk(false); }; });
+registerStageTimeoutAction("ganglieAsk", function(g){ return function(){ respondGanglieAsk(false); }; });
+registerStageTimeoutAction("guiduAsk", function(g){ return function(){ cancelGuidu(); }; });
+registerStageTimeoutAction("jiangchiAsk", function(g){ return function(){ respondJiangchi('none'); }; });
+registerStageTimeoutAction("zhijiChoice", function(g){ return function(){ respondZhijiChoice(true); }; });
+registerStageTimeoutAction("tiaoxinChoice", function(g){ return function(){ respondTiaoxinChoice(false); }; });
+registerStageTimeoutAction("huanhuoPick", function(g){ return function(){
     const target=(g.pending.candidates||[])[0];
     if(typeof target==='number') pickHuanhuoTarget(target); else cancelHuanhuo();
-  };
-  if(type==='huanhuoPickCard') return function(){
+  }; });
+registerStageTimeoutAction("huanhuoPickCard", function(g){ return function(){
     const me=g.players[g.pending.sourceSeat];
     const idx=(me&&me.hand||[]).findIndex(function(c){ return c&&c.suit==='♥'; });
     if(idx>=0) pickHuanhuoHeartCard(idx); else cancelHuanhuo();
-  };
-  if(type==='huanhuoPickGotCard') return function(){
+  }; });
+registerStageTimeoutAction("huanhuoPickGotCard", function(g){ return function(){
     const target=g.players[g.pending.targetSeat];
     const slot=target&&target.equips&&EQUIP_SLOTS.find(function(s){ return target.equips[s]; });
     if(slot) pickHuanhuoGotCard('equip',slot);
     else if(target&&(target.hand||[]).length>0) pickHuanhuoGotCard('hand',null);
-  };
-  if(type==='huanhuoPickSecond') return function(){
+  }; });
+registerStageTimeoutAction("huanhuoPickSecond", function(g){ return function(){
     const target=(g.pending.candidates||[])[0];
     if(typeof target==='number') pickHuanhuoSecondTarget(target);
-  };
-  // 【A类修复,机器人技能覆盖审计】超时兜底:liuli/tianxiang默认不转移(保守,和"没有明确
-  // 判断依据时不主动改变默认结果"一致);lirangRecover零代价纯收益,默认获得;zhengyi/
-  // shensuChoose1/shensuChoose2/qiaobianTurnStart都是有真实代价的选项,默认不发动;
-  // lieRenChoose拼点默认不发动(超时说明没人真的在决策,不主动开赌);lieRenPickCard
-  // 若已经进了这一步说明已经决定拼点,固定选手牌第0张收尾,不重新判断。
-  if(type==='liuli') return function(){ respondLiuli(null, null); };
-  if(type==='tianxiang') return function(){ respondTianxiang(null, null); };
-  if(type==='lirangRecover') return function(){ respondLiRangRecover(true); };
-  if(type==='zhengyi') return function(){ respondZhengyi(false); };
-  if(type==='lieRenChoose') return function(){ cancelLieRen(); };
-  if(type==='lieRenPickCard') return function(){
+  }; });
+registerStageTimeoutAction("lieRenChoose", function(g){ return function(){ cancelLieRen(); }; });
+registerStageTimeoutAction("lieRenPickCard", function(g){ return function(){
     const me=g.players[g.pending.sourceSeat];
     if(me && (me.hand||[]).length>0) pickLieRenCard(0);
     else cancelLieRen();
-  };
-  if(type==='shensuChoose1') return function(){ skipShensu1(); };
-  if(type==='shensuChoose2') return function(){ skipShensu2(); };
-  if(type==='qiaobianTurnStart') return function(){ qiaobianDecline(); };
-  // CORE-03：所有已知会阻塞真人操作的选择阶段保留经过验证的专用保守动作；新增阶段由
-  // 下方通用安全放弃接管，不再要求同步登记 type。
-  if(type==='duanbingChoose') return function(){ cancelDuanbing(); };
-  if(type==='mingcePickCard') return function(){ cancelMingce(); };
-  if(type==='qiaomengChoose') return function(){ cancelQiaomeng(); };
-  if(type==='lianyingAsk') return function(){ respondLianying(false); };
-  if(type==='tieqi') return function(){ respondTieqi(false); };
-  if(type==='liegong') return function(){ respondLiegong(false); };
-  if(type==='qiangxiChooseCost') return function(){ cancelQiangxi(); };
-  if(type==='qiangxiChooseWeaponFromHand') return function(){ cancelQiangxi(); };
-  if(type==='qiangxiPickTarget') return function(){
+  }; });
+registerStageTimeoutAction("shensuChoose1", function(g){ return function(){ skipShensu1(); }; });
+registerStageTimeoutAction("shensuChoose2", function(g){ return function(){ skipShensu2(); }; });
+registerStageTimeoutAction("qiaobianTurnStart", function(g){ return function(){ qiaobianDecline(); }; });
+registerStageTimeoutAction("duanbingChoose", function(g){ return function(){ cancelDuanbing(); }; });
+registerStageTimeoutAction("mingcePickCard", function(g){ return function(){ cancelMingce(); }; });
+registerStageTimeoutAction("qiaomengChoose", function(g){ return function(){ cancelQiaomeng(); }; });
+registerStageTimeoutAction("lianyingAsk", function(g){ return function(){ respondLianying(false); }; });
+registerStageTimeoutAction("tieqi", function(g){ return function(){ respondTieqi(false); }; });
+registerStageTimeoutAction("liegong", function(g){ return function(){ respondLiegong(false); }; });
+registerStageTimeoutAction("qiangxiChooseCost", function(g){ return function(){ cancelQiangxi(); }; });
+registerStageTimeoutAction("qiangxiChooseWeaponFromHand", function(g){ return function(){ cancelQiangxi(); }; });
+registerStageTimeoutAction("qiangxiPickTarget", function(g){ return function(){
     const target=(g.pending.candidates||[])[0];
     if(typeof target==='number') pickQiangxiTarget(target);
-  };
-  if(type==='luanjiChoose' || type==='luanjiConfirm') return function(){ cancelLuanji(); };
-  // CORE-43/50：此前漏出超时体系的人工选择阶段。可取消的技能统一不发动/取消；
-  // 已经支付代价或必须完成的流程选第一个合法项，确保动作一定能推进而不改变规则。
-  if(type==='haoshiPick') return function(){ const target=(g.pending.candidates||[])[0]; if(typeof target==='number') respondHaoshi(target); };
-  if(type==='leijiChoose') return function(){ cancelLeiji(); };
-  if(type==='leijiJudge') return function(){ doLeijiJudge(); };
-  if(type==='mengjin') return function(){ const choice=(g.pending.available||[])[0]; if(choice) mengjinPick(choice); };
-  if(type==='mingcePickTarget') return function(){ cancelMingce(); };
-  if(type==='mingcePickTarget2') return function(){ cancelMingce(); };
-  if(type==='mingceChoice') return function(){ chooseMingceOption('draw'); };
-  if(type==='qiaobianMove') return function(){ respondQiaobianMove(null); };
-  if(type==='enyuanChoose') return function(){ triggerEnyuan(); };
-  if(type==='jiushiFlipAsk') return function(){ respondJiushiFlip(false); };
-  if(type==='wangxiAsk') return function(){ respondWangxi(false); };
-  if(type==='buquAsk') return function(){ respondBuqu(true); };
-  if(type==='luanwuChoose') return function(){ chooseLuanwuOption('hp'); };
-  if(type==='wugu') return function(){ const d=g.pending,card=(d.pool||[])[0]; if(card) wuguPick(0,d.idx,card.id); };
-  if(type==='hanbingAsk') return function(){ respondHanbingAsk(false); };
-  if(type==='jujianPickCard') return function(){ cancelJujian(); };
-  if(type==='jushouChoose') return function(){ cancelJushou(); };
-  if(type==='shuangxiongAsk') return function(){ respondShuangxiong(false); };
-  if(type==='luoyiAsk') return function(){ respondLuoyi(false); };
-  if(type==='xunxunPick') return function(){ const d=g.pending,all=(d.cards||[]).map(function(_,i){return i;}),take=d.takeN||2; respondXunxun(all.slice(0,take),all.slice(take)); };
-  if(type==='luoshen') return function(){ respondLuoshen(false); };
-  if(type==='enyuanChooseOption') return function(){ chooseEnyuanOption('giveCard'); };
-  if(type==='enyuanGiveCard') return function(){ const p=g.players[g.pending.damagerSeat],idx=(p&&p.hand||[]).findIndex(function(c){return c&&c.suit==='♥';}); if(idx>=0) giveEnyuanCard(idx); };
-  if(type==='guhuoTarget') return function(){ cancelGuhuoTarget(); };
-  if(type==='guanxingReview') return function(){ const all=(g.pending.cards||[]).map(function(_,i){return i;}); respondGuanxing(all,[]); };
-  if(type==='quhuDamageChoice') return function(){ const target=(g.pending.targets||[])[0]; if(typeof target==='number') respondQuhuDamage(target); };
-  if(type==='tianyiRespond') return function(){ respondTianyi(0); };
-  if(type==='jiemingAsk') return function(){ respondJieming(null); };
-  if(type==='xinshengAsk') return function(){ respondXinshengAsk(false); };
-  if(type==='yijiAssign') return function(){ respondYijiAssign((g.pending.cards||[]).map(function(){return g.pending.seat;})); };
-  if(type==='tiaoxinDiscard') return function(){ const target=g.players[g.pending.to],opt=target&&tiaoxinDiscardOptions(target)[0]; if(opt) pickTiaoxinDiscard(opt.kind,opt.kind==='hand'?opt.idx:opt.slot); };
-  if(type==='qiaomengPickEquip') return function(){ const slot=(g.pending.availableSlots||[])[0]; if(slot) pickQiaomengEquip(slot); };
-  if(type==='lieRenRespond') return function(){ respondLieRen(0); };
-  if(type==='jujianPickTarget') return function(){ const target=(g.pending.candidates||[])[0]; if(typeof target==='number') respondJujianPickTarget(target); else cancelJujian(); };
-  if(type==='jujianChooseEffect') return function(){ respondJujianEffect('draw'); };
-  if(type==='luoyingAsk') return function(){ respondLuoying(false); };
-  if(type==='cixiongAsk') return function(){ respondCixiongAsk(false); };
-  if(type==='chengxiangAsk') return function(){ cancelChengxiangAsk(); };
-  if(type==='chengxiangChoose') return function(){ cancelChengxiang(); };
-  if(type==='renxinChoose') return function(){ cancelRenxin(); };
-  if(type==='xuanfengPick') return function(){ cancelXuanfeng(); };
-  if(type==='beigeChoose') return function(){ triggerBeige(false); };
-  if(type==='beigeDiscard') return function(){ const p=g.players[g.pending.sourceSeat],slot=p&&p.equips&&EQUIP_SLOTS.find(function(s){return p.equips[s];}); if(p&&(p.hand||[]).length) beigeDiscard(0,false,null); else if(slot) beigeDiscard(null,true,slot); };
-  if(type==='beigeJudge') return function(){ doBeigeJudge(); };
-  if(type==='tianyiPickCard' || type==='tianyiPickTarget') return function(){ cancelTianyi(); };
-  if(type==='zhimengAsk') return function(){ respondZhimeng(false); };
-  if(type==='zhimengPick') return function(){ const opt=(g.pending.options||[])[0]; if(opt) respondZhimengPick(opt.type,opt.index); };
-  if(type==='biyue') return function(){ respondBiyue(false); };
-  if(type==='yaowu_choose') return function(){ const p=g.players[g.pending.seat]; respondYaowu(p&&p.hp<p.maxHp?'recover':'draw'); };
-  if(type==='shensuSha') return function(){ cancelShensuSha(); };
-  if(type==='shaOffsetChoice') return function(){ respondShaOffsetChoice(null); };
-  if(type==='fenxunDiscard' || type==='fenxunTarget') return function(){ cancelFenxun(); };
-  // 新增询问型 pending 的零登记兜底。已有类型继续保留上面的专用动作，避免改变已经验证过的
-  // 强制选择/技能结算语义；未知类型只在能证明有安全恢复出口时才取消，绝不盲清 pending。
+  }; });
+registerStageTimeoutAction(["luanjiChoose","luanjiConfirm"], function(g){ return function(){ cancelLuanji(); }; });
+registerStageTimeoutAction("haoshiPick", function(g){ return function(){ const target=(g.pending.candidates||[])[0]; if(typeof target==='number') respondHaoshi(target); }; });
+registerStageTimeoutAction("leijiChoose", function(g){ return function(){ cancelLeiji(); }; });
+registerStageTimeoutAction("leijiJudge", function(g){ return function(){ doLeijiJudge(); }; });
+registerStageTimeoutAction("mengjin", function(g){ return function(){ const choice=(g.pending.available||[])[0]; if(choice) mengjinPick(choice); }; });
+registerStageTimeoutAction("mingcePickTarget", function(g){ return function(){ cancelMingce(); }; });
+registerStageTimeoutAction("mingcePickTarget2", function(g){ return function(){ cancelMingce(); }; });
+registerStageTimeoutAction("mingceChoice", function(g){ return function(){ chooseMingceOption('draw'); }; });
+registerStageTimeoutAction("qiaobianMove", function(g){ return function(){ respondQiaobianMove(null); }; });
+registerStageTimeoutAction("enyuanChoose", function(g){ return function(){ triggerEnyuan(); }; });
+registerStageTimeoutAction("jiushiFlipAsk", function(g){ return function(){ respondJiushiFlip(false); }; });
+registerStageTimeoutAction("wangxiAsk", function(g){ return function(){ respondWangxi(false); }; });
+registerStageTimeoutAction("buquAsk", function(g){ return function(){ respondBuqu(true); }; });
+registerStageTimeoutAction("luanwuChoose", function(g){ return function(){ chooseLuanwuOption('hp'); }; });
+registerStageTimeoutAction("wugu", function(g){ return function(){ const d=g.pending,card=(d.pool||[])[0]; if(card) wuguPick(0,d.idx,card.id); }; });
+registerStageTimeoutAction("hanbingAsk", function(g){ return function(){ respondHanbingAsk(false); }; });
+registerStageTimeoutAction("jujianPickCard", function(g){ return function(){ cancelJujian(); }; });
+registerStageTimeoutAction("jushouChoose", function(g){ return function(){ cancelJushou(); }; });
+registerStageTimeoutAction("shuangxiongAsk", function(g){ return function(){ respondShuangxiong(false); }; });
+registerStageTimeoutAction("luoyiAsk", function(g){ return function(){ respondLuoyi(false); }; });
+registerStageTimeoutAction("xunxunPick", function(g){ return function(){ const d=g.pending,all=(d.cards||[]).map(function(_,i){return i;}),take=d.takeN||2; respondXunxun(all.slice(0,take),all.slice(take)); }; });
+registerStageTimeoutAction("luoshen", function(g){ return function(){ respondLuoshen(false); }; });
+registerStageTimeoutAction("enyuanChooseOption", function(g){ return function(){ chooseEnyuanOption('giveCard'); }; });
+registerStageTimeoutAction("enyuanGiveCard", function(g){ return function(){ const p=g.players[g.pending.damagerSeat],idx=(p&&p.hand||[]).findIndex(function(c){return c&&c.suit==='♥';}); if(idx>=0) giveEnyuanCard(idx); }; });
+registerStageTimeoutAction("guhuoTarget", function(g){ return function(){ cancelGuhuoTarget(); }; });
+registerStageTimeoutAction("guanxingReview", function(g){ return function(){ const all=(g.pending.cards||[]).map(function(_,i){return i;}); respondGuanxing(all,[]); }; });
+registerStageTimeoutAction("quhuDamageChoice", function(g){ return function(){ const target=(g.pending.targets||[])[0]; if(typeof target==='number') respondQuhuDamage(target); }; });
+registerStageTimeoutAction("tianyiRespond", function(g){ return function(){ respondTianyi(0); }; });
+registerStageTimeoutAction("jiemingAsk", function(g){ return function(){ respondJieming(null); }; });
+registerStageTimeoutAction("xinshengAsk", function(g){ return function(){ respondXinshengAsk(false); }; });
+registerStageTimeoutAction("yijiAssign", function(g){ return function(){ respondYijiAssign((g.pending.cards||[]).map(function(){return g.pending.seat;})); }; });
+registerStageTimeoutAction("tiaoxinDiscard", function(g){ return function(){ const target=g.players[g.pending.to],opt=target&&tiaoxinDiscardOptions(target)[0]; if(opt) pickTiaoxinDiscard(opt.kind,opt.kind==='hand'?opt.idx:opt.slot); }; });
+registerStageTimeoutAction("qiaomengPickEquip", function(g){ return function(){ const slot=(g.pending.availableSlots||[])[0]; if(slot) pickQiaomengEquip(slot); }; });
+registerStageTimeoutAction("lieRenRespond", function(g){ return function(){ respondLieRen(0); }; });
+registerStageTimeoutAction("jujianPickTarget", function(g){ return function(){ const target=(g.pending.candidates||[])[0]; if(typeof target==='number') respondJujianPickTarget(target); else cancelJujian(); }; });
+registerStageTimeoutAction("jujianChooseEffect", function(g){ return function(){ respondJujianEffect('draw'); }; });
+registerStageTimeoutAction("luoyingAsk", function(g){ return function(){ respondLuoying(false); }; });
+registerStageTimeoutAction("cixiongAsk", function(g){ return function(){ respondCixiongAsk(false); }; });
+registerStageTimeoutAction("chengxiangAsk", function(g){ return function(){ cancelChengxiangAsk(); }; });
+registerStageTimeoutAction("chengxiangChoose", function(g){ return function(){ cancelChengxiang(); }; });
+registerStageTimeoutAction("renxinChoose", function(g){ return function(){ cancelRenxin(); }; });
+registerStageTimeoutAction("xuanfengPick", function(g){ return function(){ cancelXuanfeng(); }; });
+registerStageTimeoutAction("beigeChoose", function(g){ return function(){ triggerBeige(false); }; });
+registerStageTimeoutAction("beigeDiscard", function(g){ return function(){ const p=g.players[g.pending.sourceSeat],slot=p&&p.equips&&EQUIP_SLOTS.find(function(s){return p.equips[s];}); if(p&&(p.hand||[]).length) beigeDiscard(0,false,null); else if(slot) beigeDiscard(null,true,slot); }; });
+registerStageTimeoutAction("beigeJudge", function(g){ return function(){ doBeigeJudge(); }; });
+registerStageTimeoutAction(["tianyiPickCard","tianyiPickTarget"], function(g){ return function(){ cancelTianyi(); }; });
+registerStageTimeoutAction("zhimengAsk", function(g){ return function(){ respondZhimeng(false); }; });
+registerStageTimeoutAction("zhimengPick", function(g){ return function(){ const opt=(g.pending.options||[])[0]; if(opt) respondZhimengPick(opt.type,opt.index); }; });
+registerStageTimeoutAction("biyue", function(g){ return function(){ respondBiyue(false); }; });
+registerStageTimeoutAction("yaowu_choose", function(g){ return function(){ const p=g.players[g.pending.seat]; respondYaowu(p&&p.hp<p.maxHp?'recover':'draw'); }; });
+registerStageTimeoutAction("shensuSha", function(g){ return function(){ cancelShensuSha(); }; });
+registerStageTimeoutAction("shaOffsetChoice", function(g){ return function(){ respondShaOffsetChoice(null); }; });
+registerStageTimeoutAction(["fenxunDiscard","fenxunTarget"], function(g){ return function(){ cancelFenxun(); }; });
+function autoRespondAction(g){
+  const type=(g.pending&&g.pending.type)||'';
+  const typeSpec=STAGE_TABLE[type];
+  const phaseSpec=STAGE_TABLE[g.phase];
+  const factory=typeSpec&&typeof typeSpec.timeoutAction==='function' ? typeSpec.timeoutAction
+    : (phaseSpec&&typeof phaseSpec.timeoutAction==='function' ? phaseSpec.timeoutAction : null);
+  if(factory) return factory(g);
   if(canDefaultAbandonPending(g)) return function(){ defaultAbandonPending(g); };
   return null;
 }

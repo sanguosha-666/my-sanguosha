@@ -109,7 +109,7 @@ const testCode = String.raw`
 
   // ================= 郭嘉【遗计】yijiAsk =================
   await check('BOT_PHASE_ACTOR 已登记 yijiAsk:seat', function(){
-    if(BOT_PHASE_ACTOR.yijiAsk !== 'seat') throw new Error('应登记 yijiAsk:seat,实际 ' + BOT_PHASE_ACTOR.yijiAsk);
+    if(stageActorField('yijiAsk') !== 'seat') throw new Error('应登记 yijiAsk:seat,实际 ' + stageActorField('yijiAsk'));
   });
 
   await check('yijiAsk:无密钥模式下机器人应主动调用respondYijiAsk(true),推进到yijiAssign', async function(){
@@ -145,7 +145,7 @@ const testCode = String.raw`
 
   // ================= 系统性扫描发现的遗漏:夏侯惇【刚烈】ganglieAsk =================
   await check('BOT_PHASE_ACTOR 已登记 ganglieAsk:seat', function(){
-    if(BOT_PHASE_ACTOR.ganglieAsk !== 'seat') throw new Error('应登记 ganglieAsk:seat,实际 ' + BOT_PHASE_ACTOR.ganglieAsk);
+    if(stageActorField('ganglieAsk') !== 'seat') throw new Error('应登记 ganglieAsk:seat,实际 ' + stageActorField('ganglieAsk'));
   });
 
   await check('ganglieAsk:无密钥模式下机器人应主动发动(respondGanglieAsk(true))', async function(){
@@ -159,7 +159,7 @@ const testCode = String.raw`
 
   // ================= 系统性扫描发现的遗漏:张角【鬼道】guiduAsk =================
   await check('BOT_PHASE_ACTOR 已登记 guiduAsk:sourceSeat', function(){
-    if(BOT_PHASE_ACTOR.guiduAsk !== 'sourceSeat') throw new Error('应登记 guiduAsk:sourceSeat,实际 ' + BOT_PHASE_ACTOR.guiduAsk);
+    if(stageActorField('guiduAsk') !== 'sourceSeat') throw new Error('应登记 guiduAsk:sourceSeat,实际 ' + stageActorField('guiduAsk'));
   });
 
   await check('guiduAsk:无密钥模式下机器人保守默认不发动(cancelGuidu)', async function(){
@@ -173,7 +173,7 @@ const testCode = String.raw`
 
   // ================= 系统性扫描发现的遗漏:曹彰【将驰】jiangchiAsk =================
   await check('BOT_PHASE_ACTOR 已登记 jiangchiAsk:seat', function(){
-    if(BOT_PHASE_ACTOR.jiangchiAsk !== 'seat') throw new Error('应登记 jiangchiAsk:seat,实际 ' + BOT_PHASE_ACTOR.jiangchiAsk);
+    if(stageActorField('jiangchiAsk') !== 'seat') throw new Error('应登记 jiangchiAsk:seat,实际 ' + stageActorField('jiangchiAsk'));
   });
 
   await check('jiangchiAsk:无密钥模式下机器人保守默认不发动(respondJiangchi(none))', async function(){

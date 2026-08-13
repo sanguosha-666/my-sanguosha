@@ -1,6 +1,7 @@
 const fs=require('fs');
 const assert=require('assert');
 const game=fs.readFileSync('game.js','utf8');
+const data=fs.readFileSync('data.js','utf8');
 const ui=fs.readFileSync('render-controls.js','utf8');
 const timeout=fs.readFileSync('bot-ai-bus.js','utf8');
 
@@ -15,9 +16,10 @@ assert(game.includes("pending.availableTargets.includes(extraTarget)"));
 assert(game.includes("kind:'duanbing'"));
 assert(game.includes('function cancelDuanbing()'));
 assert(game.includes('resolveShaUse(g, me, baseTarget'));
-assert(/duanbingChoose:\s*\{actor:'sourceSeat',\s*skill:'短兵',\s*render:renderPendingDuanbingChoose\}/.test(ui));
+assert(/duanbingChoose:'sourceSeat'/.test(data));
+assert(/duanbingChoose:\s*\{skill:'短兵',\s*render:renderPendingDuanbingChoose\}/.test(ui));
 assert(ui.includes('function renderPendingDuanbingChoose(g,c)'));
 assert(ui.includes("b.onclick=()=>triggerDuanbing(seat)"));
 assert(ui.includes("cancel.onclick=cancelDuanbing"));
-assert(timeout.includes("type==='duanbingChoose'"));
-console.log('duanbing flow integrity tests: 16/16 passed');
+assert(timeout.includes('registerStageTimeoutAction("duanbingChoose"'));
+console.log('duanbing flow integrity tests: 17/17 passed');

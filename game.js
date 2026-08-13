@@ -29,36 +29,6 @@ document.getElementById('joinBtn').onclick = joinRoom;
 // A1 响应超时托管:询问型 pending 的超时阈值(30s)。检测器(bot-ai-bus.js)按它判定超时
 // 提交保守动作,render.js 按它显示"⏱ Ns 后自动…"倒计时。
 const RESPONSE_TIMEOUT_MS = 30000;
-// 已有询问型 pending 的兼容集合。老房间或结构不完整的既有状态仍可据此补 askedAt；新增
-// pending 不必登记，isTimedResponsePending 会按通用响应者字段自动识别。
-const RESPONSE_PENDING_TYPES = new Set([
-  'wuxie', 'guicai', 'jiedaoChoice', 'ganglieChoice', 'guhuoQuestion', 'xiaoguo',
-  'xiaoguoChoice', 'lirangAsk', 'lirangRecover', 'zhengyi', 'tianxiang', 'liuli',
-  'quhuRespond', 'fanjianSuit', 'huogong', 'huogongReveal', 'duel', 'aoeResp', 'dying', 'pick',
-  'jijiangAsk', 'hujiaAsk', 'zhibaAsk', 'zhibaGain', 'yinghunTarget', 'yinghunChoice', 'yinghunDiscard',
-  'duanbingChoose', 'mingcePickCard', 'qiaomengChoose', 'lianyingAsk', 'tieqi', 'liegong',
-  'qiangxiChooseCost', 'qiangxiChooseWeaponFromHand', 'qiangxiPickTarget',
-  'luanjiChoose', 'luanjiConfirm',
-  // CORE-43/50：全项目人工选择 pending 对账。这里登记后 normalize 和 tx 出口都会
-  // 自动补 askedAt；对应保守动作集中在 bot-ai-bus.js，避免创建点逐个漏接。
-  'haoshiPick', 'leijiChoose', 'leijiJudge', 'mengjin', 'mingcePickTarget', 'mingceChoice',
-  'qiaobianMove', 'enyuanChoose', 'jiushiFlipAsk', 'wangxiAsk', 'buquAsk', 'luanwuChoose', 'wugu',
-  'hanbingAsk', 'jujianPickCard', 'jushouChoose', 'shuangxiongAsk', 'luoyiAsk',
-  'xunxunPick', 'luoshen', 'enyuanChooseOption', 'enyuanGiveCard', 'guhuoTarget',
-  'guanxingReview', 'quhuDamageChoice', 'tianyiRespond', 'jiemingAsk', 'xinshengAsk',
-  'yijiAssign', 'tiaoxinDiscard', 'qiaomengPickEquip', 'lieRenRespond', 'jujianPickTarget',
-  'jujianChooseEffect', 'luoyingAsk', 'cixiongAsk', 'chengxiangAsk', 'chengxiangChoose',
-  'renxinChoose', 'xuanfengPick', 'beigeChoose', 'beigeDiscard', 'beigeJudge',
-  'tianyiPickCard', 'tianyiPickTarget', 'zhimengAsk', 'zhimengPick',
-  'biyue', 'yaowu_choose', 'shensuSha', 'fenxunDiscard', 'fenxunTarget',
-  // 这些阶段原本在创建点显式打戳且多数已有保守动作；也纳入统一集合，使老状态缺戳时
-  // normalize 能补齐，并让“所有人工 pending”对账真正收敛到单一清单。
-  'ganglieAsk', 'guiduAsk', 'huanhuoPick', 'huanhuoPickCard', 'huanhuoPickGotCard',
-  'huanhuoPickSecond', 'huashenChangeAskEnd', 'huashenChangeAskStart',
-  'huashenChangePickStart', 'huashenChangePickEnd', 'jiangchiAsk', 'lieRenChoose',
-  'lieRenPickCard', 'mingcePickTarget2', 'qiaobianTurnStart', 'shaOffsetChoice',
-  'shensuChoose1', 'shensuChoose2', 'tiaoxinChoice', 'yijiAsk', 'zhijiChoice'
-]);
 // setResponseAskedAt: 给询问型 pending 打"轮到当前被问者"的时间戳。创建点/asking 切换点
 // 都调它;normalize 只兜底补戳(老存档/遗漏),不重复打——创建处已打的戳保持原值,否则
 // 每次 tx/render 都会把倒计时重置回 30s,永远等不到超时。
@@ -76,8 +46,7 @@ function pendingResponderSeat(g, pending){
     return Number.isInteger(wuguSeat) ? wuguSeat : null;
   }
   const phase=g&&g.phase;
-  const actorField=(typeof BOT_PHASE_ACTOR!=='undefined' && BOT_PHASE_ACTOR && phase)
-    ? BOT_PHASE_ACTOR[phase] : null;
+  const actorField=typeof stageActorField==='function' ? stageActorField(pending.type||phase) : null;
   if(actorField && Number.isInteger(pending[actorField])) return pending[actorField];
   const fields=['responderSeat','responseSeat','asking','active','currentSeat','seat','sourceSeat','targetSeat','damagerSeat',
     'lordSeat','seatA','to','from'];
@@ -89,9 +58,1183 @@ function pendingResponderSeat(g, pending){
 function isTimedResponsePending(g, pending){
   if(!pending || typeof pending!=='object') return false;
   if(pending.type==='wuxiePublicWait') return true;
-  if(typeof pending.type==='string' && RESPONSE_PENDING_TYPES.has(pending.type)) return true;
+  const spec=typeof pending.type==='string' ? STAGE_TABLE[pending.type] : null;
+  if(spec && typeof spec.timeoutAction==='function') return true;
   return Number.isInteger(pendingResponderSeat(g,pending));
 }
+function normalizeRegisteredStage(g){
+  if(!g.pending) return;
+  const d=g.pending;
+  const spec=STAGE_TABLE[d.type];
+  if(!spec) return;
+  const required=Array.isArray(spec.required)?spec.required:[];
+  const alive=Array.isArray(spec.alive)?spec.alive:[];
+  const missing=required.some(function(field){ return d[field]===undefined || d[field]===null; });
+  const dead=alive.some(function(field){
+    const seat=d[field];
+    return !Number.isInteger(seat) || !g.players[seat] || !g.players[seat].alive;
+  });
+  if(missing||dead){
+    logPendingOrphan(g,'STAGE_TABLE声明式校验未通过('+d.type+')');
+    g.pending=null;
+    g.phase=typeof spec.orphanPhase==='string'?spec.orphanPhase:'play';
+    return;
+  }
+  if(typeof spec.normalize==='function') spec.normalize(g);
+}
+// pending 结构校验与 actor/render/timeout 共用 STAGE_TABLE；复杂阶段保留原校验体。
+function registerStageNormalizer(types, normalizePending){
+  (Array.isArray(types)?types:[types]).forEach(function(type){ registerStage(type,{normalize:normalizePending}); });
+}
+registerStageNormalizer("qiangxiPickTarget", function(g){
+  if(g.pending && g.pending.type==='qiangxiPickTarget'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0 ||
+       typeof d.costType!=='string' || !['hp','weapon'].includes(d.costType)){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiangxiPickTarget)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("qiangxiChooseCost", function(g){
+  if(g.pending && g.pending.type==='qiangxiChooseCost'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qiangxiChooseCost)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("qiangxiChooseWeaponFromHand", function(g){
+  if(g.pending && g.pending.type==='qiangxiChooseWeaponFromHand'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.weaponIndices) || d.weaponIndices.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiangxiChooseWeaponFromHand)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("mingcePickCard", function(g){
+  if(g.pending && g.pending.type==='mingcePickCard'){
+    const d = g.pending;
+    // 【不要再加 cardToGive 的校验】这个阶段的语义就是"陈宫还没选牌",startMingce 建的
+    // pending 只有 {type,sourceSeat},cardToGive 要到下一阶段才存在 —— 空/缺失是合法的
+    // 中间态,不是脏数据。曾经要求它必须是非空数组,导致每次 tx 开头的 normalize 都把这个
+    // 刚建立的 pending 清掉,明策永远走不过第一步(而 mingceUsed 已被消耗)。
+    // 和贾诩【乱武】remainingSeats.length===0 被误当脏数据是同一类错误。
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(mingcePickCard)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("mingcePickTarget", function(g){
+  if(g.pending && g.pending.type==='mingcePickTarget'){
+    const d = g.pending;
+    // 【不要再要求 targetSeat 是 number】这个阶段的语义就是"还没选接收牌的目标",
+    // pickMingceCard 建 pending 时 targetSeat 恒为 null —— 同上,合法中间态不是脏数据。
+    // 只有它非 null 时才需要是个真实座位。cardToGive/cardName 在这个阶段确实已经有了,保留校验。
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
+       (d.targetSeat!==null && (typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive)) ||
+       !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
+       typeof d.cardName !== 'string' || d.cardName === ''){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mingcePickTarget)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("mingcePickTarget2", function(g){
+  if(g.pending && g.pending.type==='mingcePickTarget2'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0 ||
+       !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
+       typeof d.cardName !== 'string' || d.cardName === ''){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mingcePickTarget2)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("mingceChoice", function(g){
+  if(g.pending && g.pending.type==='mingceChoice'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       (d.target2Seat!==null && (typeof d.target2Seat!=='number' || !g.players[d.target2Seat]))||
+       typeof d.cardName !== 'string' || d.cardName === ''){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mingceChoice)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("luanwuChoose", function(g){
+  if(g.pending && g.pending.type==='luanwuChoose'){
+    const d = g.pending;
+    if(typeof d.currentSeat!=='number' || !g.players[d.currentSeat] || !g.players[d.currentSeat].alive ||
+       typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luanwuChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    } else if(!Array.isArray(d.remainingSeats)){
+      d.remainingSeats = [];
+    }
+  }
+});
+registerStageNormalizer("luanjiChoose", function(g){
+  if(g.pending && g.pending.type==='luanjiChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.availablePairs) || d.availablePairs.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luanjiChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("luanjiConfirm", function(g){
+  if(g.pending && g.pending.type==='luanjiConfirm'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.cardIndices) || d.cardIndices.length !== 2){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luanjiConfirm)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("leijiChoose", function(g){
+  if(g.pending && g.pending.type==='leijiChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(leijiChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("leijiJudge", function(g){
+  if(g.pending && g.pending.type==='leijiJudge'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !d.resume || typeof d.resume.kind!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(leijiJudge)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("guiduAsk", function(g){
+  if(g.pending && g.pending.type==='guiduAsk'){
+    const d = g.pending;
+    // Firebase Realtime Database 不保留空数组。maybeGuidu 创建 pending 时 askedSeats 是
+    // []（还没有任何候选人被问过），同步回来后该字段会直接缺失（undefined）；这属于合法
+    // 初始状态，不能当成脏数据清掉 pending，否则真实联机局中鬼道询问会在建立后立刻消失
+    // （和 xuanfengPick 的 targets/discardedCounts、guhuoQuestion 的 questioners/answered
+    // 同一类修复——先补默认值，再校验真正结构性的字段）。
+    if(!Array.isArray(d.askedSeats)) d.askedSeats=[];
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.judgedSeat!=='number' || !g.players[d.judgedSeat] || !g.players[d.judgedSeat].alive ||
+       !d.judgeCard || !d.judgeCard.suit ||
+       !d.resume || typeof d.resume.kind!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guiduAsk)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("huashenPick", function(g){
+  if(g.pending && g.pending.type==='huashenPick'){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral!==null
+       || !Array.isArray(p.huashenPool) || p.huashenPool.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huashenPick)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("wuxie", function(g){
+  if(g.pending && g.pending.type==='wuxie'){
+    if(typeof g.pending.exclude!=='number') g.pending.exclude=g.pending.from;
+    if(typeof g.pending.depth!=='number') g.pending.depth=0;
+  }
+});
+registerStageNormalizer("dying", function(g){
+  if(g.pending && g.pending.type==='dying'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.resume || typeof d.resume.type!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(dying)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("zhijiChoice", function(g){
+  if(g.pending && g.pending.type==='zhijiChoice'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(zhijiChoice)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("tiaoxinChoice", function(g){
+  if(g.pending && g.pending.type==='tiaoxinChoice'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tiaoxinChoice)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("tiaoxinDiscard", function(g){
+  if(g.pending && g.pending.type==='tiaoxinDiscard'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tiaoxinDiscard)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("yijiAsk", function(g){
+  if(g.pending && g.pending.type==='yijiAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(yijiAsk)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("wangxiAsk", function(g){
+  if(g.pending && g.pending.type==='wangxiAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.otherSeat!=='number' || !Number.isInteger(d.amount) || d.amount<=0
+       || !g.players[d.seat] || !g.players[d.seat].alive || !g.players[d.otherSeat]
+       || (d.death!==true && !g.players[d.otherSeat].alive)
+       || !d.resume || typeof d.resume.type!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(wangxiAsk)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("shaOffsetChoice", function(g){
+  if(g.pending && g.pending.type==='shaOffsetChoice'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || 
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.available) || d.available.length===0 ||
+       !d.available.every(id => ['mengjin','qinglong','guanshifu'].includes(id))){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(shaOffsetChoice)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("mengjin", function(g){
+  if(g.pending && g.pending.type==='mengjin'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || 
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.available) || d.available.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mengjin)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("yijiAssign", function(g){
+  if(g.pending && g.pending.type==='yijiAssign'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive || !Array.isArray(d.cards) || d.cards.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(yijiAssign)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("yaowu_choose", function(g){
+  if(g.pending && g.pending.type==='yaowu_choose'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.target!=='number' ||
+       !g.players[d.seat] || !g.players[d.target] ||
+       !d.sourceCard || typeof d.sourceCard!=='object' ||
+       !d.resume || typeof d.resume!=='object' || typeof d.resume.type!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(yaowu_choose)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("zhimengAsk", function(g){
+  if(g.pending && g.pending.type==='zhimengAsk'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.options) || d.options.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhimengAsk)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("zhimengPick", function(g){
+  if(g.pending && g.pending.type==='zhimengPick'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' ||
+       !g.players[d.from] || !g.players[d.from].alive ||
+       !g.players[d.to] || !g.players[d.to].alive ||
+       !Array.isArray(d.options) || d.options.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhimengPick)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("guicai", function(g){
+  if(g.pending && g.pending.type==='guicai'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.judgeCard || !d.judgeCard.suit || !d.resume || typeof d.resume.kind!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guicai)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("tieqi", function(g){
+  if(g.pending && g.pending.type==='tieqi' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
+    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tieqi)');
+    g.pending=null; g.phase='play';
+  }
+});
+registerStageNormalizer("liegong", function(g){
+  if(g.pending && g.pending.type==='liegong' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
+    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(liegong)');
+    g.pending=null; g.phase='play';
+  }
+});
+registerStageNormalizer("xiaoguo", function(g){
+  if(g.pending && g.pending.type==='xiaoguo' && (typeof g.pending.endingSeat!=='number' || typeof g.pending.asking!=='number')){
+    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(xiaoguo)');
+    g.pending=null; g.phase='play';
+  }
+});
+registerStageNormalizer("xiaoguoChoice", function(g){
+  if(g.pending && g.pending.type==='xiaoguoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.endingSeat!=='number' || typeof g.pending.to!=='number')){
+    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(xiaoguoChoice)');
+    g.pending=null; g.phase='play';
+  }
+});
+registerStageNormalizer(["jijiangAsk","hujiaAsk"], function(g){
+  if(g.pending && (g.pending.type==='jijiangAsk'||g.pending.type==='hujiaAsk')){
+    const d = g.pending;
+    if(typeof d.lordSeat!=='number' || typeof d.asking!=='number' ||
+       typeof d.need!=='string' || !d.resume ||
+       typeof d.resume!=='object' || typeof d.resume.phase!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jijiangAsk/hujiaAsk)');
+      g.pending=null; g.phase='play';
+    } else if(!Object.prototype.hasOwnProperty.call(d.resume,'pending')){
+      // resume 缺 pending 键 = 主动激将的 pending:null 被 Firebase 吞掉,补回 null。
+      d.resume.pending = null;
+    }
+  }
+});
+registerStageNormalizer("zhibaAsk", function(g){
+  if(g.pending && g.pending.type==='zhibaAsk'){
+    const d=g.pending,lord=g.players[d.lordSeat],challenger=g.players[d.challengerSeat];
+    const invalid=!Number.isInteger(d.lordSeat) || !Number.isInteger(d.challengerSeat) || d.lordSeat===d.challengerSeat ||
+      !lord || !lord.alive || lord.role!=='zhu' || !hasCap(lord,'zhiba') ||
+      !challenger || !challenger.alive || generalFaction(challenger)!=='wu' || g.gameMode!=='identity' ||
+      !d.challengerCard || !d.resume || typeof d.resume!=='object' || typeof d.resume.phase!=='string';
+    if(invalid){
+    logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhibaAsk)');
+    if(d.challengerCard) g.discard.push(d.challengerCard);
+    g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("zhibaGain", function(g){
+  if(g.pending && g.pending.type==='zhibaGain'){
+    const d=g.pending,lord=g.players[d.lordSeat];
+    if(!Number.isInteger(d.lordSeat) || !lord || !lord.alive || lord.role!=='zhu' || !hasCap(lord,'zhiba') ||
+       !Array.isArray(d.cards) || d.cards.length!==2 || d.cards.some(card=>!card)){
+    logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhibaGain)');
+    if(Array.isArray(d.cards)) g.discard.push(...d.cards.filter(Boolean));
+    g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer(["yinghunTarget","yinghunChoice","yinghunDiscard"], function(g){
+  if(g.pending && (g.pending.type==='yinghunTarget' || g.pending.type==='yinghunChoice' || g.pending.type==='yinghunDiscard')){
+    const d=g.pending;
+    const ownerSeat=d.type==='yinghunDiscard'?d.ownerSeat:d.seat;
+    if(typeof ownerSeat!=='number' || !g.players[ownerSeat] || !g.players[ownerSeat].alive ||
+       ((d.type==='yinghunChoice'||d.type==='yinghunDiscard') && (typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive))){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(yinghunTarget/yinghunChoice/yinghunDiscard)');
+      g.pending=null;
+      if(Number.isInteger(ownerSeat) && g.players[ownerSeat] && g.players[ownerSeat].alive && g.turn===ownerSeat &&
+         typeof continueHuashenChangeCheckAtTurnStart==='function'){
+        g.phase='play'; continueHuashenChangeCheckAtTurnStart(g,ownerSeat);
+      }else g.phase='draw';
+    }
+  }
+});
+registerStageNormalizer("jiedaoChoice", function(g){
+  if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
+    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jiedaoChoice)');
+    g.pending=null; g.phase='play';
+  }
+});
+registerStageNormalizer("guhuoQuestion", function(g){
+  if(g.pending && g.pending.type==='guhuoQuestion'){
+    const d=g.pending;
+    if(!Array.isArray(d.questioners)) d.questioners=[];
+    if(!Array.isArray(d.answered)) d.answered=[];
+    if(typeof d.sourceSeat!=='number' || typeof d.asking!=='number' ||
+       !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !g.players[d.asking] || !g.players[d.asking].alive ||
+       !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guhuoQuestion)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("guhuoTarget", function(g){
+  if(g.pending && g.pending.type==='guhuoTarget'){
+    const d=g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guhuoTarget)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("wugu", function(g){
+  if(g.pending && g.pending.type==='wugu'){
+    g.pending.pool = g.pending.pool || [];
+    g.pending.order = g.pending.order || [];
+    if(typeof g.pending.from!=='number' || typeof g.pending.idx!=='number' || g.pending.order.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(wugu)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("huogongReveal", function(g){
+  if(g.pending && g.pending.type==='huogongReveal'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(huogongReveal)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("huogong", function(g){
+  if(g.pending && g.pending.type==='huogong'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !d.suit || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(huogong)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("luoshen", function(g){
+  if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
+    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(luoshen)');
+    g.pending=null; g.phase='play';
+  }
+});
+registerStageNormalizer("aoeResp", function(g){
+  if(g.pending && g.pending.type==='aoeResp'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(aoeResp)');
+      g.pending=null; g.aoe=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("duel", function(g){
+  if(g.pending && g.pending.type==='duel'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || typeof d.active!=='number'
+       || !g.players[d.from] || !g.players[d.to] || !g.players[d.active]
+       || !g.players[d.from].alive || !g.players[d.to].alive || !g.players[d.active].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(duel)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("ganglieChoice", function(g){
+  if(g.pending && g.pending.type==='ganglieChoice'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.sourceSeat!=='number' || !g.players[d.seat] || !g.players[d.sourceSeat] || !g.players[d.seat].alive || !g.players[d.sourceSeat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(ganglieChoice)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("guanshi", function(g){
+  if(g.pending && g.pending.type==='guanshi'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(guanshi)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("hanbing", function(g){
+  if(g.pending && g.pending.type==='hanbing'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(hanbing)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("hanbingAsk", function(g){
+  if(g.pending && g.pending.type==='hanbingAsk'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(hanbingAsk)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("luoyiAsk", function(g){
+  if(g.pending && g.pending.type==='luoyiAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(luoyiAsk)');
+      g.pending=null; g.phase='draw';
+    }
+  }
+});
+registerStageNormalizer("qiaobianMove", function(g){
+  if(g.pending && g.pending.type==='qiaobianMove'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qiaobianMove)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("qiaobianTurnStart", function(g){
+  if(g.pending && g.pending.type==='qiaobianTurnStart'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qiaobianTurnStart)');
+      g.pending=null; g.phase='draw';
+    }
+  }
+});
+registerStageNormalizer(["huashenChangeAskStart","huashenChangePickStart"], function(g){
+  if(g.pending && (g.pending.type==='huashenChangeAskStart' || g.pending.type==='huashenChangePickStart')){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huashenChangeAskStart/huashenChangePickStart)');
+      g.pending=null; g.phase='draw';
+    }
+  }
+});
+registerStageNormalizer("qilin", function(g){
+  if(g.pending && g.pending.type==='qilin'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qilin)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("qinglong", function(g){
+  if(g.pending && g.pending.type==='qinglong'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qinglong)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer(["cixiongAsk","cixiongChoice"], function(g){
+  if(g.pending && (g.pending.type==='cixiongAsk' || g.pending.type==='cixiongChoice')){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(cixiongAsk/cixiongChoice)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("shuangxiongAsk", function(g){
+  if(g.pending && g.pending.type==='shuangxiongAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(shuangxiongAsk)');
+      g.pending=null; g.phase='draw';
+    }
+  }
+});
+registerStageNormalizer("guanxingReview", function(g){
+  if(g.pending && g.pending.type==='guanxingReview'){
+    const gp=g.pending.seat;
+    if(typeof gp!=='number' || !g.players[gp] || !g.players[gp].alive || !Array.isArray(g.pending.cards)){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(guanxingReview)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("xunxunPick", function(g){
+  if(g.pending && g.pending.type==='xunxunPick'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive 
+       || !Array.isArray(d.cards) || d.cards.length===0 
+       || !Number.isInteger(d.takeN) || d.takeN<=0 || d.takeN>d.cards.length){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(xunxunPick)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("shensuChoose1", function(g){
+  if(g.pending && g.pending.type==="shensuChoose1"){
+    const d = g.pending;
+    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(shensuChoose1)');
+      g.pending = null; g.phase = "judge";
+    }
+  }
+});
+registerStageNormalizer("shensuChoose2", function(g){
+  if(g.pending && g.pending.type==="shensuChoose2"){
+    const d = g.pending;
+    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(shensuChoose2)');
+      g.pending = null; g.phase = "play";
+    }
+  }
+});
+registerStageNormalizer("shensuSha", function(g){
+  if(g.pending && g.pending.type==="shensuSha"){
+    const d = g.pending;
+    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.remaining!=="number" || d.remaining <= 0 ||
+       typeof d.noDistance!=="boolean"){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(shensuSha)');
+      g.pending = null;
+      g.phase = g.shensuSkipJudgingAndDraw ? "play" : (g.shensuSkipPlay ? "discard" : "play");
+    }
+  }
+});
+registerStageNormalizer("shensuShaRespond", function(g){
+  if(g.pending && g.pending.type==="shensuShaRespond"){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=="number" || typeof d.targetSeat!=="number" ||
+       !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       typeof d.needed!=="number" || typeof d.played!=="number"){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(shensuShaRespond)');
+      g.pending = null; g.phase = "play";
+    }
+  }
+});
+registerStageNormalizer("quhuRespond", function(g){
+  if(g.pending && g.pending.type==='quhuRespond'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !d.selfCard || !g.players[d.seat] || !g.players[d.targetSeat]){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(quhuRespond)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("quhuDamageChoice", function(g){
+  if(g.pending && g.pending.type==='quhuDamageChoice'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !Array.isArray(d.targets) || d.targets.length===0
+       || !g.players[d.seat] || !g.players[d.targetSeat] || !d.targets.every(t=>Number.isInteger(t) && g.players[t] && g.players[t].alive)){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(quhuDamageChoice)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer(["tianyiPickCard","tianyiPickTarget"], function(g){
+  if(g.pending && (g.pending.type==='tianyiPickCard' || g.pending.type==='tianyiPickTarget')){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tianyiPickCard/tianyiPickTarget)');
+      g.pending = null; g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("tianyiRespond", function(g){
+  if(g.pending && g.pending.type==='tianyiRespond'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !d.selfCard || typeof d.selfCard.rank!=='number'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(tianyiRespond)');
+      g.pending = null; g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("buquAsk", function(g){
+  if(g.pending && g.pending.type==='buquAsk'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(buquAsk)');
+      g.pending = null; g.phase = 'play';
+    } else if(!Number.isInteger(d.remaining) || d.remaining < 1) {
+      // remaining 是"这次伤害还需连续询问几次"的计数器,旧存档/防御性回退默认1次
+      // (等价于改动前"只问一次"的行为,不影响单点伤害场景)。
+      d.remaining = 1;
+    }
+  }
+});
+registerStageNormalizer("lianyingAsk", function(g){
+  if(g.pending && g.pending.type==='lianyingAsk'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lianyingAsk)');
+      g.pending = null; g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("qiaomengChoose", function(g){
+  if(g.pending && g.pending.type==='qiaomengChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       d.shaColor !== 'black'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiaomengChoose)');
+      g.pending = null; g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("qiaomengPickEquip", function(g){
+  if(g.pending && g.pending.type==='qiaomengPickEquip'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !Array.isArray(d.availableSlots) || d.availableSlots.length === 0 ||
+       !g.players[d.targetSeat].equips || Object.keys(g.players[d.targetSeat].equips).length === 0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiaomengPickEquip)');
+      g.pending = null; g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("fanjianSuit", function(g){
+  if(g.pending && g.pending.type==='fanjianSuit'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !g.players[d.seat] || !g.players[d.targetSeat]){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(fanjianSuit)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("jiemingAsk", function(g){
+  if(g.pending && g.pending.type==='jiemingAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jiemingAsk)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("xinshengAsk", function(g){
+  if(g.pending && g.pending.type==='xinshengAsk'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(xinshengAsk)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("liuli", function(g){
+  if(g.pending && g.pending.type==='liuli'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to]){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(liuli)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("tianxiang", function(g){
+  if(g.pending && g.pending.type==='tianxiang'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive || !Array.isArray(d.targets) || d.targets.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(tianxiang)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("biyue", function(g){
+  if(g.pending && g.pending.type==='biyue'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(biyue)');
+      g.pending=null; g.phase='discard';
+    }
+  }
+});
+registerStageNormalizer(["huashenChangeAskEnd","huashenChangePickEnd"], function(g){
+  if(g.pending && (g.pending.type==='huashenChangeAskEnd' || g.pending.type==='huashenChangePickEnd')){
+    const d=g.pending;
+    const p=g.players[d.seat];
+    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huashenChangeAskEnd/huashenChangePickEnd)');
+      g.pending=null; g.phase='discard';
+    }
+  }
+});
+registerStageNormalizer("lirangAsk", function(g){
+  if(g.pending && g.pending.type==='lirangAsk'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lirangAsk)');
+      g.pending=null; g.phase='draw';
+    }
+  }
+});
+registerStageNormalizer("lirangRecover", function(g){
+  if(g.pending && g.pending.type==='lirangRecover'){
+    const d=g.pending;
+    if(typeof d.from!=='number' || typeof d.to!=='number' || !Array.isArray(d.cards) || !g.players[d.from] || !g.players[d.to]){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lirangRecover)');
+      g.pending=null; g.phase='discard';
+    }
+  }
+});
+registerStageNormalizer("zhengyi", function(g){
+  if(g.pending && g.pending.type==='zhengyi'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !g.players[d.seat] || !g.players[d.asking] || !g.players[d.seat].alive || !g.players[d.asking].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(zhengyi)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("haoshiPick", function(g){
+  if(g.pending && g.pending.type==='haoshiPick'){
+    const d=g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0 ||
+       !Number.isInteger(d.half) || d.half<=0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(haoshiPick)');
+      g.pending=null; g.phase='play';
+    }
+  }
+});
+registerStageNormalizer("jushouChoose", function(g){
+  if(g.pending && g.pending.type==='jushouChoose'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jushouChoose)');
+      g.pending = null;
+      g.phase = 'end';
+    }
+  }
+});
+registerStageNormalizer(["jujianPickCard","jujianPickTarget","jujianChooseEffect"], function(g){
+  if(g.pending && (g.pending.type==='jujianPickCard' || g.pending.type==='jujianPickTarget' || g.pending.type==='jujianChooseEffect')){
+    const d = g.pending;
+    const srcOk = Number.isInteger(d.sourceSeat) && g.players[d.sourceSeat] && g.players[d.sourceSeat].alive;
+    if(!srcOk){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jujianPickCard/jujianPickTarget/jujianChooseEffect)');
+      g.pending = null;
+      if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
+    } else if(d.type==='jujianChooseEffect'){
+      const tgtOk = Number.isInteger(d.targetSeat) && g.players[d.targetSeat] && g.players[d.targetSeat].alive;
+      if(!tgtOk){
+        logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jujianPickCard/jujianPickTarget/jujianChooseEffect)');
+        g.pending = null;
+        if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
+      }
+    }
+  }
+});
+registerStageNormalizer("jiangchiAsk", function(g){
+  if(g.pending && g.pending.type==='jiangchiAsk'){
+    const d = g.pending;
+    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jiangchiAsk)');
+      g.pending = null;
+      if(g.phase==='jiangchiAsk') g.phase = 'draw';
+    }
+  }
+});
+registerStageNormalizer("luoyingAsk", function(g){
+  if(g.pending && g.pending.type==='luoyingAsk'){
+    const d = g.pending;
+    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.cardIds)){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luoyingAsk)');
+      g.pending = null;
+      if(g.phase==='luoyingAsk') g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("jiushiFlipAsk", function(g){
+  if(g.pending && g.pending.type==='jiushiFlipAsk'){
+    const d = g.pending;
+    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.wasFacedown!=='boolean'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jiushiFlipAsk)');
+      g.pending = null;
+      if(g.phase==='jiushiFlipAsk') g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("beigeChoose", function(g){
+  if(g.pending && g.pending.type==='beigeChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
+       (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(beigeChoose)');
+      g.pending = null;
+      g.phase = g.phase === 'beigeChoose' ? 'play' : g.phase;
+    }
+  }
+});
+registerStageNormalizer("beigeDiscard", function(g){
+  if(g.pending && g.pending.type==='beigeDiscard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
+       (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(beigeDiscard)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("beigeJudge", function(g){
+  if(g.pending && g.pending.type==='beigeJudge'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
+       !d.resume || typeof d.resume.kind!=='string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(beigeJudge)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("lieRenChoose", function(g){
+  if(g.pending && g.pending.type==='lieRenChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lieRenChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("lieRenPickCard", function(g){
+  if(g.pending && g.pending.type==='lieRenPickCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lieRenPickCard)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("lieRenRespond", function(g){
+  if(g.pending && g.pending.type==='lieRenRespond'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !d.sourceCard || typeof d.sourceCard.rank!=='number'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(lieRenRespond)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("xuanfengPick", function(g){
+  if(g.pending && g.pending.type==='xuanfengPick'){
+    const d = g.pending;
+    if(!Array.isArray(d.selections)) d.selections=[];
+    // Firebase Realtime Database 不保留空数组。旋风刚触发、尚未选择目标时，targets 和
+    // discardedCounts 都是 []，同步回来后字段会直接缺失；这属于合法初始状态，不能当成
+    // 脏数据清掉 pending，否则真实联机局中旋风界面会在建立后立刻消失。
+    if(d.targets===undefined || d.targets===null) d.targets=[];
+    if(d.discardedCounts===undefined || d.discardedCounts===null) d.discardedCounts=[];
+    if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
+       !Array.isArray(d.targets) ||
+       !Array.isArray(d.discardedCounts) ||
+       d.discardedCounts.length !== d.targets.length ||
+       d.discardedCounts.some(c => typeof c !== 'number' || c < 0) ||
+       typeof d.previousPhase !== 'string'){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(xuanfengPick)');
+      g.pending = null;
+      g.phase = d.previousPhase || (g.phase === 'xuanfengPick' ? 'discard' : g.phase);
+    }
+  }
+});
+registerStageNormalizer("duanbingChoose", function(g){
+  if(g.pending && g.pending.type==='duanbingChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.baseTarget!=='number' || !g.players[d.baseTarget] || !g.players[d.baseTarget].alive ||
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(duanbingChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("enyuanChoose", function(g){
+  if(g.pending && g.pending.type==='enyuanChoose'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(enyuanChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("enyuanChooseOption", function(g){
+  if(g.pending && g.pending.type==='enyuanChooseOption'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
+       !Array.isArray(d.heartCards)){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(enyuanChooseOption)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("enyuanGiveCard", function(g){
+  if(g.pending && g.pending.type==='enyuanGiveCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
+       !(g.players[d.damagerSeat].hand||[]).some(card=>card && card.suit==='♥')){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(enyuanGiveCard)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("huanhuoPick", function(g){
+  if(g.pending && g.pending.type==='huanhuoPick'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       !Array.isArray(d.candidates) || d.candidates.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPick)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("huanhuoPickCard", function(g){
+  if(g.pending && g.pending.type==='huanhuoPickCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       !(g.players[d.sourceSeat].hand||[]).some(card=>card && card.suit==='♥')){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPickCard)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("huanhuoPickGotCard", function(g){
+  if(g.pending && g.pending.type==='huanhuoPickGotCard'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
+       ((g.players[d.targetSeat].hand||[]).length +
+        EQUIP_SLOTS.filter(slot=>g.players[d.targetSeat].equips && g.players[d.targetSeat].equips[slot]).length)===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPickGotCard)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("huanhuoPickSecond", function(g){
+  if(g.pending && g.pending.type==='huanhuoPickSecond'){
+    const d = g.pending;
+    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
+       typeof d.firstTargetSeat!=='number' || !g.players[d.firstTargetSeat] || !g.players[d.firstTargetSeat].alive ||
+       typeof d.transferCard!=='object' || !d.transferCard ||
+       !Array.isArray(d.candidates) || d.candidates.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPickSecond)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("fenxunDiscard", function(g){
+  if(g.pending && g.pending.type==='fenxunDiscard'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
+      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(fenxunDiscard)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("fenxunTarget", function(g){
+  if(g.pending && g.pending.type==='fenxunTarget'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(fenxunTarget)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("chengxiangAsk", function(g){
+  if(g.pending && g.pending.type==='chengxiangAsk'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.damageInfo!=='object' || d.damageInfo === null){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(chengxiangAsk)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("chengxiangChoose", function(g){
+  if(g.pending && g.pending.type==='chengxiangChoose'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       !Array.isArray(d.revealedCards) || d.revealedCards.length === 0 ||
+       !Array.isArray(d.selectable) || !Number.isInteger(d.sumLimit) || d.sumLimit <= 0){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(chengxiangChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
+registerStageNormalizer("renxinChoose", function(g){
+  if(g.pending && g.pending.type==='renxinChoose'){
+    const d = g.pending;
+    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
+       typeof d.target!=='number' || !g.players[d.target] || !g.players[d.target].alive ||
+       g.players[d.target].hp > 1 ||
+       !Array.isArray(d.equipSlots) || d.equipSlots.length === 0 ||
+       typeof d.originalDamageInfo!=='object' || d.originalDamageInfo===null){
+      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(renxinChoose)');
+      g.pending = null;
+      g.phase = 'play';
+    }
+  }
+});
 function normalize(g){
   if(!g) return g;
   g.deck = g.deck || [];
@@ -210,35 +1353,11 @@ function normalize(g){
   // 典韦【强袭】:回合内使用标记
   if(typeof g.qiangxiUsed!=='boolean') g.qiangxiUsed=false;
   // 典韦【强袭】目标选择阶段:pending 应包含 type、seat 等字段
-  if(g.pending && g.pending.type==='qiangxiPickTarget'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       !Array.isArray(d.candidates) || d.candidates.length===0 ||
-       typeof d.costType!=='string' || !['hp','weapon'].includes(d.costType)){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiangxiPickTarget)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
   // 典韦【强袭】消耗选择阶段:pending 应包含 type、seat 等字段
-  if(g.pending && g.pending.type==='qiangxiChooseCost'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qiangxiChooseCost)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
   // 典韦【强袭】武器选择阶段（从手牌弃置武器时）
-  if(g.pending && g.pending.type==='qiangxiChooseWeaponFromHand'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       !Array.isArray(d.weaponIndices) || d.weaponIndices.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiangxiChooseWeaponFromHand)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
   // 辅诩【乱武】:游戏内使用标记（限定技，全局只能使用一次）
   if(typeof g.luanwuUsed!=='boolean') g.luanwuUsed=false;
 
@@ -248,63 +1367,17 @@ function normalize(g){
   // 陈宫【明策】:选择阶段
   // pending 应包含 type、sourceSeat（陈宫座位）、targetSeat（接收牌的角色）、target2Seat（被攻击的目标，可选）
   // 注意：明策结算必须完整进行，即使陈宫死亡，也继续结算
-  if(g.pending && g.pending.type==='mingcePickCard'){
-    const d = g.pending;
-    // 【不要再加 cardToGive 的校验】这个阶段的语义就是"陈宫还没选牌",startMingce 建的
-    // pending 只有 {type,sourceSeat},cardToGive 要到下一阶段才存在 —— 空/缺失是合法的
-    // 中间态,不是脏数据。曾经要求它必须是非空数组,导致每次 tx 开头的 normalize 都把这个
-    // 刚建立的 pending 清掉,明策永远走不过第一步(而 mingceUsed 已被消耗)。
-    // 和贾诩【乱武】remainingSeats.length===0 被误当脏数据是同一类错误。
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(mingcePickCard)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 陈宫【明策】:选择接收牌的目标阶段
-  if(g.pending && g.pending.type==='mingcePickTarget'){
-    const d = g.pending;
-    // 【不要再要求 targetSeat 是 number】这个阶段的语义就是"还没选接收牌的目标",
-    // pickMingceCard 建 pending 时 targetSeat 恒为 null —— 同上,合法中间态不是脏数据。
-    // 只有它非 null 时才需要是个真实座位。cardToGive/cardName 在这个阶段确实已经有了,保留校验。
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
-       (d.targetSeat!==null && (typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive)) ||
-       !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
-       typeof d.cardName !== 'string' || d.cardName === ''){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mingcePickTarget)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 陈宫【明策】:第二个目标选择阶段
-  if(g.pending && g.pending.type==='mingcePickTarget2'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !Array.isArray(d.candidates) || d.candidates.length===0 ||
-       !Array.isArray(d.cardToGive) || d.cardToGive.length===0 ||
-       typeof d.cardName !== 'string' || d.cardName === ''){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mingcePickTarget2)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 陈宫【明策】:接收牌的角色选择阶段
   // 注意：此阶段不检查sourceSeat（陈宫）是否存活，因为明策必须结算完毕
-  if(g.pending && g.pending.type==='mingceChoice'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       (d.target2Seat!==null && (typeof d.target2Seat!=='number' || !g.players[d.target2Seat]))||
-       typeof d.cardName !== 'string' || d.cardName === ''){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mingceChoice)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 陈宫【智迟】:免疫状态标记
   // 记录智迟的免疫状态：{ seat: 陈宫座位, turn: 当前回合的角色座位 }
@@ -329,85 +1402,26 @@ function normalize(g){
   // (链条问到最后一人前 pending 就被误杀),只是触发路径从"检查空数组"变成了"检查字段
   // 缺失"。修法和 g.luanwuResume.remainingSeats(见上方同函数)一致:currentSeat/sourceSeat
   // 校验通过但 remainingSeats 不是数组时,补默认值[]而不是整体判死。
-  if(g.pending && g.pending.type==='luanwuChoose'){
-    const d = g.pending;
-    if(typeof d.currentSeat!=='number' || !g.players[d.currentSeat] || !g.players[d.currentSeat].alive ||
-       typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luanwuChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    } else if(!Array.isArray(d.remainingSeats)){
-      d.remainingSeats = [];
-    }
-  }
+
 
   // 贾诩【完杀】:回合内濒死状态标记
   if(typeof g.wanshaActive!=='boolean') g.wanshaActive=false;
   if(typeof g.wanshaDyingSeat!=='number') g.wanshaDyingSeat=null;
 
   // 袁绍【乱击】:选择阶段
-  if(g.pending && g.pending.type==='luanjiChoose'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.availablePairs) || d.availablePairs.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luanjiChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 袁绍【乱击】:确认使用阶段
-  if(g.pending && g.pending.type==='luanjiConfirm'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.cardIndices) || d.cardIndices.length !== 2){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luanjiConfirm)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 张角【雷击】:使用或打出闪后的雷击选择阶段
-  if(g.pending && g.pending.type==='leijiChoose'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(leijiChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 张角【雷击】:雷击判定阶段
-  if(g.pending && g.pending.type==='leijiJudge'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !d.resume || typeof d.resume.kind!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(leijiJudge)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 张角【鬼道】:询问是否发动鬼道阶段
-  if(g.pending && g.pending.type==='guiduAsk'){
-    const d = g.pending;
-    // Firebase Realtime Database 不保留空数组。maybeGuidu 创建 pending 时 askedSeats 是
-    // []（还没有任何候选人被问过），同步回来后该字段会直接缺失（undefined）；这属于合法
-    // 初始状态，不能当成脏数据清掉 pending，否则真实联机局中鬼道询问会在建立后立刻消失
-    // （和 xuanfengPick 的 targets/discardedCounts、guhuoQuestion 的 questioners/answered
-    // 同一类修复——先补默认值，再校验真正结构性的字段）。
-    if(!Array.isArray(d.askedSeats)) d.askedSeats=[];
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.judgedSeat!=='number' || !g.players[d.judgedSeat] || !g.players[d.judgedSeat].alive ||
-       !d.judgeCard || !d.judgeCard.suit ||
-       !d.resume || typeof d.resume.kind!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guiduAsk)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 开局选将模式:'random'/'pick',开局前是 null,旧存档缺失同样回退 null
   if(g.generalMode===undefined) g.generalMode=null;
@@ -462,65 +1476,20 @@ function normalize(g){
   // 里不存availGenerals副本**(设计理由见 checkHuashenBeforeAssign 注释),所以这里
   // 也不需要校验"候选是不是过时快照"这类问题,只需要校验seat对应的huashenPool/
   // huashenGeneral本身是否处于"确实还在等待声明"这个状态。
-  if(g.pending && g.pending.type==='huashenPick'){
-    const d=g.pending;
-    const p=g.players[d.seat];
-    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral!==null
-       || !Array.isArray(p.huashenPool) || p.huashenPool.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huashenPick)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
   if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
   // 无懈反制:exclude(当前轮不问谁的座位号)/depth(成功次数)都应是数字;缺失多半是旧数据,回退到"层0"
-  if(g.pending && g.pending.type==='wuxie'){
-    if(typeof g.pending.exclude!=='number') g.pending.exclude=g.pending.from;
-    if(typeof g.pending.depth!=='number') g.pending.depth=0;
-  }
+
   // 濒死询问阶段:seat/asking 都应是数字座位号,resume.type 应是字符串;任一不对就整体判无效,防止卡死
-  if(g.pending && g.pending.type==='dying'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.resume || typeof d.resume.type!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(dying)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 姜维【志继】选择阶段:seat 应是数字且存活
-  if(g.pending && g.pending.type==='zhijiChoice'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(zhijiChoice)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 姜维【挑衅】选择阶段:from/to 应是数字且存活
-  if(g.pending && g.pending.type==='tiaoxinChoice'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' ||
-       !g.players[d.from] || !g.players[d.from].alive ||
-       !g.players[d.to] || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tiaoxinChoice)');
-      g.pending=null; g.phase='play';
-    }
-  }
-  if(g.pending && g.pending.type==='tiaoxinDiscard'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' ||
-       !g.players[d.from] || !g.players[d.from].alive ||
-       !g.players[d.to] || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tiaoxinDiscard)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
+
   // 郭嘉【遗计】询问阶段:seat 应是数字座位号且对应玩家存活;任一不对就整体判无效,防止卡死。
-  if(g.pending && g.pending.type==='yijiAsk'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(yijiAsk)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 李典【忘隙】询问阶段:seat 应是数字座位号且对应玩家存活;otherSeat 应是数字座位号且
   // 对应玩家存在;amount应为正整数;任一不对就整体判无效。otherSeat 的"存活性"不能一刀切
   // 要求为真——忘隙有两个合法创建入口(startNextWangxi的一般伤害队列/死亡结算处的致死
@@ -528,83 +1497,22 @@ function normalize(g){
   // 就是刚阵亡的那个人,d.death===true 正是用来标记这种合法情形的(见 respondWangxi 对
   // death 的分支处理:death=true 时只有李典自己摸牌,不要求otherSeat存活)。d.death!==true
   // 的一般场景才需要otherSeat存活,否则会把"目标已死"这个合法状态误判成脏数据清空掉。
-  if(g.pending && g.pending.type==='wangxiAsk'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.otherSeat!=='number' || !Number.isInteger(d.amount) || d.amount<=0
-       || !g.players[d.seat] || !g.players[d.seat].alive || !g.players[d.otherSeat]
-       || (d.death!==true && !g.players[d.otherSeat].alive)
-       || !d.resume || typeof d.resume.type!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(wangxiAsk)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 杀被抵消后的效果选择阶段:from/to 应是数字且存活;available 应是非空数组且元素合法
-  if(g.pending && g.pending.type==='shaOffsetChoice'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || 
-       !g.players[d.from] || !g.players[d.from].alive ||
-       !g.players[d.to] || !g.players[d.to].alive ||
-       !Array.isArray(d.available) || d.available.length===0 ||
-       !d.available.every(id => ['mengjin','qinglong','guanshifu'].includes(id))){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(shaOffsetChoice)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 猛进选择弃牌阶段:from/to 应是数字且存活;available 应是非空数组
-  if(g.pending && g.pending.type==='mengjin'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || 
-       !g.players[d.from] || !g.players[d.from].alive ||
-       !g.players[d.to] || !g.players[d.to].alive ||
-       !Array.isArray(d.available) || d.available.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(mengjin)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 郭嘉【遗计】分配阶段:seat 同上;cards 应是非空数组(牌堆不足2张时会是1张,长度1或2皆合法)。
-  if(g.pending && g.pending.type==='yijiAssign'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive || !Array.isArray(d.cards) || d.cards.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(yijiAssign)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 华雄【耀武】选择阶段:seat=选择者(伤害来源), target=华雄, sourceCard=红色【杀】, resume=结算后恢复信息
-  if(g.pending && g.pending.type==='yaowu_choose'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.target!=='number' ||
-       !g.players[d.seat] || !g.players[d.target] ||
-       !d.sourceCard || typeof d.sourceCard!=='object' ||
-       !d.resume || typeof d.resume!=='object' || typeof d.resume.type!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(yaowu_choose)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 马谡【散谣】的 sanyao/sanyaoChooseTarget 两个旧 pending 类型已随第一步重新设计整体
   // 作废(改成客户端本地累积选择、一次性原子提交,不再需要服务端两阶段 pending),这里原有
   // 的两条防御性校验一并删除,不留死引用。
   // 马谡【制蛮】询问阶段:from/to 应是数字且存活, options 应是非空数组
-  if(g.pending && g.pending.type==='zhimengAsk'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' ||
-       !g.players[d.from] || !g.players[d.from].alive ||
-       !g.players[d.to] || !g.players[d.to].alive ||
-       !Array.isArray(d.options) || d.options.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhimengAsk)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 马谡【制蛮】选择牌阶段:from/to 应是数字且存活, options 应是非空数组
-  if(g.pending && g.pending.type==='zhimengPick'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' ||
-       !g.players[d.from] || !g.players[d.from].alive ||
-       !g.players[d.to] || !g.players[d.to].alive ||
-       !Array.isArray(d.options) || d.options.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhimengPick)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 多目标杀排队(g.fangtianQueue，方天画戟/短兵共用):非活跃时应为 null。
   // 活跃时 from/idx 应是数字、targets 应是非空数组——任一不对就整体判无效清空,防止卡死。
   if(g.fangtianQueue===undefined) g.fangtianQueue=null;
@@ -624,33 +1532,15 @@ function normalize(g){
     }
   }
   // 鬼才改判阶段:seat/asking 都应是数字座位号,judgeCard 应有 suit/rank,resume.kind 应是字符串;任一不对就整体判无效
-  if(g.pending && g.pending.type==='guicai'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !d.judgeCard || !d.judgeCard.suit || !d.resume || typeof d.resume.kind!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guicai)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 铁骑判定阶段:from/to 都应是数字座位号;不对就整体判无效
-  if(g.pending && g.pending.type==='tieqi' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
-    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tieqi)');
-    g.pending=null; g.phase='play';
-  }
+
   // 烈弓阶段:from/to 都应是数字座位号;不对就整体判无效
-  if(g.pending && g.pending.type==='liegong' && (typeof g.pending.from!=='number' || typeof g.pending.to!=='number')){
-    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(liegong)');
-    g.pending=null; g.phase='play';
-  }
+
   // 骁果询问阶段:endingSeat/asking 都应是数字座位号;不对就整体判无效
-  if(g.pending && g.pending.type==='xiaoguo' && (typeof g.pending.endingSeat!=='number' || typeof g.pending.asking!=='number')){
-    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(xiaoguo)');
-    g.pending=null; g.phase='play';
-  }
+
   // 骁果二选一阶段:from/endingSeat/to 都应是数字座位号;不对就整体判无效
-  if(g.pending && g.pending.type==='xiaoguoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.endingSeat!=='number' || typeof g.pending.to!=='number')){
-    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(xiaoguoChoice)');
-    g.pending=null; g.phase='play';
-  }
+
   // 主公技求助阶段(激将/护驾):lordSeat/asking 应是数字座位号、need 应是字符串、
   // resume 是原 pending 快照(结构非法=这条求助链无法继续);不对就整体判无效。
   // asking 在创建/切换点恒有值,不存在"还没轮到"的合法中间态,按结构校验不误伤。
@@ -661,269 +1551,83 @@ function normalize(g){
   // 因此缺 pending 键。这不是脏数据:出牌阶段主动激将本来就没有"正在响应的原
   // pending",pending:null 就是合法中间态。拆两层:必填结构字段(lordSeat/asking/
   // need/resume.phase)不合法才整体判死;resume 缺 pending 键时补默认 null,不误杀。
-  if(g.pending && (g.pending.type==='jijiangAsk'||g.pending.type==='hujiaAsk')){
-    const d = g.pending;
-    if(typeof d.lordSeat!=='number' || typeof d.asking!=='number' ||
-       typeof d.need!=='string' || !d.resume ||
-       typeof d.resume!=='object' || typeof d.resume.phase!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jijiangAsk/hujiaAsk)');
-      g.pending=null; g.phase='play';
-    } else if(!Object.prototype.hasOwnProperty.call(d.resume,'pending')){
-      // resume 缺 pending 键 = 主动激将的 pending:null 被 Firebase 吞掉,补回 null。
-      d.resume.pending = null;
-    }
-  }
+
   // 孙策【制霸】拼点阶段:lordSeat/challengerSeat 应是数字座位号、challengerCard 是吴势力角色已出的拼点牌、
   // resume 是进入前的快照(play 阶段 pending 恒为 null,不要求 resume.pending 有值)。
-  if(g.pending && g.pending.type==='zhibaAsk'){
-    const d=g.pending,lord=g.players[d.lordSeat],challenger=g.players[d.challengerSeat];
-    const invalid=!Number.isInteger(d.lordSeat) || !Number.isInteger(d.challengerSeat) || d.lordSeat===d.challengerSeat ||
-      !lord || !lord.alive || lord.role!=='zhu' || !hasCap(lord,'zhiba') ||
-      !challenger || !challenger.alive || generalFaction(challenger)!=='wu' || g.gameMode!=='identity' ||
-      !d.challengerCard || !d.resume || typeof d.resume!=='object' || typeof d.resume.phase!=='string';
-    if(invalid){
-    logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhibaAsk)');
-    if(d.challengerCard) g.discard.push(d.challengerCard);
-    g.pending=null; g.phase='play';
-    }
-  }
-  if(g.pending && g.pending.type==='zhibaGain'){
-    const d=g.pending,lord=g.players[d.lordSeat];
-    if(!Number.isInteger(d.lordSeat) || !lord || !lord.alive || lord.role!=='zhu' || !hasCap(lord,'zhiba') ||
-       !Array.isArray(d.cards) || d.cards.length!==2 || d.cards.some(card=>!card)){
-    logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(zhibaGain)');
-    if(Array.isArray(d.cards)) g.discard.push(...d.cards.filter(Boolean));
-    g.pending=null; g.phase='play';
-    }
-  }
+
+
   // 孙策【英魂】:觉醒后准备阶段选择目标/效果,再由目标选择弃牌。
-  if(g.pending && (g.pending.type==='yinghunTarget' || g.pending.type==='yinghunChoice' || g.pending.type==='yinghunDiscard')){
-    const d=g.pending;
-    const ownerSeat=d.type==='yinghunDiscard'?d.ownerSeat:d.seat;
-    if(typeof ownerSeat!=='number' || !g.players[ownerSeat] || !g.players[ownerSeat].alive ||
-       ((d.type==='yinghunChoice'||d.type==='yinghunDiscard') && (typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive))){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(yinghunTarget/yinghunChoice/yinghunDiscard)');
-      g.pending=null;
-      if(Number.isInteger(ownerSeat) && g.players[ownerSeat] && g.players[ownerSeat].alive && g.turn===ownerSeat &&
-         typeof continueHuashenChangeCheckAtTurnStart==='function'){
-        g.phase='play'; continueHuashenChangeCheckAtTurnStart(g,ownerSeat);
-      }else g.phase='draw';
-    }
-  }
+
   // 借刀杀人选择阶段:from/seatA/seatB 都应是数字座位号;不对就整体判无效
-  if(g.pending && g.pending.type==='jiedaoChoice' && (typeof g.pending.from!=='number' || typeof g.pending.seatA!=='number' || typeof g.pending.seatB!=='number')){
-    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jiedaoChoice)');
-    g.pending=null; g.phase='play';
-  }
+
   // 于吉【蛊惑】质疑阶段:sourceSeat/asking 应是合法座位,实际牌和声明牌应存在;回答列表缺失时回退空数组
-  if(g.pending && g.pending.type==='guhuoQuestion'){
-    const d=g.pending;
-    if(!Array.isArray(d.questioners)) d.questioners=[];
-    if(!Array.isArray(d.answered)) d.answered=[];
-    if(typeof d.sourceSeat!=='number' || typeof d.asking!=='number' ||
-       !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !g.players[d.asking] || !g.players[d.asking].alive ||
-       !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guhuoQuestion)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 于吉【蛊惑】目标选择阶段:声明牌已通过质疑后,由于吉为这张牌选择目标
-  if(g.pending && g.pending.type==='guhuoTarget'){
-    const d=g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !d.actualCard || !d.claimedCard || typeof d.claimedCard.name!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(guhuoTarget)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 五谷丰登挑选阶段:pool/order 是数组(Firebase 吞空数组),from/idx 应是数字;不对就整体判无效
-  if(g.pending && g.pending.type==='wugu'){
-    g.pending.pool = g.pending.pool || [];
-    g.pending.order = g.pending.order || [];
-    if(typeof g.pending.from!=='number' || typeof g.pending.idx!=='number' || g.pending.order.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(wugu)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 火攻弃同花色阶段:from/to 都应是存活座位,suit 是展示牌花色;不对就整体判无效
-  if(g.pending && g.pending.type==='huogongReveal'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(huogongReveal)');
-      g.pending=null; g.phase='play';
-    }
-  }
-  if(g.pending && g.pending.type==='huogong'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !d.suit || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(huogong)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
+
   // 洛神判定阶段:seat 应是数字座位号;不对就整体判无效
-  if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
-    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(luoshen)');
-    g.pending=null; g.phase='play';
-  }
+
   // 群体锦囊(南蛮入侵/万箭齐发)响应阶段:from/to 都应是数字座位号且对应玩家存活;不对就整体
   // 判无效——顺带清空 g.aoe(这条锦囊本身已不可恢复,和 aoeAdvance 结算完毕时的清空一致),
   // 防止孤立的 aoeResp 卡住(没人能匹配上一个不存在/已阵亡的 to,永远等不到响应)。
-  if(g.pending && g.pending.type==='aoeResp'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(aoeResp)');
-      g.pending=null; g.aoe=null; g.phase='play';
-    }
-  }
+
   // 决斗阶段:from/to/active 都应是数字座位号且对应玩家存活(active 是当前该出杀的那个人);
   // 不对就整体判无效——render.js 的旁观者 banner 直接读 g.players[active].name 没有防护,
   // active 非法会真的抛 TypeError 崩溃,不只是卡死。
-  if(g.pending && g.pending.type==='duel'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || typeof d.active!=='number'
-       || !g.players[d.from] || !g.players[d.to] || !g.players[d.active]
-       || !g.players[d.from].alive || !g.players[d.to].alive || !g.players[d.active].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(duel)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 夏侯惇【刚烈】二选一阶段:seat(判定者本人)/sourceSeat(伤害来源)都应是数字座位号且存活;不对就整体判无效
-  if(g.pending && g.pending.type==='ganglieChoice'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.sourceSeat!=='number' || !g.players[d.seat] || !g.players[d.sourceSeat] || !g.players[d.seat].alive || !g.players[d.sourceSeat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(ganglieChoice)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 贯石斧询问阶段:from/to 都应是数字座位号且存活;不对就整体判无效——render.js 的旁观者
   // banner 直接读 g.players[from]/[to].name 没有防护,会真的崩溃。
-  if(g.pending && g.pending.type==='guanshi'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(guanshi)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 寒冰剑弃牌子阶段:from/to 都应是数字座位号且存活;不对就整体判无效——render.js 的旁观者
   // banner 直接读 g.players[from]/[to].name 没有防护,会真的崩溃。
-  if(g.pending && g.pending.type==='hanbing'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(hanbing)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 寒冰剑询问阶段(是否发动):from/to 同上;不对就整体判无效——同样在 render.js 有无防护的
   // g.players[from]/[to].name 读取。
-  if(g.pending && g.pending.type==='hanbingAsk'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(hanbingAsk)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 许褚【裸衣】摸牌阶段询问:和颜良文丑【双雄】(shuangxiongAsk)同一个 continueEnterDrawPhase
   // 里互斥的分支,结构完全一样——seat 应是当前回合玩家且存活,不对就整体判无效回退到摸牌阶段。
-  if(g.pending && g.pending.type==='luoyiAsk'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(luoyiAsk)');
-      g.pending=null; g.phase='draw';
-    }
-  }
+
   // 张郃【巧变】"是否移动一张装备/判定牌"子阶段:seat 应是数字座位号且存活;不对就整体判无效。
   // 这个子阶段发生在"已决定跳过出牌阶段、改为移动装备"之后,回退到 'play' 让该玩家正常走出牌阶段
   // 是最安全的降级(不勉强重现"跳过出牌阶段"这个已经做出的选择)。render.js 的旁观者 banner
   // 直接读 g.players[seat].name 没有防护,会真的崩溃。
-  if(g.pending && g.pending.type==='qiaobianMove'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qiaobianMove)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 张郃【巧变】回合开始"是否发动"询问:和 shuangxiongAsk/luoyiAsk 同一类"回合开始阶段的
   // 分支性询问",但这一步发生得更早(判定阶段之前)——无效时没有办法安全重放被跳过的判定/
   // 摸牌逻辑,统一降级回退到摸牌阶段(和 shuangxiongAsk/luoyiAsk 一致的近似处理)。render.js
   // 的旁观者 banner 直接读 g.players[seat].name 没有防护,会真的崩溃。
-  if(g.pending && g.pending.type==='qiaobianTurnStart'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qiaobianTurnStart)');
-      g.pending=null; g.phase='draw';
-    }
-  }
+
   // 左慈"更改化身"回合开始一侧:huashenChangeAskStart(是否更改)/huashenChangePickStart
   // (两级选择)——和qiaobianTurnStart同一类"回合开始阶段的分支性询问",发生在判定/摸牌
   // 阶段之前,无效时同样降级回退到摸牌阶段。额外校验huashenGeneral必须非null(和
   // continueHuashenChangeCheckAtTurnStart的触发条件保持一致,防止脏状态下问出一个
   // 本不该出现的询问)。
-  if(g.pending && (g.pending.type==='huashenChangeAskStart' || g.pending.type==='huashenChangePickStart')){
-    const d=g.pending;
-    const p=g.players[d.seat];
-    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huashenChangeAskStart/huashenChangePickStart)');
-      g.pending=null; g.phase='draw';
-    }
-  }
+
   // 麒麟弓选马阶段:from/to 都应是数字座位号且存活;不对就整体判无效,防止卡死
   // (render.js 这里已经用 ?:'?' 防护过读取,不会真崩溃,但座位失效仍会让选择永远问不到人)。
-  if(g.pending && g.pending.type==='qilin'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qilin)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 青龙偃月刀连续杀询问阶段:from/to 都应是数字座位号且存活;不对就整体判无效——render.js
   // 的旁观者 banner 直接读 g.players[from]/[to].name 没有防护,会真的崩溃。
-  if(g.pending && g.pending.type==='qinglong'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(qinglong)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 雌雄双股剑:攻击者询问 / 目标二选一
-  if(g.pending && (g.pending.type==='cixiongAsk' || g.pending.type==='cixiongChoice')){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(cixiongAsk/cixiongChoice)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 顺手牵羊/过河拆桥的选牌子阶段(g.pending.type==='pick'):trick/from/to 全是标量
   // (trick 是字符串锦囊名,from/to 是座位号)。这次专门审查过是否需要补防御,结论是刻意不改——
   // 和这一批新补防御的类型同样携带座位引用,但 pick 早有既有先例(CLAUDE.md 明确记录
   // "pending.type:'pick' 全是标量,normalize 无需改"),沿用先例不重新论证;等到真的出现过
   // 因为它卡死/崩溃的实际案例再补,不为了"看起来对称"而添加从未验证过必要性的防御代码。
   // 颜良文丑【双雄】摸牌阶段询问:seat 应是当前回合玩家且存活。
-  if(g.pending && g.pending.type==='shuangxiongAsk'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || d.seat!==g.turn || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(shuangxiongAsk)');
-      g.pending=null; g.phase='draw';
-    }
-  }
+
   // 观星阶段:seat 应是数字座位号且对应玩家存活,cards 应是数组;不满足整体判无效,防止卡死
-  if(g.pending && g.pending.type==='guanxingReview'){
-    const gp=g.pending.seat;
-    if(typeof gp!=='number' || !g.players[gp] || !g.players[gp].alive || !Array.isArray(g.pending.cards)){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(guanxingReview)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 李典【恂恂】阶段:seat 应是数字座位号且对应玩家存活,cards 应是数组,takeN 应是正整数;不满足整体判无效
-  if(g.pending && g.pending.type==='xunxunPick'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive 
-       || !Array.isArray(d.cards) || d.cards.length===0 
-       || !Number.isInteger(d.takeN) || d.takeN<=0 || d.takeN>d.cards.length){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(xunxunPick)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 群体锦囊上下文:字段不全则视为无效(全是标量,无空数组问题)
   if(g.aoe && (typeof g.aoe.from!=='number' || !g.aoe.trick || !g.aoe.need)) g.aoe=null;
   // 乐不思蜀:跳过出牌阶段的标志位,和 p.dying 同款防御
@@ -1016,325 +1720,66 @@ function normalize(g){
   // 导致刚设置好 pending 就被下一次 normalize 判定"无效"直接清空、phase 打回 'play'——
   // 真实 bug:拼点赢了之后完全没机会选目标,见 CLAUDE.md 记录。
   // 夏侯渊【神速】选择阶段
-  if(g.pending && g.pending.type==="shensuChoose1"){
-    const d = g.pending;
-    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(shensuChoose1)');
-      g.pending = null; g.phase = "judge";
-    }
-  }
-  if(g.pending && g.pending.type==="shensuChoose2"){
-    const d = g.pending;
-    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(shensuChoose2)');
-      g.pending = null; g.phase = "play";
-    }
-  }
-  if(g.pending && g.pending.type==="shensuSha"){
-    const d = g.pending;
-    if(typeof d.seat!=="number" || !g.players[d.seat] || !g.players[d.seat].alive ||
-       typeof d.remaining!=="number" || d.remaining <= 0 ||
-       typeof d.noDistance!=="boolean"){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(shensuSha)');
-      g.pending = null;
-      g.phase = g.shensuSkipJudgingAndDraw ? "play" : (g.shensuSkipPlay ? "discard" : "play");
-    }
-  }
-  if(g.pending && g.pending.type==="shensuShaRespond"){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=="number" || typeof d.targetSeat!=="number" ||
-       !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       typeof d.needed!=="number" || typeof d.played!=="number"){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(shensuShaRespond)');
-      g.pending = null; g.phase = "play";
-    }
-  }
-  if(g.pending && g.pending.type==='quhuRespond'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !d.selfCard || !g.players[d.seat] || !g.players[d.targetSeat]){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(quhuRespond)');
-      g.pending=null; g.phase='play';
-    }
-  }
-  if(g.pending && g.pending.type==='quhuDamageChoice'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !Array.isArray(d.targets) || d.targets.length===0
-       || !g.players[d.seat] || !g.players[d.targetSeat] || !d.targets.every(t=>Number.isInteger(t) && g.players[t] && g.players[t].alive)){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(quhuDamageChoice)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
+
+
+
+
+
   // 太史慈【天义】选牌/选目标/拼点响应
-  if(g.pending && (g.pending.type==='tianyiPickCard' || g.pending.type==='tianyiPickTarget')){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(tianyiPickCard/tianyiPickTarget)');
-      g.pending = null; g.phase = 'play';
-    }
-  }
-  if(g.pending && g.pending.type==='tianyiRespond'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !d.selfCard || typeof d.selfCard.rank!=='number'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(tianyiRespond)');
-      g.pending = null; g.phase = 'play';
-    }
-  }
+
+
   // 周泰【不屈】询问
-  if(g.pending && g.pending.type==='buquAsk'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(buquAsk)');
-      g.pending = null; g.phase = 'play';
-    } else if(!Number.isInteger(d.remaining) || d.remaining < 1) {
-      // remaining 是"这次伤害还需连续询问几次"的计数器,旧存档/防御性回退默认1次
-      // (等价于改动前"只问一次"的行为,不影响单点伤害场景)。
-      d.remaining = 1;
-    }
-  }
+
   // 陆逊【连营】询问
-  if(g.pending && g.pending.type==='lianyingAsk'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lianyingAsk)');
-      g.pending = null; g.phase = 'play';
-    }
-  }
+
   // 公孙瓒【趫猛】:伤害结算后的选择阶段
-  if(g.pending && g.pending.type==='qiaomengChoose'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       d.shaColor !== 'black'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiaomengChoose)');
-      g.pending = null; g.phase = 'play';
-    }
-  }
+
   // 公孙瓒【趫猛】:装备选择阶段
-  if(g.pending && g.pending.type==='qiaomengPickEquip'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !Array.isArray(d.availableSlots) || d.availableSlots.length === 0 ||
-       !g.players[d.targetSeat].equips || Object.keys(g.players[d.targetSeat].equips).length === 0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(qiaomengPickEquip)');
-      g.pending = null; g.phase = 'play';
-    }
-  }
-  if(g.pending && g.pending.type==='fanjianSuit'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.targetSeat!=='number' || !g.players[d.seat] || !g.players[d.targetSeat]){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(fanjianSuit)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
+
   if(g.tiesuoQueue && (!Array.isArray(g.tiesuoQueue.targets) || !Number.isInteger(g.tiesuoQueue.idx) || typeof g.tiesuoQueue.from!=='number')){
     g.tiesuoQueue=null;
   }
-  if(g.pending && g.pending.type==='jiemingAsk'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jiemingAsk)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 左慈【新生】:remaining计数循环询问,和节命的jiemingAsk同一套结构、同一套防御写法。
-  if(g.pending && g.pending.type==='xinshengAsk'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !Number.isInteger(d.remaining) || d.remaining<=0 || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(xinshengAsk)');
-      g.pending=null; g.phase='play';
-    }
-  }
-  if(g.pending && g.pending.type==='liuli'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to]){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(liuli)');
-      g.pending=null; g.phase='play';
-    }
-  }
-  if(g.pending && g.pending.type==='tianxiang'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive || !Array.isArray(d.targets) || d.targets.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(tianxiang)');
-      g.pending=null; g.phase='play';
-    }
-  }
-  if(g.pending && g.pending.type==='biyue'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(biyue)');
-      g.pending=null; g.phase='discard';
-    }
-  }
+
+
+
+
   // 左慈"更改化身"回合结束一侧:huashenChangeAskEnd/huashenChangePickEnd——和biyue同一类
   // "回合结束阶段的分支性询问",无效时降级回退到弃牌阶段(biyue同款处理)。
-  if(g.pending && (g.pending.type==='huashenChangeAskEnd' || g.pending.type==='huashenChangePickEnd')){
-    const d=g.pending;
-    const p=g.players[d.seat];
-    if(typeof d.seat!=='number' || !p || !p.alive || p.huashenGeneral===null){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huashenChangeAskEnd/huashenChangePickEnd)');
-      g.pending=null; g.phase='discard';
-    }
-  }
-  if(g.pending && g.pending.type==='lirangAsk'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !g.players[d.from] || !g.players[d.to] || !g.players[d.from].alive || !g.players[d.to].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lirangAsk)');
-      g.pending=null; g.phase='draw';
-    }
-  }
-  if(g.pending && g.pending.type==='lirangRecover'){
-    const d=g.pending;
-    if(typeof d.from!=='number' || typeof d.to!=='number' || !Array.isArray(d.cards) || !g.players[d.from] || !g.players[d.to]){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lirangRecover)');
-      g.pending=null; g.phase='discard';
-    }
-  }
-  if(g.pending && g.pending.type==='zhengyi'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || typeof d.asking!=='number' || !g.players[d.seat] || !g.players[d.asking] || !g.players[d.seat].alive || !g.players[d.asking].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(zhengyi)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
+
+
+
   // 鲁肃【好施】选择目标阶段:seat 应是数字且存活, candidates 应是非空数组
-  if(g.pending && g.pending.type==='haoshiPick'){
-    const d=g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       !Array.isArray(d.candidates) || d.candidates.length===0 ||
-       !Number.isInteger(d.half) || d.half<=0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(haoshiPick)');
-      g.pending=null; g.phase='play';
-    }
-  }
+
   // 曹仁【据守】:选择阶段
-  if(g.pending && g.pending.type==='jushouChoose'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jushouChoose)');
-      g.pending = null;
-      g.phase = 'end';
-    }
-  }
+
   // 徐庶【举荐】三阶段
-  if(g.pending && (g.pending.type==='jujianPickCard' || g.pending.type==='jujianPickTarget' || g.pending.type==='jujianChooseEffect')){
-    const d = g.pending;
-    const srcOk = Number.isInteger(d.sourceSeat) && g.players[d.sourceSeat] && g.players[d.sourceSeat].alive;
-    if(!srcOk){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jujianPickCard/jujianPickTarget/jujianChooseEffect)');
-      g.pending = null;
-      if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
-    } else if(d.type==='jujianChooseEffect'){
-      const tgtOk = Number.isInteger(d.targetSeat) && g.players[d.targetSeat] && g.players[d.targetSeat].alive;
-      if(!tgtOk){
-        logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jujianPickCard/jujianPickTarget/jujianChooseEffect)');
-        g.pending = null;
-        if(String(g.phase||'').startsWith('jujian')) g.phase = 'discard';
-      }
-    }
-  }
+
   // 曹彰【将驰】摸牌阶段询问
-  if(g.pending && g.pending.type==='jiangchiAsk'){
-    const d = g.pending;
-    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(jiangchiAsk)');
-      g.pending = null;
-      if(g.phase==='jiangchiAsk') g.phase = 'draw';
-    }
-  }
+
   // 曹植【落英】
-  if(g.pending && g.pending.type==='luoyingAsk'){
-    const d = g.pending;
-    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
-       !Array.isArray(d.cardIds)){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(luoyingAsk)');
-      g.pending = null;
-      if(g.phase==='luoyingAsk') g.phase = 'play';
-    }
-  }
+
   // 曹植【酒诗②】翻面询问
-  if(g.pending && g.pending.type==='jiushiFlipAsk'){
-    const d = g.pending;
-    if(!Number.isInteger(d.seat) || !g.players[d.seat] || !g.players[d.seat].alive ||
-       typeof d.wasFacedown!=='boolean'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(jiushiFlipAsk)');
-      g.pending = null;
-      if(g.phase==='jiushiFlipAsk') g.phase = 'play';
-    }
-  }
+
   // 蔡文姬【悲歌】:伤害后选择是否发动
-  if(g.pending && g.pending.type==='beigeChoose'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
-       (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(beigeChoose)');
-      g.pending = null;
-      g.phase = g.phase === 'beigeChoose' ? 'play' : g.phase;
-    }
-  }
+
   // 蔡文姬【悲歌】:弃牌选择阶段
-  if(g.pending && g.pending.type==='beigeDiscard'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
-       (d.damageSource !== null && typeof d.damageSource === 'number' && (!g.players[d.damageSource] || !g.players[d.damageSource].alive))){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(beigeDiscard)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
   // 蔡文姬【悲歌】:判定阶段
-  if(g.pending && g.pending.type==='beigeJudge'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.damagedSeat!=='number' || !g.players[d.damagedSeat] || !g.players[d.damagedSeat].alive ||
-       !d.resume || typeof d.resume.kind!=='string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(beigeJudge)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
   // 蔡文姬【断肠】:死亡结算标记
   if(typeof g.dyingSource !== 'number' && g.dyingSource !== null) g.dyingSource = null;
-  
+
   // 祝融【烈刃】:拼点选择阶段
-  if(g.pending && g.pending.type==='lieRenChoose'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lieRenChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
-  
+
   // 祝融【烈刃】:选择拼点牌阶段
-  if(g.pending && g.pending.type==='lieRenPickCard'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(lieRenPickCard)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
-  
+
   // 祝融【烈刃】:拼点响应阶段
-  if(g.pending && g.pending.type==='lieRenRespond'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !d.sourceCard || typeof d.sourceCard.rank!=='number'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(lieRenRespond)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
-  
+
   // 翻面状态：确保所有角色都有 faceup 属性
   for (let i = 0; i < g.players.length; i++) {
     if (g.players[i] && typeof g.players[i].faceup !== 'boolean') {
@@ -1342,25 +1787,7 @@ function normalize(g){
     }
   }
   // 凌统【旋风】:旋风选择阶段
-  if(g.pending && g.pending.type==='xuanfengPick'){
-    const d = g.pending;
-    if(!Array.isArray(d.selections)) d.selections=[];
-    // Firebase Realtime Database 不保留空数组。旋风刚触发、尚未选择目标时，targets 和
-    // discardedCounts 都是 []，同步回来后字段会直接缺失；这属于合法初始状态，不能当成
-    // 脏数据清掉 pending，否则真实联机局中旋风界面会在建立后立刻消失。
-    if(d.targets===undefined || d.targets===null) d.targets=[];
-    if(d.discardedCounts===undefined || d.discardedCounts===null) d.discardedCounts=[];
-    if(typeof d.from!=='number' || !g.players[d.from] || !g.players[d.from].alive ||
-       !Array.isArray(d.targets) ||
-       !Array.isArray(d.discardedCounts) ||
-       d.discardedCounts.length !== d.targets.length ||
-       d.discardedCounts.some(c => typeof c !== 'number' || c < 0) ||
-       typeof d.previousPhase !== 'string'){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(xuanfengPick)');
-      g.pending = null;
-      g.phase = d.previousPhase || (g.phase === 'xuanfengPick' ? 'discard' : g.phase);
-    }
-  }
+
   // 凌统【旋风】:每回合弃牌阶段是否已触发过旋风
   if(typeof g.xuanfengDiscardUsed !== 'boolean') g.xuanfengDiscardUsed = false;
   // 凌统【旋风】:本回合弃牌阶段实际弃置的牌数（用于准确计算，避免依赖g.discard.length）
@@ -1377,121 +1804,34 @@ function normalize(g){
   }
 
   // 丁奉【短兵】:使用杀时的额外目标选择阶段
-  if(g.pending && g.pending.type==='duanbingChoose'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.baseTarget!=='number' || !g.players[d.baseTarget] || !g.players[d.baseTarget].alive ||
-       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(duanbingChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 法正【恩怨】:伤害后选择阶段
-  if(g.pending && g.pending.type==='enyuanChoose'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(enyuanChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 法正【恩怨】:选择交♥手牌或失去体力阶段
-  if(g.pending && g.pending.type==='enyuanChooseOption'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
-       !Array.isArray(d.heartCards)){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(enyuanChooseOption)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 法正【恩怨】:选择要交的♥手牌阶段
-  if(g.pending && g.pending.type==='enyuanGiveCard'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.damagerSeat!=='number' || !g.players[d.damagerSeat] || !g.players[d.damagerSeat].alive ||
-       !(g.players[d.damagerSeat].hand||[]).some(card=>card && card.suit==='♥')){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(enyuanGiveCard)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 法正【眩惑】:选择目标阶段
-  if(g.pending && g.pending.type==='huanhuoPick'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       !Array.isArray(d.candidates) || d.candidates.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPick)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 法正【眩惑】:选择♥手牌阶段
-  if(g.pending && g.pending.type==='huanhuoPickCard'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       !(g.players[d.sourceSeat].hand||[]).some(card=>card && card.suit==='♥')){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPickCard)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 法正【眩惑】:选择要获得的牌阶段
-  if(g.pending && g.pending.type==='huanhuoPickGotCard'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.targetSeat!=='number' || !g.players[d.targetSeat] || !g.players[d.targetSeat].alive ||
-       ((g.players[d.targetSeat].hand||[]).length +
-        EQUIP_SLOTS.filter(slot=>g.players[d.targetSeat].equips && g.players[d.targetSeat].equips[slot]).length)===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPickGotCard)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 法正【眩惑】:选择第二个目标阶段
-  if(g.pending && g.pending.type==='huanhuoPickSecond'){
-    const d = g.pending;
-    if(typeof d.sourceSeat!=='number' || !g.players[d.sourceSeat] || !g.players[d.sourceSeat].alive ||
-       typeof d.firstTargetSeat!=='number' || !g.players[d.firstTargetSeat] || !g.players[d.firstTargetSeat].alive ||
-       typeof d.transferCard!=='object' || !d.transferCard ||
-       !Array.isArray(d.candidates) || d.candidates.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(huanhuoPickSecond)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 丁奉【奋迅】:弃牌选择阶段
-  if(g.pending && g.pending.type==='fenxunDiscard'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive){
-      logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(fenxunDiscard)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 丁奉【奋迅】:目标选择阶段
-  if(g.pending && g.pending.type==='fenxunTarget'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       !Array.isArray(d.availableTargets) || d.availableTargets.length===0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(fenxunTarget)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 曹冲【称象】: 询问是否发动阶段
   // 【压力测试发现的真实bug】这三个块(chengxiangAsk/chengxiangChoose/renxinChoose)曾经
@@ -1501,46 +1841,20 @@ function normalize(g){
   // 这是服务端bug,不是机器人专属问题。全项目扫过 normalize 里全部93处
   // "if(g.pending&&g.pending.type===X){...g.pending=null...}"块,只有这三处漏了
   // phase重置,其余全部正确同步清理(如上面的 fenxunDiscard/fenxunTarget)。
-  if(g.pending && g.pending.type==='chengxiangAsk'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       typeof d.damageInfo!=='object' || d.damageInfo === null){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(chengxiangAsk)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 曹冲【称象】: 选择牌阶段
-  if(g.pending && g.pending.type==='chengxiangChoose'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       !Array.isArray(d.revealedCards) || d.revealedCards.length === 0 ||
-       !Array.isArray(d.selectable) || !Number.isInteger(d.sumLimit) || d.sumLimit <= 0){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(chengxiangChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // 曹冲【仁心】: 选择装备牌阶段
-  if(g.pending && g.pending.type==='renxinChoose'){
-    const d = g.pending;
-    if(typeof d.seat!=='number' || !g.players[d.seat] || !g.players[d.seat].alive ||
-       typeof d.target!=='number' || !g.players[d.target] || !g.players[d.target].alive ||
-       g.players[d.target].hp > 1 ||
-       !Array.isArray(d.equipSlots) || d.equipSlots.length === 0 ||
-       typeof d.originalDamageInfo!=='object' || d.originalDamageInfo===null){
-      logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(renxinChoose)');
-      g.pending = null;
-      g.phase = 'play';
-    }
-  }
+
 
   // A1 响应超时托管:对有明确响应者的 pending 兜底补 askedAt(缺失时=首次读到,视为刚被询问)。
   // normalize 在 tx 写路径和 render 读路径都跑,老存档/创建处漏打的 pending 在这里补齐;
   // 创建处/asking 切换处已用 setResponseAskedAt 打过,这里绝不覆盖原值(覆盖=倒计时重置,
   // 永远等不到超时)。不再依赖 type 白名单；新增 pending 只要沿用通用响应者字段就自动覆盖。
+  normalizeRegisteredStage(g);
+
   if(g.pending && typeof g.pending.askedAt !== 'number'){
     if(isTimedResponsePending(g,g.pending)) g.pending.askedAt = Date.now();
   }

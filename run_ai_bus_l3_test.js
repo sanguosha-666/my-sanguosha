@@ -1212,9 +1212,9 @@ const testCode = String.raw`
       throw new Error('服务函数应调用一次 respondJiedao(true,0),实际 ' + JSON.stringify(window.__jiedaoResponseCalls));
   });
 
-  await check('A5借刀响应调度登记:EXCLUDE 含 jiedaoChoice;BOT_PHASE_ACTOR.jiedaoChoice=seatA', function(){
+  await check('A5借刀响应调度登记:EXCLUDE 含 jiedaoChoice;STAGE_TABLE.actor(jiedaoChoice)=seatA', function(){
     if(!CONTROLS_CHOICE_EXCLUDE.has('jiedaoChoice')) throw new Error('CONTROLS_CHOICE_EXCLUDE 缺少 jiedaoChoice');
-    if(BOT_PHASE_ACTOR.jiedaoChoice !== 'seatA') throw new Error('BOT_PHASE_ACTOR.jiedaoChoice 应为 seatA,实际 ' + BOT_PHASE_ACTOR.jiedaoChoice);
+    if(stageActorField('jiedaoChoice') !== 'seatA') throw new Error('STAGE_TABLE.actor(jiedaoChoice) 应为 seatA,实际 ' + stageActorField('jiedaoChoice'));
   });
 
   // ================= T5:多步两阶段扩展(离间/丈八/仁德) =================
@@ -2559,8 +2559,8 @@ const testCode = String.raw`
   await check('A4 enyuanGiveCard接线:runBotDecision调用botDecide恰1次并提交一次', async function(){
     window.__enyuanGiveCardCalls = [];
     aiApiKey = ''; aiProvider = null;
-    if(BOT_PHASE_ACTOR.enyuanGiveCard !== 'damagerSeat')
-      throw new Error('BOT_PHASE_ACTOR应登记enyuanGiveCard:damagerSeat,实际 ' + BOT_PHASE_ACTOR.enyuanGiveCard);
+    if(stageActorField('enyuanGiveCard') !== 'damagerSeat')
+      throw new Error('BOT_PHASE_ACTOR应登记enyuanGiveCard:damagerSeat,实际 ' + stageActorField('enyuanGiveCard'));
     var restore = spyBotDecideLog();
     try {
       await runBotDecision(mkEnyuanGiveCardG({ myHand: [card('杀', 'a54', '♠'), card('桃', 'a55', '♥')] }), 0);
@@ -2829,8 +2829,8 @@ const testCode = String.raw`
   await check('遗计分配接线:runBotDecision 全链 → botDecide(yijiAssign) 被调且提交;BOT_PHASE_ACTOR 登记;L1 EXCLUDE 收录防双重接管', async function(){
     window.__yijiAssignCalls = [];
     aiApiKey = ''; aiProvider = null;
-    if(BOT_PHASE_ACTOR.yijiAssign !== 'seat')
-      throw new Error('BOT_PHASE_ACTOR 应登记 yijiAssign:seat,实际 ' + BOT_PHASE_ACTOR.yijiAssign);
+    if(stageActorField('yijiAssign') !== 'seat')
+      throw new Error('BOT_PHASE_ACTOR 应登记 yijiAssign:seat,实际 ' + stageActorField('yijiAssign'));
     if(!CONTROLS_CHOICE_EXCLUDE.has('yijiAssign'))
       throw new Error('yijiAssign 渲染 #controls 按钮,必须进 CONTROLS_CHOICE_EXCLUDE 防 L1 双重接管');
     var restore = spyBotDecideLog();
@@ -2927,8 +2927,8 @@ const testCode = String.raw`
   await check('礼让发动接线:runBotDecision 全链 → botDecide(lirangAsk) 被调且提交不发动;BOT_PHASE_ACTOR 登记;L1 EXCLUDE 收录防双重接管', async function(){
     window.__lirangCalls = [];
     aiApiKey = ''; aiProvider = null;
-    if(BOT_PHASE_ACTOR.lirangAsk !== 'from')
-      throw new Error('BOT_PHASE_ACTOR 应登记 lirangAsk:from,实际 ' + BOT_PHASE_ACTOR.lirangAsk);
+    if(stageActorField('lirangAsk') !== 'from')
+      throw new Error('BOT_PHASE_ACTOR 应登记 lirangAsk:from,实际 ' + stageActorField('lirangAsk'));
     if(!CONTROLS_CHOICE_EXCLUDE.has('lirangAsk'))
       throw new Error('lirangAsk 渲染 #controls 按钮,必须进 CONTROLS_CHOICE_EXCLUDE 防 L1 双重接管');
     var restore = spyBotDecideLog();
@@ -3031,8 +3031,8 @@ const testCode = String.raw`
     window.__mockAiCalls = 0;
     window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
     aiApiKey = 'test-key'; aiProvider = 'claude';
-    if(BOT_PHASE_ACTOR.xiaoguo !== 'asking')
-      throw new Error('BOT_PHASE_ACTOR 应登记 xiaoguo:asking,实际 ' + BOT_PHASE_ACTOR.xiaoguo);
+    if(stageActorField('xiaoguo') !== 'asking')
+      throw new Error('BOT_PHASE_ACTOR 应登记 xiaoguo:asking,实际 ' + stageActorField('xiaoguo'));
     if(CONTROLS_CHOICE_EXCLUDE.has('xiaoguo'))
       throw new Error('xiaoguo 已有专用注册+接线,必须从 CONTROLS_CHOICE_EXCLUDE 移除(否则 L1 永远够不到,专用注册白做)');
     var restore = spyBotDecideLog();
@@ -3274,10 +3274,10 @@ const testCode = String.raw`
   });
 
   await check('系统性扫描收尾:BOT_PHASE_ACTOR 已登记 lieRenRespond/qiangxiPickTarget', function(){
-    if(BOT_PHASE_ACTOR.lieRenRespond !== 'targetSeat')
-      throw new Error('lieRenRespond 应登记为 targetSeat,实际 ' + BOT_PHASE_ACTOR.lieRenRespond);
-    if(BOT_PHASE_ACTOR.qiangxiPickTarget !== 'seat')
-      throw new Error('qiangxiPickTarget 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiPickTarget);
+    if(stageActorField('lieRenRespond') !== 'targetSeat')
+      throw new Error('lieRenRespond 应登记为 targetSeat,实际 ' + stageActorField('lieRenRespond'));
+    if(stageActorField('qiangxiPickTarget') !== 'seat')
+      throw new Error('qiangxiPickTarget 应登记为 seat,实际 ' + stageActorField('qiangxiPickTarget'));
   });
 
   // ================= 第二批-第1组:徐庶【举荐】+曹仁【据守】(每回合结束都可能触发,
@@ -3353,14 +3353,14 @@ const testCode = String.raw`
   });
 
   await check('第二批-1:BOT_PHASE_ACTOR 已登记 jujian三段/jushouChoose', function(){
-    if(BOT_PHASE_ACTOR.jujianPickCard !== 'sourceSeat')
-      throw new Error('jujianPickCard 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.jujianPickCard);
-    if(BOT_PHASE_ACTOR.jujianPickTarget !== 'sourceSeat')
-      throw new Error('jujianPickTarget 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.jujianPickTarget);
-    if(BOT_PHASE_ACTOR.jujianChooseEffect !== 'targetSeat')
-      throw new Error('jujianChooseEffect 应登记为 targetSeat,实际 ' + BOT_PHASE_ACTOR.jujianChooseEffect);
-    if(BOT_PHASE_ACTOR.jushouChoose !== 'seat')
-      throw new Error('jushouChoose 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.jushouChoose);
+    if(stageActorField('jujianPickCard') !== 'sourceSeat')
+      throw new Error('jujianPickCard 应登记为 sourceSeat,实际 ' + stageActorField('jujianPickCard'));
+    if(stageActorField('jujianPickTarget') !== 'sourceSeat')
+      throw new Error('jujianPickTarget 应登记为 sourceSeat,实际 ' + stageActorField('jujianPickTarget'));
+    if(stageActorField('jujianChooseEffect') !== 'targetSeat')
+      throw new Error('jujianChooseEffect 应登记为 targetSeat,实际 ' + stageActorField('jujianChooseEffect'));
+    if(stageActorField('jushouChoose') !== 'seat')
+      throw new Error('jushouChoose 应登记为 seat,实际 ' + stageActorField('jushouChoose'));
   });
 
   // ================= 第二批-第2组:雌雄双股剑+贯石斧+寒冰剑+青龙偃月刀(装备类4个,
@@ -3443,16 +3443,16 @@ const testCode = String.raw`
   });
 
   await check('第二批-2:BOT_PHASE_ACTOR 已登记 cixiongAsk/cixiongChoice/guanshi/hanbingAsk/qinglong', function(){
-    if(BOT_PHASE_ACTOR.cixiongAsk !== 'from')
-      throw new Error('cixiongAsk 应登记为 from,实际 ' + BOT_PHASE_ACTOR.cixiongAsk);
-    if(BOT_PHASE_ACTOR.cixiongChoice !== 'to')
-      throw new Error('cixiongChoice 应登记为 to,实际 ' + BOT_PHASE_ACTOR.cixiongChoice);
-    if(BOT_PHASE_ACTOR.guanshi !== 'from')
-      throw new Error('guanshi 应登记为 from,实际 ' + BOT_PHASE_ACTOR.guanshi);
-    if(BOT_PHASE_ACTOR.hanbingAsk !== 'from')
-      throw new Error('hanbingAsk 应登记为 from,实际 ' + BOT_PHASE_ACTOR.hanbingAsk);
-    if(BOT_PHASE_ACTOR.qinglong !== 'from')
-      throw new Error('qinglong 应登记为 from,实际 ' + BOT_PHASE_ACTOR.qinglong);
+    if(stageActorField('cixiongAsk') !== 'from')
+      throw new Error('cixiongAsk 应登记为 from,实际 ' + stageActorField('cixiongAsk'));
+    if(stageActorField('cixiongChoice') !== 'to')
+      throw new Error('cixiongChoice 应登记为 to,实际 ' + stageActorField('cixiongChoice'));
+    if(stageActorField('guanshi') !== 'from')
+      throw new Error('guanshi 应登记为 from,实际 ' + stageActorField('guanshi'));
+    if(stageActorField('hanbingAsk') !== 'from')
+      throw new Error('hanbingAsk 应登记为 from,实际 ' + stageActorField('hanbingAsk'));
+    if(stageActorField('qinglong') !== 'from')
+      throw new Error('qinglong 应登记为 from,实际 ' + stageActorField('qinglong'));
   });
 
   // ================= 第二批-第3组:颜良文丑【双雄】+张角【雷击】 =================
@@ -3490,12 +3490,12 @@ const testCode = String.raw`
   });
 
   await check('第二批-3:BOT_PHASE_ACTOR 已登记 shuangxiongAsk/leijiChoose/leijiJudge', function(){
-    if(BOT_PHASE_ACTOR.shuangxiongAsk !== 'seat')
-      throw new Error('shuangxiongAsk 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.shuangxiongAsk);
-    if(BOT_PHASE_ACTOR.leijiChoose !== 'sourceSeat')
-      throw new Error('leijiChoose 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.leijiChoose);
-    if(BOT_PHASE_ACTOR.leijiJudge !== 'sourceSeat')
-      throw new Error('leijiJudge 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.leijiJudge);
+    if(stageActorField('shuangxiongAsk') !== 'seat')
+      throw new Error('shuangxiongAsk 应登记为 seat,实际 ' + stageActorField('shuangxiongAsk'));
+    if(stageActorField('leijiChoose') !== 'sourceSeat')
+      throw new Error('leijiChoose 应登记为 sourceSeat,实际 ' + stageActorField('leijiChoose'));
+    if(stageActorField('leijiJudge') !== 'sourceSeat')
+      throw new Error('leijiJudge 应登记为 sourceSeat,实际 ' + stageActorField('leijiJudge'));
   });
 
   // ================= 第二批-剩余清单批量处理 =================
@@ -3793,11 +3793,11 @@ const testCode = String.raw`
       zhimengAsk:'from', zhimengPick:'from', huashenChangePickStart:'seat', huashenChangePickEnd:'seat',
     };
     Object.keys(expect).forEach(function(k){
-      if(BOT_PHASE_ACTOR[k] !== expect[k])
-        throw new Error(k + ' 应登记为 ' + expect[k] + ',实际 ' + BOT_PHASE_ACTOR[k]);
+      if(stageActorField(k) !== expect[k])
+        throw new Error(k + ' 应登记为 ' + expect[k] + ',实际 ' + stageActorField(k));
     });
-    if(BOT_PHASE_ACTOR.chengxiangChoose !== undefined)
-      throw new Error('chengxiangChoose 不应登记(g.phase从不等于该值,登记了也是死代码),实际 ' + BOT_PHASE_ACTOR.chengxiangChoose);
+    if(stageActorField('chengxiangChoose') !== null)
+      throw new Error('chengxiangChoose 不应登记(g.phase从不等于该值,登记了也是死代码),实际 ' + stageActorField('chengxiangChoose'));
   });
 
   // ================= 渲染层bug修复(luanjiChoose/luanjiConfirm)顺带补上的机器人分支 =================
@@ -3824,10 +3824,10 @@ const testCode = String.raw`
   });
 
   await check('渲染层bug修复:BOT_PHASE_ACTOR 已登记 luanjiChoose/luanjiConfirm', function(){
-    if(BOT_PHASE_ACTOR.luanjiChoose !== 'sourceSeat')
-      throw new Error('luanjiChoose 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.luanjiChoose);
-    if(BOT_PHASE_ACTOR.luanjiConfirm !== 'sourceSeat')
-      throw new Error('luanjiConfirm 应登记为 sourceSeat,实际 ' + BOT_PHASE_ACTOR.luanjiConfirm);
+    if(stageActorField('luanjiChoose') !== 'sourceSeat')
+      throw new Error('luanjiChoose 应登记为 sourceSeat,实际 ' + stageActorField('luanjiChoose'));
+    if(stageActorField('luanjiConfirm') !== 'sourceSeat')
+      throw new Error('luanjiConfirm 应登记为 sourceSeat,实际 ' + stageActorField('luanjiConfirm'));
   });
 
   // ================= 渲染层bug修复(典韦【强袭】,和乱击同一批)顺带补上的机器人分支 =================
@@ -3867,10 +3867,10 @@ const testCode = String.raw`
   });
 
   await check('渲染层bug修复:BOT_PHASE_ACTOR 已登记 qiangxiChooseCost/qiangxiChooseWeaponFromHand', function(){
-    if(BOT_PHASE_ACTOR.qiangxiChooseCost !== 'seat')
-      throw new Error('qiangxiChooseCost 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiChooseCost);
-    if(BOT_PHASE_ACTOR.qiangxiChooseWeaponFromHand !== 'seat')
-      throw new Error('qiangxiChooseWeaponFromHand 应登记为 seat,实际 ' + BOT_PHASE_ACTOR.qiangxiChooseWeaponFromHand);
+    if(stageActorField('qiangxiChooseCost') !== 'seat')
+      throw new Error('qiangxiChooseCost 应登记为 seat,实际 ' + stageActorField('qiangxiChooseCost'));
+    if(stageActorField('qiangxiChooseWeaponFromHand') !== 'seat')
+      throw new Error('qiangxiChooseWeaponFromHand 应登记为 seat,实际 ' + stageActorField('qiangxiChooseWeaponFromHand'));
   });
 
   // ---- botTwoStepA 自我触发机制(真实bug修复:借刀杀人/离间/丈八蛇矛/仁德四个技能

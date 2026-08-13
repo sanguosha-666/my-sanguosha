@@ -60,11 +60,11 @@ const sandbox = vm.createContext(context, { name: 'sgs-ai-bus-sandbox' });
 
 console.log('Loading AI 总线测试环境...\n');
 
-// 只加载三个真实源文件:ai-bot.js(密钥/提供商 let 绑定 + callAI)、bot-ai-bus.js
+// data.js 提供统一 STAGE_TABLE；其余三个真实源文件依次加载。
 // (总线核心:parseBotPlayAiChoice/BOT_DECISIONS/callAiChooseIndex/botDecide)与 bot.js
 // (注册项 + 调度)。bot.js 顶层无立即执行的
 // 函数调用,CARD_PLAYS/EQUIP_SLOTS 等只在函数体内引用,不加载也无碍。
-const files = ['ai-bot.js', 'bot-ai-bus.js', 'bot.js'];
+const files = ['data.js', 'ai-bot.js', 'bot-ai-bus.js', 'bot.js'];
 files.forEach(function(file){
   try {
     const code = fs.readFileSync(file, 'utf8');

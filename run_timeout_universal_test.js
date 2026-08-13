@@ -3,13 +3,14 @@ const vm=require('vm');
 const assert=require('assert');
 
 const game=fs.readFileSync('game.js','utf8');
+const data=fs.readFileSync('data.js','utf8');
 const bus=fs.readFileSync('bot-ai-bus.js','utf8');
-const setBlock=game.match(/const RESPONSE_PENDING_TYPES = new Set\(\[[\s\S]*?\r?\n\]\);/);
+const stageBlock=data.match(/const STAGE_TABLE = Object\.create\(null\);[\s\S]*?\}\)\.forEach\(\(\[type,actor\]\)=>registerStage\(type,\{actor\}\)\);/);
 const responderBlock=game.match(/function pendingResponderSeat\(g, pending\)\{[\s\S]*?\n\}/);
 const timedBlock=game.match(/function isTimedResponsePending\(g, pending\)\{[\s\S]*?\n\}/);
 const txBlock=game.match(/function tx\(fn, onCommitted\)\{[\s\S]*?\r?\n\}\r?\n\r?\nfunction doDraw/);
 const abandonBlock=bus.match(/function defaultAbandonPending\(snapshot\)\{[\s\S]*?\n\}/);
-assert(setBlock&&responderBlock&&timedBlock&&txBlock&&abandonBlock,'应能提取通用超时函数');
+assert(stageBlock&&responderBlock&&timedBlock&&txBlock&&abandonBlock,'应能提取通用超时函数');
 
 let now=1000;
 let state={
@@ -20,7 +21,6 @@ const context={
   Number,
   Date:{now:()=>now},
   RESPONSE_TIMEOUT_MS:30000,
-  BOT_PHASE_ACTOR:{},
   mySeat:1,
   gameRef:{transaction:function(fn){ state=fn(state); return null; }},
   normalize:function(g){return g;},
@@ -32,7 +32,7 @@ const context={
   resumeAfterInterrupt:function(g,resume){g.phase=resume.type;}
 };
 vm.createContext(context);
-vm.runInContext(setBlock[0],context);
+vm.runInContext(stageBlock[0],context);
 vm.runInContext(responderBlock[0],context);
 vm.runInContext(timedBlock[0],context);
 vm.runInContext(txBlock[0].replace(/\r?\n\r?\nfunction doDraw$/,''),context);

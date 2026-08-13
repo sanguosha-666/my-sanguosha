@@ -395,8 +395,8 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   // ===== E. 机器人 =====
 
   await check('E1 BOT_PHASE_ACTOR 登记 jijiangAsk/hujiaAsk=asking', function(){
-    assert.strictEqual(R('BOT_PHASE_ACTOR.jijiangAsk'), 'asking');
-    assert.strictEqual(R('BOT_PHASE_ACTOR.hujiaAsk'), 'asking');
+    assert.strictEqual(R('stageActorField("jijiangAsk")'), 'asking');
+    assert.strictEqual(R('stageActorField("hujiaAsk")'), 'asking');
   });
 
   await check('E2 BOT_DECISIONS.jijiangAsk/hujiaAsk 注册形状完整', function(){
@@ -675,7 +675,7 @@ const WANJIAN = { from:1, need:'闪', trick:'万箭齐发' };
   // ===== J. 机器人 =====
 
   await check('J1 BOT_PHASE_ACTOR 登记 zhibaAsk=lordSeat', function(){
-    assert.strictEqual(R('BOT_PHASE_ACTOR.zhibaAsk'), 'lordSeat');
+    assert.strictEqual(R('stageActorField("zhibaAsk")'), 'lordSeat');
   });
 
   await check('J2 BOT_DECISIONS.zhibaAsk 注册形状完整;botDecide 无密钥选点数最大的手牌', async function(){
