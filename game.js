@@ -829,7 +829,7 @@ function finishDrawPhase(g, seat, n){
       // 若只有一个目标，直接分配
       if(targetSeats.length === 1){
         const targetSeat = targetSeats[0];
-        const cardsToGive = p.hand.splice(0, half);
+        const cardsToGive = removeHandCards(g, seat, Array.from({length:half},(_,i)=>i)).reverse();
         g.players[targetSeat].hand.push(...cardsToGive);
         g.log=pushLog(g.log, p.name+' 发动【好施】,将'+half+'张手牌交给 '+g.players[targetSeat].name);
         markSkillSound(g, '好施');
@@ -1138,7 +1138,7 @@ function triggerGuidu(cardIndex) {
     }
     
     // 打出黑色牌
-    source.hand.splice(cardIndex, 1);
+    removeHandCards(g, mySeat, cardIndex);
     g.discard.push(replaceCard);
     
     g.log = pushLog(g.log, source.name + ' 发动【鬼道】,用【' + replaceCard.name + '】替换判定牌');
@@ -1356,7 +1356,7 @@ function respondGuicai(useReplace, cardIdx){
     if(useReplace){
       const card=(me.hand||[])[cardIdx];
       if(!card) return g; // 没这张牌:状态不变(双重保险)
-      me.hand.splice(cardIdx,1);
+      removeHandCards(g, mySeat, cardIdx);
       g.discard.push(card);
       g.log=pushLog(g.log, me.name+' 发动【鬼才】,打出'+card.suit+rankText(card.rank)+' 替换判定牌');
       markSkillSound(g, '鬼才');
@@ -1674,9 +1674,8 @@ function respondLiRang(activate, cardIdxs){
     if(!Array.isArray(cardIdxs) || cardIdxs.length!==2) return g;
     const idxs=[...new Set(cardIdxs)].filter(i=>Number.isInteger(i)).sort((a,b)=>b-a);
     if(idxs.length!==2 || idxs.some(i=>i<0 || i>=(me.hand||[]).length)) return g;
-    const moved=[];
-    idxs.forEach(idx=>moved.push(me.hand.splice(idx,1)[0]));
-    target.hand.push(...moved.reverse());
+    const moved=removeHandCards(g, mySeat, idxs).reverse();
+    target.hand.push(...moved);
     g.liRangRound=g.roundNum;
     g.liRangRecord={round:g.roundNum, from, to, discarded:[]};
     g.pending=null;
@@ -1744,6 +1743,17 @@ function respondShuangxiong(activate){
 // ===== 统一出牌入口:出牌阶段所有牌共用样板,各牌独特部分在 CARD_PLAYS 表里 =====
 // actionId:除"杀"外都等于 card.name;杀固定为 '杀'(赵云的闪也走杀,物理牌名可能是'闪')。
 // 每项:canPlay(身份+独特前置校验)、target(是否指定目标,决定走不走统一目标校验)、effect(独特效果+日志)。
+
+// hasTargetCard: 角色是否至少有一张"可被操作的牌"(手牌+装备区+判定区)。顺手牵羊/过河拆桥
+// 这类"必须拿走/拆掉一张牌"的锦囊统一用它做目标合法性判断——没有任何牌可拿/可拆的角色不能
+// 成为目标。奇袭(甘宁把黑牌当拆桥)与实体过河拆桥走同一口径,避免各自维护一份逻辑分叉。
+function hasTargetCard(player){
+  return !!player && (
+    (player.hand && player.hand.length>0)
+    || (player.equips && EQUIP_SLOTS.some(slot=>player.equips[slot]))
+    || (player.delays && player.delays.length>0)
+  );
+}
 
 const CARD_PLAYS = {
   '杀': {
@@ -1944,10 +1954,20 @@ const CARD_PLAYS = {
   },
   '火攻': {
     target:true,
+    allowSelf:true, // 火攻可对自己使用(需目标有手牌可展示,见 canTarget)
     canPlay:(g,me,card)=> card.name==='火攻',
     canTarget:(g,me,card,targetSeat)=>{
+      const sourceSeat=g.players.indexOf(me);
       const target=g.players[targetSeat];
-      if(!target || (target.hand||[]).length===0) return false;
+      if(!target || !target.alive) return false;
+      let handCount=(target.hand||[]).length;
+      // 自用(目标=使用者)时,正在使用的这张实体火攻还在手牌里——playCard 是先 canTarget
+      // 后 splice,不能让它自己被数进去,否则"只剩这一张火攻"会被误判为有手牌可展示。
+      // 蛊惑等转化路径的实际牌早已离手,claimedCard 与手牌对象引用不同,此过滤自然不生效。
+      if(targetSeat===sourceSeat && card && Array.isArray(target.hand)){
+        handCount=target.hand.filter(c=>c!==card).length;
+      }
+      if(handCount===0) return false;
       // 陈宫【智迟】：检查免疫状态
       if(isZhichiImmune(g, targetSeat, card)) return false;
       // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
@@ -1987,6 +2007,8 @@ const CARD_PLAYS = {
     canTarget:(g,me,card,targetSeat)=> {
       const target = g.players[targetSeat];
       if(!target || !target.alive) return false;
+      // 顺手牵羊要拿走目标一张牌:没有任何可操作的牌(手牌/装备/判定区)的角色不能成为目标
+      if(!hasTargetCard(target)) return false;
       if(distance(g, mySeat, targetSeat) > 1) return false;
       // 陈宫【智迟】：检查免疫状态
       if(isZhichiImmune(g, targetSeat, card)) return false;
@@ -2007,6 +2029,8 @@ const CARD_PLAYS = {
     canTarget:(g,me,card,targetSeat)=>{
       const target = g.players[targetSeat];
       if(!target || !target.alive) return false;
+      // 过河拆桥要拆目标一张牌:没有任何可操作的牌(手牌/装备/判定区)的角色不能成为目标
+      if(!hasTargetCard(target)) return false;
       // 陈宫【智迟】：检查免疫状态
       if(isZhichiImmune(g, targetSeat, card)) return false;
       // 贾诩【帷幕】:不能成为黑色锦囊牌的目标
@@ -2200,7 +2224,7 @@ function playCard(cardIdx, actionId, targetSeat, onCommitted){
       } // 额外目标限制(如杀的攻击距离)
       }
     }
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     if(!spec.noDiscard) g.discard.push(card); // 装备牌 noDiscard:不进弃牌堆,由 effect 放进装备区
     spec.effect(g, me, card, targetSeat);
     if(hasCap(me,'jizhi') && isTrickCardName(actionId)){
@@ -2327,7 +2351,7 @@ function pickMingceCard(cardIdx, isEquip){
       if(cardIdx<0 || cardIdx>=me.hand.length) return g;
       const c = me.hand[cardIdx];
       if(!c || (!isEquipment(c) && !canUseAs(me,c,'杀'))) return g;
-      card = me.hand.splice(cardIdx,1)[0];
+      card = removeHandCards(g, mySeat, cardIdx)[0];
       cardName = card.name;
     }
     // 传入牌名与牌对象，进入选目标阶段
@@ -2499,7 +2523,7 @@ function lianHuan(cardIdx, targetSeat){
       .slice(0,2)
       .filter(seat=>g.players[seat] && g.players[seat].alive);
     if(targets.length===0) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【铁索连环】使用,目标 '+targets.map(seat=>g.players[seat].name).join('、'));
     markSkillSound(g, '连环');
@@ -2584,7 +2608,7 @@ function respondLiuli(choice, newTargetSeat){
     if(choice.kind==='hand'){
       const idx=choice.idx;
       if(!Number.isInteger(idx) || !me.hand[idx]) return g;
-      discarded=me.hand.splice(idx,1)[0];
+      discarded=removeHandCards(g, to, idx)[0];
       g.discard.push(discarded);
     } else if(choice.kind==='equip'){
       const slot=choice.slot;
@@ -2623,7 +2647,7 @@ function qiaobianDeclare(cardIdx, phaseChoice){
     const me=g.players[mySeat];
     const card=me.hand[cardIdx];
     if(!card) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     markSkillSound(g, '巧变');
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
@@ -3024,7 +3048,7 @@ function useJijiuCard(g, me, choice){
     const idx=choice.idx;
     const card=me.hand[idx];
     if(!card || !isRed(card)) return null;
-    me.hand.splice(idx,1);
+    removeHandCards(g, mySeat, idx);
     g.discard.push(card);
     return card;
   }
@@ -3042,7 +3066,7 @@ function useJijiuCard(g, me, choice){
 function useDyingJiuCard(g, me){
   const idx=findUsableAs(me.hand, me, '酒');
   if(idx<0) return null;
-  const card=me.hand.splice(idx,1)[0];
+  const card=removeHandCards(g, mySeat, idx)[0];
   g.discard.push(card);
   return card;
 }
@@ -3113,7 +3137,7 @@ function respondDying(useTao, jijiuChoice){
       } else {
         const idx=findUsableAs(me.hand, me, '桃'); // 复用 canUseAs/findUsableAs seam,不硬编码牌名
         if(idx<0) return g; // 没有桃:状态不变(双重保险,按钮本就不该出现)
-        card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+        card=removeHandCards(g, mySeat, idx)[0]; g.discard.push(card);
         asText='打出【'+card.name+'】';
       }
       const isJijiu=!!(jijiuChoice&&jijiuChoice.kind!=='jiu'&&jijiuChoice.kind!=='jiushiJiu');
@@ -3627,7 +3651,7 @@ function respondGanglieChoice(action, picks){
       if(!Array.isArray(picks) || picks.length!==2 || new Set(picks).size!==2 || (source.hand||[]).length<2) return g;
       const idxs=picks.map(x=>Number(x));
       if(idxs.some(x=>!Number.isInteger(x) || x<0 || x>=source.hand.length)) return g;
-      const discarded=idxs.sort((a,b)=>b-a).map(idx=>source.hand.splice(idx,1)[0]);
+      const discarded=removeHandCards(g, sourceSeat, idxs);
       g.discard.push(...discarded);
       markDiscardReveal(g, sourceSeat, discarded);
       g.log=pushLog(g.log, source.name+' 弃置2张手牌,抵消【刚烈】伤害');
@@ -3806,7 +3830,7 @@ function duelResponse(useSha, cardIdx){
       const specifiedCard = (typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
       const idx = (specifiedCard && canUseAs(me, specifiedCard, '杀')) ? cardIdx : findUsableAs(me.hand,me,'杀'); // 龙胆:闪可当杀,优先用本名杀
       if(idx<0) return g;
-      const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=removeHandCards(g, mySeat, idx)[0]; g.discard.push(card);
       const played=(g.pending.shaCount||0)+1;
       g.log=pushLog(g.log, me.name+(isShaName(card.name)?' 打出【'+card.name+'】':' 打出【'+card.name+'】当【杀】')+(needed>1?'（'+played+'/'+needed+'）':''));
       markCardSound(g, '杀', mySeat, card, opp);
@@ -4216,7 +4240,7 @@ function resolveTrick(g, info){
 function applyTrickOnHand(g, info){
   const me=g.players[info.from], tgt=g.players[info.to];
   const j=Math.floor(Math.random()*tgt.hand.length);
-  const card=tgt.hand.splice(j,1)[0];
+  const card=removeHandCards(g, info.to, j)[0];
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 从 '+tgt.name+' 拿走一张手牌'); }
   else { g.discard.push(card); markDiscardReveal(g, info.to, [card]); g.log=pushLog(g.log, me.name+' 弃掉 '+tgt.name+' 一张手牌'); }
 }
@@ -4283,7 +4307,7 @@ function respondWuxie(useWuxie){
     if(useWuxie){
       const idx=me.hand.findIndex(c=>c.name==='无懈可击');
       if(idx<0) return g; // 没牌:状态不变,仍停在本人这一轮(界面按钮保留)
-      const card = me.hand.splice(idx,1)[0];
+      const card = removeHandCards(g, mySeat, idx)[0];
       g.discard.push(card);
       // depth===0(反制原锦囊)措辞不同于 depth>=1(反制上一次无懈可击)
       const target = g.pending.depth>0 ? g.players[g.pending.exclude].name+' 的【无懈可击】' : '对 '+g.players[g.pending.to].name+' 的【'+g.pending.trick+'】';
@@ -4425,7 +4449,7 @@ function aoeRespond(useCard, cardIdx){
       const specifiedCard = (typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
       const idx = (specifiedCard && canUseAs(me, specifiedCard, need)) ? cardIdx : findUsableAs(me.hand,me,need); // 龙胆:杀/闪可互转,优先用本名牌
       if(idx<0) return g; // 没牌:界面按钮保留,等其改点"不出"
-      const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=removeHandCards(g, mySeat, idx)[0]; g.discard.push(card);
       const label = card.name===need ? '打出【'+need+'】' : '打出【'+card.name+'】当【'+need+'】';
       g.log=pushLog(g.log, me.name+' '+label+',抵消【'+g.aoe.trick+'】');
       markCardSound(g, need, mySeat, card);
@@ -4618,7 +4642,7 @@ function respondLordAskCore(useCard, cardIdx){
       const specifiedCard=(typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
       const idx=(specifiedCard && canUseAs(me,specifiedCard,need)) ? cardIdx : findUsableAs(me.hand,me,need);
       if(idx<0) return g; // 没牌:界面按钮保留,等其改点"不出"
-      const card=me.hand.splice(idx,1)[0];
+      const card=removeHandCards(g, mySeat, idx)[0];
       ask.helperSeat=mySeat;
       completeLordAsk(g, ask, card);
       return g;
@@ -4652,7 +4676,7 @@ function useHuangtian(cardIdx){
     const lordSeat=g.players.findIndex((p,i)=>i!==mySeat && p && p.alive && p.role==='zhu' && hasCap(p,'huangtian'));
     const card=(donor.hand||[])[cardIdx];
     if(lordSeat<0 || !card || (card.name!=='闪' && card.name!=='闪电')) return g;
-    donor.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.players[lordSeat].hand.push(card);
     donor.huangtianUsed=true;
     g.log=pushLog(g.log, donor.name+' 发动【黄天】,交给 '+g.players[lordSeat].name+' 一张【'+card.name+'】');
@@ -4733,7 +4757,7 @@ function discardYinghunCard(selection){
     const d=g.pending,target=g.players[mySeat];
     const choice=typeof selection==='number'?{kind:'hand',idx:selection}:selection;
     let card=null,lostEquip=false;
-    if(choice&&choice.kind==='hand'&&Number.isInteger(choice.idx)) card=(target.hand||[]).splice(choice.idx,1)[0];
+    if(choice&&choice.kind==='hand'&&Number.isInteger(choice.idx)) card=removeHandCards(g, mySeat, choice.idx)[0];
     else if(choice&&choice.kind==='equip'&&EQUIP_SLOTS.includes(choice.slot)&&target.equips&&target.equips[choice.slot]){
       card=target.equips[choice.slot]; target.equips[choice.slot]=null; lostEquip=true;
     }
@@ -4777,7 +4801,7 @@ function startZhiba(cardIdx){
     const lordSeat=g.players.findIndex((q,i)=>i!==mySeat && q && q.alive && q.role==='zhu' && hasCap(q,'zhiba') && (q.hand||[]).length>0);
     const card=(challenger.hand||[])[cardIdx];
     if(lordSeat<0 || !card) return g;
-    challenger.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.zhibaUsed=true;
     g.pending=setResponseAskedAt({type:'zhibaAsk', lordSeat, challengerSeat:mySeat, challengerCard:card, resume:{phase:'play', pending:null}});
     g.phase='zhibaAsk';
@@ -4804,7 +4828,7 @@ function respondZhiba(cardIdx){
     }
     const card=(lord.hand||[])[cardIdx];
     if(!card) return g;
-    lord.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     const challengerWin=(d.challengerCard.rank||0)>(card.rank||0);
     if(challengerWin){
       g.discard.push(d.challengerCard,card);
@@ -4869,7 +4893,7 @@ function discardCard(cardIdx){
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
     if(me.hand.length<=handCapLimit(g, mySeat)) return g;
-    const card=me.hand.splice(cardIdx,1)[0]; g.discard.push(card);
+    const card=removeHandCards(g, mySeat, cardIdx)[0]; g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
       g.liRangRecord.discarded = g.liRangRecord.discarded || [];
@@ -4896,15 +4920,13 @@ function discardCards(cardIdxList){
     const need = me.hand.length - handCapLimit(g, mySeat);
     if(need<=0) return g; // 没有超出上限,不需要弃牌
     if(cardIdxList.length < need) return g; // 弃的不够,拒绝(必须一次性弃够,不允许弃少了留着下次再弃)
-    // 按下标从大到小依次splice,避免删除时下标错位
+    // 按下标从大到小依次移除,避免删除时下标错位(统一走 removeHandCards,内部触发连营)
     const sorted = [...uniqueIdx].sort((a,b)=>b-a);
-    const discarded = sorted.map(i=>me.hand.splice(i,1)[0]);
+    const discarded = removeHandCards(g, mySeat, sorted);
     g.discard.push(...discarded);
     markDiscardReveal(g, mySeat, discarded);
     // 凌统【旋风】:更新弃牌计数器
     g.discardedThisPhase = (g.discardedThisPhase || 0) + discarded.length;
-    // 陆逊【连营】:检查是否触发连营（一次性检查整个操作后的手牌数）
-    if(discarded.length > 0) maybeStartLianying(g, mySeat, discarded.length);
     // 孔融【礼让】记录:和 discardCard 单张版本同一段逻辑,只是这里批量循环每一张都要记
     // (礼让回收的是"本弃牌阶段弃置的全部牌",不能因为改成批量提交就漏记)。
     if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
@@ -5130,7 +5152,7 @@ function executeXuanfeng(g) {
       let card=null;
       if(selection.kind==='hand'){
         const hand=target.hand||[];
-        if(hand.length) card=hand.splice(Math.floor(Math.random()*hand.length),1)[0];
+        if(hand.length) card=removeHandCards(g, targetSeat, Math.floor(Math.random()*hand.length))[0];
       } else if(selection.kind==='equip'){
         const slot=selection.value;
         if(EQUIP_SLOTS.includes(slot) && target.equips && target.equips[slot]){
@@ -5189,7 +5211,7 @@ function executeXuanfeng(g) {
       // 从手牌中移除
       const handIndex = hand.indexOf(card);
       if (handIndex !== -1) {
-        hand.splice(handIndex, 1);
+        removeHandCards(g, targetSeat, handIndex);
         cardsToDiscard.push(card);
         continue;
       }
@@ -5737,12 +5759,29 @@ function maybeStartLianying(g, seat, cardsLost=1){
   if(!p || !p.alive || !hasCap(p,'lianying')) return false;
   const handAfter = (p.hand || []).length;
   const handBefore = handAfter + cardsLost;
-  if(handBefore === 1 && handAfter === 0 && cardsLost >= 1){
+  // 失去最后一张手牌 → 由有牌变为 0。cardsLost 可以>1(一次失去多张全部离手,如丈八蛇矛两张
+  // 当杀/制衡弃光/批量弃牌),只要是"失去后手牌为 0"就触发一次;队列按座位去重保证不重复。
+  if(handBefore >= 1 && handAfter === 0 && cardsLost >= 1){
     if(!Array.isArray(g.lianyingQueue)) g.lianyingQueue=[];
     if(!g.lianyingQueue.includes(seat)) g.lianyingQueue.push(seat);
     return true;
   }
   return false;
+}
+// removeHandCards: 统一"从角色手牌移除若干张"的业务入口。所有把牌从 hand 移除的路径
+// (普通出牌/响应打出/弃置/被获得/转移/拼点等)都应经过它,移除后统一触发陆逊【连营】的
+// 失去手牌判断(由有牌变为 0 时入队,由 tryFlushLianying 在 pending 空闲时挂起询问,既不丢
+// 询问也不重复)。返回值是被移除的牌数组,调用点自行决定去向(弃牌堆/转移/拼点比较)。
+// indices:单个下标(number)或下标数组(乱序安全,内部排序从大到小 splice 避免错位)。
+function removeHandCards(g, seat, indices){
+  const p = g.players && g.players[seat];
+  if(!p || !Array.isArray(p.hand)) return [];
+  const list = Array.isArray(indices)
+    ? [...new Set(indices)].filter(i=>Number.isInteger(i) && i>=0 && i<p.hand.length).sort((a,b)=>b-a)
+    : (Number.isInteger(indices) ? [indices] : []);
+  const removed = list.map(i=>p.hand.splice(i,1)[0]);
+  if(removed.length > 0) maybeStartLianying(g, seat, removed.length);
+  return removed;
 }
 // 当前无其它挂起时,从队列取出一名连营角色开询问。
 function tryFlushLianying(g){
@@ -5932,8 +5971,7 @@ function beigeDiscard(cardIndex, isEquip, equipType) {
     } else {
       // 弃置手牌
       if (source.hand && source.hand.length > cardIndex) {
-        discardedCard = source.hand[cardIndex];
-        source.hand.splice(cardIndex, 1);
+        discardedCard = removeHandCards(g, mySeat, cardIndex)[0];
       }
     }
     
@@ -6035,7 +6073,7 @@ function processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSo
         if (sourcePlayer.hand && sourcePlayer.hand.length > 0) {
           const discardCount = Math.min(2, sourcePlayer.hand.length);
           for (let i = 0; i < discardCount; i++) {
-            cardsToDiscard.push(sourcePlayer.hand.shift());
+            cardsToDiscard.push(removeHandCards(g, damageSource, 0)[0]);
           }
         }
 
@@ -6166,8 +6204,7 @@ function pickFenxunDiscard(cardIndex) {
     if (!me || !me.alive || !me.hand || cardIndex >= me.hand.length) return g;
     
     // 弃置选中的牌
-    const card = me.hand[cardIndex];
-    me.hand.splice(cardIndex, 1);
+    const card = removeHandCards(g, mySeat, cardIndex)[0];
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     
@@ -6411,7 +6448,7 @@ function giveEnyuanCard(cardIndex) {
     
     const hand = damager.hand || [];
     if(!Number.isInteger(cardIndex) || cardIndex<0 || cardIndex>=hand.length || hand[cardIndex].suit!=='♥') return g;
-    const card=hand.splice(cardIndex,1)[0];
+    const card=removeHandCards(g, pending.damagerSeat, cardIndex)[0];
     
     // 添加到source手牌
     if (!source.hand) source.hand = [];
@@ -6478,7 +6515,7 @@ function pickHuanhuoHeartCard(cardIndex) {
     if(!me || !me.alive || !target || !target.alive) return g;
     const hand = me.hand || [];
     if(!Number.isInteger(cardIndex) || cardIndex<0 || cardIndex>=hand.length || hand[cardIndex].suit!=='♥') return g;
-    const card=hand.splice(cardIndex,1)[0];
+    const card=removeHandCards(g, mySeat, cardIndex)[0];
     
     // 将这张牌交给目标角色
     if (!target.hand) target.hand = [];
@@ -6540,7 +6577,7 @@ function pickHuanhuoGotCard(kind, value) {
     if(kind==='hand'){
       const hand=target.hand||[];
       if(!hand.length) return g;
-      gotCard=hand.splice(Math.floor(Math.random()*hand.length),1)[0];
+      gotCard=removeHandCards(g, firstTargetSeat, Math.floor(Math.random()*hand.length))[0];
     } else if(kind==='equip'){
       const slot=String(value||'');
       if(!EQUIP_SLOTS.includes(slot) || !target.equips || !target.equips[slot]) return g;
@@ -6550,7 +6587,7 @@ function pickHuanhuoGotCard(kind, value) {
     } else if(Number.isInteger(kind)){
       const hand=target.hand||[];
       if(!hand.length) return g;
-      gotCard=hand.splice(Math.floor(Math.random()*hand.length),1)[0];
+      gotCard=removeHandCards(g, firstTargetSeat, Math.floor(Math.random()*hand.length))[0];
     } else return g;
     
     // 添加到自己手牌
@@ -6589,7 +6626,7 @@ function pickHuanhuoSecondTarget(seat) {
     const hand = me.hand || [];
     const idx = hand.findIndex(c => c.id === g.pending.transferCard.id);
     if(idx===-1) return g;
-    hand.splice(idx, 1);
+    removeHandCards(g, mySeat, idx);
     
     // 将牌交给第二个目标
     if (!secondTarget.hand) secondTarget.hand = [];

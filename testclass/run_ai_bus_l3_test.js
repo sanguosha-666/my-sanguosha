@@ -3939,7 +3939,9 @@ const testCode = String.raw`
   aiApiKey = ''; aiProvider = null; // 强制无密钥模式,这正是这次要解锁的路径
 
   await check('无密钥解锁-guhuoTarget:蛊惑声明生效后应主动选目标(guhuoChooseTarget)', async function(){
-    var g = clearRoles(mkSeatG({}));
+    // 声明【过河拆桥】的目标必须至少有一张可操作牌(手牌/装备/判定区),否则 cannot 成为
+    // 目标——#97 统一口径后,空手牌目标不再合法。这里给目标配手牌,保证有合法候选可挑。
+    var g = clearRoles(mkSeatG({ hands: { 1: [card('杀','gt2','♠')], 2: [card('闪','gt3','♥')] } }));
     g.pending = { type:'guhuoTarget', sourceSeat:0, actualCard:card('杀','gt1','♠'), claimedCard:{ id:'gt1', name:'过河拆桥', suit:'♥', rank:1 } };
     window.__gtCalls = [];
     guhuoChooseTarget = function(s){ window.__gtCalls.push(s); };

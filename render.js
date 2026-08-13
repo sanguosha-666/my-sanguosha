@@ -1070,6 +1070,19 @@ function renderSeatCard(g, seat, isSelf){
 }
 
 
+// singleTargetCanTarget: 普通单目标牌选目标渲染复用业务层 canTarget 的追加约束。
+// 服务端 playCard 对 target 牌的唯一合法性判断就是 spec.canTarget(见 game.js),
+// 渲染层以前在 buildSeatDOM 里手写了简化版(存活/距离/空城/判定区同名…),漏掉了
+// 谦逊这类技能限制,导致【顺手牵羊】【乐不思蜀】选目标时谦逊角色仍可点、点了却被
+// 服务端拒绝。这里统一走真正的 canTarget(g, 使用者, 牌, 目标座位)——传参语义和
+// 蛊惑(guhuoSpec.canTarget)/双雄/武圣(CARD_PLAYS['杀'].canTarget)等既有调用点
+// 完全一致。只作为"追加约束"叠加在既有 targetable 条件之上:返回 false 只会让目标
+// 更不可选,绝不在这里放宽任何既有判断。selSpec 无 canTarget(实际上所有 target:true
+// 的牌都挂了 canTarget)时恒放行,不改变旧行为。
+function singleTargetCanTarget(g, selSpec, sourcePlayer, selCard, targetSeat){
+  return !(selSpec && selSpec.canTarget) || !!selSpec.canTarget(g, sourcePlayer, selCard, targetSeat);
+}
+
 // ---------- render ----------
 function render(g){
   currentG = g; // 供确认弹窗的取消回调异步刷新界面用(回调触发时早已不在 render 的调用栈里)
@@ -1265,7 +1278,9 @@ function render(g){
     const selfOK = selDT ? (selDT.onlySelf ? i===mySeat : i!==mySeat) : (i!==mySeat || !!(selSpec && selSpec.allowSelf));
     // 官方规则:同一判定区不能有两张同名的延时类锦囊牌,和服务端 canTarget 的 hasDup 判断口径一致。
     const hasDupDelay = !!(selDT && (p.delays||[]).some(c=>c && c.name===selCard.name));
-    const targetable = !!(selSpec && selSpec.target) && selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && (!needHandOnly || (p.hand||[]).length>0) && inRange && !hasDupDelay;
+    // 最后叠加业务层 canTarget 追加约束(顺手牵羊的谦逊/火攻的空城/锦囊的智迟·帷幕等):
+    // canTarget 只收窄、不放宽上面已有的 targetable 判断,保证"能点"集合与服务端一致。
+    const targetable = !!(selSpec && selSpec.target) && selfOK && p.alive && (!needHandOrEquip || hasHandOrEquip) && (!needHandOnly || (p.hand||[]).length>0) && inRange && !hasDupDelay && singleTargetCanTarget(g, selSpec, meP, selCard, i);
     if(selectedCardIdx!==null && g.phase==='play' && g.turn===mySeat && !isJiedaoSel){
       if(targetable){
         // idx 在这里(渲染时/挂载 onclick 那一刻)冻结,而不是等点击时才读 selectedCardIdx——
@@ -1422,15 +1437,25 @@ function render(g){
     // 大乔【国色】选目标:已选中一张方块牌后,点一名判定区没有【乐不思蜀】的其他存活玩家提交。
     if(guoseMode && guoseCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
       const hasLe = (p.delays||[]).some(c=>c && c.name==='乐不思蜀');
-      if(!hasLe){
+      // 目标合法性与服务端 guoSe 完全一致:复用 CARD_PLAYS['乐不思蜀'].canTarget
+      // (谦逊/帷幕/判定区同名都由它统一校验,见 skills.js guoSe)——不能用 hasLe 一条
+      // 手写简化,否则谦逊角色在国色选目标界面仍可点、点了被服务端拒绝。
+      const guoseTargetOk = singleTargetCanTarget(g, CARD_PLAYS['乐不思蜀'], meP, {name:'乐不思蜀', virtual:true}, i);
+      if(guoseTargetOk){
         const idx=guoseCardIdx;
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
         d.onclick=()=>{ confirmAndPlay('将这张牌当【乐不思蜀】使用,对 '+g.players[i].name+' 发动【国色】？', ()=>guoSe(idx, i)); };
-      } else {
+      } else if(hasLe){
         d.style.outline='2px dotted #6b5b4d';
         d.title='该角色判定区已有【乐不思蜀】';
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">已有乐</span>';
+      } else {
+        // 谦逊/帷幕等业务层 canTarget 拒绝的目标:暗色点线+悬浮说明,不可点
+        // (同款视觉,避免玩家点了却被服务端 canTarget 拒绝)。
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='该角色不能成为【乐不思蜀】的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">不可选</span>';
       }
     }
     if(lianhuanMode && lianhuanCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){

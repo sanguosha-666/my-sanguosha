@@ -21,7 +21,7 @@
 
 const vm = require('vm');
 const fs = require('fs');
-const { SNAPSHOT_TX_STUB_SOURCE } = require('./test-tx-stub');
+const { SNAPSHOT_TX_STUB_SOURCE } = require('../test-tx-stub');
 
 const context = {
   gameRef: { transaction: function(fn) { return fn(context.g || {}); } },

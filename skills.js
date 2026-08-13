@@ -56,7 +56,7 @@ function respondTuxi(targets){
       const tgt=g.players[t];
       if((tgt.hand||[]).length>0){
         const j=Math.floor(Math.random()*tgt.hand.length);
-        me.hand.push(tgt.hand.splice(j,1)[0]);
+        me.hand.push(removeHandCards(g, t, j)[0]);
         g.log=pushLog(g.log, me.name+' 发动【突袭】,从 '+tgt.name+' 拿走一张手牌');
       } else {
         g.log=pushLog(g.log, me.name+' 发动【突袭】,但 '+tgt.name+' 没有手牌');
@@ -95,11 +95,17 @@ function jieDaoShaRen(cardIdx, seatA, seatB){
     if(!A || !A.alive || seatA===mySeat || !A.equips.weapon) return g;
     const spec=CARD_PLAYS['借刀杀人'];
     if(!spec || (spec.canTarget && !spec.canTarget(g,me,card,seatA))) return g;
-    if(!B || !B.alive || seatB===seatA || !canReachSha(g, seatA, seatB)) return g;
-    // 诸葛亮【空城】:借刀杀人的B同样是"被指定为这张杀的目标"(官方FAQ明确空城对借刀杀人的B
-    // 目标同样生效),不能因为这条路径不走 CARD_PLAYS['杀'].canTarget 就漏了这层保护。
-    if(hasCap(B,'kongcheng') && (B.hand||[]).length===0) return g;
-    me.hand.splice(cardIdx,1);
+    if(!B || !B.alive || seatB===seatA) return g;
+    // B 会被 A 打出的这张【杀】指定为目标,必须复用【杀】canTarget 的完整目标合法性
+    // (空城/智迟/同疾/多名同疾),不能只查距离+空城——否则智迟、同疾等保护会被这条
+    // 不经过 CARD_PLAYS['杀'].canTarget 的路径绕过。距离另由下一行按 A 的攻击范围校验,
+    // 所以这里传 ignoreShaDistance:true 只跳过 canTarget 尾部的距离判断,其余规则全部保留。
+    // me 必须传 A(真正的出杀者)而不是借刀使用者 mySeat:同疾的距离/范围、天义/将驰等
+    // 临时状态都以出杀者为基准,读错人会算出错误结果。
+    if(!CARD_PLAYS['杀'].canTarget(g, A, {name:'杀', virtual:true, ignoreShaDistance:true}, seatB)) return g;
+    // 距离:B 必须在 A 攻击范围内(借刀的特殊距离口径独立于杀 canTarget,保持原校验)
+    if(!canReachSha(g, seatA, seatB)) return g;
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 对 '+A.name+' 使用【借刀杀人】,目标 '+B.name);
     markCardSound(g, '借刀杀人', mySeat, card, seatA); // 借刀杀人不走 playCard 统一出口(两步选目标的独立函数),单独补一次
@@ -130,7 +136,7 @@ function duanLiang(cardIdx, targetSeat){
     if(!canTargetDelayTrick(g,me,trickCard,targetSeat,2)) return g;
     g.duanliangUsed=true;
     markSkillSound(g, '断粮');
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【兵粮寸断】使用,发动【断粮】,目标 '+g.players[targetSeat].name);
     markCardSound(g, '兵粮寸断', mySeat, card, targetSeat); // 念被当作使用的目标牌名(兵粮寸断),不是原始物理牌本身
     startTrick(g, {trick:'兵粮寸断', from:mySeat, to:targetSeat, card:trickCard});
@@ -154,11 +160,10 @@ function qiXi(cardIdx, targetSeat){
     const trickCard={...card, name:'过河拆桥', originalName:card.name};
     const spec=CARD_PLAYS['过河拆桥'];
     if(!spec || (spec.canTarget && !spec.canTarget(g,me,trickCard,targetSeat))) return g;
-    const hasTargetCard = (target.hand||[]).length>0
-      || EQUIP_SLOTS.some(s=>target.equips && target.equips[s])
-      || (target.delays||[]).length>0;
-    if(!hasTargetCard) return g;
-    me.hand.splice(cardIdx,1);
+    // 目标必须有至少一张可操作牌(手牌/装备/判定区),与实体过河拆桥的 canTarget 同一口径
+    // (hasTargetCard 已收口在 game.js,不要在技能路径里另写一份逻辑分叉)。
+    if(!hasTargetCard(target)) return g;
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【过河拆桥】使用,发动【奇袭】,目标 '+target.name);
     markSkillSound(g, '奇袭');
@@ -182,7 +187,7 @@ function guoSe(cardIdx, targetSeat){
     // 统一复用 CARD_PLAYS，避免绕过【谦逊】、【帷幕】和判定区同名牌限制。
     const spec=CARD_PLAYS['乐不思蜀'];
     if(!spec || (spec.canTarget && !spec.canTarget(g,me,trickCard,targetSeat))) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【乐不思蜀】使用,发动【国色】,目标 '+target.name);
     markSkillSound(g, '国色');
     markCardSound(g, '乐不思蜀', mySeat, card, targetSeat);
@@ -205,7 +210,7 @@ function liJian(cardIdx, fromSeat, toSeat){
     const from=g.players[fromSeat], to=g.players[toSeat];
     if(fromSeat===toSeat || !from || !to || !from.alive || !to.alive || !isMale(from) || !isMale(to)) return g;
     if(maleSeats(g).length<2) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     g.liJianUsed=true;
@@ -240,7 +245,7 @@ function respondFanjianSuit(suit){
     const zhou=g.players[seat], target=g.players[targetSeat];
     if(!zhou || !target || !zhou.alive || !target.alive || (zhou.hand||[]).length===0){ g.pending=null; g.phase='play'; return g; }
     const idx=Math.floor(Math.random()*zhou.hand.length);
-    const card=zhou.hand.splice(idx,1)[0];
+    const card=removeHandCards(g, seat, idx)[0];
     target.hand.push(card);
     const same=card.suit===suit;
     g.log=pushLog(g.log, target.name+' 为【反间】选择 '+suit+',获得并展示 '+card.suit+rankText(card.rank)+'【'+card.name+'】');
@@ -269,7 +274,7 @@ function recastLianHuan(cardIdx){
     const isRealTieSuo = card && card.name==='铁索连环';
     const isPangTongRecast = card && hasCap(me,'lianhuan') && card.suit==='♣';
     if(!isRealTieSuo && !isPangTongRecast) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     drawN(g, mySeat, 1);
     if(isRealTieSuo){
@@ -553,7 +558,7 @@ function startGuhuo(cardIdx, claimedName){
     const claimed={ id:actual.id, name:claimedName, suit:actual.suit, rank:actual.rank, originalName:actual.name };
     if(spec.canPlay && !spec.canPlay(g, me, claimed)) return g;
     if(!guhuoHasLegalTarget(g, mySeat, claimed, spec)) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.guhuoUsed=true;
     g.pending=setResponseAskedAt({ type:'guhuoQuestion', sourceSeat:mySeat, actualCard:actual, claimedCard:claimed, questioners:[], answered:[] });
     g.log=pushLog(g.log, me.name+' 扣置一张手牌发动【蛊惑】,声明为【'+claimedName+'】');
@@ -578,7 +583,7 @@ function startGuhuoResponse(cardIdx, claimedName){
     const actual=me && me.hand && me.hand[cardIdx];
     if(!actual || !guhuoResponseNamesForRole(role).includes(claimedName)) return g;
     const claimed={ id:actual.id, name:claimedName, suit:actual.suit, rank:actual.rank, originalName:actual.name };
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.guhuoUsed=true;
     const oldPhase=g.phase;
     const oldPending=g.pending;
@@ -672,10 +677,12 @@ function guhuoChooseJiedaoTarget(seatA, seatB){
     if(!me || !me.alive) return g;
     const A=g.players[seatA], B=g.players[seatB];
     if(!A || !A.alive || seatA===mySeat || !A.equips.weapon) return g;
-    if(!B || !B.alive || seatB===seatA || !canReachSha(g, seatA, seatB)) return g;
-    if(hasCap(B,'kongcheng') && (B.hand||[]).length===0) return g;
-    if(isZhichiImmune(g, seatB, d.claimedCard)) return g;
-    if(hasCap(B,'weimu') && isBlackTactics(d.claimedCard)) return g;
+    if(!B || !B.alive || seatB===seatA) return g;
+    // 与普通借刀(jieDaoShaRen)同一入口:复用【杀】canTarget 的完整目标合法性
+    // (空城/智迟/同疾/多名同疾),不再手写一套距离/空城/智迟/帷幕——两入口必须同口径。
+    if(!CARD_PLAYS['杀'].canTarget(g, A, {name:'杀', virtual:true, ignoreShaDistance:true}, seatB)) return g;
+    // 距离:B 必须在 A 攻击范围内(借刀的特殊距离口径独立于杀 canTarget)
+    if(!canReachSha(g, seatA, seatB)) return g;
     g.pending=null;
     g.phase='play';
     g.discard.push(d.actualCard);
@@ -1052,7 +1059,7 @@ function respondTianxiang(choice, targetSeat){
     if(!target || !target.alive || targetSeat===d.seat || !(d.targets||[]).includes(targetSeat)) return g;
     const card=me.hand[choice.idx];
     if(!card || cardSuitForPlayer(me, card)!=='♥') return g;
-    me.hand.splice(choice.idx,1);
+    removeHandCards(g, mySeat, choice.idx);
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     g.pending=null;
@@ -1127,7 +1134,7 @@ function quHu(cardIdx, targetSeat){
     if(targetSeat===mySeat || target.hp<=me.hp || (me.hand||[]).length===0 || (target.hand||[]).length===0) return g;
     const card=me.hand[cardIdx];
     if(!card) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     g.quHuUsed=true;
     g.pending=setResponseAskedAt({type:'quhuRespond', seat:mySeat, targetSeat, selfCard:card});
@@ -1146,7 +1153,7 @@ function respondQuhu(cardIdx){
     if(!xun || !target || !xun.alive || !target.alive){ finishQuhu(g); return g; }
     const card=target.hand[cardIdx];
     if(!card) return g;
-    target.hand.splice(cardIdx,1);
+    removeHandCards(g, targetSeat, cardIdx);
     g.discard.push(card);
     const quhuWin = (selfCard.rank||0) > (card.rank||0);
     g.log=pushLog(g.log, xun.name+' 出 '+pointText(selfCard)+',对方 '+target.name+' 出 '+pointText(card)+',拼点'+(quhuWin?'荀彧赢':'荀彧没赢'));
@@ -1261,7 +1268,7 @@ function pickTianyiTarget(cardIdx, targetSeat) {
     if (!card) return g;
     
     // 执行拼点：从玩家手牌中移除拼点牌
-    me.hand.splice(cardIdx, 1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     
     // 设置拼点响应状态
@@ -1297,7 +1304,7 @@ function respondTianyi(cardIdx) {
     if (!card) return g;
     
     // 移除目标的拼点牌
-    target.hand.splice(cardIdx, 1);
+    removeHandCards(g, targetSeat, cardIdx);
     g.discard.push(card);
     
     // 判断拼点结果：点数大的赢（数值比较）
@@ -1509,7 +1516,7 @@ function respondHuogong(activate, cardIdx){
     }
     const card=me.hand[cardIdx];
     if(!card || cardSuitForPlayer(me, card)!==d.suit) return g;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     const sourceCard=d.sourceCard;
@@ -1569,8 +1576,7 @@ function zhiHeng(cardIdxs){
     const unique=[...new Set(cardIdxs)].filter(i=>Number.isInteger(i)).sort((a,b)=>b-a);
     if(unique.length!==cardIdxs.length) return g;
     if(unique.some(i=>i<0 || i>=(me.hand||[]).length)) return g;
-    const moved=[];
-    unique.forEach(i=>{ moved.push(me.hand.splice(i,1)[0]); });
+    const moved=removeHandCards(g, mySeat, unique);
     moved.forEach(c=>{ if(c) g.discard.push(c); });
     markDiscardReveal(g, mySeat, moved);
     g.zhihengUsed=true;
@@ -1595,7 +1601,7 @@ function renDe(cardIdx, targetSeat){
     const target=g.players[targetSeat];
     if(targetSeat===mySeat || !target || !target.alive) return g;
     const cards=picks.map(idx=>me.hand[idx]);
-    for(let n=picks.length-1;n>=0;n--) me.hand.splice(picks[n],1);
+    removeHandCards(g, mySeat, picks);
     target.hand.push(...cards);
     if(!Number.isInteger(g.renDeCount)) g.renDeCount=0;
     const oldCount=g.renDeCount;
@@ -1622,7 +1628,7 @@ function qingNang(cardIdx, targetSeat){
     const tgt=g.players[targetSeat];
     if(!tgt || !tgt.alive || tgt.hp>=tgt.maxHp) return g;
     g.qingNangUsed=true;
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     tgt.hp=Math.min(tgt.maxHp, tgt.hp+1);
@@ -1738,7 +1744,7 @@ function respondXiaoguo(activate, cardIdx){
     const me=g.players[mySeat];
     const card=me.hand[cardIdx];
     if(!card || !BASIC_CARDS.includes(card.name)) return g; // 不是基本牌:不生效,状态不变
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     markSkillSound(g, '骁果');
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
@@ -1873,7 +1879,7 @@ function respondTiaoxinChoice(useSha, cardIdx){
       const specifiedCard = (typeof cardIdx==='number') ? (target.hand||[])[cardIdx] : null;
       const shaIdx = (specifiedCard && canUseAs(target, specifiedCard, '杀')) ? cardIdx : findUsableAs(target.hand, target, '杀');
       if(shaIdx>=0 && canReachSha(g, to, from)){
-        const card=target.hand.splice(shaIdx,1)[0];
+        const card=removeHandCards(g, to, shaIdx)[0];
         g.discard.push(card);
         g.log=pushLog(g.log, target.name+' 对 '+asker.name+' 使用'+(isShaName(card.name)?'【'+card.name+'】':'【'+card.name+'】当【杀】')+'响应【挑衅】');
         markCardSound(g, '杀', to, card, from);
@@ -1937,7 +1943,7 @@ function pickTiaoxinDiscard(kind, value){
     if(kind==='hand'){
       const idx=Number(value);
       if(!Number.isInteger(idx) || idx<0 || idx>=(target.hand||[]).length) return g;
-      card=target.hand.splice(idx,1)[0];
+      card=removeHandCards(g, to, idx)[0];
       if(card){
         g.discard.push(card);
         markDiscardReveal(g, to, [card]);
@@ -2136,7 +2142,7 @@ function sanyao(costKey, targetSeat) {
     if(isEquip) {
       me.equips[equipSlot] = null;
     } else {
-      me.hand.splice(handIdx, 1);
+      removeHandCards(g, mySeat, handIdx);
     }
     g.discard = g.discard || [];
     if(discardedCard && !discardedCard.virtual) g.discard.push(discardedCard);
@@ -2252,7 +2258,7 @@ function zhimengAutoResolve(g, from, to, option) {
     const hand = target.hand || [];
     if(hand.length > 0) {
       const idx = Math.floor(Math.random() * hand.length);
-      gainedCard = hand.splice(idx, 1)[0];
+      gainedCard = removeHandCards(g, to, idx)[0];
     }
   } else if(EQUIP_SLOTS.includes(option.type)) {
     if(target.equips && target.equips[option.type]) {
@@ -2419,7 +2425,7 @@ function respondHaoshi(targetSeat){
     if(!g.players[targetSeat] || !g.players[targetSeat].alive) return g;
     
     const half = g.pending.half;
-    const cardsToGive = me.hand.splice(0, half);
+    const cardsToGive = removeHandCards(g, mySeat, Array.from({length:half},(_,i)=>i)).reverse();
     g.players[targetSeat].hand.push(...cardsToGive);
     g.log = pushLog(g.log, me.name+' 发动【好施】,将'+half+'张手牌交给 '+g.players[targetSeat].name);
     markSkillSound(g, '好施');
@@ -2455,7 +2461,7 @@ function respondDimeng(seatA, seatB){
     }
     
     // 弃置X张牌
-    const cardsToDiscard = me.hand.splice(0, X);
+    const cardsToDiscard = removeHandCards(g, mySeat, Array.from({length:X},(_,i)=>i)).reverse();
     g.discard.push(...cardsToDiscard);
     markDiscardReveal(g, mySeat, cardsToDiscard);
     
@@ -2625,9 +2631,8 @@ function discardShensuCardFromHand(g, seat, cardIndex) {
   const player = g.players[seat];
   if (!player || !player.alive) return;
   
-  const card = player.hand[cardIndex];
+  const card = removeHandCards(g, seat, cardIndex)[0];
   if (card) {
-    player.hand.splice(cardIndex, 1);
     g.discard.push(card);
     markDiscardReveal(g, seat, [card]);
     g.log = pushLog(g.log, player.name + ' 弃置了手牌中的装备牌【' + card.name + '】');
@@ -3126,9 +3131,8 @@ function pickQiangxiTarget(targetSeat) {
           g.log = pushLog(g.log, `${me.name} 弃置了装备区的武器牌【${weapon.name}】`);
         }
       } else if (weaponSource === 'hand' && typeof weaponIndex === 'number') {
-        const card = me.hand[weaponIndex];
+        const card = removeHandCards(g, mySeat, weaponIndex)[0];
         if (card) {
-          me.hand.splice(weaponIndex, 1);
           g.discard.push(card);
           markDiscardReveal(g, mySeat, [card]);
           g.log = pushLog(g.log, `${me.name} 弃置了手牌中的武器牌【${card.name}】`);
@@ -3331,9 +3335,8 @@ function useShaForLuanwu(g, sourceSeat, targetSeat) {
   };
   
   // 移除杀
-  source.hand.splice(shaIndex, 1);
+  removeHandCards(g, sourceSeat, shaIndex);
   g.discard.push(shaCard);
-  maybeStartLianying(g, sourceSeat, 1);
   
   g.log = pushLog(g.log, `${source.name} 选择对 ${target.name} 使用【杀】(乱武)`);
   markCardSound(g, '杀', sourceSeat, shaCard, targetSeat);

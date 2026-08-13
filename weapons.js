@@ -183,7 +183,7 @@ function respondQinglong(activate, cardIdx){
     if(me.jiangchiNoSlash) return g;
     const card=me.hand[cardIdx];
     if(!card || !canUseAs(me,card,'杀')) return g; // 没这张牌/不能当杀:状态不变(双重保险)
-    me.hand.splice(cardIdx,1); g.discard.push(card);
+    removeHandCards(g, mySeat, cardIdx); g.discard.push(card);
     // 青龙追杀发生在前一张杀被闪抵消后的武器响应时机，不占出牌阶段的普通杀次数，
     // 也不消耗【将驰】提供的额外次数；但它仍是“使用杀”，会正常破坏克己等使用牌记录。
     const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
@@ -307,7 +307,7 @@ function respondGuanshi(picks){
         handIdxs.push(Number(p.slice(5)));
       }
     }
-    const discardedHands=handIdxs.sort((a,b)=>b-a).map(idx=>me.hand.splice(idx,1)[0]);
+    const discardedHands=removeHandCards(g, from, handIdxs);
     g.discard.push(...discardedHands);
     markDiscardReveal(g, from, discardedHands);
     if(handIdxs.length) g.log=pushLog(g.log, me.name+' 弃置'+handIdxs.length+'张手牌(贯石斧)');
@@ -418,7 +418,7 @@ function respondCixiongChoice(choice, cardIdx){
     if(choice==='discard'){
       const card = (typeof cardIdx==='number') ? (target.hand||[])[cardIdx] : null;
       if(!card) return g;
-      g.discard.push(target.hand.splice(cardIdx,1)[0]);
+      g.discard.push(removeHandCards(g, to, cardIdx)[0]);
       markDiscardReveal(g, to, [card]);
       g.log=pushLog(g.log, target.name+' 弃置手牌【'+card.name+'】（雌雄双股剑）');
       continueAfterCixiong(g);

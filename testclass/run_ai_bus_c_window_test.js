@@ -585,6 +585,9 @@ const testCode = String.raw`
     for(var d = 0; d < 5; d++){ hand.push(card('过河拆桥', 'chai' + d)); }
     var g = mkG6(hand);
     g.players[0].equips.weapon = card('诸葛连弩'); // unlimitedSha:5张杀都可出
+    // #97:过河拆桥目标必须至少有牌(手牌/装备/判定区),空手牌不再是合法目标——
+    // 给对手各配一张手牌,保证 5 拆桥 × 5 目标 = 25 条候选仍成立。
+    for(var i=1;i<6;i++){ g.players[i].hand=[card('闪','opp'+i)]; }
     var list = enumerateAllLegalOneStepActions(g, 0);
     if(list.length !== 26) throw new Error('35条原始候选应截断为25+结束=26条,实际 ' + list.length + ' ' + JSON.stringify(list.map(function(c){ return c.action; })));
     list.forEach(function(c, i){
@@ -605,6 +608,7 @@ const testCode = String.raw`
     hand.push(card('桃'));
     var g = mkG6(hand, { myHp: 2 });
     g.players[0].equips.weapon = card('诸葛连弩');
+    for(var i=1;i<6;i++){ g.players[i].hand=[card('闪','opp'+i)]; }
     var list = enumerateAllLegalOneStepActions(g, 0);
     var tao = null;
     list.forEach(function(c){ if(c.action === '桃' && c.target === null) tao = c; });
@@ -623,6 +627,7 @@ const testCode = String.raw`
     hand.push(card('桃'));
     var g = mkG6(hand, { myHp: 2 });
     g.players[0].equips.weapon = card('诸葛连弩');
+    for(var i=1;i<6;i++){ g.players[i].hand=[card('闪','opp'+i)]; }
     var list = enumerateAllLegalOneStepActions(g, 0);
     var pick = localFallbackPlayWindow(g, 0, list);
     if(!pick || pick.action !== '桃' || pick.target !== null)
@@ -634,6 +639,8 @@ const testCode = String.raw`
     var hand = [];
     for(var d = 0; d < 5; d++){ hand.push(card('过河拆桥', 'chai' + d)); }
     var g = mkG(hand); // 3人局:拆桥可打座位1/2 → 每张2条 = 10条
+    // #97:过河拆桥目标必须至少有牌——给对手各配一张手牌,保证 10 条候选成立。
+    g.players[1].hand=[card('闪','opp1')]; g.players[2].hand=[card('闪','opp2')];
     var list = enumerateAllLegalOneStepActions(g, 0);
     if(list.length !== 11) throw new Error('10条原始候选应全部保留+结束=11条,实际 ' + list.length);
     var chai = list.filter(function(c){ return c.action === '过河拆桥'; });

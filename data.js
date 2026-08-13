@@ -224,7 +224,7 @@ const GENERALS = {
           return;
         }
         const j = Math.floor(Math.random()*src.hand.length);
-        g.players[seat].hand.push(src.hand.splice(j,1)[0]);
+        g.players[seat].hand.push(removeHandCards(g, ctx.sourceSeat, j)[0]);
         g.log = pushLog(g.log, g.players[seat].name+' 【反馈】发动,获得 '+src.name+' 一张牌');
         markSkillSound(g, '反馈');
       }
@@ -694,8 +694,7 @@ const HUASHEN_SKILL_TABLE = {
     { name:'狂骨', caps:['kuanggu'] }
   ],
   lusu: [
-    { name:'好施', caps:['haoshi'] },
-    { name:'好施(额外摸牌)', caps:['extraDrawPhase'], note:'与周瑜英姿共用同一个数值型cap key,值为2——见本表顶部架构约定关于覆盖风险的说明' },
+    { name:'好施', caps:['haoshi','extraDrawPhase'], note:'摸牌+2与交牌门槛判定同属好施一个技能,需整体借用,见本表顶部架构约定' },
     { name:'缔盟', caps:['dimeng'] }
   ],
   xiahouyuan: [
@@ -885,7 +884,7 @@ function huashenHasCap(player, cap){
 // huashenCapValue: 数值型cap的借用版本(如extraDrawPhase)——只记"借来的这个技能条目
 // 确实声明了这个cap key"(entry.caps数组里有没有这个名字),真正的数值现查
 // GENERALS[player.huashenGeneral].caps[cap],不复制到中间存储、不缓存。这是刻意
-// 的架构选择:周瑜【英姿】(值1)和鲁肃【好施(额外摸牌)】(值2)共用同一个
+// 的架构选择:周瑜【英姿】(值1)和鲁肃【好施】(值2)共用同一个
 // extraDrawPhase key,如果借用时把数值抄一份存进player自己的字段,后续"更改化身"
 // 换借另一个武将时容易忘记同步更新/清空这份抄本,而现查天然不会有这个问题——和
 // huashenHasCap的原则完全一致,只是这次是数值不是布尔。

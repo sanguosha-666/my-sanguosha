@@ -274,7 +274,7 @@ function respondJiedao(useSha, cardIdx){
       const specifiedCard = (typeof cardIdx==='number') ? (A.hand||[])[cardIdx] : null;
       const idx = (specifiedCard && canUseAs(A, specifiedCard, '杀')) ? cardIdx : findUsableAs(A.hand, A, '杀');
       if(idx<0) return g; // 没有可用的杀:不生效(按钮本就不该渲染)
-      const card=A.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=removeHandCards(g, mySeat, idx)[0]; g.discard.push(card);
       g.log=pushLog(g.log, A.name+' 选择对 '+g.players[seatB].name+' 使用'+(isShaName(card.name)?'【'+card.name+'】':'【'+card.name+'】当【杀】')+'(借刀杀人)');
       markCardSound(g, '杀', mySeat, card, seatB);
       if(card.name!=='杀'){ if(hasCap(A,'longdan')) markSkillSound(g,'龙胆'); else if(hasCap(A,'wusheng')) markSkillSound(g,'武圣'); }
@@ -363,10 +363,9 @@ function playZhangbaSha(idx1, idx2, targetSeat){
     // 诸葛亮【空城】:丈八蛇矛这条路径不走 CARD_PLAYS['杀'].canTarget,单独补上同一条限制
     // ——这仍然是"使用杀"这件事,空城不区分杀是怎么凑出来的。
     if(hasCap(tgt,'kongcheng') && (tgt.hand||[]).length===0) return g;
-    // 两张牌进弃牌堆:先弹大下标再弹小下标,避免 splice 后错位
+    // 两张牌进弃牌堆:统一走 removeHandCards(大下标先弹,内部处理连营)
     const hi=Math.max(idx1,idx2), lo=Math.min(idx1,idx2);
-    g.discard.push(me.hand.splice(hi,1)[0]);
-    g.discard.push(me.hand.splice(lo,1)[0]);
+    g.discard.push(...removeHandCards(g, mySeat, [hi, lo]));
     if(!g.shaUsed) g.shaUsed=true;
     else if(g.jiangchiExtraShaLeft > 0) g.jiangchiExtraShaLeft--;
     // 丈八蛇矛合成杀的颜色按两张牌的红黑组合决定(两红→红/两黑→黑/一红一黑→无色),
@@ -397,7 +396,7 @@ function playShaFangtian(cardIdx, targets){
     // 按现有回合方向(nextAlive)从攻击者起重排,不用玩家提交的原始顺序
     const order=[]; let s=mySeat;
     for(let i=0;i<g.players.length;i++){ s=nextAlive(g,s); if(targets.includes(s)) order.push(s); }
-    me.hand.splice(cardIdx,1);
+    removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     if(!g.shaUsed) g.shaUsed=true;
     else if(g.jiangchiExtraShaLeft > 0) g.jiangchiExtraShaLeft--;
@@ -484,7 +483,7 @@ function respondShan(useShan, cardIdx){
       const specifiedCard = (typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
       const idx = (specifiedCard && canUseAs(me, specifiedCard, '闪')) ? cardIdx : findUsableAs(me.hand,me,'闪'); // 龙胆:杀可当闪,优先用本名闪
       if(idx<0) return g;
-      const card=me.hand.splice(idx,1)[0]; g.discard.push(card);
+      const card=removeHandCards(g, mySeat, idx)[0]; g.discard.push(card);
       const played=(g.pending.shanCount||0)+1;
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
       markCardSound(g, '闪', mySeat, card);

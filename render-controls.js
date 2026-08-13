@@ -1291,7 +1291,15 @@ function renderPickGeneral(g, c, opts){
     debugBox.appendChild(warn);
     const sel=document.createElement('select');
     sel.style.cssText='width:100%;margin-bottom:8px;background:#15120f;color:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px;';
-    GENERAL_IDS.forEach(id=>{
+    // 调试下拉框按武将名(gen.name)字符串升序展示,方便人肉查找;只影响这一个调试入口的
+    // 展示顺序——GENERAL_IDS 本体(即 Object.keys(GENERALS),开发添加顺序)及其它调用点
+    // (randomGeneralId/候选池排除等)一概不动,每个 option 的 value 仍是正确的武将 id。
+    const debugGeneralIds = GENERAL_IDS.slice().sort((a,b)=>{
+      const na=(getGeneral(a)||{}).name||'';
+      const nb=(getGeneral(b)||{}).name||'';
+      return na.localeCompare(nb);
+    });
+    debugGeneralIds.forEach(id=>{
       const gen=getGeneral(id); if(!gen) return;
       const opt=document.createElement('option');
       opt.value=id; opt.textContent=gen.name+' · '+gen.skill;

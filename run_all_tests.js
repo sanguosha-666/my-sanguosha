@@ -3,10 +3,10 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const root = __dirname;
-const self = path.basename(__filename);
-const tests = fs.readdirSync(root)
+const testDir = path.join(root, 'testclass');
+const tests = fs.readdirSync(testDir)
   .filter(function(file){
-    return /^run_.*\.js$/.test(file) && file !== self;
+    return /^run_.*\.js$/.test(file);
   })
   .sort();
 
@@ -28,7 +28,7 @@ if(cacheCheck.error || cacheCheck.status !== 0){
 console.log('Running ' + tests.length + ' test files...');
 tests.forEach(function(test, index){
   console.log('\n[' + (index + 1) + '/' + tests.length + '] ' + test);
-  const result = spawnSync(process.execPath, [path.join(root, test)], {
+  const result = spawnSync(process.execPath, [path.join(testDir, test)], {
     cwd: root,
     stdio: 'inherit',
     env: process.env

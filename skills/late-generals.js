@@ -95,17 +95,7 @@ function confirmLuanji() {
     const cardIndices = pending.cardIndices;
     
     // 移除这两张手牌
-    const removedCards = [];
-    const hand = me.hand || [];
-    
-    // 按降序排列索引，避免移除后影响后面的索引
-    cardIndices.sort((a, b) => b - a);
-    
-    for (const idx of cardIndices) {
-      if (idx >= 0 && idx < hand.length) {
-        removedCards.push(hand.splice(idx, 1)[0]);
-      }
-    }
+    const removedCards = removeHandCards(g, mySeat, cardIndices);
     
     if (removedCards.length !== 2) {
       g.log = pushLog(g.log, `${me.name} 使用【乱击】失败:牌数量不足`);
@@ -239,12 +229,12 @@ function respondLieRen(cardIndex) {
     // 移除双方的拼点牌
     const sourceCardIndex = source.hand.findIndex(c => c === sourceCard);
     if (sourceCardIndex !== -1) {
-      source.hand.splice(sourceCardIndex, 1);
+      removeHandCards(g, pending.sourceSeat, sourceCardIndex);
     }
     
     const targetCardIndex = target.hand.findIndex(c => c === targetCard);
     if (targetCardIndex !== -1) {
-      target.hand.splice(targetCardIndex, 1);
+      removeHandCards(g, mySeat, targetCardIndex);
     }
     
     // 将拼点牌置入弃牌堆
@@ -282,7 +272,7 @@ function respondLieRen(cardIndex) {
         if (target.hand) {
           const handIndex = target.hand.findIndex(c => c === cardToGain);
           if (handIndex !== -1) {
-            target.hand.splice(handIndex, 1);
+            removeHandCards(g, mySeat, handIndex);
             cardFound = true;
           }
         }
@@ -397,7 +387,7 @@ function respondJujianPickTarget(targetSeat){
       card=me.hand[idx];
     }
     if(!isNonBasicCard(card)) return g;
-    me.hand.splice(idx,1);
+    removeHandCards(g, mySeat, idx);
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     g.pending={

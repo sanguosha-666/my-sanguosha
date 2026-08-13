@@ -24,7 +24,7 @@ const fs = require('fs');
 const assert = require('assert');
 const path = require('path');
 
-const ROOT = __dirname;
+const ROOT = path.join(__dirname, '..');
 let passed = 0, failed = 0;
 function check(name, fn){
   return Promise.resolve().then(fn).then(function(){
