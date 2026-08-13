@@ -464,7 +464,7 @@ git commit -m "feat: 进房/回大厅挂载背景视频与飘牌切换"
 
 **Files:**
 - Modify: `render.js`（模块级快照变量 + `checkDeaths` 函数 + `render()` 内调用）
-- Test: Create `run_death_fx_detect_test.js`
+- Test: Create `testclass/run_death_fx_detect_test.js`
 
 **Interfaces:**
 - Consumes: Task 1 的 `triggerDeathFx`（`typeof` 防御）；全局 `mySeat`
@@ -472,7 +472,7 @@ git commit -m "feat: 进房/回大厅挂载背景视频与飘牌切换"
 
 - [ ] **Step 1: 写失败测试**
 
-创建 `run_death_fx_detect_test.js`：
+创建 `testclass/run_death_fx_detect_test.js`：
 
 ```js
 const vm=require('vm');
@@ -521,7 +521,7 @@ process.exit(failed?1:0);
 
 - [ ] **Step 2: 运行确认测试结构可用**
 
-Run: `node run_death_fx_detect_test.js`
+Run: `node testclass/run_death_fx_detect_test.js`
 Expected: 失败（`checkDeaths` 未定义）。**若此步骤因代码问题报错，调整测试脚手架再继续。**
 
 - [ ] **Step 3: 实现 checkDeaths**
@@ -560,7 +560,7 @@ function checkDeaths(g){
 
 - [ ] **Step 4: 补全并运行测试**
 
-将 `run_death_fx_detect_test.js` 的 check 主体改为完整断言（替换 Step 1 中的占位 check）：
+将 `testclass/run_death_fx_detect_test.js` 的 check 主体改为完整断言（替换 Step 1 中的占位 check）：
 
 ```js
 const playersOf=(aliveArr)=>aliveArr.map((al,i)=>({name:'p'+i,alive:al}));
@@ -635,13 +635,13 @@ check('人数变化(机器人增删)不触发', function(){
 });
 ```
 
-Run: `node run_death_fx_detect_test.js`
+Run: `node testclass/run_death_fx_detect_test.js`
 Expected: `6/6 passed`、exit 0。
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add render.js run_death_fx_detect_test.js
+git add render.js testclass/run_death_fx_detect_test.js
 git commit -m "feat: render.js 死亡检测触发血滴/血雾特效+专项测试"
 ```
 
