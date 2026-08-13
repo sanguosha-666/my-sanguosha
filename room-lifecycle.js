@@ -159,8 +159,13 @@ function createNewTeam(){
 //   gameMode = 'ffa' | 'identity' | 'team'  对战模式(乱斗/身份局/组队);缺省或非法当 'ffa'
 // 身份局(identity)仅允许 pick、人数 4~8;先发身份再主公 5 选 1。
 // 守卫须同时检查 pickingGeneral / pickingLordGeneral,不能只查 g.started。
+function isRoomOwner(g, seat){
+  return !!(g && seat===0 && g.players && g.players[0] && !g.players[0].isBot);
+}
+
 function startGame(mode, gameMode){
   tx(g=>{
+    if(!isRoomOwner(g,mySeat)) return g;
     if(g.started || g.phase==='pickingGeneral' || g.phase==='pickingLordGeneral') return g;
     const gm = (gameMode==='identity') ? 'identity' : (gameMode==='team') ? 'team' : 'ffa';
     const n = g.players.length;
@@ -526,6 +531,7 @@ function resetPlayerForNewGame(p){
 }
 function newGame(){
   tx(g=>{
+    if(!isRoomOwner(g,mySeat)) return g;
     g.started=false; g.phase='lobby'; g.pending=null; g.winner=null; g.aoe=null;
     g.gameMode=null; g.winSide=null; g.lordGeneralPool=null; g.generalMode=null;
     g.aiRebelSuspicion={};
@@ -537,6 +543,10 @@ function newGame(){
 }
 
 function cleanupRoom(){
+  if(!isRoomOwner(currentG,mySeat)){
+    alert('只有房主可以关闭房间。');
+    return;
+  }
   // 常驻按钮任何阶段都能点到(见 render.js #closeRoomBtn),游戏进行中点击等于强制中断
   // 所有人的对局且不可恢复——提示文案明确说清楚这一点,不区分"进行中"/"已结束"两套逻辑,
   // 行为本身(删除房间数据+所有人回大厅)完全一致,只是让玩家点之前多一层警示。

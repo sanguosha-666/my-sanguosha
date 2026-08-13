@@ -1830,7 +1830,18 @@ function renderControls(g){
       // 范围声明)。
       renderAiStatusButton(c);
     }
-    // 1) 对战模式:乱斗 / 身份局 / 组队
+    // 1) 对战模式:乱斗 / 身份局 / 组队。生命周期入口只对房主显示；
+    // 业务函数仍有独立 guard，不能只依赖 UI 隐藏。
+    if(mySeat!==0){
+      if(g.gameMode!=='team'){
+        const waiting=document.createElement('button');
+        waiting.className='ghost'; waiting.disabled=true;
+        waiting.textContent='等待房主开始游戏'; c.appendChild(waiting);
+        setBanner('等待房主选择模式并开始游戏…');
+        return;
+      }
+      selectedGameMode='team';
+    }
     const mkModeBtn=(label, mode)=>{
       const b=document.createElement('button');
       b.className = selectedGameMode===mode ? 'primary' : 'ghost';
@@ -1838,9 +1849,11 @@ function renderControls(g){
       b.onclick=()=>{ selectedGameMode=mode; if(typeof currentG!=='undefined' && currentG) render(currentG); else render(g); };
       c.appendChild(b);
     };
-    mkModeBtn('乱斗', 'ffa');
-    mkModeBtn('身份局', 'identity');
-    mkModeBtn('组队', 'team');
+    if(mySeat===0){
+      mkModeBtn('乱斗', 'ffa');
+      mkModeBtn('身份局', 'identity');
+      mkModeBtn('组队', 'team');
+    }
 
     // 2) 开局方式(依赖已选模式)
     if(selectedGameMode==='ffa'){
@@ -1853,7 +1866,7 @@ function renderControls(g){
       btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)（'+cnt+'/'+SEATS+'）';
       btnPick.disabled = cnt<MIN_PLAYERS;
       btnPick.onclick=()=>startGame('pick','ffa');
-      c.appendChild(btnPick);
+      if(mySeat===0) c.appendChild(btnPick);
     } else if(selectedGameMode==='identity'){
       // 身份局仅三选一,不提供随机武将
       const btnPick=document.createElement('button');
@@ -1907,7 +1920,7 @@ function renderControls(g){
         if(Object.keys(teams).length<2 || hasNoTeam){ alert('组队模式需至少 2 个队伍且每队至少 1 人,请先在大厅选队'); return; }
         startGame('pick','team');
       };
-      c.appendChild(btnPick);
+      if(mySeat===0) c.appendChild(btnPick);
     } else {
       const tip=document.createElement('button');
       tip.className='ghost'; tip.disabled=true;
@@ -1927,8 +1940,10 @@ function renderControls(g){
     return;
   }
   if(g.phase==='over'){
-    const btn=document.createElement('button'); btn.className='primary';
-    btn.textContent='再来一局'; btn.onclick=()=>{ selectedGameMode=null; newGame(); }; c.appendChild(btn);
+    if(mySeat===0){
+      const btn=document.createElement('button'); btn.className='primary';
+      btn.textContent='再来一局'; btn.onclick=()=>{ selectedGameMode=null; newGame(); }; c.appendChild(btn);
+    }
     // "结束并清理房间"这个按钮已经统一到页面左上角常驻的 #closeRoomBtn(cleanupRoom),
     // 不再在这里重复渲染同一个功能,避免游戏结束时同时出现两个功能一样的按钮让玩家困惑。
     const winText = (g.gameMode==='identity'||g.gameMode==='team')

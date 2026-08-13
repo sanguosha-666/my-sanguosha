@@ -1091,6 +1091,8 @@ function render(g){
   // 真人的数组下标左移。每次快照都用稳定 cid 重新定位自己，避免客户端继续拿旧座位号操作。
   const currentSeat=(g.players||[]).findIndex(p=>p&&p.cid===myClientId);
   if(currentSeat>=0) mySeat=currentSeat;
+  const closeRoomBtn=document.getElementById('closeRoomBtn');
+  if(closeRoomBtn) closeRoomBtn.classList.toggle('hidden', !isRoomOwner(g,mySeat));
   // AI托管:mySeat 重定位后同步刷新托管座位。支持"大厅先开托管、进房后再自动生效"
   // (aiTestAutopilot 定义在 ai-bot.js,本文件加载更早,typeof 只是跨文件防御惯例)。
   if(typeof aiTestAutopilot!=='undefined' && aiTestAutopilot && aiTestAutopilot.active) aiTestAutopilot.seat = mySeat;
