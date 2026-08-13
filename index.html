@@ -2034,10 +2034,20 @@
     .exchange-card .table-card-mini{width:50px;height:70px;}
   }
 
+  /* ===== 背景视觉层（大厅视频 + 游戏内飘牌 Canvas） ===== */
+  .bg-video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none;background:transparent;}
+  .bg-veil{position:fixed;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg, rgba(26,23,20,.40) 0%, rgba(26,23,20,.62) 100%);}
+  .wrap{position:relative;z-index:2;}
+  #gameBgCanvas{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;}
+
   .hidden{display:none!important;}
 </style>
 </head>
 <body>
+<!-- 大厅背景视频：装饰性纯视觉层，muted+playsinline 满足自动播放策略；
+     src 由 game-bg.js 的 pickRandomBgVideo() 随机设置；透明/加载失败时 body 渐变兜底 -->
+<video id="bgVideo" class="bg-video" autoplay muted loop playsinline aria-hidden="true" tabindex="-1"></video>
+<div id="bgVeil" class="bg-veil" aria-hidden="true"></div>
 <!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
 <button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
 <button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
@@ -2103,6 +2113,8 @@
        淡入淡出)+信息面板(阶段3会改造成独立信息条)+自己座位卡(#meSeat)+手牌行,
        取代旧版 #seats 网格环绕布局。 -->
   <div id="game" class="hidden">
+    <!-- 游戏内飘牌 Canvas：z-index:0 垫底，pointer-events:none 不拦截交互 -->
+    <canvas id="gameBgCanvas" aria-hidden="true"></canvas>
     <!-- #oppTopRow 只在宽屏桌面布局(.desktop-layout)下才会被使用(装zone==='top'的座位卡),
          窄屏下永远是空的、没有任何CSS属性的占位元素(不挂.opp-row这类会带来无条件基础样式
          的class)——render.js只有desktopLayoutActive为真时才会把座位分流进来,窄屏下
@@ -2152,7 +2164,7 @@
 <script src="data.js?v=399"></script>
 <script src="stages/stage-table.js?v=401"></script>
 <script src="debug-log.js?v=396"></script>
-<script src="room-lifecycle.js?v=399"></script>
+<script src="room-lifecycle.js?v=400"></script>
 <script src="game.js?v=422"></script>
 <script src="sha/sha-resolution.js?v=403"></script>
 <script src="weapons.js?v=398"></script>
@@ -2161,11 +2173,12 @@
 <script src="bot-ai-bus.js?v=402"></script>
 <script src="bot.js?v=401"></script>
 <script src="ai-bot.js?v=394"></script>
-<script src="render.js?v=401"></script>
+<script src="render.js?v=402"></script>
 <script src="render-table.js?v=394"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=394"></script>
 <script src="render-controls.js?v=415"></script>
 <script src="render-log.js?v=395"></script>
+<script src="game-bg.js?v=1"></script>
 </body>
 </html>
