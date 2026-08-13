@@ -274,7 +274,17 @@ const PENDING_RENDERERS = {
   zhibaAsk:           {actor:'lordSeat',   skill:'制霸', render:renderPendingZhibaAsk},
   jiemingAsk:         {actor:'seat',       skill:'节命', render:renderPendingJiemingAsk},
   xinshengAsk:        {actor:'seat',       skill:'新生', render:renderPendingXinshengAsk},
-  liuli:              {actor:'to',         skill:'流离', render:renderPendingLiuli}
+  liuli:              {actor:'to',         skill:'流离', render:renderPendingLiuli},
+  tianxiang:          {actor:'seat',       skill:'天香', render:renderPendingTianxiang},
+  huashenChangeAskStart:{actor:'seat',     skill:'化身', render:renderPendingHuashenChangeAskStart},
+  huashenChangePickStart:{actor:'seat',    skill:'化身', render:renderPendingHuashenChangePickStart},
+  huashenChangeAskEnd:{actor:'seat',       skill:'化身', render:renderPendingHuashenChangeAskEnd},
+  huashenChangePickEnd:{actor:'seat',      skill:'化身', render:renderPendingHuashenChangePickEnd},
+  biyue:              {actor:'seat',       skill:'闭月', render:renderPendingBiyue},
+  cixiongAsk:         {actor:'from',       skill:'雌雄双股剑', render:renderPendingCixiongAsk},
+  hanbingAsk:         {actor:'from',       skill:'寒冰剑', render:renderPendingHanbingAsk},
+  xiaoguo:            {actor:'asking',     skill:'骁果', render:renderPendingXiaoguo},
+  xiaoguoChoice:      {actor:'to',         skill:'骁果', render:renderPendingXiaoguoChoice}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -527,6 +537,51 @@ function renderPendingLiuli(g,c){
   liuliDiscardOptions(me).forEach(opt=>targets.forEach(t=>{const target=g.players[t];if(!target||!target.alive)return;const b=document.createElement('button');b.textContent='弃'+opt.label+' → '+target.name;b.onclick=()=>respondLiuli(opt,t);c.appendChild(b);}));
   const no=document.createElement('button');no.className='ghost';no.textContent='不发动';no.onclick=()=>respondLiuli(null,null);c.appendChild(no);
   const from=g.players[g.pending.from];setBanner(escapeHtml(from?from.name:'对方')+' 对你使用【杀】,是否发动【流离】弃一张牌转移目标?');
+}
+function renderPendingTianxiang(g,c){
+  const me=g.players[mySeat],targets=g.pending.targets||[];
+  tianxiangHeartOptions(me).forEach(opt=>targets.forEach(t=>{const target=g.players[t];if(!target||!target.alive)return;const b=document.createElement('button');b.className='ghost';b.textContent='弃【'+opt.card.name+'】 → '+target.name;b.onclick=()=>respondTianxiang({idx:opt.idx},t);c.appendChild(b);}));
+  const no=document.createElement('button');no.className='ghost';no.textContent='不发动';no.onclick=()=>respondTianxiang(null,null);c.appendChild(no);
+  setBanner('你即将受到'+g.pending.amount+'点伤害,是否发动【天香】转移给其他角色?');
+}
+function renderPendingHuashenChangeAskStart(g,c){renderHuashenChangeAsk(g,c,respondHuashenChangeAskStart);}
+function renderPendingHuashenChangePickStart(g,c){renderHuashenTwoStepPick(g,c,g.players[mySeat].huashenPool,respondHuashenChangePickStart,'化身');}
+function renderPendingHuashenChangeAskEnd(g,c){renderHuashenChangeAsk(g,c,respondHuashenChangeAskEnd);}
+function renderPendingHuashenChangePickEnd(g,c){renderHuashenTwoStepPick(g,c,g.players[mySeat].huashenPool,respondHuashenChangePickEnd,'化身');}
+function renderPendingBiyue(g,c){
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【闭月】';yes.onclick=()=>respondBiyue(true);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondBiyue(false);
+  c.appendChild(yes);c.appendChild(no);setBanner('结束阶段,是否发动【闭月】摸1张牌?');
+}
+function renderPendingCixiongAsk(g,c){
+  const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【雌雄双股剑】';yes.onclick=()=>respondCixiongAsk(true);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondCixiongAsk(false);
+  c.appendChild(yes);c.appendChild(no);setBanner('对 '+escapeHtml(to||'目标')+' 使用【杀】,是否发动【雌雄双股剑】?');
+}
+function renderPendingHanbingAsk(g,c){
+  const to=g.players[g.pending.to].name;
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【寒冰剑】';yes.onclick=()=>respondHanbingAsk(true);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondHanbingAsk(false);
+  c.appendChild(yes);c.appendChild(no);setBanner('你的【杀】命中 '+escapeHtml(to)+',是否发动【寒冰剑】?防止伤害,改为弃置对方两张牌。');
+}
+function renderPendingXiaoguo(g,c){
+  const endingName=g.players[g.pending.endingSeat].name;
+  if(xiaoguoMode){
+    setBanner(escapeHtml(endingName)+' 结束阶段,发动【骁果】:选择一张基本牌(杀/闪/桃)弃置(或点已选中的牌取消)。');
+    const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消';cancel.onclick=()=>{resetXiaoguo();render(g);};c.appendChild(cancel);
+  }else{
+    const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【骁果】';yes.onclick=()=>{xiaoguoMode=true;render(g);};c.appendChild(yes);
+    const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondXiaoguo(false);c.appendChild(no);
+    setBanner(escapeHtml(endingName)+' 结束阶段,是否弃一张基本牌发动【骁果】?');
+  }
+}
+function renderPendingXiaoguoChoice(g,c){
+  const target=g.players[mySeat],askerName=g.players[g.pending.from].name;
+  const slotLabel={weapon:'武器',armor:'防具',plus1:'防御马',minus1:'进攻马'};
+  EQUIP_SLOTS.forEach(s=>{if(!target.equips[s])return;const b=document.createElement('button');b.textContent='弃置'+slotLabel[s]+'【'+target.equips[s].name+'】';b.onclick=()=>respondXiaoguoChoice(s);c.appendChild(b);});
+  const damage=document.createElement('button');damage.className='primary';damage.textContent='受到1点伤害';damage.onclick=()=>respondXiaoguoChoice('damage');c.appendChild(damage);
+  setBanner(escapeHtml(askerName)+' 发动【骁果】,请选择:弃置一件装备(对方摸一张牌),或受到1点伤害。');
 }
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
@@ -2193,106 +2248,9 @@ function renderControls(g){
   }
   // 左慈【新生】:简单的"是否发动"二选一(参照寒冰剑respondHanbingAsk同款写法),
   // 每受到1点伤害问一次,g.pending.remaining 提示还剩几次。
-  if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang' && g.pending.seat===mySeat){
-    const opts=tianxiangHeartOptions(me);
-    const targets=g.pending.targets||[];
-    opts.forEach(opt=>{
-      targets.forEach(t=>{
-        const target=g.players[t];
-        if(!target || !target.alive) return;
-        const b=document.createElement('button');
-        b.className='ghost';
-        b.textContent='弃【'+opt.card.name+'】 → '+target.name;
-        b.onclick=()=>respondTianxiang({idx:opt.idx}, t);
-        c.appendChild(b);
-      });
-    });
-    const nb=document.createElement('button'); nb.className='ghost';
-    nb.textContent='不发动'; nb.onclick=()=>respondTianxiang(null, null);
-    c.appendChild(nb);
-    setBanner('你即将受到'+g.pending.amount+'点伤害,是否发动【天香】转移给其他角色?');
-    return;
-  }
-  if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'小乔', '天香');
-    return;
-  }
   // ===== 左慈【化身】:回合开始/结束更改(huashenChange*)——huashenPick(开局初次声明)
   // 已经挪到上面 pickingGeneral 旁边,这里不再重复 =====
-  if(g.phase==='huashenChangeAskStart' && g.pending && g.pending.type==='huashenChangeAskStart' && g.pending.seat===mySeat){
-    renderHuashenChangeAsk(g, c, respondHuashenChangeAskStart);
-    return;
-  }
-  if(g.phase==='huashenChangeAskStart' && g.pending && g.pending.type==='huashenChangeAskStart'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'左慈', '化身');
-    return;
-  }
-  if(g.phase==='huashenChangePickStart' && g.pending && g.pending.type==='huashenChangePickStart' && g.pending.seat===mySeat){
-    const me=g.players[mySeat];
-    renderHuashenTwoStepPick(g, c, me.huashenPool, respondHuashenChangePickStart, '化身');
-    return;
-  }
-  if(g.phase==='huashenChangePickStart' && g.pending && g.pending.type==='huashenChangePickStart'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'左慈', '化身');
-    return;
-  }
-  if(g.phase==='huashenChangeAskEnd' && g.pending && g.pending.type==='huashenChangeAskEnd' && g.pending.seat===mySeat){
-    renderHuashenChangeAsk(g, c, respondHuashenChangeAskEnd);
-    return;
-  }
-  if(g.phase==='huashenChangeAskEnd' && g.pending && g.pending.type==='huashenChangeAskEnd'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'左慈', '化身');
-    return;
-  }
-  if(g.phase==='huashenChangePickEnd' && g.pending && g.pending.type==='huashenChangePickEnd' && g.pending.seat===mySeat){
-    const me=g.players[mySeat];
-    renderHuashenTwoStepPick(g, c, me.huashenPool, respondHuashenChangePickEnd, '化身');
-    return;
-  }
-  if(g.phase==='huashenChangePickEnd' && g.pending && g.pending.type==='huashenChangePickEnd'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'左慈', '化身');
-    return;
-  }
-  if(g.phase==='biyue' && g.pending && g.pending.type==='biyue' && g.pending.seat===mySeat){
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【闭月】';
-    b1.onclick=()=>respondBiyue(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不发动';
-    b2.onclick=()=>respondBiyue(false);
-    c.appendChild(b2);
-    setBanner('结束阶段,是否发动【闭月】摸1张牌?');
-    return;
-  }
-  if(g.phase==='biyue' && g.pending && g.pending.type==='biyue'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'貂蝉', '闭月');
-    return;
-  }
   // 雌雄双股剑:攻击者是否发动
-  if(g.phase==='cixiongAsk' && g.pending && g.pending.type==='cixiongAsk' && g.pending.from===mySeat){
-    const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【雌雄双股剑】'; b1.onclick=()=>respondCixiongAsk(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不发动'; b2.onclick=()=>respondCixiongAsk(false);
-    c.appendChild(b2);
-    setBanner('对 '+escapeHtml(to||'目标')+' 使用【杀】,是否发动【雌雄双股剑】?');
-    return;
-  }
-  if(g.phase==='cixiongAsk' && g.pending && g.pending.type==='cixiongAsk'){
-    const from=g.players[g.pending.from]&&g.players[g.pending.from].name;
-    const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
-    setBanner(escapeHtml(from||'')+' 对 '+escapeHtml(to||'')+' 使用【杀】,是否发动【雌雄双股剑】…');
-    return;
-  }
   // 雌雄双股剑:目标二选一
   if(g.phase==='cixiongChoice' && g.pending && g.pending.type==='cixiongChoice' && g.pending.to===mySeat){
     const fromName=g.players[g.pending.from]&&g.players[g.pending.from].name;
@@ -2318,22 +2276,6 @@ function renderControls(g){
     return;
   }
   // 寒冰剑:杀命中前,装备者(攻击者)是否发动"防止伤害、改为弃置目标两张牌"。
-  if(g.phase==='hanbingAsk' && g.pending && g.pending.type==='hanbingAsk' && g.pending.from===mySeat){
-    const to=g.players[g.pending.to].name;
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【寒冰剑】'; b1.onclick=()=>respondHanbingAsk(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不发动'; b2.onclick=()=>respondHanbingAsk(false);
-    c.appendChild(b2);
-    setBanner('你的【杀】命中 '+escapeHtml(to)+',是否发动【寒冰剑】?防止伤害,改为弃置对方两张牌。');
-    return;
-  }
-  if(g.phase==='hanbingAsk' && g.pending && g.pending.type==='hanbingAsk'){
-    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    setBanner(escapeHtml(from)+' 的【杀】命中 '+escapeHtml(to)+','+escapeHtml(from)+' 是否发动【寒冰剑】…');
-    return;
-  }
   // 寒冰剑弃牌子阶段:和 pick 阶段同一套"随机手牌+具名装备"选项列表,只是这次响应函数是
   // hanbingPick,弃完一张可能还会自动/再问下一轮(由 startHanbingRound 决定,不在这里判断)。
   if(g.phase==='hanbing' && g.pending && g.pending.from===mySeat){
@@ -2352,45 +2294,6 @@ function renderControls(g){
   if(g.phase==='hanbing' && g.pending){
     const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
     setBanner(escapeHtml(from)+' 发动了【寒冰剑】,正在选择弃置 '+escapeHtml(to)+' 的第'+((g.pending.round||0)+1)+'张牌…');
-    return;
-  }
-  if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo' && g.pending.asking===mySeat){
-    const endingName=g.players[g.pending.endingSeat].name;
-    if(xiaoguoMode){
-      setBanner(escapeHtml(endingName)+' 结束阶段,发动【骁果】:选择一张基本牌(杀/闪/桃)弃置(或点已选中的牌取消)。');
-      const cb=document.createElement('button'); cb.className='ghost';
-      cb.textContent='取消'; cb.onclick=()=>{ resetXiaoguo(); render(g); }; c.appendChild(cb);
-    } else {
-      const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='发动【骁果】'; b1.onclick=()=>{ xiaoguoMode=true; render(g); };
-      c.appendChild(b1);
-      const b2=document.createElement('button');
-      b2.textContent='不发动'; b2.onclick=()=>respondXiaoguo(false);
-      c.appendChild(b2);
-      setBanner(escapeHtml(endingName)+' 结束阶段,是否弃一张基本牌发动【骁果】?');
-    }
-    return;
-  }
-  if(g.phase==='xiaoguo' && g.pending && g.pending.type==='xiaoguo'){
-    const ending=g.players[g.pending.endingSeat].name, asker=g.players[g.pending.asking].name;
-    setBanner(escapeHtml(ending)+' 结束阶段,正在询问 '+escapeHtml(asker)+' 是否发动【骁果】…');
-    return;
-  }
-  if(g.phase==='xiaoguoChoice' && g.pending && g.pending.type==='xiaoguoChoice' && g.pending.to===mySeat){
-    const target=g.players[mySeat], askerName=g.players[g.pending.from].name;
-    const slotLabel={ weapon:'武器', armor:'防具', plus1:'防御马', minus1:'进攻马' };
-    EQUIP_SLOTS.forEach(s=>{ if(target.equips[s]){
-      const b=document.createElement('button');
-      b.textContent='弃置'+slotLabel[s]+'【'+target.equips[s].name+'】'; b.onclick=()=>respondXiaoguoChoice(s); c.appendChild(b);
-    }});
-    const db=document.createElement('button'); db.className='primary';
-    db.textContent='受到1点伤害'; db.onclick=()=>respondXiaoguoChoice('damage'); c.appendChild(db);
-    setBanner(escapeHtml(askerName)+' 发动【骁果】,请选择:弃置一件装备(对方摸一张牌),或受到1点伤害。');
-    return;
-  }
-  if(g.phase==='xiaoguoChoice' && g.pending && g.pending.type==='xiaoguoChoice'){
-    const from=g.players[g.pending.from].name, ending=g.players[g.pending.endingSeat].name;
-    setBanner(escapeHtml(from)+' 发动【骁果】,'+escapeHtml(ending)+' 选择弃装备或受到1点伤害…');
     return;
   }
   if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat){
