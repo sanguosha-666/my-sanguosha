@@ -334,7 +334,9 @@ const PENDING_RENDERERS = {
   huanhuoPickCard:    {actor:'sourceSeat', skill:'眩惑', render:renderPendingHuanhuoPickCard},
   huanhuoPickGotCard: {actor:'sourceSeat', skill:'眩惑', render:renderPendingHuanhuoPickGotCard},
   huanhuoPickSecond:  {actor:'sourceSeat', skill:'眩惑', render:renderPendingHuanhuoPickSecond},
-  luanjiChoose:       {actor:'sourceSeat', skill:'乱击', render:renderPendingLuanjiChoose}
+  luanjiChoose:       {actor:'sourceSeat', skill:'乱击', render:renderPendingLuanjiChoose},
+  buquAsk:            {actor:'seat',       skill:'不屈', render:renderPendingBuquAsk},
+  duanbingChoose:     {actor:'sourceSeat', skill:'短兵', render:renderPendingDuanbingChoose}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -953,6 +955,16 @@ function renderPendingLuanjiChoose(g,c){
   hand.forEach((card,index)=>(groups[card.suit]||(groups[card.suit]=[])).push({index,card}));Object.entries(groups).forEach(([suit,cards])=>{if(cards.length<2)return;const title=document.createElement('h5');title.textContent=suit+'花色组:';div.appendChild(title);for(let i=0;i<cards.length;i++)for(let j=i+1;j<cards.length;j++){const pairIndex=pairs.findIndex(pair=>pair[0]===cards[i].index&&pair[1]===cards[j].index),b=document.createElement('button');b.className='card-btn';b.textContent='【'+cards[i].card.name+'】+【'+cards[j].card.name+'】';b.onclick=()=>pickLuanjiPair(pairIndex);div.appendChild(b);}});
   const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消';cancel.onclick=()=>cancelLuanji();div.appendChild(cancel);c.appendChild(div);setBanner('请选择两张花色相同的手牌当【万箭齐发】使用');
 }
+function renderPendingBuquAsk(g,c){
+  const div=document.createElement('div');div.className='centered',p=document.createElement('p');p.textContent='是否发动【不屈】,放置一张不屈牌？';div.appendChild(p);
+  const yes=document.createElement('button');yes.textContent='放置不屈牌';yes.onclick=()=>respondBuqu(true);div.appendChild(yes);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondBuqu(false);div.appendChild(no);c.appendChild(div);setBanner('请选择是否发动【不屈】');
+}
+function renderPendingDuanbingChoose(g,c){
+  const div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【短兵】选择额外目标';div.appendChild(h4);const base=g.players[g.pending.baseTarget],p=document.createElement('p');p.textContent='当前目标：'+escapeHtml((base&&base.name)||'?')+'。可以再选择一名与你距离为1的合法目标。';div.appendChild(p);
+  const targets=document.createElement('div');targets.className='target-options';(g.pending.availableTargets||[]).forEach(seat=>{const target=g.players[seat];if(!target||!target.alive||!isSeatClickable(seat))return;const b=document.createElement('button');b.className='target-btn';b.textContent='追加 '+escapeHtml(target.name);b.onclick=()=>triggerDuanbing(seat);targets.appendChild(b);});div.appendChild(targets);
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='不发动（仅对原目标使用杀）';cancel.onclick=cancelDuanbing;div.appendChild(cancel);c.appendChild(div);setBanner('【短兵】选择一名距离为1的额外目标');
+}
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
 // 只有1个技能时跳过、直接进第二步收尾)点选具体技能名,respondFn(generalId,skillName)
@@ -1549,27 +1561,6 @@ function renderControls(g){
   const zhimengPickHtml = renderZhimengPick(g);
   if(zhimengPickHtml) { c.innerHTML = zhimengPickHtml; return; }
   
-  // 周泰【不屈】UI:体力降到0时是否放置不屈牌
-  if(g.phase==='buquAsk' && g.pending && g.pending.type==='buquAsk' && g.pending.seat===mySeat){
-    const div=document.createElement('div'); div.className='centered';
-    const p=document.createElement('p'); p.textContent='是否发动【不屈】,放置一张不屈牌？';
-    div.appendChild(p);
-    
-    const btnUse=document.createElement('button');
-    btnUse.textContent='放置不屈牌';
-    btnUse.onclick=()=>respondBuqu(true);
-    div.appendChild(btnUse);
-    
-    const btnSkip=document.createElement('button');
-    btnSkip.textContent='不发动';
-    btnSkip.onclick=()=>respondBuqu(false);
-    div.appendChild(btnSkip);
-    
-    c.appendChild(div);
-    setBanner('请选择是否发动【不屈】');
-    return;
-  }
-  
   // 身份局主公选将(须在 !g.started 通用大厅分支之前)
   if(g.phase==='pickingLordGeneral'){
     const lord = getLordSeat(g);
@@ -2119,37 +2110,6 @@ function renderControls(g){
       }
       setBanner('轮到你,摸牌阶段。');
     }
-  } else if(g.phase==='duanbingChoose'){
-    // 【短兵】在打出杀后会把 phase 切到 duanbingChoose；必须在 play 分支之外渲染，
-    // 否则阶段已经改变后永远到不了原先嵌在 play 里的选择界面。
-    if(g.pending && g.pending.type==='duanbingChoose' && g.pending.sourceSeat===mySeat){
-      const div=document.createElement('div'); div.className='centered';
-      const h4=document.createElement('h4'); h4.textContent='【短兵】选择额外目标'; div.appendChild(h4);
-      const baseTarget=g.players[g.pending.baseTarget];
-      const p=document.createElement('p');
-      p.textContent='当前目标：'+escapeHtml((baseTarget&&baseTarget.name)||'?')+'。可以再选择一名与你距离为1的合法目标。';
-      div.appendChild(p);
-      const targetsDiv=document.createElement('div'); targetsDiv.className='target-options';
-      (g.pending.availableTargets||[]).forEach(seat=>{
-        const target=g.players[seat];
-        if(!target || !target.alive || !isSeatClickable(seat)) return;
-        const b=document.createElement('button'); b.className='target-btn';
-        b.textContent='追加 '+escapeHtml(target.name);
-        b.onclick=()=>triggerDuanbing(seat);
-        targetsDiv.appendChild(b);
-      });
-      div.appendChild(targetsDiv);
-      const cancelBtn=document.createElement('button'); cancelBtn.className='cancel-btn';
-      cancelBtn.textContent='不发动（仅对原目标使用杀）';
-      cancelBtn.onclick=cancelDuanbing;
-      div.appendChild(cancelBtn);
-      c.appendChild(div);
-      setBanner('【短兵】选择一名距离为1的额外目标');
-      return;
-    }
-    const source=g.pending && g.players[g.pending.sourceSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 正在选择【短兵】的额外目标…');
-    return;
   } else if(g.phase==='play'){
     // 本回合是否还能出杀(与单张杀 canPlay 同口径:未出过 或 有无限杀)
     const canSha = !g.shaUsed || hasCap(me,'unlimitedSha');
