@@ -1,0 +1,22 @@
+const fs=require('fs');
+const assert=require('assert');
+const game=fs.readFileSync('game.js','utf8');
+const ui=fs.readFileSync('render-controls.js','utf8');
+const timeout=fs.readFileSync('bot-ai-bus.js','utf8');
+
+assert(game.includes("hasCap(me, 'duanbing') && g.phase === 'play'"));
+assert(game.includes('dist === 1'));
+assert(game.includes("CARD_PLAYS['杀'].canTarget(g, me, card, i)"));
+assert(game.includes("type: 'duanbingChoose'"));
+assert(game.includes('setResponseAskedAt({'));
+assert(game.includes("g.phase = 'duanbingChoose'"));
+assert(game.includes("function triggerDuanbing(extraTarget)"));
+assert(game.includes("pending.availableTargets.includes(extraTarget)"));
+assert(game.includes("kind:'duanbing'"));
+assert(game.includes('function cancelDuanbing()'));
+assert(game.includes('resolveShaUse(g, me, baseTarget'));
+assert(ui.includes("g.phase==='duanbingChoose'"));
+assert(ui.includes("b.onclick=()=>triggerDuanbing(seat)"));
+assert(ui.includes("cancelBtn.onclick=cancelDuanbing"));
+assert(timeout.includes("type==='duanbingChoose'"));
+console.log('duanbing flow integrity tests: 15/15 passed');
