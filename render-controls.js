@@ -294,7 +294,12 @@ const PENDING_RENDERERS = {
   yaowu_choose:       {actor:'seat',       skill:'耀武', render:renderPendingYaowuChoose},
   wangxiAsk:          {actor:'seat',       skill:'忘隙', render:renderPendingWangxiAsk},
   quhuDamageChoice:   {actor:'seat',       skill:'驱虎', render:renderPendingQuhuDamageChoice},
-  fanjianSuit:        {actor:'targetSeat', skill:'反间', render:renderPendingFanjianSuit}
+  fanjianSuit:        {actor:'targetSeat', skill:'反间', render:renderPendingFanjianSuit},
+  jiedaoChoice:       {actor:'seatA',      skill:'借刀杀人', render:renderPendingJiedaoChoice},
+  tiaoxinChoice:      {actor:'to',         skill:'挑衅', render:renderPendingTiaoxinChoice},
+  tiaoxinDiscard:     {actor:'from',       skill:'挑衅', render:renderPendingTiaoxinDiscard},
+  qiaobianTurnStart:  {actor:'seat',       skill:'巧变', render:renderPendingQiaobianTurnStart},
+  qiaobianMove:       {actor:'seat',       skill:'巧变', render:renderPendingQiaobianMove}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -661,6 +666,58 @@ function renderPendingFanjianSuit(g,c){
   const zhou=g.players[g.pending.seat];
   ['♠','♥','♣','♦'].forEach(suit=>{const b=document.createElement('button');b.textContent='选择 '+suit;b.onclick=()=>respondFanjianSuit(suit);c.appendChild(b);});
   setBanner(escapeHtml(zhou?zhou.name:'周瑜')+' 对你发动【反间】,请选择一种花色。');
+}
+function renderPendingJiedaoChoice(g,c){
+  const A=g.players[mySeat],B=g.players[g.pending.seatB],askerName=g.players[g.pending.from].name;
+  const shaCandidates=(A.hand||[]).filter(card=>canUseAs(A,card,'杀'));
+  const canSha=shaCandidates.length>0&&!A.jiangchiNoSlash,shaNeedsPick=canSha&&shaCandidates.length>1;
+  if(canSha&&(!shaNeedsPick||selectedResponseCardIdx!==null)){
+    const chosenIdx=selectedResponseCardIdx,b=document.createElement('button');b.className='primary';b.textContent='对 '+B.name+' 使用【杀】';
+    b.onclick=shaNeedsPick?(()=>{resetSelectedResponseCard();respondJiedao(true,chosenIdx);}):(()=>respondJiedao(true));c.appendChild(b);
+  }
+  const discard=document.createElement('button');discard.textContent='弃置武器【'+A.equips.weapon.name+'】';discard.onclick=()=>respondJiedao(false);c.appendChild(discard);
+  const hint=shaNeedsPick&&selectedResponseCardIdx===null?'你有多张牌可以当【杀】使用,请先在手牌区选择一张。':'';
+  setBanner(escapeHtml(askerName)+' 对你使用【借刀杀人】,目标 '+escapeHtml(B.name)+',请选择:对其使用【杀】,或弃置你的武器。'+hint);
+}
+function renderPendingTiaoxinChoice(g,c){
+  const from=g.players[g.pending.from].name,shaCandidates=(g.players[mySeat].hand||[]).filter(card=>canUseAs(g.players[mySeat],card,'杀'));
+  const canSha=shaCandidates.length>0&&canReachSha(g,mySeat,g.pending.from),shaNeedsPick=canSha&&shaCandidates.length>1;
+  if(canSha&&(!shaNeedsPick||selectedResponseCardIdx!==null)){
+    const chosenIdx=selectedResponseCardIdx,b=document.createElement('button');b.className='primary';b.textContent='对其使用【杀】';
+    b.onclick=shaNeedsPick?(()=>{resetSelectedResponseCard();respondTiaoxinChoice(true,chosenIdx);}):(()=>respondTiaoxinChoice(true));c.appendChild(b);
+  }
+  const discard=document.createElement('button');discard.textContent='被弃置一张牌';discard.onclick=()=>respondTiaoxinChoice(false);c.appendChild(discard);
+  const hint=shaNeedsPick&&selectedResponseCardIdx===null?'你有多张牌可以当【杀】使用,请先在手牌区选择一张。':'';
+  setBanner(escapeHtml(from)+' 发动【挑衅】,'+(canSha?'请选择:对其使用一张【杀】,或被弃置一张牌。'+hint:'你没有可用的【杀】,只能选择被弃置一张牌。'));
+}
+function renderPendingTiaoxinDiscard(g,c){
+  const target=g.players[g.pending.to],from=g.players[g.pending.from],div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent='【挑衅】弃置一张牌';div.appendChild(h4);
+  (target.hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.className='ghost';b.textContent='弃置手牌 '+(idx+1);b.onclick=()=>pickTiaoxinDiscard('hand',idx);div.appendChild(b);});
+  EQUIP_SLOTS.forEach(slot=>{const card=target.equips&&target.equips[slot];if(!card)return;const b=document.createElement('button');b.className='ghost';b.textContent='弃置装备【'+card.name+'】';b.onclick=()=>pickTiaoxinDiscard('equip',slot);div.appendChild(b);});
+  c.appendChild(div);setBanner(escapeHtml(from?from.name:'姜维')+' 选择弃置 '+escapeHtml(target?target.name:'目标')+' 的一张牌。');
+}
+function renderPendingQiaobianTurnStart(g,c){
+  if(qiaobianMode!=='choosePhase'){
+    const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【巧变】';yes.onclick=()=>{qiaobianMode='choosePhase';qiaobianCardIdx=null;qiaobianPhaseChoice=null;render(g);};c.appendChild(yes);
+    const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>qiaobianDecline();c.appendChild(no);
+    setBanner('是否发动【巧变】,弃一张手牌并跳过判定/摸牌/出牌/弃牌阶段之一?');return;
+  }
+  [['judge','判定阶段'],['draw','摸牌阶段'],['play','出牌阶段'],['discard','弃牌阶段']].forEach(([key,label])=>{const b=document.createElement('button');if(qiaobianPhaseChoice===key)b.className='primary';b.textContent=label;b.onclick=()=>{qiaobianPhaseChoice=key;render(g);};c.appendChild(b);});
+  if(qiaobianCardIdx!==null&&qiaobianPhaseChoice){const ok=document.createElement('button');ok.className='primary';ok.textContent='确认';ok.onclick=()=>{const idx=qiaobianCardIdx,ph=qiaobianPhaseChoice;resetQiaobian();qiaobianDeclare(idx,ph);};c.appendChild(ok);}
+  const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消';cancel.onclick=()=>{resetQiaobian();render(g);};c.appendChild(cancel);
+  setBanner('【巧变】选择一张要弃置的手牌(下方手牌区点选)，再选一个要跳过的阶段'+(qiaobianCardIdx===null?'（还没选牌）':'')+(qiaobianPhaseChoice?'':'（还没选阶段）')+'。');
+}
+function renderPendingQiaobianMove(g,c){
+  if(qiaobianSrc){
+    const targets=qiaobianTargets(g,qiaobianSrc);targets.forEach(t=>{const b=document.createElement('button');b.textContent='移动到 '+t.label;b.onclick=()=>{const src=qiaobianSrc;resetQiaobian();respondQiaobianMove({kind:src.kind,srcSeat:src.seat,slot:src.slot,idx:src.idx,dstSeat:t.seat});};c.appendChild(b);});
+    const back=document.createElement('button');back.className='ghost';back.textContent='重新选来源';back.onclick=()=>{qiaobianSrc=null;render(g);};c.appendChild(back);
+    const skip=document.createElement('button');skip.className='ghost';skip.textContent='不移动';skip.onclick=()=>{resetQiaobian();respondQiaobianMove(null);};c.appendChild(skip);
+    setBanner('【巧变】把'+escapeHtml(qiaobianSrc.label)+'移动到哪位角色?'+(targets.length===0?'(没有合法的目的地)':''));return;
+  }
+  qiaobianSources(g).forEach(s=>{const b=document.createElement('button');b.textContent=s.label;b.onclick=()=>{qiaobianSrc=s;render(g);};c.appendChild(b);});
+  const skip=document.createElement('button');skip.className='primary';skip.textContent='不移动';skip.onclick=()=>{resetQiaobian();respondQiaobianMove(null);};c.appendChild(skip);
+  setBanner('【巧变】跳过出牌阶段成功,是否移动一张装备/判定牌?');
 }
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
@@ -2237,91 +2294,8 @@ function renderControls(g){
     setBanner(escapeHtml(from)+' 发动了【寒冰剑】,正在选择弃置 '+escapeHtml(to)+' 的第'+((g.pending.round||0)+1)+'张牌…');
     return;
   }
-  if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice' && g.pending.seatA===mySeat){
-    const A=g.players[mySeat], B=g.players[g.pending.seatB], askerName=g.players[g.pending.from].name;
-    const shaCandidates = (A.hand||[]).filter(card=>canUseAs(A, card, '杀'));
-    // 曹彰【将驰】选项1 期间不能打出杀,服务端 respondJiedao 会直接拒绝 —— 这里必须一并
-    // 不渲染"使用【杀】"按钮,否则真人点了毫无反应(只能自己改点"弃置武器"绕开)。
-    // 曾经 jiangchiNoSlash 只影响下面的 shaNeedsPick(要不要先点一张牌),没管按钮出不出现。
-    const canSha = shaCandidates.length>0 && !A.jiangchiNoSlash;
-    // 候选>1时先在手牌区点选一张再出现按钮(和respondShan同一风格);候选<=1时行为不变。
-    const shaNeedsPick = canSha && shaCandidates.length>1;
-    if(canSha && (!shaNeedsPick || selectedResponseCardIdx!==null)){
-      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
-      const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='对 '+B.name+' 使用【杀】';
-      // 提交后立刻清空选中状态:下标是"这一刻手牌数组的下标",牌一旦离手数组就 splice 了,
-      // 留着会指向另一张牌(见 duelResponse 那处的详细说明)。chosenIdx 已在上面冻结,先清空再提交是安全的。
-      b1.onclick = shaNeedsPick ? (()=>{ resetSelectedResponseCard(); respondJiedao(true, chosenIdx); }) : (()=>respondJiedao(true));
-      c.appendChild(b1);
-    }
-    const b2=document.createElement('button');
-    b2.textContent='弃置武器【'+A.equips.weapon.name+'】'; b2.onclick=()=>respondJiedao(false); c.appendChild(b2);
-    const jiedaoPickHint = (shaNeedsPick && selectedResponseCardIdx===null) ? '你有多张牌可以当【杀】使用,请先在手牌区选择一张。' : '';
-    setBanner(escapeHtml(askerName)+' 对你使用【借刀杀人】,目标 '+escapeHtml(B.name)+',请选择:对其使用【杀】,或弃置你的武器。'+jiedaoPickHint);
-    return;
-  }
-  if(g.phase==='jiedaoChoice' && g.pending && g.pending.type==='jiedaoChoice'){
-    const seatA=g.players[g.pending.seatA].name, seatB=g.players[g.pending.seatB].name;
-    setBanner('等待 '+escapeHtml(seatA)+' 选择对 '+escapeHtml(seatB)+' 使用【杀】或弃置武器…');
-    return;
-  }
   // 姜维【志继】:觉醒后选择回复体力或摸牌
   // 姜维【挑衅】:目标角色选择如何响应
-  if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice' && g.pending.to===mySeat){
-    const from=g.players[g.pending.from].name, to=g.players[mySeat].name;
-    const shaCandidates=(me.hand||[]).filter(card=>canUseAs(me, card, '杀'));
-    const canSha=shaCandidates.length>0 && canReachSha(g, mySeat, g.pending.from);
-    // 候选>1时先在手牌区点选一张再出现按钮(和respondShan同一风格);候选<=1时行为不变。
-    const shaNeedsPick = canSha && shaCandidates.length>1;
-    if(canSha && (!shaNeedsPick || selectedResponseCardIdx!==null)){
-      const chosenIdx = selectedResponseCardIdx; // 挂载onclick这一刻冻结,遵循CLAUDE.md规则14
-      const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='对其使用【杀】';
-      // 提交后立刻清空选中状态(理由同 duelResponse 那处)
-      b1.onclick = shaNeedsPick ? (()=>{ resetSelectedResponseCard(); respondTiaoxinChoice(true, chosenIdx); }) : (()=>respondTiaoxinChoice(true));
-      c.appendChild(b1);
-    }
-    const b2=document.createElement('button');
-    b2.textContent='被弃置一张牌'; b2.onclick=()=>respondTiaoxinChoice(false); c.appendChild(b2);
-    const tiaoxinPickHint = (shaNeedsPick && selectedResponseCardIdx===null) ? '你有多张牌可以当【杀】使用,请先在手牌区选择一张。' : '';
-    setBanner(escapeHtml(from)+' 发动【挑衅】,'+(canSha?'请选择:对其使用一张【杀】,或被弃置一张牌。'+tiaoxinPickHint:'你没有可用的【杀】,只能选择被弃置一张牌。'));
-    return;
-  }
-  if(g.phase==='tiaoxinChoice' && g.pending && g.pending.type==='tiaoxinChoice'){
-    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    setBanner('等待 '+escapeHtml(to)+' 选择对 '+escapeHtml(from)+' 使用【杀】或被弃置一张牌…');
-    return;
-  }
-  if(g.phase==='tiaoxinDiscard' && g.pending && g.pending.type==='tiaoxinDiscard' && g.pending.from===mySeat){
-    const target=g.players[g.pending.to];
-    const from=g.players[g.pending.from];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【挑衅】弃置一张牌';
-    div.appendChild(h4);
-    (target.hand||[]).forEach((card, idx)=>{
-      const b=document.createElement('button'); b.className='ghost';
-      b.textContent='弃置手牌 '+(idx+1);
-      b.onclick=()=>pickTiaoxinDiscard('hand', idx);
-      div.appendChild(b);
-    });
-    EQUIP_SLOTS.forEach(slot=>{
-      const card=target.equips && target.equips[slot];
-      if(!card) return;
-      const b=document.createElement('button'); b.className='ghost';
-      b.textContent='弃置装备【'+card.name+'】';
-      b.onclick=()=>pickTiaoxinDiscard('equip', slot);
-      div.appendChild(b);
-    });
-    c.appendChild(div);
-    setBanner(escapeHtml(from?from.name:'姜维')+' 选择弃置 '+escapeHtml(target?target.name:'目标')+' 的一张牌。');
-    return;
-  }
-  if(g.phase==='tiaoxinDiscard' && g.pending && g.pending.type==='tiaoxinDiscard'){
-    const from=g.players[g.pending.from].name, to=g.players[g.pending.to].name;
-    setBanner('等待 '+escapeHtml(from)+' 选择弃置 '+escapeHtml(to)+' 的一张牌…');
-    return;
-  }
   if(g.phase==='wugu' && g.pending && g.pending.type==='wugu'){
     const picker=g.pending.order[g.pending.idx];
     if(picker===mySeat){
@@ -2339,75 +2313,6 @@ function renderControls(g){
     return;
   }
   // ===== 张郃【巧变】完整版:回合开始"是否发动"→"选牌+选阶段"→(仅出牌阶段)"是否移动一张牌" =====
-  if(g.phase==='qiaobianTurnStart' && g.pending && g.pending.type==='qiaobianTurnStart' && g.pending.seat===mySeat){
-    if(qiaobianMode!=='choosePhase'){
-      const b1=document.createElement('button'); b1.className='primary';
-      b1.textContent='发动【巧变】'; b1.onclick=()=>{ qiaobianMode='choosePhase'; qiaobianCardIdx=null; qiaobianPhaseChoice=null; render(g); };
-      c.appendChild(b1);
-      const b2=document.createElement('button');
-      b2.textContent='不发动'; b2.onclick=()=>qiaobianDecline();
-      c.appendChild(b2);
-      setBanner('是否发动【巧变】,弃一张手牌并跳过判定/摸牌/出牌/弃牌阶段之一?');
-      return;
-    }
-    // choosePhase 模式:手牌区选一张牌(见 renderHand 里的 qiaobianMode==='choosePhase' 分支)+
-    // 这里选一个要跳过的阶段,两者都选好才出现"确认"。
-    const phases=[['judge','判定阶段'],['draw','摸牌阶段'],['play','出牌阶段'],['discard','弃牌阶段']];
-    phases.forEach(([key,label])=>{
-      const b=document.createElement('button');
-      if(qiaobianPhaseChoice===key) b.className='primary';
-      b.textContent=label; b.onclick=()=>{ qiaobianPhaseChoice=key; render(g); };
-      c.appendChild(b);
-    });
-    if(qiaobianCardIdx!==null && qiaobianPhaseChoice){
-      const ok=document.createElement('button'); ok.className='primary';
-      ok.textContent='确认'; ok.onclick=()=>{ const idx=qiaobianCardIdx, ph=qiaobianPhaseChoice; resetQiaobian(); qiaobianDeclare(idx, ph); };
-      c.appendChild(ok);
-    }
-    const cb=document.createElement('button'); cb.className='ghost';
-    cb.textContent='取消'; cb.onclick=()=>{ resetQiaobian(); render(g); }; c.appendChild(cb);
-    setBanner('【巧变】选择一张要弃置的手牌(下方手牌区点选)，再选一个要跳过的阶段'+
-      (qiaobianCardIdx===null?'（还没选牌）':'')+(qiaobianPhaseChoice?'':'（还没选阶段）')+'。');
-    return;
-  }
-  if(g.phase==='qiaobianTurnStart' && g.pending && g.pending.type==='qiaobianTurnStart'){
-    setBanner(escapeHtml(g.players[g.pending.seat].name)+' 是否发动【巧变】…');
-    return;
-  }
-  if(g.phase==='qiaobianMove' && g.pending && g.pending.type==='qiaobianMove' && g.pending.seat===mySeat){
-    if(qiaobianSrc){
-      const targets=qiaobianTargets(g, qiaobianSrc);
-      targets.forEach(t=>{
-        const b=document.createElement('button');
-        b.textContent='移动到 '+t.label; b.onclick=()=>{
-          const src=qiaobianSrc; resetQiaobian();
-          respondQiaobianMove({kind:src.kind, srcSeat:src.seat, slot:src.slot, idx:src.idx, dstSeat:t.seat});
-        };
-        c.appendChild(b);
-      });
-      const back=document.createElement('button'); back.className='ghost';
-      back.textContent='重新选来源'; back.onclick=()=>{ qiaobianSrc=null; render(g); }; c.appendChild(back);
-      const skip=document.createElement('button'); skip.className='ghost';
-      skip.textContent='不移动'; skip.onclick=()=>{ resetQiaobian(); respondQiaobianMove(null); }; c.appendChild(skip);
-      setBanner('【巧变】把'+escapeHtml(qiaobianSrc.label)+'移动到哪位角色?'+(targets.length===0?'(没有合法的目的地)':''));
-      return;
-    }
-    const sources=qiaobianSources(g);
-    sources.forEach(s=>{
-      const b=document.createElement('button');
-      b.textContent=s.label; b.onclick=()=>{ qiaobianSrc=s; render(g); };
-      c.appendChild(b);
-    });
-    const skip=document.createElement('button'); skip.className='primary';
-    skip.textContent='不移动'; skip.onclick=()=>{ resetQiaobian(); respondQiaobianMove(null); };
-    c.appendChild(skip);
-    setBanner('【巧变】跳过出牌阶段成功,是否移动一张装备/判定牌?');
-    return;
-  }
-  if(g.phase==='qiaobianMove' && g.pending && g.pending.type==='qiaobianMove'){
-    setBanner(escapeHtml(g.players[g.pending.seat].name)+' 正在决定是否移动一张装备/判定牌…');
-    return;
-  }
   if(g.phase==='respond' && g.pending && g.pending.to===mySeat){
     // 马超【铁骑】判红:此杀不可被闪抵消,连按钮都不给("没有可用手段就不渲染"的一贯风格)
     const shanCandidates = me.hand.filter(card=>canUseAs(me,card,'闪'));
