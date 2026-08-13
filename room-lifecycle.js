@@ -66,6 +66,8 @@ function enterGame(){
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('configWarn').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
+  if(typeof pauseBgVideo==='function') pauseBgVideo();          // 大厅视频暂停,避免后台耗流量
+  if(typeof startGameBg==='function') startGameBg();            // 启动游戏内飘牌 Canvas
   gameRef.on('value', snap => render(snap.val()));
   if(chatQuery) chatQuery.off();
   chatQuery = chatRef.limitToLast(80);
@@ -568,5 +570,7 @@ function backToLobby(){
   mySeat = null; selectedCardIdx = null; resetZhangba();
   document.getElementById('game').classList.add('hidden');
   document.getElementById('lobby').classList.remove('hidden');
+  if(typeof stopGameBg==='function') stopGameBg();              // 停止并清空飘牌
+  if(typeof resumeBgVideo==='function') resumeBgVideo();        // 恢复大厅视频(随机换一个)
   document.getElementById('lobbyErr').textContent = '房间已清理,可重新进入。';
 }
