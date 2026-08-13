@@ -7942,7 +7942,8 @@ function confirmChengxiangAsk() {
     
     // 亮出牌堆顶的 min(4, remaining) 张牌
     const drawCount = Math.min(4, g.deck.length);
-    const revealed = g.deck.splice(0, drawCount);
+    const revealed = [];
+    for(let i=0;i<drawCount;i++) revealed.push(g.deck.pop());
     
     // 如果牌堆为空，直接取消
     if (revealed.length === 0) {
@@ -8000,7 +8001,11 @@ function confirmChengxiang(selection) {
     const pending = g.pending;
     const resume = pending.resume || {type:'sha'};
     
-    const selectedIndices = selection.indices || [];
+    const selectedIndices = selection && Array.isArray(selection.indices) ? selection.indices : [];
+    const uniqueIndices=[...new Set(selectedIndices)];
+    if(uniqueIndices.length!==selectedIndices.length || uniqueIndices.some(idx=>!Number.isInteger(idx)||idx<0||idx>=pending.revealedCards.length)) return g;
+    const selectedSum=uniqueIndices.reduce((sum,idx)=>sum+pending.cardValues[idx].value,0);
+    if(selectedSum>pending.sumLimit) return g;
     const selectedCards = selectedIndices.map(idx => pending.revealedCards[idx]);
     
     if (selectedCards.length > 0) {
