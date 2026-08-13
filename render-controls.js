@@ -304,7 +304,12 @@ const PENDING_RENDERERS = {
   leijiJudge:         {actor:'sourceSeat', skill:'雷击', render:renderPendingLeijiJudge},
   guiduAsk:           {actor:'sourceSeat', skill:'鬼道', render:renderPendingGuiduAsk},
   jijiangAsk:         {actor:'asking',     skill:'激将', render:renderPendingJijiangAsk},
-  hujiaAsk:           {actor:'asking',     skill:'护驾', render:renderPendingHujiaAsk}
+  hujiaAsk:           {actor:'asking',     skill:'护驾', render:renderPendingHujiaAsk},
+  lieRenChoose:       {actor:'sourceSeat', skill:'烈刃', render:renderPendingLieRenChoose},
+  lieRenPickCard:     {actor:'sourceSeat', skill:'烈刃', render:renderPendingLieRenPickCard},
+  lieRenRespond:      {actor:'targetSeat', skill:'烈刃', render:renderPendingLieRenRespond},
+  shensuChoose1:      {actor:'seat',       skill:'神速1', render:renderPendingShensuChoose1},
+  shensuChoose2:      {actor:'seat',       skill:'神速2', render:renderPendingShensuChoose2}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -757,6 +762,37 @@ function renderLordRequest(g,c){
 }
 function renderPendingJijiangAsk(g,c){renderLordRequest(g,c);}
 function renderPendingHujiaAsk(g,c){renderLordRequest(g,c);}
+function renderPendingLieRenChoose(g,c){
+  const target=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent='【烈刃】发动';div.appendChild(h4);
+  const p1=document.createElement('p');p1.textContent='你使用【杀】对 '+escapeHtml(target?target.name:'目标')+' 造成了伤害';div.appendChild(p1);
+  const p2=document.createElement('p');p2.textContent='可以与其拼点，若你赢，你获得其一张牌';div.appendChild(p2);
+  const yes=document.createElement('button');yes.className='skill-btn';yes.style.background='#e74c3c';yes.textContent='发动烈刃';yes.onclick=()=>triggerLieRen();div.appendChild(yes);
+  const no=document.createElement('button');no.className='cancel-btn';no.textContent='不发动';no.onclick=()=>cancelLieRen();div.appendChild(no);c.appendChild(div);
+}
+function renderPendingLieRenPickCard(g,c){
+  const div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【烈刃】选择拼点牌';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent='请选择一张手牌用于拼点';div.appendChild(p);
+  const hand=document.createElement('div');hand.className='hand-options';(g.players[mySeat].hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.className='card-btn';b.textContent='【'+escapeHtml(card.name)+'】'+card.suit+rankText(card.rank);b.onclick=()=>pickLieRenCard(idx);hand.appendChild(b);});div.appendChild(hand);
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消';cancel.onclick=()=>cancelLieRen();div.appendChild(cancel);c.appendChild(div);
+}
+function renderPendingLieRenRespond(g,c){
+  const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【烈刃】拼点响应';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent=escapeHtml(source?source.name:'祝融')+' 对你发动【烈刃】,请选择一张手牌拼点';div.appendChild(p);
+  const hand=document.createElement('div');hand.className='hand-options';(g.players[mySeat].hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.className='card-btn';b.textContent='【'+escapeHtml(card.name)+'】'+card.suit+rankText(card.rank);b.onclick=()=>respondLieRen(idx);hand.appendChild(b);});div.appendChild(hand);c.appendChild(div);
+}
+function renderPendingShensuChoose1(g,c){
+  const p=g.players[mySeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【神速】发动时机';div.appendChild(h4);
+  const desc=document.createElement('p');desc.textContent='你可以发动【神速1】跳过判定和摸牌阶段，视为使用一张无距离限制的【杀】';div.appendChild(desc);
+  const yes=document.createElement('button');yes.className='skill-btn';yes.style.background='#d4a762';yes.textContent='发动神速1';yes.onclick=()=>triggerShensu1();div.appendChild(yes);
+  const no=document.createElement('button');no.className='cancel-btn';no.textContent='不发动';no.onclick=()=>skipShensu1();div.appendChild(no);c.appendChild(div);setBanner(p.name+' 可以发动【神速1】跳过判定和摸牌阶段');
+}
+function renderPendingShensuChoose2(g,c){
+  const p=g.players[mySeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【神速】发动时机';div.appendChild(h4);
+  const desc=document.createElement('p');desc.textContent='你可以发动【神速2】跳过出牌阶段并弃置一张装备牌，视为使用一张无距离限制的【杀】';div.appendChild(desc);
+  const yes=document.createElement('button');yes.className='skill-btn';yes.style.background='#d4a762';yes.textContent='发动神速2';yes.onclick=()=>triggerShensu2();div.appendChild(yes);
+  const no=document.createElement('button');no.className='cancel-btn';no.textContent='不发动';no.onclick=()=>skipShensu2();div.appendChild(no);c.appendChild(div);setBanner(p.name+' 可以发动【神速2】跳过出牌阶段并弃置装备牌');
+}
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
 // 只有1个技能时跳过、直接进第二步收尾)点选具体技能名,respondFn(generalId,skillName)
@@ -1770,93 +1806,10 @@ function renderControls(g){
   }
   
   // 祝融【烈刃】:伤害结算后的触发选择
-  if(g.phase==='lieRenChoose' && g.pending && g.pending.type==='lieRenChoose' && g.pending.sourceSeat===mySeat){
-    const target = g.players[g.pending.targetSeat];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【烈刃】发动';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='你使用【杀】对 '+escapeHtml(target?target.name:'目标')+' 造成了伤害';
-    div.appendChild(p1);
-    const p2=document.createElement('p'); p2.textContent='可以与其拼点，若你赢，你获得其一张牌';
-    div.appendChild(p2);
-    const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#e74c3c';
-    b1.textContent='发动烈刃';
-    b1.onclick=()=>triggerLieRen();
-    div.appendChild(b1);
-    const b2=document.createElement('button'); b2.className='cancel-btn';
-    b2.textContent='不发动';
-    b2.onclick=()=>cancelLieRen();
-    div.appendChild(b2);
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='lieRenChoose' && g.pending && g.pending.type==='lieRenChoose'){
-    const source = g.players[g.pending.sourceSeat];
-    const target = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 可以发动【烈刃】,与 '+escapeHtml(target?target.name:'?')+' 拼点…');
-    return;
-  }
   
   // 祝融【烈刃】:选择拼点牌
-  if(g.phase==='lieRenPickCard' && g.pending && g.pending.type==='lieRenPickCard' && g.pending.sourceSeat===mySeat){
-    const target = g.players[g.pending.targetSeat];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【烈刃】选择拼点牌';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='请选择一张手牌用于拼点';
-    div.appendChild(p1);
-    const handDiv=document.createElement('div'); handDiv.className='hand-options';
-    
-    const hand = me.hand || [];
-    hand.forEach((card, idx)=>{
-      const b=document.createElement('button');
-      b.className='card-btn';
-      b.textContent='【'+escapeHtml(card.name)+'】'+card.suit+rankText(card.rank);
-      b.onclick=()=>pickLieRenCard(idx);
-      handDiv.appendChild(b);
-    });
-    div.appendChild(handDiv);
-    const cb=document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='取消'; cb.onclick=()=>cancelLieRen();
-    div.appendChild(cb);
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='lieRenPickCard' && g.pending && g.pending.type==='lieRenPickCard'){
-    const source = g.players[g.pending.sourceSeat];
-    const target = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 发动【烈刃】,等待 '+escapeHtml(target?target.name:'?')+' 选择拼点牌…');
-    return;
-  }
   
   // 祝融【烈刃】:目标响应拼点
-  if(g.phase==='lieRenRespond' && g.pending && g.pending.type==='lieRenRespond' && g.pending.targetSeat===mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【烈刃】拼点响应';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent=escapeHtml(source?source.name:'祝融')+' 对你发动【烈刃】,请选择一张手牌拼点';
-    div.appendChild(p1);
-    const handDiv=document.createElement('div'); handDiv.className='hand-options';
-    
-    const hand = me.hand || [];
-    hand.forEach((card, idx)=>{
-      const b=document.createElement('button');
-      b.className='card-btn';
-      b.textContent='【'+escapeHtml(card.name)+'】'+card.suit+rankText(card.rank);
-      b.onclick=()=>respondLieRen(idx);
-      handDiv.appendChild(b);
-    });
-    div.appendChild(handDiv);
-    c.appendChild(div);
-    return;
-  }
-  if(g.phase==='lieRenRespond' && g.pending && g.pending.type==='lieRenRespond'){
-    const source = g.players[g.pending.sourceSeat];
-    const target = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(source?source.name:'?')+' 对 '+escapeHtml(target?target.name:'?')+' 发动【烈刃】,等待 '+escapeHtml(target?target.name:'?')+' 选择拼点牌…');
-    return;
-  }
 
   // 张角【雷击】:使用或打出闪后的触发选择
   
@@ -1866,56 +1819,8 @@ function renderControls(g){
 
   // 夏侯渊【神速】UI
   // 神速1：在判定阶段开始前的触发点
-  if(g.phase==='shensuChoose1' && g.pending && g.pending.type==='shensuChoose1' && g.pending.seat===mySeat){
-    const p = g.players[mySeat];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【神速】发动时机';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='你可以发动【神速1】跳过判定和摸牌阶段，视为使用一张无距离限制的【杀】';
-    div.appendChild(p1);
-    const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#d4a762';
-    b1.textContent='发动神速1';
-    b1.onclick=()=>triggerShensu1();
-    div.appendChild(b1);
-    const b2=document.createElement('button'); b2.className='cancel-btn';
-    b2.textContent='不发动';
-    b2.onclick=()=>skipShensu1();
-    div.appendChild(b2);
-    c.appendChild(div);
-    setBanner(p.name + ' 可以发动【神速1】跳过判定和摸牌阶段');
-    return;
-  }
-  if(g.phase==='shensuChoose1' && g.pending && g.pending.type==='shensuChoose1'){
-    const p = g.players[g.pending.seat];
-    waitAskBanner(p ? p.name : '夏侯渊', '神速1');
-    return;
-  }
   
   // 神速2：在摸牌结束后的触发点
-  if(g.phase==='shensuChoose2' && g.pending && g.pending.type==='shensuChoose2' && g.pending.seat===mySeat){
-    const p = g.players[mySeat];
-    const div=document.createElement('div'); div.className='centered';
-    const h4=document.createElement('h4'); h4.textContent='【神速】发动时机';
-    div.appendChild(h4);
-    const p1=document.createElement('p'); p1.textContent='你可以发动【神速2】跳过出牌阶段并弃置一张装备牌，视为使用一张无距离限制的【杀】';
-    div.appendChild(p1);
-    const b1=document.createElement('button'); b1.className='skill-btn'; b1.style.background='#d4a762';
-    b1.textContent='发动神速2';
-    b1.onclick=()=>triggerShensu2();
-    div.appendChild(b1);
-    const b2=document.createElement('button'); b2.className='cancel-btn';
-    b2.textContent='不发动';
-    b2.onclick=()=>skipShensu2();
-    div.appendChild(b2);
-    c.appendChild(div);
-    setBanner(p.name + ' 可以发动【神速2】跳过出牌阶段并弃置装备牌');
-    return;
-  }
-  if(g.phase==='shensuChoose2' && g.pending && g.pending.type==='shensuChoose2'){
-    const p = g.players[g.pending.seat];
-    waitAskBanner(p ? p.name : '夏侯渊', '神速2');
-    return;
-  }
   
   // 神速杀目标选择
   if(g.pending && g.pending.type==='shensuSha' && g.pending.seat===mySeat){
