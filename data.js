@@ -864,6 +864,16 @@ function huashenSkillEntry(player){
   if(!entries) return null;
   return entries.find(e=>e.name===player.huashenSkillName) || null;
 }
+function hasSkillName(player, skillName){
+  if(!player || player.skillsLost || chanyuanLocksSkills(player)) return false;
+  const gen=getGeneral(player.general);
+  const own=gen&&typeof gen.skill==='string' ? gen.skill.split('/').map(function(s){return s.trim();}) : [];
+  if(own.includes(skillName) || player.huashenSkillName===skillName) return true;
+  return skillName==='观星' && !!(player.caps&&player.caps.guanxing);
+}
+function markHongyanIfConverted(g, player, card){
+  if(player && card && card.suit==='♠' && hasSkillName(player,'红颜')) markSkillSound(g,'红颜');
+}
 // huashenHasCap: 左慈通过【化身】借用的技能是否提供某个布尔能力——只查当前声明借用的
 // 那一个技能条目的caps数组,不查huashenGeneral整个武将的其它技能(左慈只借了"单个技能",
 // 不是整个武将)。断肠等"武将技能整体失效"效果对借来的技能同样生效(和generalHasCap

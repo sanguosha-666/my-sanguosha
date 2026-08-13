@@ -62,6 +62,7 @@ function respondTuxi(targets){
         g.log=pushLog(g.log, me.name+' 发动【突袭】,但 '+tgt.name+' 没有手牌');
       }
     });
+    markSkillSound(g, '突袭');
     g.phase='play';
     return g;
   });
@@ -128,6 +129,7 @@ function duanLiang(cardIdx, targetSeat){
     // 断粮沿用兵粮寸断的全部目标规则，仅把技能允许的距离上限放宽为 2。
     if(!canTargetDelayTrick(g,me,trickCard,targetSeat,2)) return g;
     g.duanliangUsed=true;
+    markSkillSound(g, '断粮');
     me.hand.splice(cardIdx,1);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【兵粮寸断】使用,发动【断粮】,目标 '+g.players[targetSeat].name);
     markCardSound(g, '兵粮寸断', mySeat, card, targetSeat); // 念被当作使用的目标牌名(兵粮寸断),不是原始物理牌本身
@@ -471,6 +473,7 @@ function grantChanyuan(g, seat){
   const p=g.players[seat];
   if(!p || !p.alive || p.chanyuan) return;
   p.chanyuan = true;
+  markSkillSound(g,'缠怨');
   g.log = pushLog(g.log, p.name+' 因质疑真实【蛊惑】获得【缠怨】');
 }
 
@@ -759,6 +762,7 @@ function respondHuashenChangePickStart(generalId, skillName){
     if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)){ return g; }
     me.huashenGeneral = generalId;
     me.huashenSkillName = skillName;
+    markSkillSound(g, '化身');
     g.log = pushLog(g.log, me.name+' 已更改【化身】声明的技能');
     g.pending = null;
     continueGuanxingCheck(g, seat);
@@ -795,6 +799,7 @@ function continueGuanxingCheck(g, seat){
       const cards = g.deck.splice(g.deck.length-actualN, actualN);
       g.pending = { type:'guanxingReview', seat, cards };
       g.phase = 'guanxingReview';
+      markSkillSound(g, '观星');
       g.log = pushLog(g.log, p.name+' 发动【观星】,正在查看牌堆顶…'); // 不写牌面,私密信息
       return;
     }
@@ -1734,6 +1739,7 @@ function respondXiaoguo(activate, cardIdx){
     const card=me.hand[cardIdx];
     if(!card || !BASIC_CARDS.includes(card.name)) return g; // 不是基本牌:不生效,状态不变
     me.hand.splice(cardIdx,1);
+    markSkillSound(g, '骁果');
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     g.log=pushLog(g.log, me.name+' 弃置一张【'+card.name+'】,发动【骁果】,询问 '+g.players[endingSeat].name+' 弃装备或受到1点伤害…');
@@ -1831,6 +1837,7 @@ function respondTiaoxin(targetSeat){
     if((target.hand||[]).length===0) return g;
     
     g.tiaoxinUsed=true;
+    markSkillSound(g, '挑衅');
     // 【B类修复】补setResponseAskedAt——此前没有,30秒超时兜底对这个pending形同虚设。
     g.pending=setResponseAskedAt({type:'tiaoxinChoice', from:mySeat, to:targetSeat});
     g.phase='tiaoxinChoice';

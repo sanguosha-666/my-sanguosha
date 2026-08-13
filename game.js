@@ -900,6 +900,7 @@ function tryBagua(g, seat, resumeInfo){
 // finishBaguaColor: 八卦阵判定的红黑结算(独立出来,供 tryBagua 直接判 和 finishGuicai 改判后判 共用)。
 function finishBaguaColor(g, seat, card){
   const p = g.players[seat];
+  markHongyanIfConverted(g,p,card);
   if(isRedForPlayer(p, card)){ g.log=pushLog(g.log, p.name+' 判定为红,视为打出【闪】'); return true; }
   g.log=pushLog(g.log, p.name+' 判定为黑,【八卦阵】未生效'); return false;
 }
@@ -1652,6 +1653,7 @@ function tx(fn, onCommitted){
 function doDraw(){
   tx(g=>{
     if(g.phase!=='draw'||g.turn!==mySeat) return g;
+    if(hasSkillName(g.players[mySeat],'英姿')) markSkillSound(g,'英姿');
     finishDrawPhase(g, mySeat, drawPhaseCount(g, mySeat));
     return g;
   });
@@ -1793,6 +1795,7 @@ const CARD_PLAYS = {
     },
     effect:(g,me,card,targetSeat)=>{
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
+      const shaWasAlreadyUsed=!!g.shaUsed;
       // 太史慈【天义】:天义赢时不消耗出杀次数（次数上限+1的效果）
       if(!(g.tianyiWin && hasCap(me,'tianyi'))) {
         if(!g.shaUsed){
@@ -1800,6 +1803,10 @@ const CARD_PLAYS = {
         } else if(g.jiangchiExtraShaLeft > 0){
           g.jiangchiExtraShaLeft--;
         }
+      }
+      if(hasSkillName(me,'咆哮') && shaWasAlreadyUsed && (g.lastPaoxiaoSoundTurn!==g.roundNum)){
+        markSkillSound(g,'咆哮');
+        g.lastPaoxiaoSoundTurn=g.roundNum;
       }
       triggerJiangOnTarget(g, mySeat, targetSeat, 'sha', isRed(card));
       
@@ -2113,6 +2120,14 @@ function distance(g, from, to){
   const d = base + equipDist(g.players[to],'plus1') + fromMinus1 + yicongFromModifier + yicongToModifier;
   return Math.max(1, d);
 }
+function distanceWithoutCharacterModifiers(g, from, to){
+  if(from===to) return 0;
+  const alive=g.players.map((p,i)=>i).filter(i=>g.players[i]&&g.players[i].alive);
+  const pf=alive.indexOf(from), pt=alive.indexOf(to);
+  if(pf<0||pt<0||alive.length<2) return 1;
+  const cw=(((pt-pf)%alive.length)+alive.length)%alive.length;
+  return Math.max(1,Math.min(cw,alive.length-cw)+equipDist(g.players[to],'plus1')+equipDist(g.players[from],'minus1'));
+}
 // attackRange: 该玩家攻击距离 = 武器 range,无武器默认 1。
 function attackRange(g, seat){
   const p = g.players[seat];
@@ -2145,6 +2160,7 @@ function aoeEffect(g, me, card){
     if(huoshouSourceSeat!==null){
       g.aoe.huoshouSourceSeat=huoshouSourceSeat;
       g.log=pushLog(g.log,g.players[huoshouSourceSeat].name+'【祸首】成为本次【南蛮入侵】的伤害来源');
+      markSkillSound(g,'祸首');
     }
   }
   g.log=pushLog(g.log, me.name+' 使用【'+card.name+'】');
@@ -2172,7 +2188,16 @@ function playCard(cardIdx, actionId, targetSeat, onCommitted){
       } else {
       // 默认拒绝自选目标;spec.allowSelf(如闪电这类延时锦囊)放行
       if((targetSeat===mySeat && !spec.allowSelf) || !g.players[targetSeat] || !g.players[targetSeat].alive) return g;
-      if(spec.canTarget && !spec.canTarget(g,me,card,targetSeat)) return g; // 额外目标限制(如杀的攻击距离)
+      if(spec.canTarget && !spec.canTarget(g,me,card,targetSeat)){
+        const blocked=g.players[targetSeat];
+        if(blocked && hasSkillName(blocked,'空城') && actionId==='杀' && (blocked.hand||[]).length===0) markSkillSound(g,'空城');
+        else if(blocked && hasSkillName(blocked,'帷幕') && isBlackTactics(card)) markSkillSound(g,'帷幕');
+        else {
+          const tongji=g.players.find((p,seat)=>p&&p.alive&&hasSkillName(p,'同疾')&&(p.hand||[]).length>p.hp&&seat!==mySeat&&distance(g,seat,mySeat)<=attackRange(g,seat)&&seat!==targetSeat);
+          if(tongji) markSkillSound(g,'同疾');
+        }
+        return g;
+      } // 额外目标限制(如杀的攻击距离)
       }
     }
     me.hand.splice(cardIdx,1);
@@ -2217,6 +2242,7 @@ function respondLiegong(activate){
   tx(g=>{
     if(g.phase!=='liegong'||!g.pending||g.pending.type!=='liegong'||g.pending.from!==mySeat) return g;
     const from=g.pending.from, to=g.pending.to;
+    if(activate) markSkillSound(g, '烈弓');
     g.log=pushLog(g.log, activate
       ? g.players[from].name+' 发动【烈弓】,此【杀】不可被【闪】抵消'
       : g.players[from].name+'：不发动【烈弓】');
@@ -2251,6 +2277,7 @@ function startMingce(){
     const others = g.players.filter((p,i)=>p && p.alive && i!==mySeat);
     if(others.length===0) return g;
     g.mingceUsed = true;
+    markSkillSound(g, '明策');
     g.pending = setResponseAskedAt({type:'mingcePickCard', sourceSeat:mySeat});
     g.phase = 'mingcePickCard';
     return g;
@@ -2441,6 +2468,7 @@ function respondTieqi(activate){
     const card=judge(g);
     const shaInfo = g.pending.jiuBonus ? {jiuBonus:true} : undefined;
     if(!card){ afterShaTargetSkills(g, from, to, false, g.pending.sourceCard, g.pending.shaColor, shaInfo); return g; } // 无牌可判,视为未发动
+    markSkillSound(g,'铁骑');
     if(maybeGuicai(g, from, card, {kind:'tieqiJudge', from, to, sourceCard:g.pending.sourceCard, shaColor:g.pending.shaColor, shaInfo})==='pending') return g;
     finishTieqiJudge(g, from, to, card, g.pending.sourceCard, g.pending.shaColor, shaInfo);
     return g;
@@ -2596,6 +2624,7 @@ function qiaobianDeclare(cardIdx, phaseChoice){
     const card=me.hand[cardIdx];
     if(!card) return g;
     me.hand.splice(cardIdx,1);
+    markSkillSound(g, '巧变');
     g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
     const phaseLabel={judge:'判定阶段',draw:'摸牌阶段',play:'出牌阶段',discard:'弃牌阶段'}[phaseChoice];
@@ -3768,6 +3797,7 @@ function duelResponse(useSha, cardIdx){
     const me=g.players[mySeat];
     const opp=(mySeat===g.pending.from)?g.pending.to:g.pending.from;
     const needed = (!hasCap(me,'wushuang') && hasCap(g.players[opp],'wushuang')) ? 2 : 1;
+    if(needed===2 && !(g.pending.shaCount||0)) markSkillSound(g,'无双');
     if(useSha){
       // 曹彰【将驰】选项1:本回合不能打出杀
       if(me.jiangchiNoSlash) return g;
@@ -4303,6 +4333,7 @@ function aoeAdvance(g, prevSeat){
   if(next!==null && g.aoe.trick==='南蛮入侵'){
     const nextPlayer=g.players[next];
     if(nextPlayer && nextPlayer.alive && hasCap(nextPlayer,'juxiang')){
+      markSkillSound(g,'巨象');
       g.log=pushLog(g.log, nextPlayer.name+'【巨象】发动，南蛮入侵对其无效');
       return aoeAdvance(g, next);
     }
@@ -4332,6 +4363,7 @@ function aoeAdvance(g, prevSeat){
                 const nanmanCard = g.discard[nanmanIdx];
                 if(!zhurong.hand) zhurong.hand = [];
                 zhurong.hand.push(nanmanCard);
+                markSkillSound(g,'巨象');
                 g.log = pushLog(g.log, zhurong.name + '【巨象】发动,获得了【南蛮入侵】');
                 // 从弃牌堆中移除该南蛮入侵牌
                 g.discard.splice(nanmanIdx, 1);
@@ -4475,6 +4507,8 @@ function startLordAsk(g, lordSeat, need, cap, resumeOverride){
   if(first===null) return; // 无人可求助(守卫已排除,这里兜底)
   const resume=resumeOverride || {phase:g.phase, pending:g.pending};
   if(cap==='jijiang') g.jijiangUsed=true; else g.hujiaUsed=true;
+  if(cap==='jijiang') markSkillSound(g,'激将');
+  else markSkillSound(g,'护驾');
   const type=cap==='jijiang'?'jijiangAsk':'hujiaAsk';
   g.pending=setResponseAskedAt({type, lordSeat, need, asking:first, resume});
   g.phase=type;
@@ -4631,7 +4665,10 @@ function useHuangtian(cardIdx){
 function peachRecoveryAmount(g, sourceSeat, targetSeat){
   const source=g.players[sourceSeat], target=g.players[targetSeat];
   if(g.gameMode==='identity' && sourceSeat!==targetSeat && source && target && target.alive &&
-     target.role==='zhu' && hasCap(target,'jiuyuan') && generalFaction(source)==='wu') return 2;
+     target.role==='zhu' && hasCap(target,'jiuyuan') && generalFaction(source)==='wu'){
+    markSkillSound(g,'救援');
+    return 2;
+  }
   return 1;
 }
 
@@ -4884,7 +4921,13 @@ function endTurn(){
   tx(g=>{
     if(g.phase!=='discard'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
-    if(me.hand.length>handCapLimit(g, mySeat) && !canSkipDiscard(g, mySeat)) return g; // 手牌超上限必须先弃;克己满足则放行
+    const overLimit=me.hand.length>handCapLimit(g,mySeat);
+    if(overLimit && !canSkipDiscard(g, mySeat)) return g; // 手牌超上限必须先弃;克己满足则放行
+    if(overLimit && canSkipDiscard(g,mySeat)) markSkillSound(g,'克己');
+    if(hasSkillName(me,'血裔') && g.gameMode==='identity' && me.role==='zhu'){
+      const baseCap=Math.max(me.hp-(Number.isInteger(g.lordHandCap)?g.lordHandCap:0),0);
+      if(me.hand.length>baseCap && me.hand.length<=handCapLimit(g,mySeat)) markSkillSound(g,'血裔');
+    }
     if(maybeStartLiRangRecover(g, mySeat)) return g;
     // 贾诩完杀：回合结束时清理状态
     g.wanshaActive = false; g.wanshaDyingSeat = null;
@@ -5396,6 +5439,7 @@ function startTurn(g, seat){
     g.pending = setResponseAskedAt({ type:'zhijiChoice', seat });
     g.phase = 'zhijiChoice';
     g.log = pushLog(g.log, p.name + ' 发动【志继】觉醒,体力上限-1,请选择:回复1点体力或摸两张牌');
+    markSkillSound(g,'志继');
     return; // 等待玩家选择
   }
   continueHuashenChangeCheckAtTurnStart(g, seat);
@@ -5652,6 +5696,8 @@ function respondLuoshen(activate){
     }
     const card=judge(g);
     if(!card){ enterDrawPhase(g); return g; } // 无牌可判,视为发动失败,直接进摸牌阶段
+    markHongyanIfConverted(g,g.players[seat],card);
+    markSkillSound(g, '洛神');
     if(maybeGuicai(g, seat, card, {kind:'luoshenJudge', seat})==='pending') return g;
     finishLuoshenJudge(g, seat, card);
     return g;
@@ -5853,6 +5899,7 @@ function triggerBeige(doTrigger) {
       reason: pending.reason
     };
     g.phase = 'beigeDiscard';
+    markSkillSound(g, '悲歌');
     g.log = pushLog(g.log, source.name + ' 发动【悲歌】,请选择一张牌弃置');
     
     return g;

@@ -203,6 +203,8 @@ function resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo)
 function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo){
   const fromSeat=g.players.indexOf(me);
   const target=g.players[targetSeat];
+  if(hasSkillName(me,'马术') && distanceWithoutCharacterModifiers(g,fromSeat,targetSeat)>attackRange(g,fromSeat)) markSkillSound(g,'马术');
+  if(hasSkillName(me,'义从') && me.hp>2 && distanceWithoutCharacterModifiers(g,fromSeat,targetSeat)>attackRange(g,fromSeat)) markSkillSound(g,'义从');
   
   // 处理神速的杀的特殊标记
   const isShensuSha = shaInfo && shaInfo.fromShensu;
@@ -251,6 +253,7 @@ function afterShaTargetSkills(g, from, to, noShan, sourceCard, shaColor, shaInfo
   const ignoresArmor=hasCap(me,'ignoreArmor');
   if(shaColor==='black' && ((hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) || (!ignoresArmor && hasCap(target,'renwang')))){
     const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
+    if(reason==='【毅重】') markSkillSound(g,'毅重');
     g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
     finishSingleShaTarget(g);
     return;
@@ -333,6 +336,7 @@ function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInf
 }
 
 function finishTieqiJudge(g, from, to, card, sourceCard, shaColor, shaInfo){
+  markHongyanIfConverted(g,g.players[from],card);
   const red=isRedForPlayer(g.players[from], card);
   g.log=pushLog(g.log, g.players[from].name+' 发动【铁骑】,判定为'+(red?'红':'黑'));
   // 天妒:铁骑判定归属者是 from(发动铁骑的攻击者)自己的判定,若 from 恰好是郭嘉可以收下判定牌
@@ -474,6 +478,7 @@ function respondShan(useShan, cardIdx){
     if(g.phase!=='respond'||!g.pending||g.pending.to!==mySeat) return g;
     const me=g.players[mySeat]; const attacker=g.players[g.pending.from];
     const needed = hasCap(attacker,'wushuang') ? 2 : 1;
+    if(needed===2 && !(g.pending.shanCount||0)) markSkillSound(g,'无双');
     if(useShan){
       if(g.pending.noShan) return g; // 马超【铁骑】判红:此杀不可被闪抵消,服务端兜底(UI 本就不该渲染这个按钮)
       const specifiedCard = (typeof cardIdx==='number') ? (me.hand||[])[cardIdx] : null;
@@ -483,6 +488,7 @@ function respondShan(useShan, cardIdx){
       const played=(g.pending.shanCount||0)+1;
       g.log=pushLog(g.log, me.name+' 打出'+(card.name==='闪'?'【闪】':'【'+card.name+'】当【闪】')+(needed>1?'（'+played+'/'+needed+'）':'抵消'));
       markCardSound(g, '闪', mySeat, card);
+      if(card.name!=='闪' && hasSkillName(me,'倾国') && !isRedForPlayer(me,card)) markSkillSound(g,'倾国');
       if(card.name!=='闪' && hasCap(me,'longdan')) markSkillSound(g,'龙胆');
       // 张角【雷击】:使用或打出【闪】时可以发动雷击——maybeStartLeiji 内部会把 g.pending
       // 整个换成 leijiChoose 结构(不再是这个函数原本认识的 {from,to,...} respond 结构),

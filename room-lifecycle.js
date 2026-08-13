@@ -347,6 +347,7 @@ function respondHuashenPick(generalId, skillName){
     if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)) return g;
     me.huashenGeneral = generalId;
     me.huashenSkillName = skillName;
+    markSkillSound(g, '化身');
     // 不清空 me.huashenPool —— v2的关键行为差异,见函数注释。
     g.log = pushLog(g.log, me.name+' 已选定借用的技能,等待其他玩家…');
     g.pending = null;
@@ -388,6 +389,7 @@ function respondHuashenChangePickEnd(generalId, skillName){
     if(!me || !validateHuashenPick(me.huashenPool, generalId, skillName)){ return g; }
     me.huashenGeneral = generalId;
     me.huashenSkillName = skillName;
+    markSkillSound(g, '化身');
     g.log = pushLog(g.log, me.name+' 已更改【化身】声明的技能');
     g.pending = null;
     continueBiyueCheck(g, endingSeat);
