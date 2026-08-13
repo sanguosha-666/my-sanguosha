@@ -14,6 +14,7 @@ var BG_VIDEOS = [
 function pickRandomBgVideo(){
   var v = document.getElementById('bgVideo');
   if(!v) return;
+  v.style.visibility = 'visible'; // 恢复可见(进房时被隐藏,避免停帧像卡住)
   v.src = BG_VIDEOS[Math.floor(Math.random() * BG_VIDEOS.length)];
   if(typeof v.load === 'function') v.load();
   if(typeof v.play === 'function'){
@@ -22,14 +23,21 @@ function pickRandomBgVideo(){
   }
 }
 
-// 进房暂停大厅视频（避免后台耗流量/CPU）
+// 进房暂停大厅视频（避免后台耗流量/CPU），并隐藏视频与遮罩层——
+// 若只 pause 不隐藏,<video> 会停在最后一帧,背景看起来像卡住;
+// 隐藏后回到本来的 body 渐变默认背景。
 function pauseBgVideo(){
   var v = document.getElementById('bgVideo');
   if(v && typeof v.pause === 'function') v.pause();
+  if(v) v.style.visibility = 'hidden';
+  var veil = document.getElementById('bgVeil');
+  if(veil) veil.style.visibility = 'hidden';
 }
 
-// 回大厅恢复：随机换一个继续播
+// 回大厅恢复：显示遮罩、随机换一个视频继续播
 function resumeBgVideo(){
+  var veil = document.getElementById('bgVeil');
+  if(veil) veil.style.visibility = 'visible';
   pickRandomBgVideo();
 }
 
