@@ -24,15 +24,34 @@ function check(condition, message) {
 }
 const read = expression => vm.runInContext(expression, context);
 
-for (const skill of ['短兵', '奋迅', '恩怨', '眩惑']) {
-  check(read(`SKILL_PINYIN['${skill}']`) === undefined, `${skill} 不应注册空音频资源`);
+const emittedSkills = new Set();
+for (const file of ['game.js', 'skills.js']) {
+  const code = fs.readFileSync(file, 'utf8');
+  for (const match of code.matchAll(/markSkillSound\(g,\s*['"]([^'"]+)['"]/g)) {
+    emittedSkills.add(match[1]);
+  }
 }
-check(read("SKILL_PINYIN['神速']") === 'shensu', '真实存在的技能音频映射应保留');
+for (const skill of emittedSkills) {
+  check(read(`typeof SKILL_PINYIN[${JSON.stringify(skill)}] === 'string'`), `${skill} 应注册技能音频`);
+}
+const configuredSkills = new Set();
+const dataSource = fs.readFileSync('data.js', 'utf8');
+for (const match of dataSource.matchAll(/gender:'(?:male|female)'.*?skill:'([^']+)'/g)) {
+  for (const rawSkill of match[1].split('/')) {
+    configuredSkills.add(rawSkill.replace(/\([^)]*\)/g, '').trim());
+  }
+}
+for (const skill of configuredSkills) {
+  check(read(`typeof SKILL_PINYIN[${JSON.stringify(skill)}] === 'string'`), `${skill} 应准备技能音频资源`);
+}
+check(read("SKILL_PINYIN['趫猛']") === 'qiaomeng', '趫猛显示名应映射到 qiaomeng 音频');
 
 read('lastPlayedSkillSeq = 1');
-read("maybePlaySkillSound({ lastSkillSound: { seq: 2, name: '短兵' } })");
+read("maybePlaySkillSound({ lastSkillSound: { seq: 2, name: '不存在技能' } })");
 check(audioCreated === 0, '未注册技能不应创建 Audio');
-read("maybePlaySkillSound({ lastSkillSound: { seq: 3, name: '神速' } })");
+read("maybePlaySkillSound({ lastSkillSound: { seq: 3, name: '刚烈' } })");
 check(audioCreated === 1, '已注册技能应正常创建 Audio');
+read("maybePlaySkillSound({ lastSkillSound: { seq: 4, name: '神速' } })");
+check(audioCreated === 2, '原有技能音频应继续正常创建 Audio');
 
-console.log(`skill audio mapping tests: ${passed}/7 passed`);
+console.log(`skill audio mapping tests: ${passed}/${passed} passed`);

@@ -49,7 +49,28 @@ const CARD_PINYIN = {
 const SKILL_PINYIN = {
   // 只登记仓库中真实存在、非空且可播放的技能音频。新增映射时必须通过
   // run_skill_audio_integrity_test.js，避免技能触发时产生静默 404。
-  '神速':'shensu'
+  'qiaomeng':'qiaomeng', '不屈':'buqu', '举荐':'jujian', '义从':'yicong', '乱击':'luanji',
+  '乱武':'luanwu', '争义':'zhengyi', '仁德':'rende', '仁心':'renxin', '倾国':'qingguo',
+  '克己':'keji', '再起':'zaiqi', '刚烈':'ganglie', '制蛮':'zhiman', '制衡':'zhiheng',
+  '制霸':'zhiba', '化身':'huashen', '双雄':'shuangxiong', '反间':'fanjian', '反馈':'fankui',
+  '同疾':'tongji', '咆哮':'paoxiao', '国色':'guose', '天义':'tianyi', '天妒':'tiandu',
+  '天香':'tianxiang', '奇袭':'qixi', '奋迅':'fenxun', '奸雄':'jianxiong', '好施':'haoshi',
+  '妄尊':'wangzun', '完杀':'wansha', '将驰':'jiangchi', '巧变':'qiaobian', '巨象':'juxiang',
+  '帷幕':'weimu', '强袭':'qiangxi', '志继':'zhiji', '忘隙':'wangxi', '急救':'jijiu',
+  '恂恂':'xunxun', '恩怨':'enyuan', '悲歌':'beige', '护驾':'hujia', '挑衅':'tiaoxin',
+  '据守':'jushou', '救援':'jiuyuan', '散谣':'sanyao', '断粮':'duanliang', '断肠':'duanchang',
+  '新生':'xinsheng', '旋风':'xuanfeng', '无双':'wushuang', '无言':'wuyan', '明策':'mingce',
+  '智迟':'zhichi', '枭姬':'xiaoji', '武圣':'wusheng', '毅重':'yizhong', '洛神':'luoshen',
+  '流离':'liuli', '涅槃':'niepan', '激将':'jijiang', '激昂':'jiang', '烈刃':'lieren',
+  '烈弓':'liegong', '狂骨':'kuanggu', '猛进':'mengjin', '眩惑':'xuanhuo', '短兵':'duanbing',
+  '礼让':'lirang', '神速':'shensu', '祸首':'huoshou', '离间':'lijian', '称象':'chengxiang',
+  '空城':'kongcheng', '突袭':'tuxi', '红颜':'hongyan', '缔盟':'dimeng', '缠怨':'chanyuan',
+  '耀武':'yaowu', '节命':'jieming', '苦肉':'kurou', '英姿':'yingzi', '英魂':'yinghun',
+  '落英':'luoying', '蛊惑':'guhuo', '血裔':'xueyi', '裸衣':'luoyi', '观星':'guanxing',
+  '趫猛':'qiaomeng', '连环':'lianhuan', '连营':'lianying', '遗计':'yiji', '酒诗':'jiushi',
+  '铁骑':'tieqi', '闭月':'biyue', '集智':'jizhi', '雷击':'leiji', '青囊':'qingnang',
+  '马术':'mashu', '驱虎':'quhu', '骁果':'xiaoguo', '鬼才':'guicai', '鬼道':'guidao',
+  '魂姿':'hunzi', '黄天':'huangtian', '龙胆':'longdan'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
