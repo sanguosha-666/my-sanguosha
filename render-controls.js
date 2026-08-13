@@ -324,7 +324,12 @@ const PENDING_RENDERERS = {
   luanwuChoose:       {actor:'currentSeat',skill:'乱武', render:renderPendingLuanwuChoose},
   hanbing:            {actor:'from',       skill:'寒冰剑', render:renderPendingHanbing},
   zhibaGain:          {actor:'lordSeat',   skill:'制霸', render:renderPendingZhibaGain},
-  yinghunTarget:      {actor:'seat',       skill:'英魂', render:renderPendingYinghunTarget}
+  yinghunTarget:      {actor:'seat',       skill:'英魂', render:renderPendingYinghunTarget},
+  yinghunChoice:      {actor:'seat',       skill:'英魂', render:renderPendingYinghunChoice},
+  yinghunDiscard:     {actor:'targetSeat', skill:'英魂', render:renderPendingYinghunDiscard},
+  enyuanChoose:       {actor:'damagerSeat',skill:'恩怨', render:renderPendingEnyuanChoose},
+  enyuanChooseOption: {actor:'damagerSeat',skill:'恩怨', render:renderPendingEnyuanChooseOption},
+  enyuanGiveCard:     {actor:'damagerSeat',skill:'恩怨', render:renderPendingEnyuanGiveCard}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -899,6 +904,26 @@ function renderPendingYinghunTarget(g,c){
   g.players.forEach((p,i)=>{if(!p||!p.alive||i===mySeat)return;const b=document.createElement('button');b.textContent='选择 '+p.name;b.onclick=()=>chooseYinghunTarget(i);c.appendChild(b);});
   const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='不发动';cancel.onclick=()=>cancelYinghun();c.appendChild(cancel);setBanner('【英魂】选择一名其他角色。');
 }
+function renderPendingYinghunChoice(g,c){
+  const x=g.pending.x||1,target=g.players[g.pending.targetSeat],a=document.createElement('button');a.textContent='摸1张，弃'+x+'张';a.onclick=()=>respondYinghunChoice('draw1');c.appendChild(a);
+  const b=document.createElement('button');b.textContent='摸'+x+'张，弃1张';b.onclick=()=>respondYinghunChoice('drawX');c.appendChild(b);setBanner('为 '+escapeHtml(target?target.name:'目标')+' 选择【英魂】效果。');
+}
+function renderPendingYinghunDiscard(g,c){
+  const me=g.players[mySeat];(me.hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.textContent='弃置【'+card.name+'】'+card.suit+rankText(card.rank);b.onclick=()=>discardYinghunCard(idx);c.appendChild(b);});
+  EQUIP_SLOTS.forEach(slot=>{const card=me.equips&&me.equips[slot];if(!card)return;const b=document.createElement('button');b.textContent='弃置装备【'+card.name+'】';b.onclick=()=>discardYinghunCard({kind:'equip',slot});c.appendChild(b);});setBanner('【英魂】请选择弃置的牌（还需 '+escapeHtml(String(g.pending.remaining||0))+' 张）。');
+}
+function renderPendingEnyuanChoose(g,c){
+  const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【恩怨】触发';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent=source.name+' 受到你的伤害，你需要选择';div.appendChild(p);const b=document.createElement('button');b.className='skill-btn';b.style.background='#d4a762';b.textContent='进行选择';b.onclick=()=>triggerEnyuan();div.appendChild(b);c.appendChild(div);setBanner('你对 '+source.name+' 造成了伤害，需要选择【恩怨】效果');
+}
+function renderPendingEnyuanChooseOption(g,c){
+  const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【恩怨】选择';div.appendChild(h4);const p=document.createElement('p');p.textContent='你需要选择：';div.appendChild(p);
+  if(g.pending.heartCards&&g.pending.heartCards.length){const give=document.createElement('button');give.className='skill-btn';give.textContent='交一张♥手牌给'+source.name;give.onclick=()=>chooseEnyuanOption('giveCard');div.appendChild(give);}const hp=document.createElement('button');hp.className='skill-btn';hp.textContent='失去1点体力';hp.onclick=()=>chooseEnyuanOption('loseHp');div.appendChild(hp);c.appendChild(div);setBanner('你需要选择：交一张♥手牌给'+source.name+'，或失去1点体力');
+}
+function renderPendingEnyuanGiveCard(g,c){
+  const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【恩怨】选择♥手牌';div.appendChild(h4);const p=document.createElement('p');p.textContent='选择要交给 '+source.name+' 的一张♥手牌：';div.appendChild(p);
+  const cards=document.createElement('div');cards.className='card-options';(g.players[mySeat].hand||[]).forEach((card,i)=>{if(!card||card.suit!=='♥')return;const b=document.createElement('button');b.className='card-btn';b.textContent='【'+card.name+'】';b.onclick=()=>giveEnyuanCard(i);cards.appendChild(b);});div.appendChild(cards);c.appendChild(div);setBanner('选择要交给 '+source.name+' 的一张♥手牌');
+}
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
 // 只有1个技能时跳过、直接进第二步收尾)点选具体技能名,respondFn(generalId,skillName)
@@ -1389,66 +1414,10 @@ function renderControls(g){
   // 陈宫【明策】:选择接收牌的目标阶段
   
   // 法正【恩怨】:伤害后的触发阶段
-  if(g.pending && g.pending.type==='enyuanChoose' && g.pending.damagerSeat===mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【恩怨】触发';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = source.name + ' 受到你的伤害，你需要选择';
-    div.appendChild(p);
-    const btn = document.createElement('button'); btn.className='skill-btn'; btn.style.background='#d4a762';
-    btn.textContent='进行选择'; btn.onclick=()=>triggerEnyuan();
-    div.appendChild(btn);
-    c.appendChild(div);
-    setBanner('你对 ' + source.name + ' 造成了伤害，需要选择【恩怨】效果');
-    return;
-  }
 
   // 法正【恩怨】:选择交♥手牌或失去体力阶段
-  if(g.pending && g.pending.type==='enyuanChooseOption' && g.pending.damagerSeat===mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【恩怨】选择';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '你需要选择：';
-    div.appendChild(p);
-    const hasHeart = g.pending.heartCards && g.pending.heartCards.length > 0;
-    if(hasHeart) {
-      const btn1 = document.createElement('button'); btn1.className='skill-btn';
-      btn1.textContent='交一张♥手牌给' + source.name;
-      btn1.onclick=()=>chooseEnyuanOption('giveCard');
-      div.appendChild(btn1);
-    }
-    const btn2 = document.createElement('button'); btn2.className='skill-btn';
-    btn2.textContent='失去1点体力';
-    btn2.onclick=()=>chooseEnyuanOption('loseHp');
-    div.appendChild(btn2);
-    c.appendChild(div);
-    setBanner('你需要选择：交一张♥手牌给' + source.name + '，或失去1点体力');
-    return;
-  }
 
   // 法正【恩怨】:选择要交的♥手牌阶段
-  if(g.pending && g.pending.type==='enyuanGiveCard' && g.pending.damagerSeat===mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【恩怨】选择♥手牌';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '选择要交给 ' + source.name + ' 的一张♥手牌：';
-    div.appendChild(p);
-    const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
-    (g.players[mySeat].hand||[]).forEach((card, i) => {
-      if(!card || card.suit!=='♥') return;
-      const cb = document.createElement('button'); cb.className='card-btn';
-      cb.textContent='【'+card.name+'】';
-      cb.onclick=()=>giveEnyuanCard(i);
-      cardDiv.appendChild(cb);
-    });
-    div.appendChild(cardDiv);
-    c.appendChild(div);
-    setBanner('选择要交给 ' + source.name + ' 的一张♥手牌');
-    return;
-  }
 
   
   // 陈宫【明策】:选择第二个目标阶段
@@ -1641,24 +1610,6 @@ function renderControls(g){
   }
 
   // 法正【恩怨】:其他玩家选择阶段
-  if(g.phase==='enyuanChoose' && g.pending && g.pending.type==='enyuanChoose' && g.pending.damagerSeat!==mySeat){
-    const damager = g.players[g.pending.damagerSeat];
-    const source = g.players[g.pending.sourceSeat];
-    setBanner((damager ? damager.name : '?') + ' 需要选择【恩怨】效果…');
-    return;
-  }
-  if(g.phase==='enyuanChooseOption' && g.pending && g.pending.type==='enyuanChooseOption' && g.pending.damagerSeat!==mySeat){
-    const damager = g.players[g.pending.damagerSeat];
-    const source = g.players[g.pending.sourceSeat];
-    setBanner((damager ? damager.name : '?') + ' 正在选择【恩怨】的处理方式…');
-    return;
-  }
-  if(g.phase==='enyuanGiveCard' && g.pending && g.pending.type==='enyuanGiveCard' && g.pending.damagerSeat!==mySeat){
-    const damager = g.players[g.pending.damagerSeat];
-    const source = g.players[g.pending.sourceSeat];
-    setBanner((damager ? damager.name : '?') + ' 正在选择交给 ' + (source ? source.name : '?') + ' 的♥手牌…');
-    return;
-  }
   
   // 法正【眩惑】:其他玩家选择阶段
   if(g.phase==='huanhuoPick' && g.pending && g.pending.type==='huanhuoPick' && g.pending.sourceSeat!==mySeat){
@@ -1945,17 +1896,6 @@ function renderControls(g){
   }
   // 太史慈【天义】拼点响应
   // 孙策【制霸】:被请求的主公选择拼点牌;魂姿觉醒后可以拒绝。
-  if(g.phase==='yinghunChoice' && g.pending && g.pending.type==='yinghunChoice' && g.pending.seat===mySeat){
-    const x=g.pending.x||1,target=g.players[g.pending.targetSeat];
-    const a=document.createElement('button'); a.textContent='摸1张，弃'+x+'张'; a.onclick=()=>respondYinghunChoice('draw1'); c.appendChild(a);
-    const b=document.createElement('button'); b.textContent='摸'+x+'张，弃1张'; b.onclick=()=>respondYinghunChoice('drawX'); c.appendChild(b);
-    setBanner('为 '+escapeHtml(target?target.name:'目标')+' 选择【英魂】效果。'); return;
-  }
-  if(g.phase==='yinghunDiscard' && g.pending && g.pending.type==='yinghunDiscard' && g.pending.targetSeat===mySeat){
-    (me.hand||[]).forEach((card,idx)=>{ const b=document.createElement('button'); b.textContent='弃置【'+card.name+'】'+card.suit+rankText(card.rank); b.onclick=()=>discardYinghunCard(idx); c.appendChild(b); });
-    EQUIP_SLOTS.forEach(slot=>{ const card=me.equips&&me.equips[slot]; if(card){ const b=document.createElement('button'); b.textContent='弃置装备【'+card.name+'】'; b.onclick=()=>discardYinghunCard({kind:'equip',slot}); c.appendChild(b); } });
-    setBanner('【英魂】请选择弃置的牌（还需 '+escapeHtml(String(g.pending.remaining||0))+' 张）。'); return;
-  }
   // 左慈【新生】:简单的"是否发动"二选一(参照寒冰剑respondHanbingAsk同款写法),
   // 每受到1点伤害问一次,g.pending.remaining 提示还剩几次。
   // ===== 左慈【化身】:回合开始/结束更改(huashenChange*)——huashenPick(开局初次声明)
