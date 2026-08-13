@@ -91,7 +91,9 @@ function drawDecoCard(ctx, c){
 // 生成一张新的飘牌粒子
 function newDecoCard(){
   var suits = ['♠','♥','♣','♦'];
-  var w = bgCanvas ? bgCanvas.width : 800;
+  // 注意：sizeBgCanvas 已 setTransform(dpr)，画布坐标系为 CSS 像素；
+  // spawn/移除判定必须用 clientWidth/clientHeight（CSS 像素），不能用物理像素 width/height。
+  var w = bgCanvas ? (bgCanvas.clientWidth || bgCanvas.width) : 800;
   return {
     x: Math.random() * w,
     y: -60 - Math.random() * 40,
@@ -123,14 +125,14 @@ function bgTick(ts){
     c.x += c.vx * dt;
     c.y += c.vy * dt;
     c.rot += c.vrot * dt;
-    if(c.y - c.size > bgCanvas.height){
+    if(c.y - c.size > (bgCanvas.clientHeight || bgCanvas.height)){
       fallingCards.splice(i, 1);
       continue;
     }
     drawDecoCard(bgCtx, c);
   }
 
-  drawBgFx(ts);
+  drawBgFx(ts, dt); // dt 同源传参,血滴运动不依赖固定帧步长
 }
 
 // 启动飘牌（进房时调用）
@@ -183,30 +185,38 @@ if(typeof window !== 'undefined'){
 
 // ============ 角色死亡特效 ============
 // kind='self'：血滴滴落→落地晕染→渐隐恢复；kind='other'：全屏血雾弥漫→退去
+// 时间基准：rAF 回调的 timestamp 与 performance.now() 同源；Date.now() 差页面加载时长
+// （~1e12ms），与 drawBgFx 的 now 混用会导致 prog 恒负（特效不可见/不清理）。必须同源。
+function bgNow(){
+  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? performance.now() : Date.now();
+}
 function triggerDeathFx(kind){
   if(!bgCtx || !bgCanvas || !bgRunning) return;
   if(kind === 'self'){
     var n = 5 + Math.floor(Math.random() * 4); // 5~8 滴
     var drops = [];
+    var cw = bgCanvas.clientWidth || bgCanvas.width;
+    var ch = bgCanvas.clientHeight || bgCanvas.height;
     for(var i = 0; i < n; i++){
       drops.push({
-        x: Math.random() * bgCanvas.width,
+        x: Math.random() * cw,      // CSS 像素坐标（setTransform(dpr) 后）
         y: -20 - Math.random() * 40,
         vx: (Math.random() - 0.5) * 40,
         vy: 60 + Math.random() * 90,
         r: 3 + Math.random() * 3,
-        landY: bgCanvas.height * (0.55 + Math.random() * 0.4),
+        landY: ch * (0.55 + Math.random() * 0.4),
         landed: false, landAt: 0
       });
     }
-    bgFx = { kind: 'self', t0: Date.now(), dur: 2800, drops: drops };
-  }else{
-    bgFx = { kind: 'other', t0: Date.now(), dur: 1300 };
+    bgFx = { kind: 'self', t0: bgNow(), dur: 2800, drops: drops };
+  }else if(kind === 'other'){
+    bgFx = { kind: 'other', t0: bgNow(), dur: 1300 };
   }
 }
 
-// 绘制当前死亡特效（在飘牌之上）
-function drawBgFx(now){
+// 绘制当前死亡特效（在飘牌之上）；now 为 rAF timestamp，dt 为当前帧真实步长（秒）
+function drawBgFx(now, dt){
   if(!bgFx) return;
   var el = now - bgFx.t0;
   if(el > bgFx.dur){ bgFx = null; return; }
@@ -216,8 +226,8 @@ function drawBgFx(now){
     for(var i = 0; i < drops.length; i++){
       var d = drops[i];
       if(!d.landed){
-        d.y += d.vy * (1/60);
-        d.x += d.vx * (1/60);
+        d.y += d.vy * dt;
+        d.x += d.vx * dt;
         if(d.y >= d.landY){ d.landed = true; d.landAt = el; }
       }else{
         var age = el - d.landAt;
