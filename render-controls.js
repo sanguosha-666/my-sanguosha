@@ -264,7 +264,17 @@ const PENDING_RENDERERS = {
   shaOffsetChoice:    {actor:'from',       skill:'杀的后续效果', render:renderPendingShaOffsetChoice},
   mengjin:            {actor:'from',       skill:'猛进', render:renderPendingMengjin},
   yijiAsk:            {actor:'seat',       skill:'遗计', render:renderPendingYijiAsk},
-  ganglieAsk:         {actor:'seat',       skill:'刚烈', render:renderPendingGanglieAsk}
+  ganglieAsk:         {actor:'seat',       skill:'刚烈', render:renderPendingGanglieAsk},
+  luoyiAsk:           {actor:'seat',       skill:'裸衣', render:renderPendingLuoyiAsk},
+  lirangAsk:          {actor:'from',       skill:'礼让', render:renderPendingLirangAsk},
+  lirangRecover:      {actor:'from',       skill:'礼让', render:renderPendingLirangRecover},
+  zhengyi:            {actor:'asking',     skill:'争义', render:renderPendingZhengyi},
+  quhuRespond:        {actor:'targetSeat', skill:'驱虎', render:renderPendingQuhuRespond},
+  tianyiRespond:      {actor:'targetSeat', skill:'天义', render:renderPendingTianyiRespond},
+  zhibaAsk:           {actor:'lordSeat',   skill:'制霸', render:renderPendingZhibaAsk},
+  jiemingAsk:         {actor:'seat',       skill:'节命', render:renderPendingJiemingAsk},
+  xinshengAsk:        {actor:'seat',       skill:'新生', render:renderPendingXinshengAsk},
+  liuli:              {actor:'to',         skill:'流离', render:renderPendingLiuli}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -461,6 +471,62 @@ function renderPendingGanglieAsk(g,c){
   const no=document.createElement('button'); no.textContent='不发动'; no.onclick=()=>respondGanglieAsk(false);
   c.appendChild(yes); c.appendChild(no);
   setBanner('你受到伤害,是否对 '+escapeHtml(source?source.name:'伤害来源')+' 发动【刚烈】进行判定?');
+}
+function renderPendingLuoyiAsk(g,c){
+  const yes=document.createElement('button'); yes.className='primary'; yes.textContent='发动【裸衣】'; yes.onclick=()=>respondLuoyi(true);
+  const no=document.createElement('button'); no.textContent='不发动'; no.onclick=()=>respondLuoyi(false);
+  c.appendChild(yes);c.appendChild(no);setBanner('摸牌阶段,是否发动【裸衣】少摸1张牌? 若如此做,本回合你使用【杀】或【决斗】造成的伤害+1。');
+}
+function renderPendingLirangAsk(g,c){
+  const to=g.players[g.pending.to];
+  if(lirangPicks.length===2){
+    const ok=document.createElement('button');ok.className='primary';ok.textContent='发动【礼让】';const picks=lirangPicks.slice();
+    ok.onclick=()=>confirmAndPlay('将选中的两张牌交给 '+(to?to.name:'目标')+' 发动【礼让】？',()=>respondLiRang(true,picks));c.appendChild(ok);
+  }
+  const no=document.createElement('button');no.className='ghost';no.textContent='不发动';no.onclick=()=>respondLiRang(false,[]);c.appendChild(no);
+  setBanner('是否发动【礼让】,交给 '+escapeHtml(to?to.name:'目标')+' 两张手牌? 已选 '+lirangPicks.length+'/2。');
+}
+function renderPendingLirangRecover(g,c){
+  const target=g.players[g.pending.to],count=(g.pending.cards||[]).length;
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='获得弃牌';yes.onclick=()=>respondLiRangRecover(true);
+  const no=document.createElement('button');no.textContent='不获得';no.onclick=()=>respondLiRangRecover(false);
+  c.appendChild(yes);c.appendChild(no);setBanner('是否发动【礼让】,获得 '+escapeHtml(target?target.name:'目标')+' 本弃牌阶段弃置的 '+count+' 张牌?');
+}
+function renderPendingZhengyi(g,c){
+  const kong=g.players[g.pending.seat];
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【争义】';yes.onclick=()=>respondZhengyi(true);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondZhengyi(false);
+  c.appendChild(yes);c.appendChild(no);setBanner(escapeHtml(kong?kong.name:'孔融')+' 即将受到'+g.pending.amount+'点伤害,是否发动【争义】替其承受?');
+}
+function renderPendingQuhuRespond(g,c){
+  (g.players[mySeat].hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);b.onclick=()=>respondQuhu(idx);c.appendChild(b);});
+  const xun=g.players[g.pending.seat];setBanner(escapeHtml(xun?xun.name:'荀彧')+' 对你发动【驱虎】,选择一张手牌拼点。');
+}
+function renderPendingTianyiRespond(g,c){
+  (g.players[mySeat].hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);b.onclick=()=>respondTianyi(idx);c.appendChild(b);});
+  const source=g.players[g.pending.seat];setBanner(escapeHtml(source?source.name:'太史慈')+' 对你发动【天义】,选择一张手牌拼点。');
+}
+function renderPendingZhibaAsk(g,c){
+  const me=g.players[mySeat],challenger=g.players[g.pending.challengerSeat];
+  (me.hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);b.onclick=()=>respondZhiba(idx);c.appendChild(b);});
+  if(me.hunziAwakened){const refuse=document.createElement('button');refuse.className='ghost';refuse.textContent='拒绝拼点';refuse.onclick=()=>respondZhiba(-1);c.appendChild(refuse);}
+  setBanner(escapeHtml(challenger?challenger.name:'吴势力角色')+' 请求发动你的【制霸】,选择一张手牌拼点。');
+}
+function renderPendingJiemingAsk(g,c){
+  g.players.forEach((p,i)=>{if(!p||!p.alive)return;const limit=Math.min(p.maxHp,5),need=Math.max(0,limit-(p.hand||[]).length);const b=document.createElement('button');b.textContent='节命: '+p.name+(need>0?' 摸'+need+'张':' 不摸牌');b.onclick=()=>respondJieming(i);c.appendChild(b);});
+  const no=document.createElement('button');no.className='ghost';no.textContent='不发动';no.onclick=()=>respondJieming(null);c.appendChild(no);
+  setBanner('你受到伤害,是否发动【节命】令一名角色摸牌? 剩余 '+g.pending.remaining+' 次。');
+}
+function renderPendingXinshengAsk(g,c){
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【新生】';yes.onclick=()=>respondXinshengAsk(true);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondXinshengAsk(false);
+  c.appendChild(yes);c.appendChild(no);setBanner('你受到伤害,是否发动【新生】获得一个新的武将? 剩余 '+g.pending.remaining+' 次。');
+}
+function renderPendingLiuli(g,c){
+  const me=g.players[mySeat],targets=g.pending.targets||[];
+  liuliDiscardOptions(me).forEach(opt=>targets.forEach(t=>{const target=g.players[t];if(!target||!target.alive)return;const b=document.createElement('button');b.textContent='弃'+opt.label+' → '+target.name;b.onclick=()=>respondLiuli(opt,t);c.appendChild(b);}));
+  const no=document.createElement('button');no.className='ghost';no.textContent='不发动';no.onclick=()=>respondLiuli(null,null);c.appendChild(no);
+  const from=g.players[g.pending.from];setBanner(escapeHtml(from?from.name:'对方')+' 对你使用【杀】,是否发动【流离】弃一张牌转移目标?');
 }
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
@@ -2061,138 +2127,13 @@ function renderControls(g){
     waitAskBanner(p?p.name:'李典', '忘隙');
     return;
   }
-  if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk' && g.pending.seat===mySeat){
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【裸衣】'; b1.onclick=()=>respondLuoyi(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不发动'; b2.onclick=()=>respondLuoyi(false);
-    c.appendChild(b2);
-    setBanner('摸牌阶段,是否发动【裸衣】少摸1张牌? 若如此做,本回合你使用【杀】或【决斗】造成的伤害+1。');
-    return;
-  }
-  if(g.phase==='luoyiAsk' && g.pending && g.pending.type==='luoyiAsk'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'许褚', '裸衣');
-    return;
-  }
   // 李典【恂恂】选择阶段:选择获得的牌和置底顺序
   if(g.phase==='xunxunPick' && g.pending && g.pending.type==='xunxunPick'){
     renderXunxun(g, c);
     return;
   }
-  if(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk' && g.pending.from===mySeat){
-    const to=g.players[g.pending.to];
-    if(lirangPicks.length===2){
-      const ok=document.createElement('button'); ok.className='primary';
-      ok.textContent='发动【礼让】';
-      const picks=lirangPicks.slice();
-      ok.onclick=()=>{ confirmAndPlay('将选中的两张牌交给 '+(to?to.name:'目标')+' 发动【礼让】？', ()=>respondLiRang(true, picks)); };
-      c.appendChild(ok);
-    }
-    const nb=document.createElement('button'); nb.className='ghost';
-    nb.textContent='不发动';
-    nb.onclick=()=>respondLiRang(false, []);
-    c.appendChild(nb);
-    setBanner('是否发动【礼让】,交给 '+escapeHtml(to?to.name:'目标')+' 两张手牌? 已选 '+lirangPicks.length+'/2。');
-    return;
-  }
-  if(g.phase==='lirangAsk' && g.pending && g.pending.type==='lirangAsk'){
-    const from=g.players[g.pending.from], to=g.players[g.pending.to];
-    setBanner(escapeHtml(to?to.name:'目标')+' 的摸牌阶段开始,等待 '+escapeHtml(from?from.name:'孔融')+' 决定是否发动【礼让】…');
-    return;
-  }
-  if(g.phase==='lirangRecover' && g.pending && g.pending.type==='lirangRecover' && g.pending.from===mySeat){
-    const target=g.players[g.pending.to];
-    const count=(g.pending.cards||[]).length;
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='获得弃牌';
-    b1.onclick=()=>respondLiRangRecover(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不获得';
-    b2.onclick=()=>respondLiRangRecover(false);
-    c.appendChild(b2);
-    setBanner('是否发动【礼让】,获得 '+escapeHtml(target?target.name:'目标')+' 本弃牌阶段弃置的 '+count+' 张牌?');
-    return;
-  }
-  if(g.phase==='lirangRecover' && g.pending && g.pending.type==='lirangRecover'){
-    const from=g.players[g.pending.from];
-    setBanner('等待 '+escapeHtml(from?from.name:'孔融')+' 决定是否回收【礼让】弃牌…');
-    return;
-  }
-  if(g.phase==='zhengyi' && g.pending && g.pending.type==='zhengyi' && g.pending.asking===mySeat){
-    const kong=g.players[g.pending.seat];
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【争义】';
-    b1.onclick=()=>respondZhengyi(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不发动';
-    b2.onclick=()=>respondZhengyi(false);
-    c.appendChild(b2);
-    setBanner(escapeHtml(kong?kong.name:'孔融')+' 即将受到'+g.pending.amount+'点伤害,是否发动【争义】替其承受?');
-    return;
-  }
-  if(g.phase==='zhengyi' && g.pending && g.pending.type==='zhengyi'){
-    const asking=g.players[g.pending.asking], kong=g.players[g.pending.seat];
-    setBanner('等待 '+escapeHtml(asking?asking.name:'礼让对象')+' 决定是否发动【争义】替 '+escapeHtml(kong?kong.name:'孔融')+' 承伤…');
-    return;
-  }
-  if(g.phase==='quhuRespond' && g.pending && g.pending.type==='quhuRespond' && g.pending.targetSeat===mySeat){
-    (me.hand||[]).forEach((card, idx)=>{
-      const b=document.createElement('button');
-      b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);
-      b.onclick=()=>respondQuhu(idx);
-      c.appendChild(b);
-    });
-    const xun=g.players[g.pending.seat];
-    setBanner(escapeHtml(xun?xun.name:'荀彧')+' 对你发动【驱虎】,选择一张手牌拼点。');
-    return;
-  }
-  if(g.phase==='quhuRespond' && g.pending && g.pending.type==='quhuRespond'){
-    const xun=g.players[g.pending.seat], target=g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(xun?xun.name:'荀彧')+' 发动【驱虎】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
-    return;
-  }
   // 太史慈【天义】拼点响应
-  if(g.phase==='tianyiRespond' && g.pending && g.pending.type==='tianyiRespond' && g.pending.targetSeat===mySeat){
-    const source = g.players[g.pending.seat];
-    (me.hand||[]).forEach((card, idx)=>{
-      const b=document.createElement('button');
-      b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);
-      b.onclick=()=>respondTianyi(idx);
-      c.appendChild(b);
-    });
-    setBanner(escapeHtml(source?source.name:'太史慈')+' 对你发动【天义】,选择一张手牌拼点。');
-    return;
-  }
-  if(g.phase==='tianyiRespond' && g.pending && g.pending.type==='tianyiRespond'){
-    const source = g.players[g.pending.seat], target = g.players[g.pending.targetSeat];
-    setBanner(escapeHtml(source?source.name:'太史慈')+' 发动【天义】,等待 '+escapeHtml(target?target.name:'目标')+' 选择拼点牌…');
-    return;
-  }
   // 孙策【制霸】:被请求的主公选择拼点牌;魂姿觉醒后可以拒绝。
-  if(g.phase==='zhibaAsk' && g.pending && g.pending.type==='zhibaAsk' && g.pending.lordSeat===mySeat){
-    const challenger = g.players[g.pending.challengerSeat];
-    (me.hand||[]).forEach((card, idx)=>{
-      const b=document.createElement('button');
-      b.textContent='拼点【'+card.name+'】'+card.suit+rankText(card.rank);
-      b.onclick=()=>respondZhiba(idx);
-      c.appendChild(b);
-    });
-    if(me.hunziAwakened){
-      const refuse=document.createElement('button'); refuse.className='ghost';
-      refuse.textContent='拒绝拼点'; refuse.onclick=()=>respondZhiba(-1); c.appendChild(refuse);
-    }
-    setBanner(escapeHtml(challenger?challenger.name:'吴势力角色')+' 请求发动你的【制霸】,选择一张手牌拼点。');
-    return;
-  }
-  if(g.phase==='zhibaAsk' && g.pending && g.pending.type==='zhibaAsk'){
-    const lord = g.players[g.pending.lordSeat], challenger = g.players[g.pending.challengerSeat];
-    setBanner(escapeHtml(challenger?challenger.name:'吴势力角色')+' 请求【制霸】,等待 '+escapeHtml(lord?lord.name:'孙策')+' 选择拼点牌…');
-    return;
-  }
   if(g.phase==='zhibaGain' && g.pending && g.pending.type==='zhibaGain' && g.pending.lordSeat===mySeat){
     const yes=document.createElement('button'); yes.className='primary'; yes.textContent='获得两张拼点牌'; yes.onclick=()=>respondZhibaGain(true); c.appendChild(yes);
     const no=document.createElement('button'); no.textContent='不获得'; no.onclick=()=>respondZhibaGain(false); c.appendChild(no);
@@ -2250,69 +2191,8 @@ function renderControls(g){
     setBanner(escapeHtml(zhou?zhou.name:'周瑜')+' 发动【反间】,等待 '+escapeHtml(target?target.name:'目标')+' 选择花色…');
     return;
   }
-  if(g.phase==='jiemingAsk' && g.pending && g.pending.type==='jiemingAsk' && g.pending.seat===mySeat){
-    g.players.forEach((p,i)=>{
-      if(!p || !p.alive) return;
-      const limit=Math.min(p.maxHp,5);
-      const need=Math.max(0, limit-(p.hand||[]).length);
-      const b=document.createElement('button');
-      b.textContent='节命: '+p.name+(need>0?' 摸'+need+'张':' 不摸牌');
-      b.onclick=()=>respondJieming(i);
-      c.appendChild(b);
-    });
-    const nb=document.createElement('button'); nb.className='ghost';
-    nb.textContent='不发动'; nb.onclick=()=>respondJieming(null);
-    c.appendChild(nb);
-    setBanner('你受到伤害,是否发动【节命】令一名角色摸牌? 剩余 '+g.pending.remaining+' 次。');
-    return;
-  }
-  if(g.phase==='jiemingAsk' && g.pending && g.pending.type==='jiemingAsk'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'荀彧', '节命');
-    return;
-  }
   // 左慈【新生】:简单的"是否发动"二选一(参照寒冰剑respondHanbingAsk同款写法),
   // 每受到1点伤害问一次,g.pending.remaining 提示还剩几次。
-  if(g.phase==='xinshengAsk' && g.pending && g.pending.type==='xinshengAsk' && g.pending.seat===mySeat){
-    const b1=document.createElement('button'); b1.className='primary';
-    b1.textContent='发动【新生】'; b1.onclick=()=>respondXinshengAsk(true);
-    c.appendChild(b1);
-    const b2=document.createElement('button');
-    b2.textContent='不发动'; b2.onclick=()=>respondXinshengAsk(false);
-    c.appendChild(b2);
-    setBanner('你受到伤害,是否发动【新生】获得一个新的武将? 剩余 '+g.pending.remaining+' 次。');
-    return;
-  }
-  if(g.phase==='xinshengAsk' && g.pending && g.pending.type==='xinshengAsk'){
-    const p=g.players[g.pending.seat];
-    waitAskBanner(p?p.name:'左慈', '新生');
-    return;
-  }
-  if(g.phase==='liuli' && g.pending && g.pending.type==='liuli' && g.pending.to===mySeat){
-    const opts=liuliDiscardOptions(me);
-    const targets=g.pending.targets||[];
-    opts.forEach(opt=>{
-      targets.forEach(t=>{
-        const target=g.players[t];
-        if(!target || !target.alive) return;
-        const b=document.createElement('button');
-        b.textContent='弃'+opt.label+' → '+target.name;
-        b.onclick=()=>respondLiuli(opt, t);
-        c.appendChild(b);
-      });
-    });
-    const nb=document.createElement('button'); nb.className='ghost';
-    nb.textContent='不发动'; nb.onclick=()=>respondLiuli(null, null);
-    c.appendChild(nb);
-    const from=g.players[g.pending.from];
-    setBanner(escapeHtml(from?from.name:'对方')+' 对你使用【杀】,是否发动【流离】弃一张牌转移目标?');
-    return;
-  }
-  if(g.phase==='liuli' && g.pending && g.pending.type==='liuli'){
-    const p=g.players[g.pending.to];
-    waitAskBanner(p?p.name:'大乔', '流离');
-    return;
-  }
   if(g.phase==='tianxiang' && g.pending && g.pending.type==='tianxiang' && g.pending.seat===mySeat){
     const opts=tianxiangHeartOptions(me);
     const targets=g.pending.targets||[];

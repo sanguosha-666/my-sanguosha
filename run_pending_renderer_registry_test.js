@@ -15,7 +15,8 @@ const migrated=[
   'huashenPick','haoshiPick','jujianPickCard','jujianPickTarget','jujianChooseEffect',
   'jiangchiAsk','luoyingAsk','jiushiFlipAsk','jushouChoose','qiaomengChoose',
   'tieqi','shuangxiongAsk','liegong','qinglong','lianyingAsk','guanshi','shaOffsetChoice',
-  'mengjin','yijiAsk','ganglieAsk'
+  'mengjin','yijiAsk','ganglieAsk','luoyiAsk','lirangAsk','lirangRecover','zhengyi',
+  'quhuRespond','tianyiRespond','zhibaAsk','jiemingAsk','xinshengAsk','liuli'
 ];
 migrated.forEach(function(type){
   assert(new RegExp('\\b'+type+'\\s*:\\s*\\{actor:').test(table[0]),type+' 应登记 actor');
@@ -42,4 +43,4 @@ assert.strictEqual(context.renderRegisteredPending({phase:'haoshiPick',pending:{
 assert.strictEqual(shown,'等待其他玩家响应【好施】…','旁观阶段应显示匿名技能提示');
 assert.strictEqual(context.renderRegisteredPending({phase:'play',pending:{type:'haoshiPick',seat:1}},{}),false,'phase 不匹配不得误分派');
 
-console.log('pending renderer registry tests: 46 checks passed (20 phases migrated)');
+console.log('pending renderer registry tests: 66 checks passed (30 phases migrated)');
