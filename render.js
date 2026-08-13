@@ -1120,11 +1120,13 @@ function render(g){
     }
     return;
   }
-  checkDeaths(g);
   // 大厅机器人允许增删 players 项；若机器人之后又有真人加入，删除中间的机器人会让后面
   // 真人的数组下标左移。每次快照都用稳定 cid 重新定位自己，避免客户端继续拿旧座位号操作。
   const currentSeat=(g.players||[]).findIndex(p=>p&&p.cid===myClientId);
   if(currentSeat>=0) mySeat=currentSeat;
+  // checkDeaths 必须放在 mySeat 重定位之后：极端场景（机器人删除致座位前移 + 同帧死亡）
+  // 里 self/other 分类依赖最新 mySeat，否则可能把"自己死亡"误判成"他人死亡"。
+  checkDeaths(g);
   const closeRoomBtn=document.getElementById('closeRoomBtn');
   if(closeRoomBtn) closeRoomBtn.classList.toggle('hidden', !isRoomOwner(g,mySeat));
   // AI托管:mySeat 重定位后同步刷新托管座位。支持"大厅先开托管、进房后再自动生效"

@@ -262,3 +262,7 @@ function drawBgFx(now, dt){
     bgCtx.fillRect(0, 0, w, h);
   }
 }
+
+// 页面首次加载时初始化一个随机背景视频。
+// script 在 </body> 前加载,此时 #bgVideo 已在 DOM(muted+playsinline 下无手势 autoplay 放行)。
+if(typeof document !== 'undefined') pickRandomBgVideo();
