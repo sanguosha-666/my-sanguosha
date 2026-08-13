@@ -1083,6 +1083,28 @@ function singleTargetCanTarget(g, selSpec, sourcePlayer, selCard, targetSeat){
   return !(selSpec && selSpec.canTarget) || !!selSpec.canTarget(g, sourcePlayer, selCard, targetSeat);
 }
 
+// 死亡特效触发基线：记录上一帧各座位 alive 状态。纯前端视觉,不读游戏逻辑。
+var lastAliveSnapshot = null;
+// 检测角色死亡(alive true→false),触发 game-bg.js 的血滴/血雾特效。
+// 仅 g.started 时对比;大厅/未开局(机器人增删)重置基线,不误触发。
+function checkDeaths(g){
+  if(!g || !g.started || !Array.isArray(g.players)){
+    lastAliveSnapshot = null;
+    return;
+  }
+  const alive = g.players.map(p => p ? !!p.alive : false);
+  const prev = lastAliveSnapshot;
+  lastAliveSnapshot = alive;
+  if(!prev || prev.length !== alive.length) return; // 首次/人数变化不触发
+  for(let i=0;i<alive.length;i++){
+    if(prev[i] === true && alive[i] === false){
+      if(typeof triggerDeathFx==='function'){
+        triggerDeathFx(i === mySeat ? 'self' : 'other');
+      }
+    }
+  }
+}
+
 // ---------- render ----------
 function render(g){
   currentG = g; // 供确认弹窗的取消回调异步刷新界面用(回调触发时早已不在 render 的调用栈里)
@@ -1098,6 +1120,7 @@ function render(g){
     }
     return;
   }
+  checkDeaths(g);
   // 大厅机器人允许增删 players 项；若机器人之后又有真人加入，删除中间的机器人会让后面
   // 真人的数组下标左移。每次快照都用稳定 cid 重新定位自己，避免客户端继续拿旧座位号操作。
   const currentSeat=(g.players||[]).findIndex(p=>p&&p.cid===myClientId);
