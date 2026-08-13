@@ -329,7 +329,12 @@ const PENDING_RENDERERS = {
   yinghunDiscard:     {actor:'targetSeat', skill:'英魂', render:renderPendingYinghunDiscard},
   enyuanChoose:       {actor:'damagerSeat',skill:'恩怨', render:renderPendingEnyuanChoose},
   enyuanChooseOption: {actor:'damagerSeat',skill:'恩怨', render:renderPendingEnyuanChooseOption},
-  enyuanGiveCard:     {actor:'damagerSeat',skill:'恩怨', render:renderPendingEnyuanGiveCard}
+  enyuanGiveCard:     {actor:'damagerSeat',skill:'恩怨', render:renderPendingEnyuanGiveCard},
+  huanhuoPick:        {actor:'sourceSeat', skill:'眩惑', render:renderPendingHuanhuoPick},
+  huanhuoPickCard:    {actor:'sourceSeat', skill:'眩惑', render:renderPendingHuanhuoPickCard},
+  huanhuoPickGotCard: {actor:'sourceSeat', skill:'眩惑', render:renderPendingHuanhuoPickGotCard},
+  huanhuoPickSecond:  {actor:'sourceSeat', skill:'眩惑', render:renderPendingHuanhuoPickSecond},
+  luanjiChoose:       {actor:'sourceSeat', skill:'乱击', render:renderPendingLuanjiChoose}
 };
 function renderRegisteredPending(g,c){
   const d=g&&g.pending;
@@ -924,6 +929,30 @@ function renderPendingEnyuanGiveCard(g,c){
   const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【恩怨】选择♥手牌';div.appendChild(h4);const p=document.createElement('p');p.textContent='选择要交给 '+source.name+' 的一张♥手牌：';div.appendChild(p);
   const cards=document.createElement('div');cards.className='card-options';(g.players[mySeat].hand||[]).forEach((card,i)=>{if(!card||card.suit!=='♥')return;const b=document.createElement('button');b.className='card-btn';b.textContent='【'+card.name+'】';b.onclick=()=>giveEnyuanCard(i);cards.appendChild(b);});div.appendChild(cards);c.appendChild(div);setBanner('选择要交给 '+source.name+' 的一张♥手牌');
 }
+function renderPendingHuanhuoPick(g,c){
+  const div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择目标';div.appendChild(h4);const p=document.createElement('p');p.textContent='选择要交♥手牌的角色：';div.appendChild(p);
+  const targets=document.createElement('div');targets.className='target-options';(g.pending.candidates||[]).forEach(seat=>{const target=g.players[seat];if(!target||!target.alive||!isSeatClickable(seat))return;const b=document.createElement('button');b.className='target-btn';b.textContent=target.name;b.onclick=()=>pickHuanhuoTarget(seat);targets.appendChild(b);});div.appendChild(targets);
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消';cancel.onclick=()=>cancelHuanhuo();div.appendChild(cancel);c.appendChild(div);setBanner('选择要交♥手牌的角色');
+}
+function renderPendingHuanhuoPickCard(g,c){
+  const target=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择♥手牌';div.appendChild(h4);const p=document.createElement('p');p.textContent='直接点击下方手牌区的一张♥牌，或点击这里的快捷按钮：';div.appendChild(p);
+  const cards=document.createElement('div');cards.className='card-options';(g.players[mySeat].hand||[]).forEach((card,i)=>{if(!card||card.suit!=='♥')return;const b=document.createElement('button');b.className='card-btn';b.textContent='【'+card.name+'】';b.onclick=()=>pickHuanhuoHeartCard(i);cards.appendChild(b);});div.appendChild(cards);
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消发动【眩惑】';cancel.onclick=()=>cancelHuanhuo();div.appendChild(cancel);c.appendChild(div);setBanner('选择要交给 '+target.name+' 的一张♥手牌（可直接点击下方手牌）');
+}
+function renderPendingHuanhuoPickGotCard(g,c){
+  const target=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择获得的牌';div.appendChild(h4);const p=document.createElement('p');p.textContent='获得 '+target.name+' 的一张牌（手牌暗置随机，装备可指定）：';div.appendChild(p);
+  const cards=document.createElement('div');cards.className='card-options';if((target.hand||[]).length){const hand=document.createElement('button');hand.className='card-btn';hand.textContent='随机获得一张手牌（共'+target.hand.length+'张）';hand.onclick=()=>pickHuanhuoGotCard('hand');cards.appendChild(hand);}const names={weapon:'武器',armor:'防具',plus1:'+1马',minus1:'-1马'};
+  EQUIP_SLOTS.forEach(slot=>{const card=target.equips&&target.equips[slot];if(!card)return;const b=document.createElement('button');b.className='card-btn';b.textContent=names[slot]+'【'+card.name+'】';b.onclick=()=>pickHuanhuoGotCard('equip',slot);cards.appendChild(b);});div.appendChild(cards);c.appendChild(div);setBanner('获得 '+target.name+' 的一张手牌或装备');
+}
+function renderPendingHuanhuoPickSecond(g,c){
+  const div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择交给的角色';div.appendChild(h4);const p=document.createElement('p');p.textContent='选择要将获得的牌交给的角色：';div.appendChild(p);
+  const targets=document.createElement('div');targets.className='target-options';(g.pending.candidates||[]).forEach(seat=>{const target=g.players[seat];if(!target||!target.alive||!isSeatClickable(seat))return;const b=document.createElement('button');b.className='target-btn';b.textContent=target.name;b.onclick=()=>pickHuanhuoSecondTarget(seat);targets.appendChild(b);});div.appendChild(targets);c.appendChild(div);setBanner('选择要将获得的牌交给的角色');
+}
+function renderPendingLuanjiChoose(g,c){
+  const pairs=g.pending.availablePairs||[],hand=g.players[mySeat].hand||[],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【乱击】选择牌对';div.appendChild(h4);const p=document.createElement('p');p.textContent='请选择两张花色相同的手牌当【万箭齐发】使用';div.appendChild(p),groups={};
+  hand.forEach((card,index)=>(groups[card.suit]||(groups[card.suit]=[])).push({index,card}));Object.entries(groups).forEach(([suit,cards])=>{if(cards.length<2)return;const title=document.createElement('h5');title.textContent=suit+'花色组:';div.appendChild(title);for(let i=0;i<cards.length;i++)for(let j=i+1;j<cards.length;j++){const pairIndex=pairs.findIndex(pair=>pair[0]===cards[i].index&&pair[1]===cards[j].index),b=document.createElement('button');b.className='card-btn';b.textContent='【'+cards[i].card.name+'】+【'+cards[j].card.name+'】';b.onclick=()=>pickLuanjiPair(pairIndex);div.appendChild(b);}});
+  const cancel=document.createElement('button');cancel.className='ghost';cancel.textContent='取消';cancel.onclick=()=>cancelLuanji();div.appendChild(cancel);c.appendChild(div);setBanner('请选择两张花色相同的手牌当【万箭齐发】使用');
+}
 // renderHuashenTwoStepPick: 左慈"选武将→选技能"两级选择的共用UI,availGenerals(实时传入
 // 的候选武将id数组,如 p.huashenPool)第一步点选武将,第二步(HUASHEN_SKILL_TABLE[general]
 // 只有1个技能时跳过、直接进第二步收尾)点选具体技能名,respondFn(generalId,skillName)
@@ -1423,112 +1452,12 @@ function renderControls(g){
   // 陈宫【明策】:选择第二个目标阶段
   
   // 法正【眩惑】:选择目标阶段
-  if(g.pending && g.pending.type==='huanhuoPick' && g.pending.sourceSeat===mySeat){
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【眩惑】选择目标';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '选择要交♥手牌的角色：';
-    div.appendChild(p);
-    const targetDiv = document.createElement('div'); targetDiv.className = 'target-options';
-    g.pending.candidates.forEach(seat => {
-      const target = g.players[seat];
-      if(target && target.alive && isSeatClickable(seat)) {
-        const b = document.createElement('button'); b.className='target-btn';
-        b.textContent=target.name;
-        b.onclick=()=>pickHuanhuoTarget(seat);
-        targetDiv.appendChild(b);
-      }
-    });
-    div.appendChild(targetDiv);
-    const cb = document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='取消'; cb.onclick=()=>cancelHuanhuo();
-    div.appendChild(cb);
-    c.appendChild(div);
-    setBanner('选择要交♥手牌的角色');
-    return;
-  }
   
   // 法正【眩惑】:选择♥手牌阶段
-  if(g.pending && g.pending.type==='huanhuoPickCard' && g.pending.sourceSeat===mySeat){
-    const target = g.players[g.pending.targetSeat];
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【眩惑】选择♥手牌';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '直接点击下方手牌区的一张♥牌，或点击这里的快捷按钮：';
-    div.appendChild(p);
-    const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
-    // game.js 的 huanhuoPickCard 只保存座位号；这里必须读取法正当前真实手牌，不能再访问
-    // 已删除的 pending.heartCards，否则该阶段渲染会直接抛错，整个操作区变成空白。
-    (g.players[mySeat].hand||[]).forEach((card, i) => {
-      if(!card || card.suit!=='♥') return;
-      const cb = document.createElement('button'); cb.className='card-btn';
-      cb.textContent='【'+card.name+'】';
-      cb.onclick=()=>pickHuanhuoHeartCard(i);
-      cardDiv.appendChild(cb);
-    });
-    div.appendChild(cardDiv);
-    const cb = document.createElement('button'); cb.className='cancel-btn';
-    cb.textContent='取消发动【眩惑】'; cb.onclick=()=>cancelHuanhuo();
-    div.appendChild(cb);
-    c.appendChild(div);
-    setBanner('选择要交给 ' + target.name + ' 的一张♥手牌（可直接点击下方手牌）');
-    return;
-  }
 
   // 法正【眩惑】:选择要获得的牌阶段
-  if(g.pending && g.pending.type==='huanhuoPickGotCard' && g.pending.sourceSeat===mySeat){
-    const target = g.players[g.pending.targetSeat];
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【眩惑】选择获得的牌';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '获得 ' + target.name + ' 的一张牌（手牌暗置随机，装备可指定）：';
-    div.appendChild(p);
-    const cardDiv = document.createElement('div'); cardDiv.className = 'card-options';
-    if((target.hand||[]).length){
-      const cb = document.createElement('button'); cb.className='card-btn';
-      cb.textContent='随机获得一张手牌（共'+target.hand.length+'张）';
-      cb.onclick=()=>pickHuanhuoGotCard('hand');
-      cardDiv.appendChild(cb);
-    }
-    const slotNames={weapon:'武器',armor:'防具',plus1:'+1马',minus1:'-1马'};
-    EQUIP_SLOTS.forEach(slot=>{
-      const card=target.equips && target.equips[slot];
-      if(!card) return;
-      const cb=document.createElement('button'); cb.className='card-btn';
-      cb.textContent=slotNames[slot]+'【'+card.name+'】';
-      cb.onclick=()=>pickHuanhuoGotCard('equip',slot);
-      cardDiv.appendChild(cb);
-    });
-    div.appendChild(cardDiv);
-    // 眩惑实质性结算已开始，不提供取消按钮
-    c.appendChild(div);
-    setBanner('获得 ' + target.name + ' 的一张手牌或装备');
-    return;
-  }
 
   // 法正【眩惑】:选择第二个目标阶段
-  if(g.pending && g.pending.type==='huanhuoPickSecond' && g.pending.sourceSeat===mySeat){
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【眩惑】选择交给的角色';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '选择要将获得的牌交给的角色：';
-    div.appendChild(p);
-    const targetDiv = document.createElement('div'); targetDiv.className = 'target-options';
-    g.pending.candidates.forEach(seat => {
-      const target = g.players[seat];
-      if(target && target.alive && isSeatClickable(seat)) {
-        const b = document.createElement('button'); b.className='target-btn';
-        b.textContent=target.name;
-        b.onclick=()=>pickHuanhuoSecondTarget(seat);
-        targetDiv.appendChild(b);
-      }
-    });
-    div.appendChild(targetDiv);
-    // 眩惑实质性结算已开始，不提供取消按钮
-    c.appendChild(div);
-    setBanner('选择要将获得的牌交给的角色');
-    return;
-  }
 
   
   // 陈宫【明策】:接收牌的角色选择阶段
@@ -1537,7 +1466,7 @@ function renderControls(g){
   // }else if(g.phase==='play'){ 大分支内部——但 startLuanji() 把 g.phase 切到
   // 'luanjiChoose'/confirmLuanji 切到'luanjiConfirm'之后,g.phase 就不再是'play'了,
   // 外层 else-if 链条永远进不来这四个分支,导致选牌/确认面板对任何人(真人和机器人)都
-  // 渲染不出来。修法是挪出 play 分支、改成独立的 g.phase==='luanjiChoose'/'luanjiConfirm'
+  // 渲染不出来。修法是挪出 play 分支，改成独立的乱击选牌/确认阶段
   // 顶层判断(和 mingceChoice/qiaomengChoose 等其它独立单角色技能同一种写法),不改
   // startLuanji()/confirmLuanji() 本身的 phase 切换(game.js/skills.js 里 normalize 和
   // 各响应函数的守卫都只认 pending.type,不认 g.phase,唯一依赖 g.phase 语义的是
@@ -1545,95 +1474,14 @@ function renderControls(g){
   // 不切换,会让机器人调度错误地把这两步当成"正常出牌阶段决策"处理,绕开
   // BOT_PHASE_ACTOR.luanjiChoose/luanjiConfirm 已经注册好的专用分支,这条路更危险,
   // 故选择挪渲染代码而不是改 phase 切换)。
-  if(g.phase==='luanjiChoose' && g.pending && g.pending.type==='luanjiChoose' && g.pending.sourceSeat===mySeat){
-    const availablePairs = g.pending.availablePairs || [];
-    const hand = me.hand || [];
-    const div = document.createElement('div'); div.className = 'centered';
-    const h4 = document.createElement('h4'); h4.textContent = '【乱击】选择牌对';
-    div.appendChild(h4);
-    const p = document.createElement('p'); p.textContent = '请选择两张花色相同的手牌当【万箭齐发】使用';
-    div.appendChild(p);
-
-    // 按花色分组显示
-    const suitGroups = {};
-    for (let i = 0; i < hand.length; i++) {
-      const card = hand[i];
-      const suit = card.suit;
-      if (!suitGroups[suit]) {
-        suitGroups[suit] = [];
-      }
-      suitGroups[suit].push({ index: i, card: card });
-    }
-
-    // 为每个花色组显示可选的牌对
-    for (const [suit, cards] of Object.entries(suitGroups)) {
-      if (cards.length >= 2) {
-        const suitHeader = document.createElement('h5');
-        suitHeader.textContent = suit + '花色组:';
-        div.appendChild(suitHeader);
-
-        // 显示所有可能的牌对
-        for (let i = 0; i < cards.length; i++) {
-          for (let j = i + 1; j < cards.length; j++) {
-            const pairIndex = availablePairs.findIndex(
-              pair => pair[0] === cards[i].index && pair[1] === cards[j].index
-            );
-
-            const b = document.createElement('button');
-            b.className = 'card-btn';
-            b.textContent = '【' + cards[i].card.name + '】+【' + cards[j].card.name + '】';
-            b.onclick = () => pickLuanjiPair(pairIndex);
-            div.appendChild(b);
-          }
-        }
-      }
-    }
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'ghost';
-    cancelBtn.textContent = '取消';
-    cancelBtn.onclick = () => cancelLuanji();
-    div.appendChild(cancelBtn);
-
-    c.appendChild(div);
-    setBanner('请选择两张花色相同的手牌当【万箭齐发】使用');
-    return;
-  }
 
   // 袁绍【乱击】:确认阶段
 
   // 袁绍【乱击】:观察者界面（其他玩家发动乱击时）
-  if(g.phase==='luanjiChoose' && g.pending && g.pending.type==='luanjiChoose' && g.pending.sourceSeat!==mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    setBanner(source ? source.name + ' 正在选择【乱击】的牌…' : '有人正在选择【乱击】的牌…');
-    return;
-  }
 
   // 法正【恩怨】:其他玩家选择阶段
   
   // 法正【眩惑】:其他玩家选择阶段
-  if(g.phase==='huanhuoPick' && g.pending && g.pending.type==='huanhuoPick' && g.pending.sourceSeat!==mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    setBanner((source ? source.name : '?') + ' 正在选择【眩惑】的目标…');
-    return;
-  }
-  if(g.phase==='huanhuoPickCard' && g.pending && g.pending.type==='huanhuoPickCard' && g.pending.sourceSeat!==mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    const target = g.players[g.pending.targetSeat];
-    setBanner((source ? source.name : '?') + ' 正在选择要交给 ' + (target ? target.name : '?') + ' 的♥手牌…');
-    return;
-  }
-  if(g.phase==='huanhuoPickGotCard' && g.pending && g.pending.type==='huanhuoPickGotCard' && g.pending.sourceSeat!==mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    const target = g.players[g.pending.targetSeat];
-    setBanner((source ? source.name : '?') + ' 正在选择从 ' + (target ? target.name : '?') + ' 获得的牌…');
-    return;
-  }
-  if(g.phase==='huanhuoPickSecond' && g.pending && g.pending.type==='huanhuoPickSecond' && g.pending.sourceSeat!==mySeat){
-    const source = g.players[g.pending.sourceSeat];
-    setBanner((source ? source.name : '?') + ' 正在选择要交给的角色…');
-    return;
-  }
   
   // 祝融【烈刃】:伤害结算后的触发选择
   
