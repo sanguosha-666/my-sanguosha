@@ -47,32 +47,9 @@ const CARD_PINYIN = {
   '赤兔':'chitu', '紫骍':'zixing', '大宛':'dawan', '骕骦':'sushuang'
 };
 const SKILL_PINYIN = {
-  '天妒':'tiandu', '遗计':'yiji', '枭姬':'xiaoji', '反馈':'fankui',
-  '鬼才':'guicai', '龙胆':'longdan', '武圣':'wusheng', '奇袭':'qixi',
-  '苦肉':'kurou', '集智':'jizhi', '制衡':'zhiheng', '奸雄':'jianxiong',
-  '反间':'fanjian',
-  '仁德':'rende', '激昂':'jiang', '青囊':'qingnang', '急救':'jijiu',
-  '刚烈':'ganglie', '裸衣':'luoyi', '驱虎':'quhu', '节命':'jieming',
-  '国色':'guose', '流离':'liuli', '天香':'tianxiang', '红颜':'hongyan',
-  '连环':'lianhuan', '涅槃':'niepan', '离间':'lijian', '闭月':'biyue',
-  '双雄':'shuangxiong',
-  '礼让':'lirang', '争义':'zhengyi',
-  '恂恂':'xunxun', '忘隙':'wangxi', '狂骨':'kuanggu',
-  '神速':'shensu',
-  '天义':'tianyi',
-  '完杀':'wansha', '乱武':'luanwu', '帷幕':'weimu',
-  '雷击':'leiji', '鬼道':'guidu',
-  '乱击':'luanji',
-  '同疾':'tongji',
-  '妄尊':'wangzun',
-  '悲歌':'beige', '断肠':'duanchang',
-  '巨象':'juxiang', '烈刃':'lieRen',
-  '明策':'mingce', '智迟':'zhichi',
-  '旋风':'xuanfeng',
-  // 短兵、奋迅、恩怨、眩惑的音频资源当前为空文件，补齐资源前不注册播放。
-  '无言':'wuyan', '举荐':'jujian',
-  '将驰':'jiangchi',
-  '落英':'luoying', '酒诗':'jiushi'
+  // 只登记仓库中真实存在、非空且可播放的技能音频。新增映射时必须通过
+  // run_skill_audio_integrity_test.js，避免技能触发时产生静默 404。
+  '神速':'shensu'
 };
 // cardImageSrc: 映射表里没有这张牌名(比如以后加新牌但没先配这里)时返回 null,调用方按
 // null 处理成"没有插画图片可用"——牌名文字始终固定显示在 .card-title 标题栏,不受这个
