@@ -161,7 +161,7 @@ const testCode = String.raw`
   aiApiKey = 'test-key';
   aiProvider = 'claude';
   // 沙箱全局创建 aiTestAutopilot(Task 4 才正式定义,这里模拟其形状)
-  aiTestAutopilot = { active: false, seat: null, records: [] };
+  aiTestAutopilot = { active: false, seat: null }; aiDecisionRecords = [];
 
   await check('callAiChooseIndex: 托管命中时返回idx且aiTestLastReason被设置', async function(){
     aiTestAutopilot = {active:true, seat:0};
@@ -188,8 +188,15 @@ const testCode = String.raw`
     // 未托管时 systemPrompt 应保持默认模板一字不变:含"不要解释"、不含托管标记(零变化)
     if(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt.indexOf('本次为AI托管') >= 0)
       throw new Error('未托管时 systemPrompt 不应含托管标记,实际 '+JSON.stringify(window.__mockAiArgs.opts.systemPrompt));
-    if(!window.__mockAiArgs || window.__mockAiArgs.opts.systemPrompt.indexOf('不要解释') < 0)
-      throw new Error('未托管时 systemPrompt 应保持默认(含"不要解释"),实际 '+JSON.stringify(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt));
+    // 【CORE-73 语义变更,原断言已作废】此处原本断言"未托管 systemPrompt 保持默认(含
+    // 不要解释)"——那条命题在 CORE-73 之后不再成立:决策面板要展示每台 AI(含非托管
+    // 机器人)的中文理由,而理由只有 prompt 明确要求时模型才会给,所以"附理由"的格式
+    // 指令现在对全部决策生效,与之矛盾的"不要解释"必须同时从两条路径去掉。托管与否的
+    // 区分改由"(本次为AI托管)"标记承担(上一条断言),不再靠"要不要理由"区分。
+    if(!window.__mockAiArgs || window.__mockAiArgs.opts.systemPrompt.indexOf('不要解释') >= 0)
+      throw new Error('未托管时 systemPrompt 不应残留"不要解释"(与附理由指令冲突),实际 '+JSON.stringify(window.__mockAiArgs && window.__mockAiArgs.opts.systemPrompt));
+    if(window.__mockAiArgs.opts.systemPrompt.indexOf('reason') < 0)
+      throw new Error('未托管时 systemPrompt 也应含附理由格式指令(CORE-73),实际 '+JSON.stringify(window.__mockAiArgs.opts.systemPrompt));
   });
   await check('callAiChooseIndex: 托管时user prompt末尾"只返回{choice}"替换为理由格式(分离)', async function(){
     aiTestAutopilot = {active:true, seat:0};
@@ -275,13 +282,13 @@ const testCode = String.raw`
   // prompt/AI返回)。改后:hook 只建骨架记录(prompt/rawResponse 空、choice/reason null),
   // 由 callAiChooseIndex 解析完成后经 aiTestFillPendingRecord 回填本次真实数据。
   await check('aiTestDecisionHook: 只建骨架记录(不读上一条缓存),aiTestFillPendingRecord回填真实数据', function(){
-    aiTestAutopilot = {active:true, seat:0, records:[]};
+    aiTestAutopilot = {active:true, seat:0}; aiDecisionRecords = [];
     aiTestLastReason = '旧理由'; // 模拟上一条决策残留缓存,骨架记录不应读到它
     var g2 = mkSeatG({n:3});
     g2.phase='duel';
     aiTestDecisionHook(g2, 0, {summary:'决策(duel)'});
-    if(aiTestAutopilot.records.length!==1) throw new Error('应追加1条,实际 '+aiTestAutopilot.records.length);
-    var rec = aiTestAutopilot.records[0];
+    if(aiDecisionRecords.length!==1) throw new Error('应追加1条,实际 '+aiDecisionRecords.length);
+    var rec = aiDecisionRecords[0];
     if(rec.phaseLabel!=='duel') throw new Error('phaseLabel应为原始phase字符串,实际 '+rec.phaseLabel);
     if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应非空字符串');
     if(rec.summary!=='决策(duel)') throw new Error('summary应透传,实际 '+rec.summary);
@@ -291,29 +298,28 @@ const testCode = String.raw`
     if(rec.reason!==null) throw new Error('骨架记录reason应为null(不回退旧aiTestLastReason),实际 '+rec.reason);
     // 回填:模拟 callAiChooseIndex 解析完成后调用,真实数据应写入同一条记录
     aiTestFillPendingRecord({prompt:'p1', rawResponse:'r1', choice:1, reason:'新理由'});
-    if(aiTestAutopilot.records.length!==1) throw new Error('回填不应新增记录,实际 '+aiTestAutopilot.records.length);
-    rec = aiTestAutopilot.records[0];
+    if(aiDecisionRecords.length!==1) throw new Error('回填不应新增记录,实际 '+aiDecisionRecords.length);
+    rec = aiDecisionRecords[0];
     if(rec.prompt!=='p1' || rec.rawResponse!=='r1') throw new Error('回填后prompt/rawResponse应为本次数据');
     if(rec.choice!==1) throw new Error('回填后choice应为1,实际 '+rec.choice);
     if(rec.reason!=='新理由') throw new Error('回填后reason应为本次理由,实际 '+rec.reason);
     if(aiTestPendingRecord!==null) throw new Error('回填后aiTestPendingRecord应置null防残留');
   });
-  await check('runBotDecision: 托管决策后采集hook被调用(records增长,draw分支照常,不读旧缓存)', async function(){
+  // 【CORE-73 语义变更】原断言是"托管决策后 records 必增长(哪怕是 draw 这种不调 AI 的
+  // 确定性决策也建一条空骨架)"。采集下沉到 callAiChooseIndex 之后这条命题不再成立,也
+  // 不该成立:不调 AI 的决策没有 prompt/理由/模型可记,改动前那种"字段全空的空壳记录"
+  // 只是噪音。新命题:确定性决策不产生记录,但决策本身照常执行。
+  await check('runBotDecision: 确定性决策(draw,不调AI)不产生记录,但决策照常执行', async function(){
     var g3 = mkSeatG({n:3});
     g3.phase='draw'; g3.turn=0;
     g3.players[0].isBot=false;
-    aiTestAutopilot = {active:true, seat:0, records:[]};
+    aiTestAutopilot = {active:true, seat:0}; aiDecisionRecords = [];
     aiTestLastCall = { prompt: '旧缓存prompt', rawResponse: '旧缓存raw' }; // 模拟上一条残留
     window.__doDrawCalled = 0;
     doDraw = function(){ window.__doDrawCalled++; };
     await runBotDecision(g3, 0);
-    if(aiTestAutopilot.records.length < 1) throw new Error('应至少追加1条record,实际 '+aiTestAutopilot.records.length);
-    var rec = aiTestAutopilot.records[0];
-    if(typeof rec.summary!=='string' || !rec.summary) throw new Error('summary应非空');
-    if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应为非空字符串');
-    // 骨架记录不应贴旧缓存:draw 是确定性决策(doDraw 不调 AI),prompt/rawResponse 应为空
-    if(rec.prompt!=='') throw new Error('骨架记录prompt应为空(不取旧aiTestLastCall),实际 '+rec.prompt);
-    if(rec.rawResponse!=='') throw new Error('骨架记录rawResponse应为空,实际 '+rec.rawResponse);
+    if(aiDecisionRecords.length !== 0)
+      throw new Error('不调AI的确定性决策不应产生记录,实际 '+aiDecisionRecords.length+' 条');
     if(window.__doDrawCalled !== 1) throw new Error('draw分支应照常执行,实际 '+window.__doDrawCalled+' 次');
   });
 
@@ -378,14 +384,14 @@ const testCode = String.raw`
   showAiKeyModal = function(){ globalThis.__aiKeyModalShown = true; };
 
   await check('顶部AI按钮只打开弹窗,不改变托管状态或清空记录', function(){
-    aiTestAutopilot = {active:false, seat:null, records:[{summary:'保留'}]};
+    aiTestAutopilot = {active:false, seat:null}; aiDecisionRecords = [{summary:'保留',isAutopilot:true}];
     toggleAiTestAutopilot();
     if(aiTestAutopilot.active) throw new Error('打开弹窗不应开始托管');
-    if(aiTestAutopilot.records.length!==1) throw new Error('打开弹窗不应清空记录');
+    if(aiDecisionRecords.length!==1) throw new Error('打开弹窗不应清空记录');
   });
   await check('startAiTestAutopilot:无密钥不开启且弹配置框', function(){
     aiApiKey = ''; aiProvider = 'openrouter';
-    aiTestAutopilot = {active:false, seat:null, records:[]};
+    aiTestAutopilot = {active:false, seat:null}; aiDecisionRecords = [];
     globalThis.__aiKeyModalShown = false;
     startAiTestAutopilot();
     if(aiTestAutopilot.active) throw new Error('无密钥不应开启托管');
@@ -394,36 +400,36 @@ const testCode = String.raw`
   await check('startAiTestAutopilot:有密钥开启且保留已有记录', function(){
     aiApiKey = 'sk-or-test'; aiProvider = 'openrouter';
     _g = {players:[{cid:myClientId, aiAutopilot:false}]};
-    aiTestAutopilot = {active:false, seat:null, records:[{summary:'保留'}]};
+    aiTestAutopilot = {active:false, seat:null}; aiDecisionRecords = [{summary:'保留',isAutopilot:true}];
     startAiTestAutopilot();
     if(!aiTestAutopilot.active) throw new Error('有密钥应开启');
     if(aiTestAutopilot.seat!==0) throw new Error('seat应为mySeat(0),实际 '+aiTestAutopilot.seat);
-    if(aiTestAutopilot.records.length!==1) throw new Error('开始托管不应清空记录');
+    if(aiDecisionRecords.length!==1) throw new Error('开始托管不应清空记录');
     if(!_g.players[0].aiAutopilot) throw new Error('开始托管应把公开标识同步到自己的玩家状态');
   });
   await check('stopAiTestAutopilot:结束托管但保留已有记录', function(){
     _g = {players:[{cid:myClientId, aiAutopilot:true}]};
-    aiTestAutopilot = {active:true, seat:0, records:[{summary:'保留'}]};
+    aiTestAutopilot = {active:true, seat:0}; aiDecisionRecords = [{summary:'保留',isAutopilot:true}];
     stopAiTestAutopilot();
     if(aiTestAutopilot.active) throw new Error('结束按钮应关闭托管');
-    if(aiTestAutopilot.records.length!==1) throw new Error('结束托管不应清空记录');
+    if(aiDecisionRecords.length!==1) throw new Error('结束托管不应清空记录');
     if(_g.players[0].aiAutopilot) throw new Error('结束托管应清除房间公开标识');
   });
   await check('只有清空按钮或游戏结束清空记录', function(){
-    aiTestAutopilot = {active:false, seat:0, records:[{summary:'a'}]};
+    aiTestAutopilot = {active:false, seat:0}; aiDecisionRecords = [{summary:'a',isAutopilot:true}];
     clearAiTestRecords();
-    if(aiTestAutopilot.records.length!==0) throw new Error('清空按钮应清空记录');
-    aiTestAutopilot.records=[{summary:'b'}];
+    if(aiDecisionRecords.length!==0) throw new Error('清空按钮应清空记录');
+    aiDecisionRecords=[{summary:'b',isAutopilot:true}];
     syncAiTestGamePhase('play');
     syncAiTestGamePhase('over');
-    if(aiTestAutopilot.records.length!==0) throw new Error('游戏结束应清空记录');
+    if(aiDecisionRecords.length!==0) throw new Error('游戏结束应清空记录');
   });
   await check('appendAiTestRecord: 追加后records增长且摘要含决策文本', function(){
-    aiTestAutopilot = {active:true, seat:0, records:[]};
+    aiTestAutopilot = {active:true, seat:0}; aiDecisionRecords = [];
     appendAiTestRecord({time:'12:00:00', phaseLabel:'出牌阶段', summary:'选择【杀】攻击座位2',
       stateInfo:'{"seat":0}', prompt:'', rawResponse:'{"choice":0}', choice:0, reason:'测试'});
-    if(aiTestAutopilot.records.length!==1) throw new Error('应追加1条,实际 '+aiTestAutopilot.records.length);
-    if(aiTestAutopilot.records[0].summary.indexOf('选择【杀】')<0) throw new Error('摘要应含决策文本');
+    if(aiDecisionRecords.length!==1) throw new Error('应追加1条,实际 '+aiDecisionRecords.length);
+    if(aiDecisionRecords[0].summary.indexOf('选择【杀】')<0) throw new Error('摘要应含决策文本');
   });
   await check('toggleAiTestRecord: 折叠切换hidden类(无DOM不抛错)', function(){
     toggleAiTestRecord(0);
@@ -437,14 +443,14 @@ const testCode = String.raw`
     var g = mkSeatG({n:3});
     g.phase='draw'; g.turn=0;
     g.players[0].isBot=false; g.players[0].alive=false; // 托管座位已阵亡
-    aiTestAutopilot = {active:true, seat:0, records:[]};
+    aiTestAutopilot = {active:true, seat:0}; aiDecisionRecords = [];
     window.__doDrawCalled = 0;
     doDraw = function(){ window.__doDrawCalled++; };
     await runBotDecision(g, 0);
     if(window.__doDrawCalled !== 0)
       throw new Error('阵亡托管座位不应执行draw分支,实际调用 '+window.__doDrawCalled+' 次(首行守卫缺失)');
-    if(aiTestAutopilot.records.length !== 0)
-      throw new Error('阵亡座位不应追加record,实际 '+aiTestAutopilot.records.length+' 条');
+    if(aiDecisionRecords.length !== 0)
+      throw new Error('阵亡座位不应追加record,实际 '+aiDecisionRecords.length+' 条');
   });
 
   // ============ Task7: 回归探针 —— 确定性决策(不调AI)骨架记录确实空(无理由) ============
@@ -455,12 +461,12 @@ const testCode = String.raw`
   // 托管分支用 buildAutopilotSystemPrompt/buildAutopilotUserPrompt 替换消除,由上面的
   // "prompt 分离"断言锁定。此探针把"确定性决策无理由"钉成既有行为,防止未来误当 bug。
   await check('回归探针:确定性决策(不调AI)骨架记录确实空(无理由)', function(){
-    aiTestAutopilot = {active:true, seat:0, records:[]};
+    aiTestAutopilot = {active:true, seat:0}; aiDecisionRecords = [];
     var g4 = mkSeatG({n:3});
     g4.phase='draw';
     aiTestDecisionHook(g4, 0, {summary:'决策(draw)'});
-    if(aiTestAutopilot.records.length!==1) throw new Error('应1条');
-    var rec = aiTestAutopilot.records[0];
+    if(aiDecisionRecords.length!==1) throw new Error('应1条');
+    var rec = aiDecisionRecords[0];
     if(rec.reason!==null) throw new Error('确定性决策应无理由,实际 '+rec.reason);
     if(rec.prompt!=='') throw new Error('确定性决策应无prompt');
     if(typeof rec.stateInfo!=='string' || !rec.stateInfo) throw new Error('stateInfo应非空');

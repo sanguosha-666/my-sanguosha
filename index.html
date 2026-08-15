@@ -1109,6 +1109,11 @@
      与其他图标按钮一致、低于弹窗(#aiTestModal 是 z-index:120),点开弹窗不会压住弹窗交互。 */
   #aiTestBtn{position:fixed;top:64px;left:64px;z-index:50;width:44px;height:44px;
     border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  /* AI决策面板入口(aiPanelBtn,CORE-73):#aiTestBtn 的正上方(同 left:64,top 由 64 上移到
+     12——那一格此前空着:top:12 只有 left:12 的 #closeRoomBtn 和右上角的 helpBtn/logBtn)。
+     其余定位/尺寸/配色与 #aiTestBtn 逐项一致,同为 z-index:50、低于弹窗的 120。 */
+  #aiPanelBtn{position:fixed;top:12px;left:64px;z-index:50;width:44px;height:44px;
+    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
   /* 调试日志弹窗内容(showDebugLog,复用 #infoModal/.info-panel):列表默认只显示摘要行,
@@ -1225,6 +1230,11 @@
   /* ===== AI托管信息窗(可拖动/可调整大小) ===== */
   #aiTestModal{position:fixed;top:70px;right:12px;left:auto;bottom:auto;width:420px;max-width:80vw;height:480px;max-height:80vh;z-index:120;display:flex;align-items:stretch;justify-content:stretch;box-shadow:0 4px 20px rgba(0,0,0,.45)}
   #aiTestModal.hidden{display:none}
+  /* AI决策面板(CORE-73):与托管信息窗同款窗体,错开一点位置避免两窗完全重叠。 */
+  #aiPanelModal{position:fixed;top:110px;right:48px;left:auto;bottom:auto;width:460px;max-width:84vw;height:500px;max-height:82vh;z-index:120;display:flex;align-items:stretch;justify-content:stretch;box-shadow:0 4px 20px rgba(0,0,0,.45)}
+  #aiPanelModal.hidden{display:none}
+  /* 记录摘要行里的"座位·武将"标签:面板同时列多台 AI 的决策时用来分辨是谁的。 */
+  .aitest-who{flex:0 0 auto;padding:0 4px;border:1px solid var(--paper-dim,#a0926e);border-radius:3px;font-size:11px;opacity:.85}
   .aitest-panel{position:relative;display:flex;flex-direction:column;width:100%;height:100%;background:var(--paper,#f5ecd9);border:1px solid var(--paper-dim,#a0926e);border-radius:8px;overflow:hidden;box-sizing:border-box}
   .aitest-header{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cinnabar,#a03a2a);color:#fff;font-size:14px;font-weight:600;cursor:move;user-select:none}
   .aitest-close{margin-left:auto;background:transparent;color:#fff}
@@ -2058,6 +2068,7 @@
 <button id="closeRoomBtn" class="icon-btn hidden" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
 <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
 <button id="aiTestBtn" class="icon-btn" title="打开AI托管信息窗" onclick="openAiTestModal()">🤖</button>
+<button id="aiPanelBtn" class="icon-btn" title="查看AI决策(理由/武将/模型,含非托管机器人)" onclick="openAiPanelModal()">🧠</button>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
@@ -2071,6 +2082,19 @@
       <button id="aiTestStartBtn" class="aitest-foot-btn" onclick="startAiTestAutopilot()">开始托管</button>
       <button id="aiTestStopBtn" class="aitest-foot-btn" onclick="stopAiTestAutopilot()" disabled>结束托管</button>
       <span class="aitest-hint">点击记录行展开详情</span>
+    </div>
+    <div class="aitest-resize-handle" title="拖动调整大小"></div>
+  </div>
+</div>
+<!-- CORE-73:AI 决策查看面板。独立于托管开关(托管关着也能看各机器人座位的 AI 决策),
+     复用 .aitest-* 全套样式与折叠记录结构;记录数据来自统一存储 aiDecisionRecords。 -->
+<div id="aiPanelModal" class="hidden">
+  <div class="aitest-panel">
+    <div class="aitest-header">🧠 AI决策<button id="aiPanelCloseBtn" class="aitest-close icon-btn" onclick="closeAiPanelModal()">✕</button></div>
+    <div class="aitest-body" id="aiPanelBody"></div>
+    <div class="aitest-footer">
+      <button class="aitest-foot-btn" onclick="clearAiTestRecords()">清空</button>
+      <span class="aitest-hint">点击记录行展开理由/武将/模型</span>
     </div>
     <div class="aitest-resize-handle" title="拖动调整大小"></div>
   </div>
@@ -2174,9 +2198,9 @@
 <script src="weapons.js?v=398"></script>
 <script src="skills.js?v=407"></script>
 <script src="skills/late-generals.js?v=403"></script>
-<script src="bot-ai-bus.js?v=403"></script>
-<script src="bot.js?v=405"></script>
-<script src="ai-bot.js?v=396"></script>
+<script src="bot-ai-bus.js?v=404"></script>
+<script src="bot.js?v=406"></script>
+<script src="ai-bot.js?v=397"></script>
 <script src="render.js?v=403"></script>
 <script src="render-table.js?v=394"></script>
 <script src="render-discard.js?v=395"></script>
