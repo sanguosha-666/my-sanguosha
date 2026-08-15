@@ -578,6 +578,16 @@ function resetPlayerForNewGame(p){
   p.role=null; p.roleRevealed=false; p.generalChoices=null;
 }
 function newGame(){
+  // CORE-113:botTwoStepA(借刀/离间/丈八/仁德四个多步决策共用的客户端本地状态,见
+  // bot.js「L3多步两阶段框架」)只在自己的决策链正常走完时才清空——刻意设计成不入
+  // Firebase/纯客户端状态,但这也意味着上一局如果在这类两步决策进行到一半时结束
+  // (对局提前分出胜负/被中断),这个变量会原样留在浏览器里。newGame 之前完全没有清空
+  // 它,导致下一局如果 g.turn/g.phase 恰好命中同一个 decisionId 的 match 条件,机器人
+  // 会拿着上一局早已失效的座位/牌引用去执行——真实用 soak.js 压测复现过：轻则一直
+  // execute 静默失败导致该座位永久卡死(play:null),重则读到上一局座位数之外的下标直接
+  // 抛异常崩溃整局。修法照抄同一函数里已有的 aiSummaryReset 那行(backToLobby 里也有
+  // 一份同款调用),不是新发明的模式。
+  if(typeof resetBotTwoStep==='function') resetBotTwoStep();
   tx(g=>{
     ensureOwner(g); // #104 迁移:老房间无 owner 先补记,守卫才可能放行
     if(!isRoomOwner(g,mySeat)) return g;
@@ -609,6 +619,7 @@ function cleanupRoom(){
 
 function backToLobby(){
   if(typeof aiSummaryReset === 'function') aiSummaryReset();
+  if(typeof resetBotTwoStep==='function') resetBotTwoStep(); // CORE-113,同newGame()那处注释
   if(chatQuery) chatQuery.off();
   chatQuery=null; chatRef=null; chatMessages=[];
   mySeat = null; selectedCardIdx = null; resetZhangba();

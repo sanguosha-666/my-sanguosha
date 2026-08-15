@@ -150,6 +150,12 @@ async function soakOneGame(seed, n){
   };
   commitGameState(g0);
   mySeat = 0;
+  // CORE-113:真实游戏每局之间靠 newGame()/backToLobby() 调用 resetBotTwoStep() 清空
+  // 客户端本地的多步决策状态(botTwoStepA)——soak.js 连续跑多局共用同一个vm沙箱/同一份
+  // 全局状态,不经过这两个入口,如果不在这里手动补一次,上一局残留的botTwoStepA会原样
+  // 带进下一局,复现同一类"座位/牌引用已经不属于这一局"的卡死/崩溃(这正是当初撞见这个
+  // bug、进而在room-lifecycle.js里补上根治修复的复现方式)。
+  if(typeof resetBotTwoStep==='function') resetBotTwoStep();
   startGame('random', 'ffa'); // player0 暂时是owner+非bot才能通过isRoomOwner守卫
   // 开局后收回:全员机器人驱动。【真实踩过的坑】不能按固定下标0收回——startGame内部会调
   // shuffleSeats()打乱players数组顺序(#104),原来在下标0、owner:true的那个玩家对象开局后
