@@ -221,6 +221,7 @@ var DEATH_VIDEOS = [
 function triggerDeathFx(kind){
   if(kind !== 'self') return; // 他人死亡:无特效
   if(typeof document === 'undefined') return;
+  // 动画走 DOM 视频层而非飘牌 canvas,故不再要求 bgRunning/bgCtx 就绪
   var v = document.getElementById('deathFxVideo');
   if(!v || !DEATH_VIDEOS.length) return;
   v.src = DEATH_VIDEOS[Math.floor(Math.random() * DEATH_VIDEOS.length)];

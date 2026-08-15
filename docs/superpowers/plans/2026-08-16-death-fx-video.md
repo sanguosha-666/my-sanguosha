@@ -161,7 +161,7 @@ Expected: 无输出（退出码 0）。
 - [ ] **Step 7: 运行既有死亡检测测试确认 checkDeaths 逻辑未破坏**
 
 Run: `node testclass/run_death_fx_detect_test.js`
-Expected: `death fx detect tests: 5/5 passed`（`other`/`self` 分类调用不变，测试不改）。
+Expected: `death fx detect tests: 6/6 passed`（`other`/`self` 分类调用不变，测试不改）。
 
 - [ ] **Step 8: 提交**
 
@@ -187,7 +187,7 @@ node --check game-bg.js
 node --check render.js
 ```
 
-Expected: 测试 `5/5 passed`；cache-bust check passed；两个语法检查退出码 0。
+Expected: 测试 `6/6 passed`；cache-bust check passed；两个语法检查退出码 0。
 
 - [ ] **Step 2: 人工核对改动**
 

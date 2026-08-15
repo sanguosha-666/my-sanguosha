@@ -28,7 +28,7 @@
 
 ### 1. index.html
 
-- 在 `#bgVeil` 之后新增死亡动画视频元素（与大厅视频同层 z-index:0、DOM 顺序靠后，
+- 在 `#gameBgCanvas` 之后、`#game` 内新增死亡动画视频元素（与大厅视频同层 z-index:0、DOM 顺序靠后，
   可盖住飘牌 canvas）：
 
   ```html
