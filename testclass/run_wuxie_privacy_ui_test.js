@@ -46,7 +46,14 @@ if(!logSource.includes("return '等待其他玩家响应【无懈可击】…';"
 if(!logSource.includes('text = hideWuxiePollingPlayer(text);')){
   throw new Error('常驻日志与 toast 的共用格式化入口未应用匿名化');
 }
-if(!indexSource.includes('<script src="render-log.js?v=395"></script>')){
+// 这条断言的本意是"render-log.js 改动后 index.html 的 ?v= 必须跟着动",但硬编码一个
+// 具体数字必然会被之后任何一次正常的、和无懈可击本身无关的 cache-bust 提交撞坏(CORE-70
+// 给 render-log.js 补注释就撞了一次)——改成"当前 index.html 里 render-log.js 引用的版本号
+// 严格大于这条测试历史断言过的基线版本"，既能验证约定确实被遵守，又不会因为后续任何一次
+// 正常提交递增版本号就失效。
+const RENDER_LOG_MIN_CACHE_BUST_VERSION = 395; // 本测试首次写下时锁定的基线版本
+const renderLogVersionMatch = indexSource.match(/<script src="render-log\.js\?v=(\d+)"><\/script>/);
+if(!renderLogVersionMatch || Number(renderLogVersionMatch[1]) < RENDER_LOG_MIN_CACHE_BUST_VERSION){
   throw new Error('render-log.js 缓存版本未更新，浏览器可能继续使用旧脚本');
 }
 

@@ -130,21 +130,52 @@ function chainedTagText(g, seat){
   return others.length ? ('连环-'+others.join('/')) : '连环';
 }
 
-// ===== "轮到你了"提示:语音 + 大字视觉双重触发,同一个去重 key(见 render() 里的调用点) =====
+// ===== "轮到你了"提示:战鼓音效 + 大字视觉双重触发,同一个去重 key(见 render() 里的调用点) =====
 // lastAnnouncedTurnKey:哨兵初始值 null(不是 undefined——这里不需要"第一次render不提示历史"
 // 这套逻辑,一开始就没有任何"已提示过的轮次",null 天然和任何真实 turnKey 字符串都不相等)。
 let lastAnnouncedTurnKey = null;
-// announceMyTurn:用浏览器内置 SpeechSynthesis 播报"轮到你了"。浏览器的自动播放策略可能在
-// 玩家还没和页面发生过任何交互时静默拒绝播放(不抛错、就是没声音)——showMyTurnBanner 是
-// 专门给这种情况准备的视觉兜底,两者同时触发,不互相依赖对方是否成功。
-function announceMyTurn(){
+// lastAnnouncedPendingKey:"他人回合但自己需要响应"(被杀出闪/濒死求桃/技能询问等)这一类
+// 提示的去重哨兵,和 lastAnnouncedTurnKey 是两套独立的 key/触发条件(见 render() 调用点),
+// 不能共用同一个变量——两种场景可能在同一局游戏里交替出现。
+let lastAnnouncedPendingKey = null;
+// playTurnDrum: 播放"轮到操作"提示音效(战鼓声),覆盖两种场景——轮到自己回合、以及他人
+// 回合但自己需要响应。CORE-70 之前这里用浏览器内置 SpeechSynthesis 播报"轮到你了"语音,
+// 现在换成音效资源,和项目其它语音/音效同一套 new Audio().play().catch() 播放方式
+// (见 maybePlayCardSound/maybePlaySkillSound)。
+// 【资源缺失时的降级】assets/audio/turn_drum.mp3 这个文件本身可能还没有放进项目(见
+// CORE-70 备注,音频资源留给后续补齐)——不存在时 .play() 会 reject,走 .catch() 只
+// console.warn,不抛异常、不影响 showMyTurnBanner 视觉兜底,和项目里所有音效播放的既定
+// 降级方式完全一致,不需要额外的"文件是否存在"检测。
+function playTurnDrum(){
   try{
-    if(!('speechSynthesis' in window)) return;
-    const u = new SpeechSynthesisUtterance('轮到你了');
-    u.lang = 'zh-CN';
-    window.speechSynthesis.cancel(); // 避免多次快速触发时语音排队堆积
-    window.speechSynthesis.speak(u);
-  }catch(e){ /* 语音播放失败静默忽略,反正有大字视觉兜底 */ }
+    const audio = new Audio('assets/audio/turn_drum.mp3');
+    audio.play().catch(err=>console.warn('轮到操作提示音播放失败:', err && err.name, err));
+  }catch(e){ console.warn('轮到操作提示音播放失败:', e); }
+}
+// playStartHorn: 点击"开始游戏"系列按钮时播放号角声,同一套降级方式(资源缺失只console.warn)。
+function playStartHorn(){
+  try{
+    const audio = new Audio('assets/audio/start_horn.mp3');
+    audio.play().catch(err=>console.warn('开始游戏提示音播放失败:', err && err.name, err));
+  }catch(e){ console.warn('开始游戏提示音播放失败:', e); }
+}
+// shouldPlayResponsePendingDrum: "他人回合但自己需要响应"这类战鼓提示的触发判断 + 去重
+// key 计算,从 render() 里抽成纯函数——不依赖 DOM/Audio,方便独立测试,不需要跑一遍
+// 会触碰全部座位卡/手牌 DOM 的重量级 render(g) 才能验证这段去重逻辑对不对。
+// 返回 { relevant, shouldPlay, key }:
+//   relevant=false 表示这一刻根本不构成"他人回合+自己是响应者"(此时 render() 应该把
+//     去重哨兵重置为 null,不留着上一次的 key);
+//   relevant=true 时 shouldPlay 表示这个 key 和上次不同、该播放一次,key 是这次算出的新值
+//   (无论 shouldPlay 是否为 true,render() 都应该把哨兵更新成这个 key)。
+function shouldPlayResponsePendingDrum(g, seat, lastKey){
+  if(!(g && g.started && g.turn!==seat && g.pending && typeof g.pending.askedAt==='number')) {
+    return { relevant:false, shouldPlay:false, key:null };
+  }
+  if(typeof pendingResponderSeat!=='function' || pendingResponderSeat(g,g.pending)!==seat){
+    return { relevant:false, shouldPlay:false, key:null };
+  }
+  const key = g.pending.type+':'+g.pending.askedAt;
+  return { relevant:true, shouldPlay: key!==lastKey, key };
 }
 // showMyTurnBanner: 居中大字短暂覆层,和 showLogToast 同一套"class 加/减触发CSS动画"写法,
 // 但视觉上更醒目(更大字号、居中、短暂遮罩),专用于"轮到我了"这一个场景,不复用常驻的
@@ -1150,13 +1181,24 @@ function render(g){
   // 轮次会重新拿到同一个 turn 座位号,必须靠 roundNum 区分,不能只用 turn 本身。
   const turnKey = g.started ? (g.turn+':'+(g.roundNum||0)) : null;
   if(g.started && g.turn===mySeat && turnKey!==lastAnnouncedTurnKey){
-    announceMyTurn();
+    playTurnDrum();
     showMyTurnBanner();
     lastAnnouncedTurnKey = turnKey;
   } else if(g.turn!==mySeat){
     lastAnnouncedTurnKey = undefined;
   }
-  maybePlayCardSound(g); // 打出手牌语音:和上面announceMyTurn同一批"每次状态更新都检测一次"的位置
+  // CORE-70:他人回合、但自己是当前 pending 的响应者(被杀出闪/濒死求桃/技能询问等)时,
+  // 同一战鼓提示——之前只覆盖"自己回合"这一种情况,分神/切后台时容易错过这类响应。
+  // 触发判断 + 去重 key 计算在 shouldPlayResponsePendingDrum(纯函数,可独立测试),这里
+  // 只管按结果播放/更新哨兵。
+  const respDrum = shouldPlayResponsePendingDrum(g, mySeat, lastAnnouncedPendingKey);
+  if(respDrum.relevant){
+    if(respDrum.shouldPlay) playTurnDrum();
+    lastAnnouncedPendingKey = respDrum.key;
+  } else {
+    lastAnnouncedPendingKey = null;
+  }
+  maybePlayCardSound(g); // 打出手牌语音:和上面playTurnDrum同一批"每次状态更新都检测一次"的位置
   maybePlaySkillSound(g); // 技能发动语音:同一批检测
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();

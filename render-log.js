@@ -250,7 +250,8 @@ const CHAT_EMOJIS = ['😀','😂','🤣','😊','😍','😎','😭','😡','�
 
 // ===== 聊天语音播报(Chat TTS, 2026-08):收到新聊天消息用 speechSynthesis 念内容,
 // 按发送者武将性别选声(男低音/女高音)。纯客户端本地行为,不写 Firebase。
-// 复用 announceMyTurn(render.js)同款写法:cancel() 防堆积 + try/catch 静默失败。
+// 同款写法:cancel() 防堆积 + try/catch 静默失败(render.js 的 playTurnDrum/playStartHorn
+// 音效播放函数也是同一个"失败静默降级"原则,只是那两个用的是 Audio 而不是 speechSynthesis)。
 let chatVoiceEnabled = (function(){
   try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); }
   catch(e){ return true; }
