@@ -1981,15 +1981,27 @@ function seatPickBuildCandidates(g, seat){
   return out;
 }
 function seatPickLocalFallback(g, seat, candidates){
-  // 遍历注册表,对第一个 match 的技能取 fallbackSeat(旧行为);匹配到目标则返回对应候选
+  // 遍历注册表,依次尝试每个 match 的技能取 fallbackSeat(旧行为);匹配到目标则返回对应候选。
+  // CORE-113:第一个matched技能的fallbackSeat为null/undefined时,不能直接return null——
+  // 这不代表"整体不发动",只代表"排在最前面的这个技能自己没有合适目标"(比如断粮满足出牌
+  // 条件但所有人距离都>2),必须continue试后面还有没有别的matched技能确实有候选。旧写法
+  // (直接return null)是本函数创建时就写下的已知限制(见函数创建那次commit的顶部注释),
+  // 当时判断"是既有设计,不是这次新增fallbackSeat引入的问题,不改这个架构"——但soak.js
+  // 压测实测证实这不是无害的次要边界:seatPickMatch只要求"至少一个技能matched"就返回true,
+  // botDecide据此认定seatPick这条链"已处理"而不再往下走runBotActionWindow;一旦排在前面
+  // 的技能matched但自己没候选,machine返回null被botDecide解读成"决定不发动"直接return
+  // true,而实际candidates里可能还挂着后面技能的合法候选——整个回合从此再也摸不到
+  // runBotActionWindow,状态永远不变,soak.js多批压测里稳定复现为stuck@play:null(120局
+  // 修复CORE-112后仍残留约3~4%,均系此因)。改成continue,只有遍历完全部matched技能都没有
+  // 可用候选时才真正返回null(=名副其实的"不发动任何座位技能")。
   const keys = Object.keys(BOT_SEAT_PICKS);
   for(let i=0;i<keys.length;i++){
     const key = keys[i], s = BOT_SEAT_PICKS[key];
     if(typeof s.match!=='function' || !s.match(g, seat)) continue;
     const fs = s.fallbackSeat(g, seat);
-    if(fs===null || fs===undefined) return null; // 旧行为=不发动 → botDecide 拿 null 会崩,须返回候选或由 execute 处理
+    if(fs===null || fs===undefined) continue; // 这个技能自己没有合适目标,继续看后面还有没有别的matched技能有候选
     const hit = candidates.find(function(c){ return c.skillKey===key && c.seat===fs; });
-    return hit || null;
+    if(hit) return hit;
   }
   return null;
 }
@@ -2191,10 +2203,16 @@ BOT_SEAT_PICKS.duanliang = {
     return (me.hand||[]).some(function(c){ return isDuanliangCard(me, c); });
   },
   buildSeatCandidates: function(g, seat){
+    // CORE-113:同guose那次的修复——原来只手写了距离这一条,漏了canTargetDelayTrick里
+    // 真正在挡的【帷幕】(黑色锦囊牌保护)和判定区同名牌限制。真实execute路径
+    // (duanLiang→canTargetDelayTrick)会拒绝这类目标,候选生成却没排除,机器人反复选中
+    // 同一个非法目标→execute静默失败→状态不变,soak.js压测实测复现为永久卡死。
+    const me = g.players[seat];
     const out = [];
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
       if(distance(g, seat, i) > 2) return;
+      if(!canTargetDelayTrick(g, me, {suit:'♠', name:'兵粮寸断'}, i, 2)) return;
       out.push({ seat: i, label: '断粮→'+p.name });
     });
     return out;
@@ -2218,10 +2236,17 @@ BOT_SEAT_PICKS.qixi = {
     return (me.hand||[]).some(isQixiCard);
   },
   buildSeatCandidates: function(g, seat){
+    // CORE-113:同guose/duanliang那次的修复——原来只手写了"目标有牌可拆"这一条,漏了
+    // 真实execute路径(qiXi→CARD_PLAYS['过河拆桥'].canTarget)里的【智迟】免疫和【帷幕】
+    // (黑色锦囊牌保护)。机器人反复选中被这两者保护的目标→execute静默失败→状态不变,
+    // soak.js压测实测复现为永久卡死。
+    const me = g.players[seat];
+    const spec = CARD_PLAYS['过河拆桥'];
     const out = [];
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
       if(!seatHasTargetableCards(p)) return;
+      if(spec && spec.canTarget && !spec.canTarget(g, me, {suit:'♠', name:'过河拆桥'}, i)) return;
       out.push({ seat: i, label: '奇袭→'+p.name });
     });
     return out;
@@ -2245,10 +2270,20 @@ BOT_SEAT_PICKS.guose = {
     return (me.hand||[]).some(isGuoseCard);
   },
   buildSeatCandidates: function(g, seat){
+    // CORE-113:目标合法性必须与真正的execute路径(guoSe→CARD_PLAYS['乐不思蜀'].canTarget)
+    // 完全一致——这里原来只手写了"目标判定区没有同名延时锦囊"这一条,漏了canTarget里
+    // 真正在挡的【谦逊】/【帷幕】保护。旧版本的偏差表现:soak.js压测实测复现——机器人对
+    // 一个被谦逊/帷幕保护的目标反复"选中→execute→guoSe内部canTarget拒绝→状态不变",
+    // 无限循环,永久卡死(stuck@play:null)。修复:直接调用CARD_PLAYS['乐不思蜀'].canTarget
+    // 做同一份判断,不再手写一份简化/过期的复制品——和guoSe自己"避免绕过【谦逊】、【帷幕】
+    // 和判定区同名牌限制"这条既有原则保持单一权威来源,以后官方canTarget逻辑再变化,
+    // 这里不需要跟着手动同步。
+    const me = g.players[seat];
+    const spec = CARD_PLAYS['乐不思蜀'];
     const out = [];
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
-      if((p.delays||[]).some(c=>c && c.name==='乐不思蜀')) return;
+      if(spec && spec.canTarget && !spec.canTarget(g, me, {suit:'♦', name:'乐不思蜀'}, i)) return;
       out.push({ seat: i, label: '国色→'+p.name });
     });
     return out;
@@ -3704,12 +3739,16 @@ async function runBotDecision(g,seat){
     // (pickBestCandidateSeat/pickHealFallbackSeat,见各自注册处),只要对应技能的
     // buildSeatCandidates确实有合法目标,fallbackSeat就不会是null,不会再触发那个
     // "选了但什么都没做"的卡死路径——去掉aiReady门槛,让无密钥模式也能走本地兜底决策。
-    // 【已知的残余边界,不在本次修复范围】seatPickLocalFallback是"取第一个match的技能,
-    // 用它自己的fallbackSeat"——如果排在前面的技能matched但自身buildSeatCandidates为空
-    // (比如断粮满足出牌条件但所有人距离都>2),它的fallbackSeat会是null,
-    // seatPickLocalFallback会直接返回null而不去尝试排在后面的、真正有候选的技能。
-    // 这是seatPickLocalFallback本身"取第一个matched技能"的既有设计,不是这次新增
-    // fallbackSeat引入的问题,这次不改这个架构(一次只改一件事)。
+    // 【CORE-113已修复,更新旧注释】上面这条曾经记录的"残余边界"——
+    // seatPickLocalFallback遇到第一个matched技能fallbackSeat为null时直接返回null、
+    // 不去尝试后面真正有候选的技能——soak.js压测证实这不是无害的次要边界,而是稳定复现
+    // 的永久卡死根因(botDecide('seatPick',...)返回true但什么都没做,runBotDecision
+    // 直接return,永远摸不到runBotActionWindow)。已修复:seatPickLocalFallback改成遇到
+    // 空candidate时continue试下一个matched技能,遍历完都没有才真正返回null。见其函数体
+    // 内的详细注释。同一批还修了guose/duanliang/qixi三个技能的buildSeatCandidates漏判
+    // 【谦逊】/【帷幕】/【智迟】保护(候选生成和真实execute路径canTarget不一致,机器人
+    // 反复选中被保护的目标导致execute静默失败),这两类是本次soak压测残留play:null的
+    // 全部根因,已用soak.js 4批×60局(共240局)验证清零。
     if(await botDecide('seatPick', g, seat)) return;
     if(await botDecide('fangtian', g, seat)) return;
     // 【Part2】天义/强袭/乱武/乱击/奋迅:此前完全没有代码调用这几个start*函数,机器人
