@@ -1402,6 +1402,79 @@ function closeAiTestModal(){
   const m=document.getElementById('aiTestModal');
   if(m) m.classList.add('hidden');
 }
+// ============ CORE-75:本局全量导出(游戏log + AI决策 + 对局元信息) ============
+// 【为什么要它】"本局发生了什么"分散在三个入口:游戏日志(📜)、调试日志(🐛,而且按
+// CORE-72 只记异常)、AI 决策(面板)。出问题后要复现/调查得逐个翻,没有一次性拿到全量
+// 的手段。这里把三者拼成一个 JSON 交给浏览器下载。
+// 【硬约束】纯本地导出,不产生任何 Firebase 写入——不调 tx/gameRef/writeDebugLog,
+// 只读 currentG(render 的本地快照)与 aiDecisionRecords(纯客户端数组)。
+function buildAiDecisionDump(){
+  const g = (typeof currentG!=='undefined') ? currentG : null;
+  return {
+    exportedAt: new Date().toISOString(),
+    roomId: (typeof roomId!=='undefined') ? roomId : null,
+    mySeat: (typeof mySeat!=='undefined') ? mySeat : null,
+    ai: {
+      provider: (typeof aiProvider!=='undefined') ? aiProvider : null,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) ? aiApiModel : null,
+      modelPool: (typeof aiApiModels!=='undefined' && Array.isArray(aiApiModels)) ? aiApiModels.slice() : []
+      // 刻意不导出 aiApiKey:导出文件会被转发给别人看,密钥不能跟着走。
+    },
+    game: g ? {
+      phase: g.phase || null,
+      turn: (typeof g.turn==='number') ? g.turn : null,
+      roundNum: (typeof g.roundNum==='number') ? g.roundNum : null,
+      gameMode: g.gameMode || null,
+      over: !!g.over,
+      winner: (g.winner===undefined) ? null : g.winner,
+      players: (g.players||[]).map(function(p, i){
+        const gen = (p && p.general && typeof getGeneral==='function') ? getGeneral(p.general) : null;
+        return {
+          seat: i,
+          name: (p && p.name) || '',
+          general: (gen && gen.name) || (p && p.general) || '',
+          isBot: !!(p && p.isBot),
+          alive: !!(p && p.alive),
+          hp: (p && p.hp), maxHp: (p && p.maxHp)
+        };
+      })
+    } : null,
+    // 游戏日志全量(pushLog 的记录,和 📜 弹窗同一份数据)
+    log: (g && Array.isArray(g.log)) ? g.log.map(function(l){
+      return (l && typeof l==='object') ? { seq: l.seq, text: l.text } : { seq: null, text: String(l) };
+    }) : [],
+    // AI 决策全量(字段与决策面板/托管信息窗展示的一致)
+    aiDecisions: (typeof aiDecisionRecords!=='undefined' ? aiDecisionRecords : []).map(function(r){
+      return {
+        time: r.time, seat: r.seat, seatName: r.seatName, general: r.general,
+        phase: r.phaseLabel, summary: r.summary, model: r.model,
+        isAutopilot: !!r.isAutopilot,
+        choice: r.choice, reason: r.reason,
+        prompt: r.prompt, rawResponse: r.rawResponse, stateInfo: r.stateInfo
+      };
+    })
+  };
+}
+function downloadAiDecisionDump(){
+  try{
+    const dump = buildAiDecisionDump();
+    const text = JSON.stringify(dump, null, 2);
+    const name = 'sgs-dump-' + (dump.roomId || 'room') + '-'
+      + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+    const blob = new Blob([text], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 0);
+    return name;
+  }catch(e){
+    console.warn('导出本局数据失败', e);
+    return null;
+  }
+}
 // ===== CORE-73:AI 决策查看面板(独立于托管开关,托管关着也能看机器人决策) =====
 function openAiPanelModal(){
   const m=document.getElementById('aiPanelModal');

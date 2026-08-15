@@ -56,7 +56,13 @@ const context = {
   joinRoom: function() {},
   mySeat: 0,
   pushLog: function(log, text) { log.push({seq: log.length, text: text}); return log; },
-  console: console, Math: Math, Date: Date, JSON: JSON, RegExp: RegExp
+  console: console, Math: Math, Date: Date, JSON: JSON, RegExp: RegExp,
+  // CORE-75 导出走 Blob + URL.createObjectURL + <a download>.click():node 里没有这两个
+  // 浏览器 API,给最小 stub(只需要不抛错 + 能观察到确实被调用)。
+  Blob: function(parts, opts){ this.parts = parts; this.type = opts && opts.type; },
+  URL: { createObjectURL: function(){ return 'blob:mock'; }, revokeObjectURL: function(){} },
+  setTimeout: function(f, t){ return setTimeout(f, t); },
+  clearTimeout: function(t){ return clearTimeout(t); }
 };
 context.window.firebase = context.firebase;
 context.window.document = context.document;
@@ -245,6 +251,91 @@ const testCode = String.raw`
     if(typeof closeAiPanelModal!=='function') throw new Error('closeAiPanelModal 应存在');
     openAiPanelModal();
     closeAiPanelModal();
+  });
+
+  // ============ 9. CORE-75:本局全量导出 ============
+  await check('CORE-75: 导出内容含游戏log全量、AI决策全量、对局元信息', function(){
+    roomId = 'room-9527';
+    currentG = {
+      phase:'play', turn:0, roundNum:3, gameMode:'ffa', over:false, winner:null,
+      players: mkG().players,
+      log: [{seq:0,text:'机器人0 出【杀】'},{seq:1,text:'玩家1 打出【闪】'}]
+    };
+    aiDecisionRecords = [{
+      time:'12:00:00', seat:0, seatName:'机器人0', general:'刘备', phaseLabel:'play',
+      summary:'决策(play)', model:'m-x', isAutopilot:false, choice:1, reason:'理由甲',
+      prompt:'P', rawResponse:'R', stateInfo:'S'
+    }];
+    var d = buildAiDecisionDump();
+    if(d.roomId!=='room-9527') throw new Error('应含房间号,实际 '+d.roomId);
+    if(!d.exportedAt) throw new Error('应含导出时间');
+    if(d.log.length!==2 || d.log[1].text.indexOf('闪')<0) throw new Error('应含全量游戏log');
+    if(d.aiDecisions.length!==1) throw new Error('应含全量AI决策');
+    var a = d.aiDecisions[0];
+    if(a.reason!=='理由甲' || a.general!=='刘备' || a.model!=='m-x')
+      throw new Error('AI决策字段应含理由/武将名/模型名,实际 '+JSON.stringify(a));
+    if(a.prompt!=='P' || a.rawResponse!=='R') throw new Error('应含prompt/原始返回');
+    if(d.game.players.length!==3 || d.game.players[0].general!=='刘备')
+      throw new Error('应含玩家列表(座位/名字/武将/是否机器人)');
+    if(d.game.players[0].isBot!==true) throw new Error('应标注是否机器人');
+    if(d.game.roundNum!==3) throw new Error('应含对局元信息');
+  });
+
+  await check('CORE-75: 导出不含AI密钥(导出文件会被转发)', function(){
+    aiApiKey = 'sk-secret-should-not-leak';
+    var text = JSON.stringify(buildAiDecisionDump());
+    if(text.indexOf('sk-secret-should-not-leak')>=0) throw new Error('导出内容不应含AI密钥');
+    var d = buildAiDecisionDump();
+    if(!d.ai || !('provider' in d.ai) || !('modelPool' in d.ai))
+      throw new Error('但应含provider/模型池等非敏感配置');
+  });
+
+  // 硬约束:导出是纯本地行为,不能产生任何 Firebase 写入。
+  // 注意:必须让 download 真正走完整条路径(stub 掉 <a>.click),否则它中途抛错进 catch,
+  // 这条断言就变成"因为没执行到所以没写入"的假绿。
+  await check('CORE-75: 导出动作不产生任何Firebase写入(硬约束)', function(){
+    var writes = 0;
+    var savedTx = tx, savedRef = gameRef, savedDbg = (typeof writeDebugLog!=='undefined') ? writeDebugLog : null;
+    var savedCreate = document.createElement;
+    var clicked = 0;
+    document.createElement = function(tag){
+      var el = savedCreate.call(document, tag);
+      if(tag==='a'){ el.click = function(){ clicked++; }; el.remove = function(){}; }
+      return el;
+    };
+    tx = function(){ writes++; return null; };
+    gameRef = { transaction: function(){ writes++; return { then: function(){ return this; } }; } };
+    writeDebugLog = function(){ writes++; };
+    var name;
+    try{
+      buildAiDecisionDump();
+      name = downloadAiDecisionDump();
+    } finally {
+      tx = savedTx; gameRef = savedRef; if(savedDbg) writeDebugLog = savedDbg;
+      document.createElement = savedCreate;
+    }
+    if(!name || clicked!==1) throw new Error('前置条件:导出应完整执行完(否则断言是假绿),clicked='+clicked+' name='+name);
+    if(writes !== 0) throw new Error('导出不应触发任何 tx/gameRef.transaction/writeDebugLog,实际 '+writes+' 次');
+  });
+
+  await check('CORE-75: downloadAiDecisionDump 走浏览器下载且文件名含房间号', function(){
+    window.__downloadClicked = 0;
+    window.__downloadName = null;
+    var savedCreate = document.createElement;
+    document.createElement = function(tag){
+      var el = savedCreate.call(document, tag);
+      if(tag==='a'){
+        el.click = function(){ window.__downloadClicked++; window.__downloadName = el.download; };
+        el.remove = function(){};
+      }
+      return el;
+    };
+    var name;
+    try{ name = downloadAiDecisionDump(); }
+    finally{ document.createElement = savedCreate; }
+    if(!name || name.indexOf('room-9527')<0) throw new Error('文件名应含房间号,实际 '+name);
+    if(name.slice(-5)!=='.json') throw new Error('应为 .json 文件,实际 '+name);
+    if(window.__downloadClicked!==1) throw new Error('应触发一次浏览器下载点击,实际 '+window.__downloadClicked);
   });
 
   console.log('\n' + '='.repeat(60));
