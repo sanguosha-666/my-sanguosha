@@ -103,6 +103,26 @@ function botStateKey(g,seat){
 // try/finally 保证不管走哪条路径(成功/AI失败回退本地/抛异常)最终都会被清空,不会永久
 // 卡住机器人。
 let botDecisionInFlight=false;
+// ==================== CORE-109:botDecisionInFlight 看门狗 ====================
+// 【要解决什么】botDecisionInFlight 的清零完全依赖 try/finally——如果 runBotDecision
+// 内部某次 await(AI调用/tx)因为浏览器被节流(切后台/锁屏)、或极端异常情况挂死到永远不
+// resolve,finally 永远不会执行,这个标志位会永久卡在 true,该浏览器驱动的全部机器人从
+// 此再也不会被调度(scheduleBotTurn 每次都在"botDecisionInFlight"分支直接 return)。
+// 修复前完全无告警——用户视角就是"游戏卡死了",不知道是浏览器被节流、AI挂死还是别的原因。
+// 【阈值怎么定】callAI 单次超时 AI_CALL_TIMEOUT_MS=15000ms;callAiChooseIndex 轮换模式
+// 最坏情况下会把整个模型池挨个试一遍(见其 maxAttempts=aiApiModels.length),池子上限见
+// AI_MODEL_OPTIONS 静态表(单provider最多个位数模型);botPlay 一次决策还可能连续问两次AI
+// (先选牌再选目标,tryAiBotPlay+tryAiBotBestTarget各自独立走一次callAiChooseIndex)。
+// 120秒是"两次独立决策 × 较大的轮换池"都算进去后仍有安全余量的阈值——真正的"浏览器被
+// 节流/挂死"场景通常是几分钟到几十分钟量级,120秒不会和"AI只是恰好很慢"的正常情况混淆。
+// 【为什么用token而不是直接清零判断botDecisionInFlight】看门狗定时器和真正的
+// runBotDecision调用是两条独立的异步路径——如果调用在看门狗触发前的最后一刻才resolve,
+// 它自己的finally会先把botDecisionInFlight清零;看门狗定时器这时才触发,如果只判断
+// botDecisionInFlight是否为true会误判(此时可能已经是下一次全新决策正确地把它设回true)。
+// botDecisionWatchdogToken在每次真正进入决策前自增,看门狗只在"当前token仍是自己发起
+// 那次"时才动作,避免误伤后续正常发起的决策。
+let botDecisionWatchdogToken=0;
+let BOT_DECISION_WATCHDOG_MS=120000; // let(可测试覆盖),同 BOT_COMMIT_TIMEOUT_MS 的既定写法
 // botMissedSchedule:修复"botDecisionInFlight期间的调度请求被静默丢弃、永久卡死"这个
 // 真实bug(真实dump复现过:郭嘉的guicai决策AI调用还没resolve期间,另一次无懈可击链式
 // 询问轮到郭嘉,scheduleBotTurn 在124行直接return丢弃这次请求,不记录、不重试;
@@ -182,10 +202,34 @@ function scheduleBotTurn(g){
     if(!isBotController(latest) && !(aiTestSelfNow && nowSeat===aiTestAutopilot.seat)) return;
     if(botStateKey(latest,nowSeat)!==key) return;
     botDecisionInFlight=true;
+    const watchdogToken = ++botDecisionWatchdogToken;
+    const watchdogCtx = { g: latest, seat: nowSeat };
+    const watchdogTimer = setTimeout(function(){
+      // 只在"仍是自己发起的这次决策、且标志位仍卡着true"时才动作,避免误伤后续正常
+      // 发起的决策(见上方 botDecisionWatchdogToken 顶部注释)。
+      if(botDecisionWatchdogToken!==watchdogToken || !botDecisionInFlight) return;
+      botDecisionInFlight=false;
+      if(typeof writeDebugLog==='function'){
+        try{
+          writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'ai_lock_stuck', {
+            phase: watchdogCtx.g && watchdogCtx.g.phase || null,
+            pendingType: watchdogCtx.g && watchdogCtx.g.pending && watchdogCtx.g.pending.type || null,
+            turn: watchdogCtx.g && typeof watchdogCtx.g.turn==='number' ? watchdogCtx.g.turn : null,
+            roundNum: watchdogCtx.g && typeof watchdogCtx.g.roundNum==='number' ? watchdogCtx.g.roundNum : null,
+            seat: watchdogCtx.seat,
+            message: 'botDecisionInFlight 超过 '+(BOT_DECISION_WATCHDOG_MS/1000)+' 秒未释放,已强制清零(可能AI调用挂死或浏览器被节流)',
+            playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(watchdogCtx.g) : null
+          });
+        }catch(e){ /* 诊断日志本身出错不影响主流程 */ }
+      }
+      try{ scheduleBotTurn(typeof currentG!=='undefined'?currentG:null); }
+      catch(e){ console.warn('ai_lock_stuck recheck',e); }
+    }, BOT_DECISION_WATCHDOG_MS);
     try{
       if(nowSeat>=0) await runBotDecision(latest,nowSeat);
       else runBotFallbackProbe(latest);
     } finally {
+      clearTimeout(watchdogTimer);
       botDecisionInFlight=false;
       // 补检查:期间有调度请求被丢弃过,现在标志位已清零,用最新的 currentG 重新跑一遍
       // scheduleBotTurn 自己——它会自己判断"当前到底该谁行动",不需要外部传入具体信息。
@@ -223,10 +267,51 @@ function scheduleBotTurn(g){
     }
   },650+Math.floor(Math.random()*500));
 }
+// ==================== CORE-109:bot_decision_failed 通用兜底检测 ====================
+// 【要解决什么】此前 bot_decision_failed 只在强C同窗多步循环(runBotActionWindow)里接了
+// 一处——那里恰好有 tx 的 onCommitted 回调可以直接判断"提交是否真的生效"。botInvoke 是
+// 机器人几乎全部动作(respond/duel/dying/aoeResp/各类seatPick/出牌...184处调用点)共用的
+// 唯一入口,但其余分支都是 fire-and-forget,没有现成的"提交后状态"信号,给每处都接
+// onCommitted 改动面太大(bot.js 顶部注释里明确留了 TODO)。
+// 【这里用的替代方案】不改造每个响应函数,而是在 botInvoke 外层做一次"事后诸葛亮"式检测:
+// 记下调用前的 botStateKey(phase/turn/roundNum/pending关键字段/自己的hp和手牌数/日志条数),
+// BOT_INVOKE_STATE_CHECK_MS 后再读一次当前状态——如果这段时间里状态的这些字段一个都没变,
+// 说明这次提交大概率被服务端守卫拒绝了(正常提交至少会让log.length增加,项目里已确认的
+// 纪律是几乎所有respond*/finish*都会pushLog,见CLAUDE.md)。这是启发式检测,不是精确判定,
+// 可能有极少数"提交成功但恰好这几个字段都没变"的假阴性(漏报,不影响正确性),但假阳性
+// (状态真的变了却被误判为没变)概率很低——sanguosha-666/my-sanguosha#109 明确接受"先可
+// 观测,不要求完美"。阈值复用 BOT_COMMIT_TIMEOUT_MS 同一个 5000ms(强C同一套超时假设)。
+let BOT_INVOKE_STATE_CHECK_MS = 5000; // let(可测试覆盖),同 BOT_COMMIT_TIMEOUT_MS 的既定写法
+function scheduleBotInvokeFailureCheck(g0, seat, preKey, prePendingType){
+  setTimeout(function(){
+    const g1 = (typeof currentG!=='undefined') ? currentG : null;
+    if(!g1 || typeof botStateKey!=='function') return;
+    if(botStateKey(g1,seat)!==preKey) return; // 状态已变化,视为正常提交
+    if(typeof writeDebugLog!=='function') return;
+    try{
+      writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_failed', {
+        phase: g0.phase || null,
+        pendingType: prePendingType,
+        turn: typeof g0.turn==='number' ? g0.turn : null,
+        roundNum: typeof g0.roundNum==='number' ? g0.roundNum : null,
+        seat: seat,
+        message: '机器人在'+(prePendingType||g0.phase||'未知阶段')+'提交了动作,但'
+          +(BOT_INVOKE_STATE_CHECK_MS/1000)+'秒后局面关键字段(阶段/回合/pending/日志条数)'
+          +'未发生任何变化,可能被服务端守卫拒绝(启发式检测,非精确判定)',
+        playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(g1) : null
+      });
+    }catch(e){ /* 诊断日志本身出错不影响主流程 */ }
+  }, BOT_INVOKE_STATE_CHECK_MS);
+}
 function botInvoke(seat,fn){
   const humanSeat=mySeat;
   mySeat=seat;
+  const g0 = (typeof currentG!=='undefined') ? currentG : null;
+  const preKey = (g0 && typeof botStateKey==='function') ? botStateKey(g0,seat) : null;
   try{ fn(); } finally { mySeat=humanSeat; }
+  if(g0 && preKey!==null){
+    scheduleBotInvokeFailureCheck(g0, seat, preKey, g0.pending && g0.pending.type || null);
+  }
 }
 function botKnownRole(g,viewerSeat,targetSeat){
   const target=g.players[targetSeat];
