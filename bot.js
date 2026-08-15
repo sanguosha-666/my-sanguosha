@@ -3796,11 +3796,12 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondShaOffsetChoice((d.available||[])[0]||null)); return;
   }
   // 【系统性扫描发现的紧急盲区收尾】祝融【烈刃】拼点响应:确定性兜底,不追求判断哪张牌更好,
-  // 固定选手牌第一张——目的只是消除卡死，不是让这一步变聪明。手牌为空时(理论上不会,
-  // respondLieRen自己的cardIdx<0校验会拒绝)不动作，交给上游服务端自身的容错。
+  // 固定选手牌第一张——目的只是消除卡死，不是让这一步变聪明。
+  // CORE-112:手牌为空时不再跳过不动作——respondLieRen 已经补上"目标无牌自动判负"的
+  // 分支(cardIndex 参数在这种情况下会被忽略),不再需要在这里先判断手牌是否非空才敢调用,
+  // 无论有没有牌都直接提交,由 respondLieRen 内部决定怎么处理。
   if(g.phase==='lieRenRespond'&&d.type==='lieRenRespond'&&d.targetSeat===seat){
-    const me=g.players[seat];
-    if((me.hand||[]).length>0) botInvoke(seat,()=>respondLieRen(0));
+    botInvoke(seat,()=>respondLieRen(0));
     return;
   }
   // 【系统性扫描发现的紧急盲区收尾】典韦【强袭】选目标:确定性兜底，固定选候选列表第一个
