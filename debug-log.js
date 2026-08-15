@@ -13,7 +13,17 @@
 //   timeout_stuck           —— 30秒超时后 autoRespondAction 返回 null,没有保守动作可提交
 //   bot_decision_failed     —— 机器人决策分支执行了但没能成功提交动作(状态提交前后未变化)
 //   pending_orphan_detected —— normalize 发现不合法 pending,已被强制清空(记录清空前内容)
-const DEBUG_LOG_KINDS = ['js_error', 'timeout_stuck', 'bot_decision_failed', 'pending_orphan_detected'];
+//   bot_decision_trace      —— (CORE-109)AI 决策流水:候选数/来源(llm成功/AI不可用兜底)/
+//                              选中的候选下标与文案,只在配置了 AI 密钥时记录(未配置 AI 走本地
+//                              启发式是预期默认状态,不构成诊断信号,不记)
+//   ai_call_failed          —— (CORE-109)callAI 失败(超时/网络/解析/HTTP错误/鉴权/全池冷却),
+//                              含 provider/model/失败类别/耗时
+//   ai_lock_stuck           —— (CORE-109)botDecisionInFlight 决策锁超过看门狗阈值未释放,
+//                              已被强制清零(可能AI调用挂死或浏览器被节流)
+const DEBUG_LOG_KINDS = [
+  'js_error', 'timeout_stuck', 'bot_decision_failed', 'pending_orphan_detected',
+  'bot_decision_trace', 'ai_call_failed', 'ai_lock_stuck'
+];
 
 // debugLogIsoTime: 本地时区人类可读时间,'YYYY-MM-DD HH:mm:ss'。
 function debugLogIsoTime(ts){
@@ -326,7 +336,10 @@ const DEBUG_LOG_KIND_LABELS = {
   js_error: '❌ JS异常',
   timeout_stuck: '⏱️ 超时卡死',
   bot_decision_failed: '🤖 机器人决策失败',
-  pending_orphan_detected: '🧹 pending被清空'
+  pending_orphan_detected: '🧹 pending被清空',
+  bot_decision_trace: '📋 AI决策流水',
+  ai_call_failed: '📡 AI调用失败',
+  ai_lock_stuck: '🔒 AI决策锁卡死'
 };
 
 // DEBUG_LOG_KIND_HINTS: 每种 kind 的"可能原因"一句话提示(不宣称是百分百根因,只是
@@ -335,7 +348,10 @@ const DEBUG_LOG_KIND_HINTS = {
   js_error: '可能原因:查看下方 stack 里第一条属于项目源码的位置',
   timeout_stuck: '可能原因:当前 pending 类型可能没有配置超时保守动作',
   bot_decision_failed: '可能原因:机器人进入该阶段但没有成功提交合法动作',
-  pending_orphan_detected: '可能原因:pending 结构异常,或引用的玩家状态已失效'
+  pending_orphan_detected: '可能原因:pending 结构异常,或引用的玩家状态已失效',
+  bot_decision_trace: '仅用于取证:message 里的来源标注区分这次是AI真实决策还是本地兜底',
+  ai_call_failed: '可能原因:AI服务超时/网络问题/密钥或额度问题/响应格式解析失败,message 里有具体分类',
+  ai_lock_stuck: '可能原因:控制器浏览器被节流/切后台,或某次AI调用异常挂死未能resolve'
 };
 
 // DEBUG_LOG_ERROR_CODE_HINTS: showDebugLog() 整体读取失败时,按 Firebase 错误 code 给

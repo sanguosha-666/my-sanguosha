@@ -316,6 +316,9 @@ async function callAiChooseIndex(opts){
     && Array.isArray(aiApiModels) && aiApiModels.length>0;
   showAiThinkingIndicator(g, seat);
   let result;
+  let attemptedModel = null; // CORE-109:最后一次实际尝试的模型,失败日志用
+  let allCooled = false; // CORE-109:轮换池全部冷却(哨兵空串),区分"没打请求"和"打了但失败"
+  const callStartedAt = Date.now(); // CORE-109:失败日志记录耗时,粗略反映是否命中超时
   try{
     // 轮换模式:最多试完整个池子(每个模型至多一次——429/413 写冷却后 resolveAiModel
     // 会跳过,非限流错误靠指针前进换下一个,但池子只有一个模型时不无限重打它);
@@ -327,8 +330,10 @@ async function callAiChooseIndex(opts){
       if(model === ''){
         // 全池冷却(哨兵空串):不发注定失败的请求,直接走本地兜底(null)。
         result = null;
+        allCooled = true;
         break;
       }
+      attemptedModel = model;
       result = await callAI(aiProvider, aiApiKey, {
         systemPrompt: sysText,
         userPrompt: userPromptText,
@@ -347,6 +352,25 @@ async function callAiChooseIndex(opts){
   }
   if(autopilotHit && aiTestLastCall) aiTestLastCall.rawResponse = result && result.ok ? result.text : null;
   if(!result || !result.ok){
+    // CORE-109:callAI 失败(或全池冷却)统一记录一条 ai_call_failed——此前完全静默,
+    // 只有 429/413 冷却本身有 console.warn,超时/网络/解析/HTTP错误/鉴权失败/全池冷却
+    // 都无迹可查。只在确实配置了 AI(走到这里必然已过 aiApiKey 守卫)时记,不影响无密钥
+    // 对局(那条路径在函数顶部就已经 return null,不会执行到这里)。
+    if(typeof writeDebugLog==='function'){
+      try{
+        writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'ai_call_failed', {
+          phase: g && g.phase || null,
+          pendingType: g && g.pending && g.pending.type || null,
+          turn: g && typeof g.turn==='number' ? g.turn : null,
+          roundNum: g && typeof g.roundNum==='number' ? g.roundNum : null,
+          seat: seat,
+          message: 'AI调用失败(provider='+aiProvider+',model='+(attemptedModel||'无(全池冷却)')+'):'
+            + (allCooled ? '轮换池全部处于限流冷却中,已跳过请求,回退本地兜底' : ((result&&result.reason||'unknown')+' - '+(result&&result.detail||'')))
+            + ',耗时约'+(Date.now()-callStartedAt)+'ms',
+          playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(g) : null
+        });
+      }catch(e){ /* 诊断日志本身出错不影响主决策流程 */ }
+    }
     if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; } // 未托管零触碰
     return null;
   }
@@ -373,10 +397,36 @@ async function callAiChooseIndex(opts){
     });
   }
   if(idx===null || idx<0 || idx>=candidates.length){
+    // CORE-109:AI 返回了 200,但解析失败或选了候选列表之外的下标——这次决策仍会回退
+    // 本地启发式,但"模型说了没用的话"和"模型没响应"是两种不同的诊断信号,分开记。
+    logBotDecisionTrace(g, seat, 'ai_response_unusable',
+      'AI返回200但解析失败或索引越界(候选数'+candidates.length+',解析结果='+idx+'),回退本地兜底');
     if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
     return null;
   }
+  logBotDecisionTrace(g, seat, 'llm',
+    'AI从'+candidates.length+'个候选中选择了#'+idx+(candidates[idx]&&candidates[idx].label?'('+candidates[idx].label+')':'')
+    +(autopilotHit?'(托管座位)':''));
   return idx;
+}
+// logBotDecisionTrace: CORE-109 决策流水的唯一写入口——只在 callAiChooseIndex 内部调用
+// (该函数是全部 AI 决策路径——L1 controlsChoice/L2-L3 决策总线/botPlay选牌选目标/强C
+// 同窗循环——唯一实际发起 AI 请求的收敛点,见 CLAUDE.md"统一入口"),不需要在各个上层
+// 决策点分别接入。只记 source(llm=AI真实决定/ai_response_unusable=AI响应了但没法用)和
+// 候选规模/选中结果,不记录候选列表全文(可能带手牌相关的具体文案,以及避免单条日志过大)。
+function logBotDecisionTrace(g, seat, source, message){
+  if(typeof writeDebugLog!=='function') return;
+  try{
+    writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_trace', {
+      phase: g && g.phase || null,
+      pendingType: g && g.pending && g.pending.type || null,
+      turn: g && typeof g.turn==='number' ? g.turn : null,
+      roundNum: g && typeof g.roundNum==='number' ? g.roundNum : null,
+      seat: seat,
+      message: '['+source+'] '+message,
+      playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(g) : null
+    });
+  }catch(e){ /* 诊断日志本身出错不影响主决策流程 */ }
 }
 
 // botDecide:决策总线入口。匹配失败/无候选且无 onEmpty 时返回 false(调用方按
