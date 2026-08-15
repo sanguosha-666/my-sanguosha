@@ -838,6 +838,12 @@ function finishDrawPhase(g, seat, n){
         g.pending = { type: 'haoshiPick', seat, half, candidates: targetSeats };
         g.phase = 'haoshiPick';
         g.log = pushLog(g.log, p.name+' 发动【好施】,请选择要交给的角色…');
+        // CORE-112:这里必须 return——不然会继续往下跑到函数末尾的 advancePastPlay(g),
+        // 那一行会把刚设好的 g.phase 立刻覆盖回 'play'(默认分支),而 g.pending 还留着
+        // 'haoshiPick',形成"phase已经是play、pending却还是haoshiPick"的残留状态,
+        // 机器人/UI都对不上号,永久卡死(真实用 soak.js 压测复现过)。挂起的分支必须像
+        // 下面的神速2分支一样显式 return,不能让流程继续往下走。
+        return;
       }
     }
   }
@@ -3568,6 +3574,15 @@ function resumeAfterInterrupt(g, resume, seat){
   } else { // 'sha' 及其它
     if(g.fangtianQueue){ advanceFangtianQueue(g); }
     else if(g.luanwuResume){ continueLuanwuAfterSha(g); }
+    // CORE-112:回到出牌阶段之前必须确认当前回合玩家(g.turn)还活着——'sha'是最常见的
+    // resume类型,涵盖绝大多数杀的响应/结算收尾;如果这张杀的伤害链条(或途中触发的任意
+    // 打断)导致回合玩家自己死亡(比如反伤/连锁效果致命),旧代码在这里无条件写
+    // g.phase='play',回合永远不会推进到下一个存活玩家,机器人/UI都对着一个死人的出牌
+    // 阶段卡死。同一份修复上面 duel/delay/kurou/quhu/fanjian/sanyao 等resume分支早就在
+    // 做(`if(!g.players[g.turn].alive){ startTurn(g,nextAlive(g,g.turn)); }`),这里
+    // 补齐同一套既有写法,不是新发明的模式——只是default分支被漏掉了。真实用soak.js压测
+    // 复现过(卡在 stuck@play:null,g.turn 指向的座位 alive:false)。
+    else if(!g.players[g.turn] || !g.players[g.turn].alive){ startTurn(g, nextAlive(g, g.turn)); }
     else { g.phase='play'; }
   }
 }
@@ -3713,7 +3728,10 @@ function advanceFangtianQueue(g){
   const q=g.fangtianQueue;
   q.idx++;
   while(q.idx<q.targets.length && (!g.players[q.targets[q.idx]] || !g.players[q.targets[q.idx]].alive)) q.idx++;
-  if(q.idx>=q.targets.length){ g.fangtianQueue=null; g.phase='play'; return; }
+  // CORE-112:同 finishSingleShaTarget 收尾处的同一条修复——方天画戟队列问完最后一个
+  // 目标、回到出牌阶段时也要同步清空 g.pending,理由和触发路径完全相同(最后一个目标
+  // 的杀链中途可能挂着 tieqi/liegong 这类未清空的过期 pending)。
+  if(q.idx>=q.targets.length){ g.fangtianQueue=null; g.pending=null; g.phase='play'; return; }
   q.shaInfo=null;
   resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard, undefined);
 }

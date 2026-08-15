@@ -454,6 +454,14 @@ function finishSingleShaTarget(g){
   if(g.fangtianQueue){ advanceFangtianQueue(g); return; }
   // 乱武借 resolveShaUse 出的杀结算完:接回乱武链
   if(g.luanwuResume){ continueLuanwuAfterSha(g); return; }
+  // CORE-112:这张杀彻底结算完毕、回到出牌阶段时,必须同步清空 g.pending——目标在这次杀
+  // 结算途中死亡(afterShaTargetSkills 的 !target.alive 分支)是最常触发的路径:此时
+  // tieqi/liegong 这类"是否发动"的杀链中间态 pending 还挂在 g.pending 上没被清空过,
+  // 只写 g.phase='play' 会导致 phase 已经"回到出牌阶段"、但 pending.type 仍是
+  // tieqi/liegong 这类过期值,机器人/UI 都按这个残留 pending 的响应者身份继续尝试
+  // 响应,永久卡死(真实用 soak.js 压测复现过)。这里补齐清空,和 CLAUDE.md"链结束
+  // 必须显式置空 pending"那条既有纪律一致,不是新发明的模式。
+  g.pending=null;
   g.phase='play';
 }
 

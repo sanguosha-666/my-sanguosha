@@ -212,36 +212,47 @@ function respondLieRen(cardIndex) {
     
     const source = g.players[pending.sourceSeat];
     const target = g.players[mySeat];
-    
+
     if (!source || !source.alive || !target || !target.alive) return g;
-    if (!target.hand || cardIndex < 0 || cardIndex >= target.hand.length) return g;
-    
-    const targetCard = target.hand[cardIndex];
-    if (!targetCard) return g;
-    
+    // CORE-112:target.hand为空时的自动判负——拼点要求双方各出一张牌,目标手牌为空时
+    // 根本凑不出cardIndex(下面 cardIndex>=target.hand.length 恒成立,原实现在这种情况
+    // 直接return g无任何响应),而 triggerLieRen/pickLieRenCard 创建这个pending时从未
+    // 检查过目标手牌数——只要祝融对一个手牌已空的角色发动烈刃就必然触发,不是理论边界
+    // 情况,真实用 soak.js 压测复现过(卡在 lieRenRespond)。修复:目标无牌时视为自动
+    // 判负(拿不出牌意味着点数视为最低,规则上就是没有资格赢),不消耗目标的牌(没有牌
+    // 可消耗),只弃置祝融那张拼点牌。
+    const targetEmptyHanded = !target.hand || target.hand.length === 0;
+    if (!targetEmptyHanded && (cardIndex < 0 || cardIndex >= target.hand.length)) return g;
+
+    const targetCard = targetEmptyHanded ? null : target.hand[cardIndex];
+    if (!targetEmptyHanded && !targetCard) return g;
+
     const sourceCard = pending.sourceCard;
-    
-    // 判断拼点结果：点数大的赢
-    const sourceRank = sourceCard.rank;
-    const targetRank = targetCard.rank;
-    const lieRenWin = sourceRank > targetRank;
-    
-    // 移除双方的拼点牌
+
+    // 判断拼点结果：点数大的赢;目标没牌视为自动判负(source必赢)
+    const lieRenWin = targetEmptyHanded ? true : (sourceCard.rank > targetCard.rank);
+
+    // 移除双方的拼点牌(目标没牌时无需移除)
     const sourceCardIndex = source.hand.findIndex(c => c === sourceCard);
     if (sourceCardIndex !== -1) {
       removeHandCards(g, pending.sourceSeat, sourceCardIndex);
     }
-    
-    const targetCardIndex = target.hand.findIndex(c => c === targetCard);
-    if (targetCardIndex !== -1) {
-      removeHandCards(g, mySeat, targetCardIndex);
+
+    if (!targetEmptyHanded) {
+      const targetCardIndex = target.hand.findIndex(c => c === targetCard);
+      if (targetCardIndex !== -1) {
+        removeHandCards(g, mySeat, targetCardIndex);
+      }
     }
-    
-    // 将拼点牌置入弃牌堆
-    g.discard.push(sourceCard, targetCard);
-    
+
+    // 将拼点牌置入弃牌堆(目标没牌时只有source这一张)
+    if (targetEmptyHanded) g.discard.push(sourceCard);
+    else g.discard.push(sourceCard, targetCard);
+
     const pointText = (c) => c.suit + rankText(c.rank);
-    g.log = pushLog(g.log, `${source.name} 出 ${pointText(sourceCard)}, ${target.name} 出 ${pointText(targetCard)},拼点${lieRenWin ? source.name + '赢' : source.name + '没赢'}`);
+    g.log = pushLog(g.log, targetEmptyHanded
+      ? `${source.name} 出 ${pointText(sourceCard)}, ${target.name} 没有牌可拼点,视为拼点${source.name}赢`
+      : `${source.name} 出 ${pointText(sourceCard)}, ${target.name} 出 ${pointText(targetCard)},拼点${lieRenWin ? source.name + '赢' : source.name + '没赢'}`);
     
     if (lieRenWin) {
       // 祝融赢，从目标处获得一张牌
