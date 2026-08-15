@@ -37,8 +37,10 @@ function debugLogPlayersSummary(g){
 }
 
 // writeDebugLog: 唯一的写入入口,所有触发点都调用这一个函数,不要各处分别拼 JSON。
-// fire-and-forget:内部 catch 住一切失败,绝不能因为日志写失败反过来影响正常游戏逻辑
-// (和 render-table.js 飞牌动画那段 try/catch 的既定原则一致)。
+// fire-and-forget:失败绝不能反过来影响正常游戏逻辑(和 render-table.js 飞牌动画那段
+// try/catch 的既定原则一致),但**不再完全静默**——写入失败时在 Console 留一条
+// console.warn(带上原始 err),否则线上出问题时(比如 Firebase Rules 没有放行
+// debugLogs/{roomId},见 CORE-71)开发者连"到底是不是权限问题"都无从判断。
 function writeDebugLog(roomIdArg, kind, payload){
   try{
     if(typeof db === 'undefined' || !db) return; // Firebase 未配置,静默跳过
@@ -67,8 +69,14 @@ function writeDebugLog(roomIdArg, kind, payload){
     }, payload || {});
     const ref = db.ref('debugLogs/' + roomIdArg + '/' + key);
     const p = ref.set(entry);
-    if(p && typeof p.catch === 'function') p.catch(function(){ /* 静默:日志写失败不影响主流程 */ });
-  }catch(e){ /* 调试日志本身出错绝不能影响主流程 */ }
+    if(p && typeof p.catch === 'function'){
+      p.catch(function(err){
+        if(typeof console !== 'undefined') console.warn('写入调试日志失败:', err);
+      });
+    }
+  }catch(e){
+    if(typeof console !== 'undefined') console.warn('writeDebugLog 出错:', e);
+  }
 }
 
 // logPendingOrphan: normalize() 里"检测到不合法 pending、强制清空"的统一入口。
@@ -321,25 +329,107 @@ const DEBUG_LOG_KIND_LABELS = {
   pending_orphan_detected: '🧹 pending被清空'
 };
 
+// DEBUG_LOG_KIND_HINTS: 每种 kind 的"可能原因"一句话提示(不宣称是百分百根因,只是
+// 缩小排查范围的起点),展示在展开详情里、JSON pretty-print 之前一行。
+const DEBUG_LOG_KIND_HINTS = {
+  js_error: '可能原因:查看下方 stack 里第一条属于项目源码的位置',
+  timeout_stuck: '可能原因:当前 pending 类型可能没有配置超时保守动作',
+  bot_decision_failed: '可能原因:机器人进入该阶段但没有成功提交合法动作',
+  pending_orphan_detected: '可能原因:pending 结构异常,或引用的玩家状态已失效'
+};
+
+// DEBUG_LOG_ERROR_CODE_HINTS: showDebugLog() 整体读取失败时,按 Firebase 错误 code 给
+// 的提示(和上面 DEBUG_LOG_KIND_HINTS 是两回事——那个是"记录本身讲了什么故障",这个是
+// "为什么连记录都读不到")。目前只有 CORE-71 实测确认过的 PERMISSION_DENIED 一种,以后
+// 遇到新的错误 code 再补,不预先猜测穷举。
+const DEBUG_LOG_ERROR_CODE_HINTS = {
+  PERMISSION_DENIED: 'Firebase Rules 可能未允许 debugLogs/{roomId} 访问'
+};
+
+// extractProjectSourceLocation: 从一段浏览器 stack trace 文本里提取第一条"文件名:行号"。
+// 按"是不是 .js 文件"这个通用形状匹配文件名本身,不维护本项目文件名清单——新增/拆分
+// 文件(game.js/render*.js/skills.js 等)不需要同步更新这里。
+// 【子目录前缀】项目按域拆分出的子目录当前只有 sha//skills//stages/ 三个(KNOWN_SUBFOLDERS),
+// 只有这三个名字出现在文件名紧邻前一段路径时才拼上"子目录/文件名"——不能用通用规则把
+// URL 路径里任意一段都当子目录(会把 "github.io/my-sanguosha/xxx.js" 误拼成
+// "my-sanguosha/xxx.js")。以后如果再拆出新的子目录,把名字加进这份小名单即可,维护量
+// 远小于维护一份逐文件清单。
+// 唯一需要主动排除的是明确不属于本项目业务代码的第三方脚本(目前只有 Firebase compat
+// SDK,按域名/文件名关键字排除)。cache-bust 的 "?v=123" 查询串会被剥掉,只留"文件名:行号"。
+const DEBUG_LOG_KNOWN_SUBFOLDERS = ['sha', 'skills', 'stages'];
+function extractProjectSourceLocation(stack){
+  if(!stack || typeof stack !== 'string') return null;
+  const lines = stack.split('\n');
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
+    if(/firebase[-.]|gstatic\.com|googleapis\.com/i.test(line)) continue;
+    const m = /([^\/\s()?]+\.js)(?:\?[^:()]*)?:(\d+)(?::\d+)?/.exec(line);
+    if(!m) continue;
+    const before = line.slice(0, line.indexOf(m[0]));
+    const seg = /([A-Za-z0-9_-]+)\/$/.exec(before);
+    const file = (seg && DEBUG_LOG_KNOWN_SUBFOLDERS.indexOf(seg[1]) >= 0) ? (seg[1] + '/' + m[1]) : m[1];
+    return file + ':' + m[2];
+  }
+  return null;
+}
+
+// debugLogActorLabel: 从 entry.seat + entry.playersSummary(写入时的公开信息快照)里
+// 反查"当前行动玩家"的显示名字。两者任一缺失都返回空串(老记录/早期错误可能没有这两个
+// 字段,不强行拼出"座位undefined"这种半成品文案)。
+function debugLogActorLabel(entry){
+  if(typeof entry.seat !== 'number' || !Array.isArray(entry.playersSummary)) return '';
+  const p = entry.playersSummary[entry.seat];
+  return (p && p.name) ? p.name : ('座位' + entry.seat);
+}
+
 // debugLogEntryHtml: 单条记录的默认视图(摘要行,一直显示)+ 展开详情(默认隐藏,点摘要行
-// 切换)。默认视图:时间 + kind中文 + phase(如果有) + message。展开详情:turn/roundNum/
-// seat/pendingType/pendingSnapshot/playersSummary/stack 整体格式化成 JSON pretty-print。
+// 切换)。
+// 默认视图:时间 + kind中文(js_error 额外拼上"文件名:行号") + phase(如果有) +
+// 当前行动玩家(如果能反查到) + message——控制在"10秒内看懂大概是什么"这个目标内,
+// 不默认铺开 pendingSnapshot/playersSummary/stack 这类大段 JSON。
+// 展开详情:先一行 kind 对应的"可能原因"提示,再是 turn/roundNum/seat/pendingType/
+// pendingSnapshot/playersSummary/stack 整体格式化成 JSON pretty-print(stack 放在
+// detailObj 里,js_error 时是排查的重点)。
 function debugLogEntryHtml(entry, idx){
   const kindLabel = (DEBUG_LOG_KIND_LABELS[entry.kind] !== undefined) ? DEBUG_LOG_KIND_LABELS[entry.kind] : String(entry.kind);
+  const loc = (entry.kind === 'js_error') ? extractProjectSourceLocation(entry.stack) : null;
+  const kindText = loc ? (kindLabel + ' | ' + loc) : kindLabel;
   const phaseHtml = entry.phase ? ('<span class="dbglog-phase">phase=' + escapeHtml(String(entry.phase)) + '</span>') : '';
+  const actor = debugLogActorLabel(entry);
+  const actorHtml = actor ? ('<span class="dbglog-actor">' + escapeHtml(actor) + '</span>') : '';
   const summary = '<div class="dbglog-row" data-idx="' + idx + '">'
     + '<span class="dbglog-time">' + escapeHtml(entry.isoTime || '') + '</span>'
-    + '<span class="dbglog-kind">' + escapeHtml(kindLabel) + '</span>'
+    + '<span class="dbglog-kind">' + escapeHtml(kindText) + '</span>'
     + phaseHtml
+    + actorHtml
     + '<div class="dbglog-msg">' + escapeHtml(entry.message || '') + '</div>'
     + '</div>';
+  const hint = DEBUG_LOG_KIND_HINTS[entry.kind];
+  const hintHtml = hint ? ('<span class="dbglog-hint">' + escapeHtml(hint) + '</span>') : '';
   const detailObj = {
     turn: entry.turn, roundNum: entry.roundNum, seat: entry.seat, pendingType: entry.pendingType,
     pendingSnapshot: entry.pendingSnapshot, playersSummary: entry.playersSummary, stack: entry.stack
   };
-  const detail = '<pre class="dbglog-detail hidden" data-idx="' + idx + '">'
-    + escapeHtml(JSON.stringify(detailObj, null, 2)) + '</pre>';
+  const detail = '<div class="dbglog-detail hidden" data-idx="' + idx + '">'
+    + hintHtml
+    + '<pre>' + escapeHtml(JSON.stringify(detailObj, null, 2)) + '</pre>'
+    + '</div>';
   return '<div class="dbglog-item">' + summary + detail + '</div>';
+}
+
+// debugLogStatsHtml: 顶部统计条——这一批(默认最近50条)里四类各出现几次,帮着一眼判断
+// "这段时间大概出了什么类型的问题",不是精确的历史全量统计(受 limitToFirst(50) 限制)。
+function debugLogStatsHtml(entries){
+  const counts = { js_error: 0, timeout_stuck: 0, pending_orphan_detected: 0, bot_decision_failed: 0 };
+  entries.forEach(function(e){
+    if(e && Object.prototype.hasOwnProperty.call(counts, e.kind)) counts[e.kind]++;
+  });
+  return '<div class="dbglog-stats">最近' + entries.length + '条 —— '
+    + '❌JS异常 ' + counts.js_error + ' ／ '
+    + '⏱️超时卡死 ' + counts.timeout_stuck + ' ／ '
+    + '🧹pending异常 ' + counts.pending_orphan_detected + ' ／ '
+    + '🤖机器人失败 ' + counts.bot_decision_failed
+    + '</div>';
 }
 
 // showDebugLog: 拉取当前房间最近50条记录(orderByKey().limitToFirst(50)——key是反向
@@ -367,12 +457,10 @@ function showDebugLog(){
       body.innerHTML = '<div class="dbglog-empty">暂无调试日志记录(这是好事)</div>';
       return;
     }
-    let html = '';
-    let idx = 0;
-    snap.forEach(function(child){
-      html += debugLogEntryHtml(child.val() || {}, idx);
-      idx++;
-    });
+    const entries = [];
+    snap.forEach(function(child){ entries.push(child.val() || {}); });
+    let html = debugLogStatsHtml(entries);
+    entries.forEach(function(entry, idx){ html += debugLogEntryHtml(entry, idx); });
     body.innerHTML = '<div class="dbglog-list">' + html + '</div>';
     const rows = body.querySelectorAll('.dbglog-row');
     for(let i = 0; i < rows.length; i++){
@@ -381,10 +469,20 @@ function showDebugLog(){
         if(d) d.classList.toggle('hidden');
       };
     }
-  }).catch(function(){
+  }).catch(function(err){
+    // CORE-71:此前这里完全丢弃 err,页面只显示笼统文案、Console 也没有任何原始错误——
+    // 权限问题(Firebase Rules 没放行 debugLogs/{roomId})和网络问题在用户看来完全一样,
+    // 排查时无从下手。现在 Console 留一条带原始 err 的 warn,页面显示简短错误 code,
+    // 常见 code(目前只有 PERMISSION_DENIED)额外给一句排查提示。
+    if(typeof console !== 'undefined') console.warn('读取调试日志失败:', err);
     const m = document.getElementById('infoModal');
     if(!m || m.classList.contains('hidden')) return;
     const body = m.querySelector('.info-body');
-    if(body) body.innerHTML = '<div class="dbglog-empty">拉取调试日志失败,请检查网络或 Firebase 配置</div>';
+    if(!body) return;
+    const code = (err && err.code) ? String(err.code) : '未知错误';
+    const hint = DEBUG_LOG_ERROR_CODE_HINTS[code];
+    body.innerHTML = '<div class="dbglog-empty">调试日志读取失败<br>错误：' + escapeHtml(code)
+      + (hint ? ('<br><span class="dbglog-hint">' + escapeHtml(hint) + '</span>') : '')
+      + '</div>';
   });
 }
