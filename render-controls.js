@@ -1632,12 +1632,12 @@ function renderControls(g){
       const btnRandom=document.createElement('button');
       btnRandom.className='ghost'; btnRandom.textContent='开始游戏(随机武将)（'+cnt+'/'+SEATS+'）';
       btnRandom.disabled = cnt<MIN_PLAYERS;
-      btnRandom.onclick=()=>startGame('random','ffa');
+      btnRandom.onclick=()=>{ if(typeof playStartHorn==='function') playStartHorn(); startGame('random','ffa'); };
       c.appendChild(btnRandom);
       const btnPick=document.createElement('button');
       btnPick.className='ghost'; btnPick.textContent='开始游戏(三选一)（'+cnt+'/'+SEATS+'）';
       btnPick.disabled = cnt<MIN_PLAYERS;
-      btnPick.onclick=()=>startGame('pick','ffa');
+      btnPick.onclick=()=>{ if(typeof playStartHorn==='function') playStartHorn(); startGame('pick','ffa'); };
       if(isRoomOwner(g,mySeat)) c.appendChild(btnPick);
     } else if(selectedGameMode==='identity'){
       // 身份局仅三选一,不提供随机武将
@@ -1648,6 +1648,7 @@ function renderControls(g){
       btnPick.onclick=()=>{
         if(cnt<4){ alert('身份局至少需要 4 名玩家'); return; }
         if(cnt>8){ alert('身份局最多 8 名玩家'); return; }
+        if(typeof playStartHorn==='function') playStartHorn();
         startGame('pick','identity');
       };
       c.appendChild(btnPick);
@@ -1690,6 +1691,7 @@ function renderControls(g){
         let hasNoTeam=false;
         (g.players||[]).forEach(p=>{ if(p){ if(Number.isInteger(p.team)) teams[p.team]=true; else hasNoTeam=true; } });
         if(Object.keys(teams).length<2 || hasNoTeam){ alert('组队模式需至少 2 个队伍且每队至少 1 人,请先在大厅选队'); return; }
+        if(typeof playStartHorn==='function') playStartHorn();
         startGame('pick','team');
       };
       if(isRoomOwner(g,mySeat)) c.appendChild(btnPick);
