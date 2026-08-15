@@ -2536,12 +2536,23 @@ BOT_DECISIONS.jiedaoTwoStep = {
       // 伤害,不能选。阶段A的hasSomeB已经保证选中的A至少有一个非同队的合法B,这里正常
       // 情况下不会因为这条过滤导致候选变空;万一状态变化(比如B临时变成同队)真的导致
       // 候选为空,交给下面execute阶段处理(不会卡住,见execute注释)。
+      // 【CORE-114修复】原来只查距离+空城+同队,没有调用jieDaoShaRen真正会查的
+      // CARD_PLAYS['杀'].canTarget(g,A,{...ignoreShaDistance:true},i)——这条会额外拦
+      // 【智迟】免疫/【同疾】等保护(距离部分因为传了ignoreShaDistance已被跳过,不会和
+      // 下面单独的canReachSha重复判断/冲突)。候选生成和真实execute路径不一致的同一类
+      // 问题CORE-113已经在guose/duanliang/qixi修过一轮,这里是jiedaoTwoStep阶段B同一
+      // 大类的遗漏:机器人反复选中被智迟/同疾保护的B,jieDaoShaRen内部canTarget拒绝,
+      // execute静默失败,状态永远不变——soak.js压测实测复现(探针显示botDecide
+      // ('jiedaoTwoStep',...)反复返回true但状态不变)。
       const A = botTwoStepA.a;
+      const me2 = g.players[seat];
+      const shaSpec = CARD_PLAYS['杀'];
       g.players.forEach(function(p, i){
         if(!p || !p.alive || i===A) return;
         if(!canReachSha(g, A, i)) return;
         if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
         if(sameTeam(g, A, i)) return;
+        if(shaSpec && shaSpec.canTarget && !shaSpec.canTarget(g, g.players[A], {name:'杀', virtual:true, ignoreShaDistance:true}, i)) return;
         out.push({ index: 0, label: '借刀:令 '+g.players[A].name+' 杀 '+p.name, step:'B', seatA: A, seatB: i, jiedaoIdx: jiedaoIdx });
       });
       return out;
@@ -2549,9 +2560,15 @@ BOT_DECISIONS.jiedaoTwoStep = {
     // 阶段 A:镜像 render.js 1467-1468 —— 有武器且存在合法B(hasSomeB)的存活其他角色。
     // 【组队模式修复】hasSomeB 额外要求"至少一个B和A不同队",保证阶段A选中的A在阶段B
     // 一定能找到合法的非同队B(不会出现"选完A才发现B全是队友"的空候选场景)。
+    // 【CORE-114修复】原来没有调用jieDaoShaRen真正会查的
+    // CARD_PLAYS['借刀杀人'].canTarget(g,me,card,i)——这条会拦【智迟】免疫/【帷幕】
+    // (借刀杀人是黑色锦囊牌)保护A。同一类候选生成与真实execute路径不一致的问题。
+    const jiedaoSpec = CARD_PLAYS['借刀杀人'];
+    const jiedaoSelCard = jiedaoIdx>=0 ? me.hand[jiedaoIdx] : {name:'借刀杀人', virtual:true};
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
       if(!p.equips || !p.equips.weapon) return;
+      if(jiedaoSpec && jiedaoSpec.canTarget && !jiedaoSpec.canTarget(g, me, jiedaoSelCard, i)) return;
       const hasSomeB = g.players.some(function(B, bi){
         return B && B.alive && bi!==i && canReachSha(g, i, bi)
           && !(hasCap(B,'kongcheng') && (B.hand||[]).length===0)
