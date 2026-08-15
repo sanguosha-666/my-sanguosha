@@ -443,11 +443,18 @@ async function callAiChooseIndex(opts){
     if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
     return null;
   }
-  logBotDecisionTrace(g, seat, 'llm',
-    'AI从'+candidates.length+'个候选中选择了#'+idx+(candidates[idx]&&candidates[idx].label?'('+candidates[idx].label+')':'')
-    +(autopilotHit?'(托管座位)':''));
+  // 【CORE-72】这里原本无条件记一条 source=llm 的 bot_decision_trace。已删除:debugLogs
+  // 的既定设计原则是"只在异常/该关注的情况下写"(见 debug-log.js 顶部注释),而 AI 正常
+  // 决策在一局里极其频繁,把 js_error/timeout_stuck/bot_decision_failed/ai_call_failed/
+  // ai_lock_stuck 这些真正需要排查的信号整个淹掉。正常决策流水本身仍有价值,但已经有了
+  // 专门的去处:CORE-73 的统一存储 aiDecisionRecords + AI 决策面板(数据不丢,只是换地方,
+  // 而且比这条日志更全——带 prompt/原始返回/理由/武将/模型)。异常类照常记(上面那条
+  // ai_response_unusable 分支)。
   return idx;
 }
+// CORE-72:允许写进 debugLogs 的 bot_decision_trace 来源(异常类)。正常决策('llm')
+// 刻意不在其中——debugLogs 只记异常,正常流水归 AI 决策面板(CORE-73)。
+const BOT_DECISION_TRACE_ABNORMAL_SOURCES = new Set(['ai_response_unusable']);
 // logBotDecisionTrace: CORE-109 决策流水的唯一写入口——只在 callAiChooseIndex 内部调用
 // (该函数是全部 AI 决策路径——L1 controlsChoice/L2-L3 决策总线/botPlay选牌选目标/强C
 // 同窗循环——唯一实际发起 AI 请求的收敛点,见 CLAUDE.md"统一入口"),不需要在各个上层
@@ -455,6 +462,11 @@ async function callAiChooseIndex(opts){
 // 候选规模/选中结果,不记录候选列表全文(可能带手牌相关的具体文案,以及避免单条日志过大)。
 function logBotDecisionTrace(g, seat, source, message){
   if(typeof writeDebugLog!=='function') return;
+  // 【CORE-72】按 source 区分:只有异常类才进 debugLogs。'llm'(AI 正常决策且提交成功)
+  // 是正常流水,不是需要关注的异常,写进来会淹没真正的排查信号——它的去处是 CORE-73 的
+  // AI 决策面板(aiDecisionRecords)。这道守卫留在唯一写入口上,而不是只删调用点:以后
+  // 再有人往这里传正常类 source,也不会悄悄把噪音写回 debugLogs。
+  if(!BOT_DECISION_TRACE_ABNORMAL_SOURCES.has(source)) return;
   try{
     writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_trace', {
       phase: g && g.phase || null,
