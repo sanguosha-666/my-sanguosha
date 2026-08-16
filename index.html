@@ -2059,6 +2059,31 @@
     }
   }
 
+  /* CORE-86(issue #133):平板触控目标尺寸。基础 button 规则(padding:9px 16px +
+     font-size:14px)算出来的实际高度约 40px,低于触屏 44px 的通行下限——鼠标点击 40px
+     完全够用,手指点就偏小了。
+     【为什么单独开一条 @media、不并进上面那块平板规则】上面那块的第一个分支
+     (min-width:641px) and (max-width:1199px) 只看宽度,手机横屏(如 iPhone SE 横屏
+     667×375)宽度 667 同样落在这个区间里。第一版实现直接写进那块,实测把手机横屏的页面
+     总高从 382px 抬到了 403px——那个视口只有 375px 高、本来就已经在溢出边缘,等于让一个
+     已经吃紧的档更吃紧,违反 issue"手机零回归"的验收要求。这里补一条 (min-height:521px)
+     的高度门槛把手机横屏排除掉:521 这个值和既有的手机横屏紧凑块
+     (max-height:520px) and (orientation:landscape) and (pointer:coarse) 严格互补,不留
+     空隙也不重叠——手机横屏继续走它自己那套刻意压小的紧凑尺寸,平板(最矮的 iPad 横屏
+     也有 768px 高)才抬触控目标。这条是 CLAUDE.md 规则22"宽度和高度必须分别拉到下限单独
+     测"的又一个实例:只按宽度分档就会把手机横屏误当平板。
+     只提高度、不改 padding/font-size:min-height 不会把已经够高的按钮撑大,也不影响横向
+     尺寸和文字排版,是这几个可选做法里对既有布局扰动最小的一个(实测 1024×768 到
+     1366×1024 各档均无横向溢出、无换行变化)。
+     选择器带 #controls(特异性 1,0,1)是刻意的:只抬游戏内的操作/响应按钮这一类真正需要
+     手指点的目标,不用裸 button 一刀切——右上角 .icon-btn、AI 调试面板 .aitest-foot-btn
+     这些工具类按钮各自有 class 规则(特异性 0,1,0)本来就压得住裸 button,写成裸 button
+     反而会造成"有的生效有的不生效"这种看起来随机的结果,不如一开始就写清楚范围。 */
+  @media (min-width:641px) and (max-width:1199px) and (min-height:521px),
+         (min-width:641px) and (hover:none) and (pointer:coarse) and (min-height:521px){
+    #controls button{min-height:44px;}
+  }
+
   /* 平板竖屏：武将信息描述收起，给座位、操作区和手牌保留稳定空间。完整说明仍可
      通过武将牌上的“?”查看。 */
   @media (min-width:641px) and (max-width:900px) and (orientation:portrait){
@@ -2239,7 +2264,7 @@
 <script src="bot-ai-bus.js?v=406"></script>
 <script src="bot.js?v=411"></script>
 <script src="ai-bot.js?v=402"></script>
-<script src="render.js?v=407"></script>
+<script src="render.js?v=408"></script>
 <script src="render-table.js?v=394"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=394"></script>

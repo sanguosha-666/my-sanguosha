@@ -233,10 +233,31 @@ function isPortrait(){
   }
   return !!(window.matchMedia&&window.matchMedia('(orientation: portrait)').matches);
 }
+// CORE-86(issue #133):强制横屏遮罩此前只看方向、不看屏幕大小,平板竖屏(iPad 768×1024 /
+// iPad Pro 1024×1366)这种宽度完全够用的设备也被一刀切挡死。这条限制本来就只该针对"竖屏
+// 时宽度窄到放不下横排对手行"的手机——index.html 的响应式体系里,手机竖屏档是
+// @media(max-width:640px)/(max-width:480px),641px 以上早就被当作平板处理(见 index.html
+// "平板布局"那两块:主块 (min-width:641px) and (max-width:1199px) 覆盖平板横竖屏,另有
+// (min-width:641px) and (max-width:900px) and (orientation:portrait) 一整块平板竖屏专用
+// 规则)。**那块平板竖屏 CSS 在这次修复之前是完全执行不到的死代码**——遮罩无条件拦截了
+// 所有竖屏,CSS 写了也永远没机会生效,这本身就是"当初设计意图就是要支持平板竖屏、只是
+// 遮罩这一侧漏改了"的直接证据。
+// 阈值取 640 是为了和 CSS 侧的手机断点严格互补(不留空隙也不重叠):width<=640 恰好就是
+// 手机竖屏 CSS 生效的范围,遮罩只在这个范围内出现;641 及以上交给平板 CSS,放行竖屏。
+// 现实机型不会落进夹缝:竖屏最宽的手机(iPhone Pro Max 一类)约 430 CSS px,远低于 640;
+// 折叠屏展开后约 768px,本来就该按小平板对待,放行是正确行为。
+const LANDSCAPE_GATE_MAX_WIDTH = 640;
+function shouldShowLandscapeGate(){
+  if(!isPortrait()) return false;
+  const w = window.innerWidth;
+  // 拿不到有效宽度的极端环境(和 isPortrait 自己的兜底同一考虑)保持旧行为:提示横屏。
+  if(!Number.isFinite(w) || w <= 0) return true;
+  return w <= LANDSCAPE_GATE_MAX_WIDTH;
+}
 function checkLandscapeGate(){
   const gate = document.getElementById('landscapeGate');
   if(!gate) return;
-  gate.classList.toggle('hidden', !isPortrait());
+  gate.classList.toggle('hidden', !shouldShowLandscapeGate());
 }
 // 和 unlockAudioOnce 同一套写法:页面加载后立即注册监听、立即跑一次初始检测,不等进入
 // 房间/不等第一次 render(g)——大厅表单和游戏内视图都需要这层引导,不依赖任何游戏状态。
