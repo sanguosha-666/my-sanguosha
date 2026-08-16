@@ -2144,6 +2144,9 @@
   <div id="game" class="hidden">
     <!-- 游戏内飘牌 Canvas：z-index:0 垫底，pointer-events:none 不拦截交互 -->
     <canvas id="gameBgCanvas" aria-hidden="true"></canvas>
+    <!-- 死亡动画视频：自己死亡时全屏播放随机一段(见 game-bg.js DEATH_VIDEOS)，
+         不设 loop 属性,播放完毕由 game-bg.js 隐藏并恢复原背景 -->
+    <video id="deathFxVideo" class="bg-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
     <!-- #oppTopRow 只在宽屏桌面布局(.desktop-layout)下才会被使用(装zone==='top'的座位卡),
          窄屏下永远是空的、没有任何CSS属性的占位元素(不挂.opp-row这类会带来无条件基础样式
          的class)——render.js只有desktopLayoutActive为真时才会把座位分流进来,窄屏下
@@ -2208,6 +2211,6 @@
 <script src="render-hand.js?v=394"></script>
 <script src="render-controls.js?v=418"></script>
 <script src="render-log.js?v=396"></script>
-<script src="game-bg.js?v=2"></script>
+<script src="game-bg.js?v=4"></script>
 </body>
 </html>

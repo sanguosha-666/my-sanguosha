@@ -61,7 +61,6 @@ if(typeof document !== 'undefined' && typeof document.addEventListener === 'func
 // ============ 游戏内飘牌 Canvas ============
 var bgCanvas = null, bgCtx = null, bgRafId = 0, bgRunning = false, bgLastTs = 0;
 var fallingCards = [];
-var bgFx = null; // 当前死亡特效状态
 
 function roundRectPath(ctx, x, y, w, h, r){
   ctx.beginPath();
@@ -156,8 +155,6 @@ function bgTick(ts){
     }
     drawDecoCard(bgCtx, c);
   }
-
-  drawBgFx(ts, dt); // dt 同源传参,血滴运动不依赖固定帧步长
 }
 
 // 启动飘牌（进房时调用）
@@ -178,8 +175,12 @@ function stopGameBg(){
   bgRunning = false;
   if(bgRafId){ cancelAnimationFrame(bgRafId); bgRafId = 0; }
   fallingCards = [];
-  bgFx = null;
   if(bgCtx && bgCanvas) bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+  // 回大厅兜底:若死亡动画仍在播放/显示,立即停止并隐藏,恢复默认背景
+  if(typeof document !== 'undefined'){
+    var dv = document.getElementById('deathFxVideo');
+    if(dv) hideDeathFxVideo(dv);
+  }
 }
 
 // 适配 DPR 与画布尺寸
@@ -209,83 +210,42 @@ if(typeof window !== 'undefined'){
 }
 
 // ============ 角色死亡特效 ============
-// kind='self'：血滴滴落→落地晕染→渐隐恢复；kind='other'：全屏血雾弥漫→退去
-// 时间基准：rAF 回调的 timestamp 与 performance.now() 同源；Date.now() 差页面加载时长
-// （~1e12ms），与 drawBgFx 的 now 混用会导致 prog 恒负（特效不可见/不清理）。必须同源。
-function bgNow(){
-  return (typeof performance !== 'undefined' && typeof performance.now === 'function')
-    ? performance.now() : Date.now();
-}
+// 他人死亡不再播放任何特效(原全屏血雾已删除);
+// 自己死亡时在网页背景全屏播放随机一段死亡动画视频,播放完毕自动恢复原背景。
+// 新增动画文件:命名 death-N.mp4 放入 assets/video/,并在本数组追加文件名。
+var DEATH_VIDEOS = [
+  'assets/video/death-1.mp4',
+  'assets/video/death-2.mp4'
+];
+
 function triggerDeathFx(kind){
-  if(!bgCtx || !bgCanvas || !bgRunning) return;
-  if(kind === 'self'){
-    var n = 5 + Math.floor(Math.random() * 4); // 5~8 滴
-    var drops = [];
-    var cw = bgCanvas.clientWidth || bgCanvas.width;
-    var ch = bgCanvas.clientHeight || bgCanvas.height;
-    for(var i = 0; i < n; i++){
-      drops.push({
-        x: Math.random() * cw,      // CSS 像素坐标（setTransform(dpr) 后）
-        y: -20 - Math.random() * 40,
-        vx: (Math.random() - 0.5) * 40,
-        vy: 60 + Math.random() * 90,
-        r: 3 + Math.random() * 3,
-        landY: ch * (0.55 + Math.random() * 0.4),
-        landed: false, landAt: 0
-      });
-    }
-    bgFx = { kind: 'self', t0: bgNow(), dur: 2800, drops: drops };
-  }else if(kind === 'other'){
-    bgFx = { kind: 'other', t0: bgNow(), dur: 1300 };
-  }
+  if(kind !== 'self') return; // 他人死亡:无特效
+  if(typeof document === 'undefined') return;
+  // 动画走 DOM 视频层而非飘牌 canvas,故不再要求 bgRunning/bgCtx 就绪
+  var v = document.getElementById('deathFxVideo');
+  if(!v || !DEATH_VIDEOS.length) return;
+  v.src = DEATH_VIDEOS[Math.floor(Math.random() * DEATH_VIDEOS.length)];
+  v.style.visibility = 'visible';
+  if(typeof v.load === 'function') v.load();
+  var p = v.play();
+  if(p && typeof p.catch === 'function') p.catch(function(){ hideDeathFxVideo(v); });
+  bindDeathFxVideo(v); // 绑定 ended/error,播放完/失败即隐藏恢复
 }
 
-// 绘制当前死亡特效（在飘牌之上）；now 为 rAF timestamp，dt 为当前帧真实步长（秒）
-function drawBgFx(now, dt){
-  if(!bgFx) return;
-  var el = now - bgFx.t0;
-  if(el > bgFx.dur){ bgFx = null; return; }
-  var prog = el / bgFx.dur;
-  if(bgFx.kind === 'self'){
-    var drops = bgFx.drops;
-    for(var i = 0; i < drops.length; i++){
-      var d = drops[i];
-      if(!d.landed){
-        d.y += d.vy * dt;
-        d.x += d.vx * dt;
-        if(d.y >= d.landY){ d.landed = true; d.landAt = el; }
-      }else{
-        var age = el - d.landAt;
-        var radius = d.r * 6 * Math.min(age / 400, 1);
-        var g = bgCtx.createRadialGradient(d.x, d.y, 0, d.x, d.y, radius);
-        g.addColorStop(0, 'rgba(150,30,20,' + (0.55 * (1 - prog)) + ')');
-        g.addColorStop(1, 'rgba(150,30,20,0)');
-        bgCtx.fillStyle = g;
-        bgCtx.beginPath();
-        bgCtx.arc(d.x, d.y, radius, 0, Math.PI * 2);
-        bgCtx.fill();
-      }
-    }
-    // 未落地的血滴画实心圆
-    for(var j = 0; j < drops.length; j++){
-      var d2 = drops[j];
-      if(d2.landed) continue;
-      bgCtx.fillStyle = 'rgba(150,30,20,' + Math.min(0.8, 0.3 + (d2.y / d2.landY) * 0.5) + ')';
-      bgCtx.beginPath();
-      bgCtx.arc(d2.x, d2.y, d2.r, 0, Math.PI * 2);
-      bgCtx.fill();
-    }
-  }else{
-    // 全屏血雾：0→0.35→0 alpha，从边缘向中心
-    var fade = prog < 0.5 ? prog / 0.5 : (1 - prog) / 0.5;
-    var a = Math.min(0.35 * fade, 0.35);
-    var w = bgCanvas.clientWidth || bgCanvas.width, h = bgCanvas.clientHeight || bgCanvas.height;
-    var grd = bgCtx.createRadialGradient(w/2, h/2, Math.min(w, h) * 0.25, w/2, h/2, Math.max(w, h) * 0.75);
-    grd.addColorStop(0, 'rgba(140,28,18,0)');
-    grd.addColorStop(1, 'rgba(140,28,18,' + a + ')');
-    bgCtx.fillStyle = grd;
-    bgCtx.fillRect(0, 0, w, h);
-  }
+// 播放结束或失败:隐藏视频,原背景(飘牌 canvas)自然恢复
+function hideDeathFxVideo(v){
+  if(!v) return;
+  if(typeof v.pause === 'function') v.pause();
+  v.style.visibility = 'hidden';
+  v.removeAttribute('src');
+  if(typeof v.load === 'function') v.load(); // 释放视频资源
+}
+
+function bindDeathFxVideo(v){
+  if(v.__fxBound) return;
+  v.__fxBound = true;
+  v.addEventListener('ended', function(){ hideDeathFxVideo(v); });
+  v.addEventListener('error', function(){ hideDeathFxVideo(v); });
 }
 
 // 页面首次加载时初始化一个随机背景视频。
