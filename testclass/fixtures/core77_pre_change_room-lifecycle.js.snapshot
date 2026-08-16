@@ -310,9 +310,6 @@ function startGame(mode, gameMode){
 // ——这正是"开局第一回合甄姬洛神不触发"那个bug当年的教训(见下面 startTurn 调用处的注释),
 // 不能因为这次改动顺手引入新的手写 g.phase。
 function finishGeneralAssign(g){
-  // CORE-77(issue #122)第一期:开局记录seed。这里只是"生成并记录"这个数值,没有任何
-  // 其它代码读它做决策(见 game.js generateSeed 顶部注释)——本期不改变任何随机结果。
-  g.seed = generateSeed();
   g.deck = buildDeck(); g.discard=[];
   g.lordGeneralPool = null;
   g.players.forEach((p,i)=>{

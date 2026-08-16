@@ -1614,78 +1614,10 @@ function pruneExchangeCards(g){
     g.exchangeCards=[];
   }
 }
-// ============ CORE-77(issue #122)第一期:对局确定性重放 —— 记录基础设施 ============
-// 【本期范围,严格限定】只做"开局记录seed + 动作命令采集"这一件事,不改变任何随机结果、
-// 不引入播种PRNG、不做重放器——那些是issue明确划分的第二/三期。这里新增的两样东西
-// (g.seed / commandLog)本期都只是"被记录"，完全没有任何代码去"读"它们做决策，因此
-// 不可能改变现有任何游戏结果，这是"行为零变化"这个声明能够成立的根本原因：不是承诺
-// "改了但保证等价"，而是压根没有新代码路径会影响已有的判定/随机结果。
-//
-// 【seed】generateSeed() 生成一个无符号32位整数，写入 g.seed（finishGeneralAssign 调用,
-// 见 room-lifecycle.js）。这个值目前只是"记录留痕"——没有任何随机调用点从它派生随机数
-// （那是第二期"随机数种子化"要做的事：把 Math.random() 替换成以 g.seed 播种的 Mulberry32）。
-// 多消耗一次 Math.random() 调用本身不影响后续任何游戏内随机结果——V8 的 Math.random() 各次
-// 调用相互独立，不是"从同一个有限序列里按顺序取值"，所以这里多调一次不会让后面的
-// shuffleSeats/buildDeck 等随机结果发生偏移。
-// 【为什么不用 Math.random()】本期只是"记录"这个数值,还没有任何代码用它驱动游戏内的
-// 随机结果(那是第二期"随机数种子化"的工作)——但如果这里消耗一次 Math.random(),会把
-// 开局之后全部既有随机调用点(shuffleSeats/buildDeck等)在真实、未播种的 Math.random()
-// 流水线里整体错位一位:严格来说就不再是"行为零变化"了——即使规则逻辑没变,给定同一串
-// 真实操作,谁摸到哪张牌会和没有这次改动时不同。改用 Date.now() + 单调自增计数器
-// 异或组合,完全不触碰 Math.random(),保证这次改动前后,同一串操作产出的后续全部随机
-// 结果逐位一致——这一点已用 run_core77_replay_infra_test.js 的"零行为变化"回归实测验证。
-let seedEntropyCounter = 0;
-function generateSeed(){
-  seedEntropyCounter = (seedEntropyCounter + 1) >>> 0;
-  return (Date.now() ^ Math.imul(seedEntropyCounter, 0x9E3779B1)) >>> 0; // 无符号32位整数
-}
-// 【命令日志】commandLog 是纯客户端本地内存数组，刻意不挂在 g 上——不写 Firebase(和
-// aiDecisionRecords/aiSuspicionEvents 同一类"本地诊断/记录数据不进共享状态"的既有写法)。
-// 记录粒度：每次 tx(fn) 调用对应一条记录，字段是"谁、何时、在什么阶段/pending类型下、
-// 由哪个函数发起"——commandName 用调用栈自动捕获直接调用者的函数名，不需要在全项目
-// 上百个 tx() 调用点逐一手工传参数(那样改动面会大得多，而且这个项目从不做代码压缩/
-// 混淆，函数名在生产环境下同样保留，栈解析不会因构建流程失真)。
-// 【已知的、本期刻意不解决的局限】commandName 只是"哪个函数发起了这次tx"，不含具体
-// 参数（比如 playCard 具体打了第几张牌、指定了哪个目标）——真正做到"seed+命令序列可
-// 精确重演"需要参数级别的命令记录，这是第二期"重放器"要解决的问题，需要另外设计怎样
-// 以最小改动面拿到参数（比如统一的动作分发入口，或者干脆逐点位手工传参）。这里如实
-// 记录这个限制，不假装本期已经做到"可重放"。
-let commandLog = [];
-let commandLogSeq = 0;
-const COMMAND_LOG_MAX = 500; // 和 aiSuspicionEvents(上限20)/recentLog(上限15)同一类
-// 用途做法：无限增长的本地诊断数组会拖慢长局，早期项目里已经有多处这个上限惯例。
-// captureCommandName:从调用栈解析"是谁调的 tx()"，纯尽力而为，任何解析失败都返回 null、
-// 绝不抛异常影响主流程(和项目里"诊断类代码用 try/catch 包裹、失败静默"的既有纪律一致)。
-function captureCommandName(){
-  try{
-    const stack = new Error().stack;
-    if(typeof stack!=='string') return null;
-    const lines = stack.split('\n');
-    // lines[0] 是 "Error"；lines[1] 是 captureCommandName 自己那一帧；lines[2] 是 tx()
-    // 那一帧；lines[3] 才是真正调用 tx() 的那个函数(playCard/respondShan等)。
-    const callerLine = lines[3];
-    if(!callerLine) return null;
-    const m = /at\s+([A-Za-z0-9_$.]+)/.exec(callerLine);
-    return m ? m[1] : null;
-  }catch(e){ return null; }
-}
 function tx(fn, onCommitted){
   // 机器人控制端会暂时把 mySeat 切到机器人座位再调用现有动作函数。Firebase 事务可能
   // 因并发而重试，所以必须在创建事务时冻结行动座位。
   const actingSeat=mySeat;
-  // CORE-77 第一期:在真正调用 gameRef.transaction 之前捕获调用者名字并立即入队——
-  // 入队顺序因此和 tx() 被调用的顺序一致(不是"提交成功"的顺序,Firebase 事务在冲突时
-  // 会重试,但本项目单房间几乎不存在真正并发写冲突,先按调用序入队足够)。entry 对象
-  // 引用直接传进下面的 updater 闭包，重试时对同一个 entry 就地覆写 phase/pending 字段
-  // 而不是重复 push——避免"重试几次就多出几条重复日志"。纯本地内存操作，不影响
-  // 任何既有的 g 读写/返回值/normalize/stripUndefined 逻辑，插入点在这些逻辑之前。
-  const commandEntry = {
-    seq: ++commandLogSeq, ts: Date.now(), actingSeat,
-    commandName: captureCommandName(),
-    phaseAtStart: null, pendingTypeAtStart: null
-  };
-  commandLog.push(commandEntry);
-  if(commandLog.length > COMMAND_LOG_MAX) commandLog.shift();
   const p = gameRef.transaction(g => {
     if(!g) return g;
     const visibleSeat=mySeat;
@@ -1695,8 +1627,6 @@ function tx(fn, onCommitted){
       pruneExchangeCards(g);
       const pendingAtStart=g.pending;
       const responderAtStart=pendingResponderSeat(g,pendingAtStart);
-      commandEntry.phaseAtStart = g.phase || null;
-      commandEntry.pendingTypeAtStart = (pendingAtStart && pendingAtStart.type) || null;
       const result = fn(g) || g;
       // 连营队列:本 tx 内 effect/杀结算可能覆盖 pending;收尾再尝试挂起询问
       tryFlushLianying(result);
