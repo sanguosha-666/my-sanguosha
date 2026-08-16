@@ -245,15 +245,18 @@ function triggerLightningFx(hit){
 }
 
 // ============ 过场动画(武将死亡/胜负结算剧情点) ============
-// 触发由 render.js 检测 g.lastMovieFx.seq 变化 + 座位/身份过滤后调用 triggerMovieFx(kind)。
-// 各 kind 播放条件见 render.js maybePlayMovieFx 的注释;素材命名按下面数组放入 assets/video/,
-// 每 kind 可追加多段候选(随机播放)。
+// 触发由 render.js 检测 g.lastMovieFx.seq 变化 + 座位/身份过滤后调用 triggerMovieFx(key)。
+// 各 key 播放条件见 render.js movieVideoKeyForMe 的注释;素材命名按下面数组放入 assets/video/,
+// 每 key 可追加多段候选(随机播放)。
 var MOVIE_VIDEOS = {
   yujiDeath:  ['assets/video/yuji1.mp4'],   // 于吉死 → 于吉以外的玩家
   yujiKill:   ['assets/video/yuji0.mp4'],   // 于吉杀人 → 于吉以外且仍存活的玩家
   zuociDeath: ['assets/video/zuoci0.mp4'],  // 左慈死 → 仅杀死左慈的玩家
-  zuociLose:  ['assets/video/zuoci1.mp4'],  // 结算时左慈所在阵营输 → 仅使用左慈的玩家
-  neiWin:     ['assets/video/han.mp4']      // 内奸胜 → 使用主公/忠臣的玩家
+  zuociLose:  ['assets/video/zuoci1.mp4'],  // 结算左慈所在阵营输 → 仅使用左慈的玩家(最优先)
+  fanLose:    ['assets/video/fanze-lost.mp4'], // 结算反贼输 → 反贼玩家
+  fanWin:     ['assets/video/fanzei-win.mp4'], // 结算反贼胜 → 反贼玩家
+  lordLose:   ['assets/video/zhuzhong-lost.mp4'], // 结算主公输 → 主公玩家
+  zhongLose:  ['assets/video/han.mp4']      // 结算忠臣输 → 忠臣玩家
 };
 
 function triggerMovieFx(kind){

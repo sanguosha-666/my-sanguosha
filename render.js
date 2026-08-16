@@ -669,30 +669,43 @@ function maybePlayLightningFx(g){
 }
 
 // ===== 过场动画:所有客户端共用 g.lastMovieFx.seq 去重 =====
-// 写入端在 game.js 的 finishDying(武将死亡)/checkWin(胜负结算),kind+seat 决定播放条件:
+// 写入端在 game.js 的 finishDying(武将死亡)/checkWin(胜负结算)。kind+seat 决定播放条件,
+// 优先级:左慈 > 于吉 > 阵营统一动画(用户指定)。返回要播的视频 key(即 game-bg.js
+// MOVIE_VIDEOS 的键),null=本客户端不播:
 //   yujiDeath :于吉死 → 于吉以外的玩家播 yuji1
 //   yujiKill  :于吉杀人 → 于吉以外且仍存活的玩家播 yuji0
 //   zuociDeath:左慈死 → 仅杀死左慈的玩家播 zuoci0
-//   zuociLose :结算时左慈所在阵营输 → 仅使用左慈的玩家播 zuoci1
-//   neiWin    :内奸胜 → 使用主公/忠臣的玩家播 han
-// 视频文件映射见 game-bg.js MOVIE_VIDEOS;哨兵模式与 maybePlayLightningFx 同款。
+//   gameOver  :胜负结算 → 按身份分派(左慈输播 zuoci1 / 反贼输 fanze-lost / 反贼胜
+//              fanzei-win / 主公输 zhuzhong-lost / 忠臣输 han)
+// 哨兵模式与 maybePlayLightningFx 同款。
 let lastMovieFxSeq = undefined;
+function movieVideoKeyForMe(g, evt){
+  const me=g.players && g.players[mySeat];
+  switch(evt.kind){
+    case 'yujiDeath':  return (mySeat!==evt.seat) ? 'yujiDeath' : null;
+    case 'yujiKill':   return (mySeat!==evt.seat && !!me && !!me.alive) ? 'yujiKill' : null;
+    case 'zuociDeath': return (mySeat===evt.seat) ? 'zuociDeath' : null;
+    case 'gameOver': {
+      const r=evt.result || {};
+      // 左慈最优先:我是左慈且左慈所在阵营输了 → zuoci1
+      if(me && me.general==='zuoci' && r.zuociLose) return 'zuociLose';
+      // 其次阵营统一动画
+      if(me && me.role==='fan') return r.fan==='win' ? 'fanWin' : (r.fan==='lose' ? 'fanLose' : null);
+      if(me && me.role==='zhu') return r.lord==='lose' ? 'lordLose' : null;
+      if(me && me.role==='zhong') return r.zhong==='lose' ? 'zhongLose' : null;
+      return null; // 内奸等无专属动画
+    }
+  }
+  return null;
+}
 function maybePlayMovieFx(g){
   const evt=g.lastMovieFx;
   if(!evt || !Number.isInteger(evt.seq)){ if(lastMovieFxSeq===undefined) lastMovieFxSeq=0; return; }
   if(lastMovieFxSeq===undefined){ lastMovieFxSeq=evt.seq; return; } // 刷新不补播历史
   if(evt.seq===lastMovieFxSeq) return;
   lastMovieFxSeq=evt.seq;
-  const me=g.players && g.players[mySeat];
-  let shouldPlay=false;
-  switch(evt.kind){
-    case 'yujiDeath':  shouldPlay = (mySeat!==evt.seat); break;
-    case 'yujiKill':   shouldPlay = (mySeat!==evt.seat && !!me && !!me.alive); break;
-    case 'zuociDeath': shouldPlay = (mySeat===evt.seat); break;
-    case 'zuociLose':  shouldPlay = (mySeat===evt.seat); break;
-    case 'neiWin':     shouldPlay = !!(me && (me.role==='zhu'||me.role==='zhong')); break;
-  }
-  if(shouldPlay && typeof triggerMovieFx==='function') triggerMovieFx(evt.kind);
+  const key=movieVideoKeyForMe(g, evt);
+  if(key && typeof triggerMovieFx==='function') triggerMovieFx(key);
 }
 
 

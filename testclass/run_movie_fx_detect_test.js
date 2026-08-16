@@ -1,17 +1,21 @@
 /**
  * 过场动画(武将死亡/胜负结算) 检测/触发测试
  *
- * 背景：用户请求按武将剧情点播放全屏动画(参考死亡动画)：
+ * 背景：用户请求按武将剧情点播放全屏动画(参考死亡动画)，优先级：左慈 > 于吉 > 阵营统一动画。
  *   yujiDeath : 于吉死 → 于吉以外的玩家播 yuji1.mp4
  *   yujiKill  : 于吉杀人 → 于吉以外且仍存活的玩家播 yuji0.mp4
  *   zuociDeath: 左慈死 → 仅杀死左慈的玩家播 zuoci0.mp4
- *   zuociLose : 结算时左慈所在阵营输 → 仅使用左慈的玩家播 zuoci1.mp4
- *   neiWin    : 内奸胜 → 使用主公/忠臣的玩家播 han.mp4
+ *   gameOver  : 胜负结算结果表 → 按身份分派：
+ *               左慈所在阵营输 → 仅左慈玩家播 zuoci1.mp4(最优先)
+ *               反贼输/胜 → 反贼玩家播 fanze-lost.mp4 / fanzei-win.mp4
+ *               主公输 → 主公玩家播 zhuzhong-lost.mp4
+ *               忠臣输 → 忠臣玩家播 han.mp4
  * 实现：
- *   1. 游戏层——game.js markMovieFx 写 g.lastMovieFx={seq, kind, seat}：
- *      finishDying 死亡分支(于吉死/左慈死/于吉杀人)、checkWin 身份局结束(左慈输/内奸胜)。
+ *   1. 游戏层——game.js markMovieFx 写 g.lastMovieFx={seq, kind, seat, result?}：
+ *      finishDying 死亡分支(于吉死/左慈死/于吉杀人，左慈最优先最后写)、
+ *      checkWin 身份局结束(写 gameOver 结果表)。
  *   2. 防御层——game.js normalize 对 undefined/格式非法回退 null。
- *   3. 前端层——render.js 哨兵 lastMovieFxSeq + maybePlayMovieFx 按 kind+座位/身份过滤。
+ *   3. 前端层——render.js 哨兵 lastMovieFxSeq + movieVideoKeyForMe 按 kind+座位/身份分派。
  */
 const vm = require('vm');
 const fs = require('fs');
@@ -144,57 +148,56 @@ check('普通人死亡 → 不写任何过场事件', ()=>{
   assert.strictEqual(g.lastMovieFx, undefined);
 });
 
-check('于吉杀死左慈 → 按序覆盖,只留 yujiKill(seq 递增)', ()=>{
+check('于吉杀死左慈 → 左慈最优先,zuociDeath 覆盖 yujiKill', ()=>{
   const s = freshGameSandbox();
   const g = mkDying(s, 0, 1);
   g.players[0].general = 'zuoci';
   g.players[1].general = 'yuji';
   R(s, 'finishDying')(g, true);
-  // 同一死命中 zuociDeath(seq1)+yujiKill(seq2),后者覆盖;seq 已自增至 2
-  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'yujiKill', seat:1}));
+  // 优先级 左慈>于吉:yujiKill(seq1) 先写,zuociDeath(seq2) 后写覆盖
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'zuociDeath', seat:1}));
 });
 
-console.log('\n== 游戏层：checkWin 结算事件 ==\n');
+console.log('\n== 游戏层：checkWin 结算结果表 ==\n');
 
-check('内奸胜 → neiWin;左慈主公(输方)→ zuociLose', ()=>{
+check('内奸胜 → gameOver 全员输,左慈主公输 zuociLose=true', ()=>{
   const s = freshGameSandbox();
   const p0 = mkPlayer(s,'内奸','yuji', {role:'nei'});
   const p1 = mkPlayer(s,'主公','zuoci', {role:'zhu', hp:0, alive:false});
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'nei');
-  // 左慈在主公座位(输方)先写 zuociLose,neiWin 后写覆盖
-  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'neiWin', seat:null}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'lose',zhong:'lose',zuociLose:true}}));
 });
 
-check('主公与忠臣胜 → 无 neiWin;左慈反贼(输方)→ zuociLose', ()=>{
+check('主公与忠臣胜 → 反贼输,左慈反贼输 zuociLose=true', ()=>{
   const s = freshGameSandbox();
   const p0 = mkPlayer(s,'主公','zhangfei', {role:'zhu'});
   const p1 = mkPlayer(s,'反贼','zuoci', {role:'fan', hp:0, alive:false});
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'lord');
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'zuociLose', seat:1}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'win',zhong:'win',zuociLose:true}}));
 });
 
-check('左慈在赢方(忠臣,主胜) → 不写 zuociLose', ()=>{
+check('反贼胜 → 反贼 win,左慈反贼赢 zuociLose=false', ()=>{
   const s = freshGameSandbox();
-  const p0 = mkPlayer(s,'主公','zhangfei', {role:'zhu'});
-  const p1 = mkPlayer(s,'忠臣','zuoci', {role:'zhong', hp:0, alive:false});
+  const p0 = mkPlayer(s,'反贼','zuoci', {role:'fan'});
+  const p1 = mkPlayer(s,'主公','zhangfei', {role:'zhu', hp:0, alive:false});
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
-  assert.strictEqual(g.winSide, 'lord');
-  assert.strictEqual(g.lastMovieFx, undefined);
+  assert.strictEqual(g.winSide, 'fan');
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'win',lord:'lose',zhong:'lose',zuociLose:false}}));
 });
 
-check('无胜者(none) → 左慈(任意阵营)视为输,写 zuociLose', ()=>{
+check('无胜者(none) → 全员输,左慈输 zuociLose=true', ()=>{
   const s = freshGameSandbox();
   const p0 = mkPlayer(s,'主公','zuoci', {role:'zhu', hp:0, alive:false});
   const p1 = mkPlayer(s,'反贼','zhangfei', {role:'fan', hp:0, alive:false});
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'none');
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'zuociLose', seat:0}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'lose',zhong:'lose',zuociLose:true}}));
 });
 
 console.log('\n== 防御层：normalize ==\n');
@@ -205,10 +208,13 @@ check('脏数据防御：lastMovieFx 格式非法→normalize 回退 null', ()=>
   g.lastMovieFx = { seq:1, kind:123, seat:0 }; // kind 非字符串
   R(s, 'normalize')(g);
   assert.strictEqual(g.lastMovieFx, null);
-  g.lastMovieFx = { seq:'x', kind:'neiWin', seat:null }; // seq 非整数
+  g.lastMovieFx = { seq:'x', kind:'gameOver', seat:null }; // seq 非整数
   R(s, 'normalize')(g);
   assert.strictEqual(g.lastMovieFx, null);
-  g.lastMovieFx = { seq:1, kind:'neiWin', seat:'a' }; // seat 非整数非 null
+  g.lastMovieFx = { seq:1, kind:'gameOver', seat:'a' }; // seat 非整数非 null
+  R(s, 'normalize')(g);
+  assert.strictEqual(g.lastMovieFx, null);
+  g.lastMovieFx = { seq:1, kind:'gameOver', seat:null, result:['x'] }; // result 是数组
   R(s, 'normalize')(g);
   assert.strictEqual(g.lastMovieFx, null);
 });
@@ -220,16 +226,16 @@ check('脏数据防御：lastMovieFx 缺失→normalize 补 null', ()=>{
   assert.strictEqual(g.lastMovieFx, null);
 });
 
-check('合法 lastMovieFx 不被 normalize 清掉', ()=>{
+check('合法 lastMovieFx(含 result)不被 normalize 清掉', ()=>{
   const s = freshGameSandbox();
   const g = mkGame(s);
-  g.lastMovieFx = { seq:3, kind:'zuociLose', seat:1 };
+  g.lastMovieFx = { seq:3, kind:'gameOver', seat:null, result:{fan:'lose',lord:'win',zhong:'win',zuociLose:false} };
   R(s, 'normalize')(g);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:3, kind:'zuociLose', seat:1}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:3, kind:'gameOver', seat:null, result:{fan:'lose',lord:'win',zhong:'win',zuociLose:false}}));
 });
 
 // ============ 前端层沙箱 ============
-console.log('\n== 前端层：render.js 哨兵 + 过滤 ==\n');
+console.log('\n== 前端层：render.js 哨兵 + 分派 ==\n');
 
 const context = {
   firebase:{initializeApp(){return{database(){return{ref(){return{on(){},once(){},transaction(){},set(){},update(){},child(){return this;},remove(){}};}};}};},database(){return this.initializeApp().database();}},
@@ -246,10 +252,10 @@ const fsandbox=vm.createContext(context);
 });
 function FR(code){return vm.runInContext(code,fsandbox);}
 fsandbox.__mvFired=[];
-FR('window.triggerMovieFx=function(kind){ global.__mvFired.push(kind); };');
+FR('window.triggerMovieFx=function(key){ global.__mvFired.push(key); };');
 FR('triggerMovieFx=window.triggerMovieFx;');
 
-// 辅助:一次性跑"基线 + 当前事件",返回触发的 kind 数组
+// 一次性跑"基线 + 当前事件",返回触发的 key 数组
 function fire(evt, mySeat, players){
   FR('lastMovieFxSeq=undefined;');
   FR('mySeat='+mySeat+';');
@@ -262,7 +268,7 @@ function fire(evt, mySeat, players){
 
 check('首次调用(无基线)不触发', function(){
   fsandbox.__mvFired=[];
-  FR('lastMovieFxSeq=undefined; __mvFired=[]; maybePlayMovieFx({players:[{alive:true,role:"zhu"}],lastMovieFx:{seq:5,kind:"neiWin",seat:null}})');
+  FR('lastMovieFxSeq=undefined; __mvFired=[]; maybePlayMovieFx({players:[{alive:true,role:"zhu"}],lastMovieFx:{seq:5,kind:"gameOver",seat:null,result:{}}})');
   assert.strictEqual(fsandbox.__mvFired.length,0,'首次不应触发');
 });
 
@@ -284,25 +290,49 @@ check('zuociDeath：仅杀手触发', function(){
   assert.strictEqual(S(fire({seq:2,kind:'zuociDeath',seat:1}, 0, players)), S([]), '非杀手不应触发');
 });
 
-check('zuociLose：仅左慈玩家触发', function(){
-  const players=[{alive:true},{alive:true}];
-  assert.strictEqual(S(fire({seq:1,kind:'zuociLose',seat:0}, 0, players)), S(['zuociLose']));
-  assert.strictEqual(S(fire({seq:2,kind:'zuociLose',seat:1}, 0, players)), S([]), '非左慈玩家不应触发');
+check('gameOver：反贼胜→fanWin / 反贼输→fanLose', function(){
+  const res={fan:'win',lord:'lose',zhong:'lose',zuociLose:false};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:res}, 0, [{alive:true,role:'fan'}])), S(['fanWin']));
+  const res2={fan:'lose',lord:'win',zhong:'win',zuociLose:false};
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:res2}, 0, [{alive:true,role:'fan'}])), S(['fanLose']));
 });
 
-check('neiWin：主公/忠臣触发,反贼/内奸不触发', function(){
-  assert.strictEqual(S(fire({seq:1,kind:'neiWin',seat:null}, 0, [{alive:true,role:'zhu'}])), S(['neiWin']));
-  assert.strictEqual(S(fire({seq:2,kind:'neiWin',seat:null}, 0, [{alive:true,role:'zhong'}])), S(['neiWin']));
-  assert.strictEqual(S(fire({seq:3,kind:'neiWin',seat:null}, 0, [{alive:true,role:'fan'}])), S([]), '反贼不应触发');
-  assert.strictEqual(S(fire({seq:4,kind:'neiWin',seat:null}, 0, [{alive:true,role:'nei'}])), S([]), '内奸本人不应触发');
+check('gameOver：主公输→lordLose / 主公赢不播', function(){
+  const res={fan:'win',lord:'lose',zhong:'lose',zuociLose:false};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:res}, 0, [{alive:true,role:'zhu'}])), S(['lordLose']));
+  const res2={fan:'lose',lord:'win',zhong:'win',zuociLose:false};
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:res2}, 0, [{alive:true,role:'zhu'}])), S([]), '主公赢不应触发');
+});
+
+check('gameOver：忠臣输→zhongLose / 忠臣赢不播', function(){
+  const res={fan:'win',lord:'lose',zhong:'lose',zuociLose:false};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:res}, 0, [{alive:true,role:'zhong'}])), S(['zhongLose']));
+  const res2={fan:'lose',lord:'win',zhong:'win',zuociLose:false};
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:res2}, 0, [{alive:true,role:'zhong'}])), S([]), '忠臣赢不应触发');
+});
+
+check('gameOver：左慈玩家且左慈输→zuociLose(最优先,覆盖阵营动画)', function(){
+  // 左慈是反贼且反贼输:应播 zuociLose 而非 fanLose(左慈最优先)
+  const res={fan:'lose',lord:'win',zhong:'win',zuociLose:true};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:res}, 0, [{alive:true,role:'fan',general:'zuoci'}])), S(['zuociLose']));
+  // 左慈是主公且主公输:播 zuociLose 而非 lordLose
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:res}, 0, [{alive:true,role:'zhu',general:'zuoci'}])), S(['zuociLose']));
+  // 左慈玩家但左慈没输(反贼赢):按阵营播 fanWin
+  const res2={fan:'win',lord:'lose',zhong:'lose',zuociLose:false};
+  assert.strictEqual(S(fire({seq:3,kind:'gameOver',seat:null,result:res2}, 0, [{alive:true,role:'fan',general:'zuoci'}])), S(['fanWin']));
+});
+
+check('gameOver：内奸无专属动画不播', function(){
+  const res={fan:'lose',lord:'lose',zhong:'lose',zuociLose:false};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:res}, 0, [{alive:true,role:'nei'}])), S([]), '内奸不应触发');
 });
 
 check('seq 未变不重复触发', function(){
   const players=[{alive:true,role:'zhu'}];
   fsandbox.__p=players;
   FR('lastMovieFxSeq=undefined; mySeat=0; __mvFired=[];');
-  FR('maybePlayMovieFx({players:__p,lastMovieFx:{seq:1,kind:"neiWin",seat:null}});');
-  FR('maybePlayMovieFx({players:__p,lastMovieFx:{seq:1,kind:"neiWin",seat:null}});');
+  FR('maybePlayMovieFx({players:__p,lastMovieFx:{seq:1,kind:"gameOver",seat:null,result:{fan:"win",lord:"lose",zhong:"lose",zuociLose:false}}});');
+  FR('maybePlayMovieFx({players:__p,lastMovieFx:{seq:1,kind:"gameOver",seat:null,result:{fan:"win",lord:"lose",zhong:"lose",zuociLose:false}}});');
   assert.strictEqual(fsandbox.__mvFired.length,0,'同 seq 不应重复触发');
 });
 
