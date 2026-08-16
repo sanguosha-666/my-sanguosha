@@ -1612,11 +1612,30 @@ function clearAiTestRecords(){
   renderAiTestRecords();
   renderAiPanelRecords();
 }
+// CORE-83(issue #130)修复:AI 决策面板(#118/CORE-73)与"下载本局"导出(#120/CORE-75)
+// 的核心用途就是"结束后复盘/导出调查",但游戏结束(phase变over)时这里原本会把
+// aiDecisionRecords整体清空——这是托管信息窗时代的旧语义("这局结束了,信息窗记录
+// 没意义"),CORE-73/CORE-75 把决策记录升级成"本局全部AI决策统一存储+导出数据源"之后,
+// 没有同步调整这个清空时机,直接摧毁了这两个功能的核心价值(用户实测:结束后面板空白、
+// 导出dump的aiDecisions:[])。
+// 修法:清空时机从"游戏结束"改到"确认进入了一局新对局"——用 g.seed(CORE-77/issue #122
+// 每局开始时生成的唯一值)判断"这是不是和上次观察到的不是同一局",而不是继续用旧的
+// aiTestLastObservedPhase 只看phase字符串(那种判法天然绑死在"进入over就清空"这个错误
+// 时机上,治标不治本)。g.seed 是**共享房间状态**的一部分,所有客户端(不分是不是房主)
+// 通过 Firebase 同步都会观察到同一次变化——不依赖谁点了"再来一局"按钮(和CORE-84同一个
+// "不能用client-action级hook、要用共享状态级观察"的教训)。第一次观察到某个seed时
+// (aiTestLastObservedSeed尚为null)不清空——本来就是空的,清了也没意义,只有"确认换到了
+// 下一局"(seed变成一个新值)才清。stopAiTestAutopilot()继续保留在结束时触发,和记录
+// 清空解耦(游戏结束仍应该自动停止托管,只是不该顺带清空刚打完这局的记录)。
 let aiTestLastObservedPhase = null;
-function syncAiTestGamePhase(phase){
+let aiTestLastObservedSeed = null;
+function syncAiTestGamePhase(phase, seed){
   if(phase==='over' && aiTestLastObservedPhase!=='over'){
-    clearAiTestRecords();
     if(aiTestAutopilot.active) stopAiTestAutopilot();
+  }
+  if(Number.isInteger(seed) && seed!==aiTestLastObservedSeed){
+    if(aiTestLastObservedSeed!==null) clearAiTestRecords();
+    aiTestLastObservedSeed = seed;
   }
   aiTestLastObservedPhase=phase;
 }

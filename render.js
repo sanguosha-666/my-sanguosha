@@ -1269,7 +1269,7 @@ function render(g){
   // 行动"的座位判定 bug 长得一模一样,会把排查方向带偏,所以这里用 try/finally 拆开。
   try{
   normalize(g);
-  if(typeof syncAiTestGamePhase==='function') syncAiTestGamePhase(g.phase);
+  if(typeof syncAiTestGamePhase==='function') syncAiTestGamePhase(g.phase, g.seed);
   // 轮到自己回合:语音+大字视觉双重提示,同一个触发时机、同一套去重判断——只在"刚刚轮到
   // 自己回合"这一刻提示一次,不会因为同一回合内的其它状态变化(如无关的日志/别人操作)
   // 而反复重复提示。
