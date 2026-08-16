@@ -337,6 +337,86 @@ const testCode = String.raw`
     }
   });
 
+  // ============ CORE-80(issue #127):导出的玩家列表应带身份,且遵守隐藏信息规则 ============
+  // issue 原文以为"游戏结束时不揭示所有玩家身份"是真实的游戏逻辑缺陷,但核实发现
+  // checkWin(game.js)的身份局分支早在 commit 81b95a5(2026-07-19)就已经实现"结束时
+  // 全员roleRevealed=true、座位卡靠既有canSeeRole渲染自动展示"(run_identity_mode_test.js
+  // Task10 四项断言仍然全绿,确认这条链路完好)。issue 用户附带的诊断dump之所以看不到任何
+  // 身份字段,是因为 buildAiDecisionDump 的玩家列表映射从一开始就没有导出 role/roleRevealed
+  // 这两个字段——和 CORE-81 是完全同一类问题(诊断导出功能本身的完整性缺口,不是真实游戏
+  // 逻辑缺陷),只是这次缺的是"身份"这一个字段而不是"over"。
+  await check('CORE-80: 身份局对局结束后,导出的玩家列表应带上已揭晓的身份(role字段)', function(){
+    currentG = {
+      phase:'over', turn:0, roundNum:5, gameMode:'identity', winner:'反贼',
+      players: [
+        Object.assign({}, mkG().players[0], { role:'zhu', roleRevealed:true }),
+        Object.assign({}, mkG().players[1], { role:'fan', roleRevealed:true }),
+        Object.assign({}, mkG().players[2], { role:'zhong', roleRevealed:true })
+      ],
+      log: []
+    };
+    var d = buildAiDecisionDump();
+    if(d.game.players[0].role!=='主公') throw new Error('座位0应导出身份"主公",实际 '+d.game.players[0].role);
+    if(d.game.players[1].role!=='反贼') throw new Error('座位1应导出身份"反贼",实际 '+d.game.players[1].role);
+    if(d.game.players[2].role!=='忠臣') throw new Error('座位2应导出身份"忠臣",实际 '+d.game.players[2].role);
+  });
+
+  await check('CORE-80对照组: 身份局对局进行中,未揭晓的身份不应导出(不能因为加了这个字段就意外泄露隐藏信息)', function(){
+    currentG = {
+      phase:'play', turn:0, roundNum:2, gameMode:'identity', winner:null,
+      players: [
+        Object.assign({}, mkG().players[0], { role:'zhu', roleRevealed:false }), // 主公恒公开,即使roleRevealed=false也可见
+        Object.assign({}, mkG().players[1], { role:'fan', roleRevealed:false }),  // 未揭晓的反贼,不应导出
+        Object.assign({}, mkG().players[2], { role:'zhong', roleRevealed:false }) // 未揭晓的忠臣,不应导出
+      ],
+      log: []
+    };
+    mySeat = 2; // 从座位2(忠臣自己)的视角导出:能看到自己+主公,看不到未揭晓的座位1
+    var d = buildAiDecisionDump();
+    if(d.game.players[0].role!=='主公') throw new Error('主公恒公开,任何视角都应可见,实际 '+d.game.players[0].role);
+    if(d.game.players[1].role!==null) throw new Error('未揭晓的反贼不应导出身份(应为null),实际 '+d.game.players[1].role);
+    if(d.game.players[2].role!=='忠臣') throw new Error('座位2导出自己的身份应可见(viewerSeat===targetSeat),实际 '+d.game.players[2].role);
+    mySeat = 0;
+  });
+
+  await check('CORE-80对照组: 非身份局(ffa)不应导出role字段(canSeeRole恒false,无回归)', function(){
+    currentG = {
+      phase:'play', turn:0, roundNum:2, gameMode:'ffa', winner:null,
+      players: mkG().players,
+      log: []
+    };
+    var d = buildAiDecisionDump();
+    if(d.game.players.some(function(p){ return p.role!==null; })) throw new Error('非身份局不应导出任何role,实际 '+JSON.stringify(d.game.players.map(function(p){return p.role;})));
+  });
+
+  await check('CORE-80破坏性验证: 若不接canSeeRole、无条件导出p.role,进行中的隐藏身份也会被泄露(证明对照组断言有鉴别力)', function(){
+    var original = buildAiDecisionDump;
+    buildAiDecisionDump = function(){
+      var d = original();
+      var g = currentG;
+      d.game.players.forEach(function(pp, i){
+        var p = g.players[i];
+        pp.role = p && p.role && typeof ROLE_LABEL!=='undefined' ? (ROLE_LABEL[p.role]||p.role) : null; // 旧bug写法:无条件导出,不查canSeeRole
+      });
+      return d;
+    };
+    try{
+      currentG = {
+        phase:'play', turn:0, roundNum:2, gameMode:'identity', winner:null,
+        players: [
+          Object.assign({}, mkG().players[0], { role:'zhu', roleRevealed:false }),
+          Object.assign({}, mkG().players[1], { role:'fan', roleRevealed:false })
+        ],
+        log: []
+      };
+      mySeat = 0;
+      var d = buildAiDecisionDump();
+      if(d.game.players[1].role!=='反贼') throw new Error('无条件导出版本应该(错误地)泄露未揭晓的反贼身份,如果没有说明对照组断言对这段逻辑没有鉴别力');
+    } finally {
+      buildAiDecisionDump = original;
+    }
+  });
+
   await check('CORE-75: 导出不含AI密钥(导出文件会被转发)', function(){
     aiApiKey = 'sk-secret-should-not-leak';
     var text = JSON.stringify(buildAiDecisionDump());
