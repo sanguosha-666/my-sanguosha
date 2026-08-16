@@ -587,9 +587,28 @@ const AI_MODEL_OPTIONS = {
 
 // ---------- 统一网络层 ----------
 // callAI(provider, apiKey, {systemPrompt, userPrompt, maxTokens, model}) ->
-//   Promise<{ok:true, text} | {ok:false, reason:'network'|'auth'|'timeout'|'parse'|'other', detail}>
+//   Promise<{ok:true, text, usage} | {ok:false, reason:'network'|'auth'|'timeout'|'parse'|'other', detail}>
+// usage(CORE-76)= {input,output,total} 的 token 用量,取不到时为 null。
 // fetch/超时竞速/错误归类只在这一处实现,adapter 本身完全不碰网络。
 const AI_CALL_TIMEOUT_MS = 15000;
+
+// parseAiUsage:从 provider 原始响应里取 token 用量,归一化成 {input,output,total}。
+// 覆盖两种命名:OpenAI 兼容家族(openrouter/groq/hf/cohere/cerebras)的
+// prompt_tokens/completion_tokens/total_tokens,与 Claude 的 input_tokens/output_tokens。
+// 任何取不到/结构不符的情况一律返回 null(调用方按"这次没有用量数据"处理,不报错)。
+function parseAiUsage(json){
+  try{
+    const u = json && json.usage;
+    if(!u || typeof u!=='object') return null;
+    const num = v => (typeof v==='number' && isFinite(v)) ? v : null;
+    const input = num(u.prompt_tokens) !== null ? num(u.prompt_tokens) : num(u.input_tokens);
+    const output = num(u.completion_tokens) !== null ? num(u.completion_tokens) : num(u.output_tokens);
+    let total = num(u.total_tokens);
+    if(total===null && input!==null && output!==null) total = input + output;
+    if(input===null && output===null && total===null) return null;
+    return { input: input, output: output, total: total };
+  }catch(e){ return null; }
+}
 
 function callAI(provider, apiKey, opts){
   // 【tri 模式分发(2026-08-12)】provider==='tri' 时 apiKey 是三段斜杠密钥
@@ -660,7 +679,11 @@ function callAI(provider, apiKey, opts){
     return res.json().then(json=>{
       try{
         const text = adapter.parseResponse(json);
-        return { ok:true, text };
+        // CORE-76:顺带把 token 用量带出去(成本追踪)。刻意不做成每个 adapter 各写一份
+        // parseUsage——usage 不是各家的协议差异,而是同一个字段的两种命名变体
+        // (OpenAI 兼容家族 prompt/completion_tokens vs Claude input/output_tokens),
+        // 归一化一处写完即可;取不到时返回 null,绝不影响 text 本身。
+        return { ok:true, text, usage: parseAiUsage(json) };
       }catch(e){
         return { ok:false, reason:'parse', detail:'响应解析失败: '+e.message };
       }
@@ -1450,6 +1473,7 @@ function buildAiDecisionDump(){
         phase: r.phaseLabel, summary: r.summary, model: r.model,
         isAutopilot: !!r.isAutopilot,
         choice: r.choice, reason: r.reason,
+        usage: r.usage, submitResult: r.submitResult,
         prompt: r.prompt, rawResponse: r.rawResponse, stateInfo: r.stateInfo
       };
     })
@@ -1550,7 +1574,30 @@ function recordDetailHtml(rec, i){
     // 必须能对上"哪条决策用了哪个模型";取自 callAiChooseIndex 的 attemptedModel。
     +'<div class="aitest-sec">④ 使用的模型</div><div>'+escapeHtml(rec.model || '(未知)')+'</div>'
     +'<div class="aitest-sec">⑤ 武将</div><div>'+escapeHtml(rec.general || '(未知)')+'</div>'
+    // CORE-76:全链路补齐——⑥ token 用量(成本追踪)、⑦ 提交结果(这次决策最后成没成)
+    +'<div class="aitest-sec">⑥ token用量</div><div>'+escapeHtml(aiUsageText(rec.usage))+'</div>'
+    +'<div class="aitest-sec">⑦ 提交结果</div><div>'+escapeHtml(aiSubmitResultText(rec.submitResult))+'</div>'
     +'</div>';
+}
+// CORE-76:token 用量的展示文案。取不到时明确写"(无)"而不是留空——留空会被误读成
+// "用了0个token"。
+function aiUsageText(u){
+  if(!u || typeof u!=='object') return '(无)';
+  const part = [];
+  if(typeof u.input==='number') part.push('输入 '+u.input);
+  if(typeof u.output==='number') part.push('输出 '+u.output);
+  if(typeof u.total==='number') part.push('合计 '+u.total);
+  return part.length ? part.join(' / ') : '(无)';
+}
+// CORE-76:提交结果的展示文案。注意 'rejected_or_timeout' 是一个合并档位——底层检测
+// (botStateKey 前后对比)本身分不清"被服务端守卫拒绝"和"提交超时未生效",两者的表现
+// 都是"局面关键字段一个都没变"。刻意不假装能分开:与既有 bot_decision_failed 的检测
+// 口径保持完全一致(同一套 botStateKey、同一个 5000ms 窗口)。
+function aiSubmitResultText(r){
+  if(r==='committed') return '成功(局面已变化)';
+  if(r==='rejected_or_timeout') return '未生效(被服务端守卫拒绝或超时,启发式检测分不清两者)';
+  if(r==='pending') return '已提交,结果待判定';
+  return '(未提交/未走到提交环节)';
 }
 function toggleAiTestRecord(idx){
   // 同一条记录可能同时出现在托管信息窗和决策面板里(同一 data-idx),两处一起开合,
@@ -1611,6 +1658,12 @@ function aiDecisionRecordStart(g, seat, info){
       choice: null,
       reason: null,
       model: null,
+      // CORE-76:token 用量(callAI 返回的 usage,归一化 {input,output,total}),回填时写入。
+      usage: null,
+      // CORE-76:提交结果。'pending'=已决策待判定/'committed'=状态已变化(提交生效)/
+      // 'rejected_or_timeout'=检测窗口内局面关键字段一个都没变(被服务端守卫拒绝或超时未生效)/
+      // null=这次决策没走到提交(如 AI 调用失败、解析失败退本地兜底)。
+      submitResult: null,
       isAutopilot: !!info.isAutopilot
     };
     appendAiTestRecord(rec);
@@ -1622,7 +1675,7 @@ function aiDecisionRecordStart(g, seat, info){
 function fillAiDecisionRecord(rec, fields){
   try{
     if(!rec || !fields) return;
-    ['prompt','rawResponse','choice','reason','model'].forEach(function(k){
+    ['prompt','rawResponse','choice','reason','model','usage','submitResult'].forEach(function(k){
       if(fields[k]!==undefined) rec[k]=fields[k];
     });
     const idx = aiDecisionRecords.indexOf(rec);

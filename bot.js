@@ -282,11 +282,32 @@ function scheduleBotTurn(g){
 // (状态真的变了却被误判为没变)概率很低——sanguosha-666/my-sanguosha#109 明确接受"先可
 // 观测,不要求完美"。阈值复用 BOT_COMMIT_TIMEOUT_MS 同一个 5000ms(强C同一套超时假设)。
 let BOT_INVOKE_STATE_CHECK_MS = 5000; // let(可测试覆盖),同 BOT_COMMIT_TIMEOUT_MS 的既定写法
+// CORE-76:提交结果回写到 AI 决策记录。和上面 bot_decision_failed 用**同一套**判据
+// (同一个 botStateKey 前后对比、同一个 5000ms 窗口)——验收标准明确要求"与
+// bot_decision_failed 检测口径一致",所以这里不另起一套判断。
+// 【为什么"被拒"和"超时"合并成一档】这套启发式只能看出"局面关键字段一个都没变",
+// 天然分不清"被服务端守卫拒绝"和"提交了但超时未生效"——两者的观测表现完全相同。
+// 与其编一个分不出来的三档,不如如实记成合并档 'rejected_or_timeout',展示文案里
+// 也写明这一点(aiSubmitResultText)。
+function markAiDecisionSubmitResult(seat, result){
+  try{
+    if(typeof aiCurrentDecisionRecord==='undefined' || !aiCurrentDecisionRecord) return;
+    // 座位不一致说明这条记录不是这次 botInvoke 对应的那次决策,宁可漏记不错记。
+    if(aiCurrentDecisionRecord.seat!==seat) return;
+    if(typeof fillAiDecisionRecord==='function'){
+      fillAiDecisionRecord(aiCurrentDecisionRecord, { submitResult: result });
+    }
+  }catch(e){ /* 诊断用,失败不影响主流程 */ }
+}
 function scheduleBotInvokeFailureCheck(g0, seat, preKey, prePendingType){
   setTimeout(function(){
     const g1 = (typeof currentG!=='undefined') ? currentG : null;
     if(!g1 || typeof botStateKey!=='function') return;
-    if(botStateKey(g1,seat)!==preKey) return; // 状态已变化,视为正常提交
+    if(botStateKey(g1,seat)!==preKey){
+      markAiDecisionSubmitResult(seat, 'committed'); // 状态已变化,视为正常提交
+      return;
+    }
+    markAiDecisionSubmitResult(seat, 'rejected_or_timeout');
     if(typeof writeDebugLog!=='function') return;
     try{
       writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_failed', {
@@ -309,6 +330,9 @@ function botInvoke(seat,fn){
   const g0 = (typeof currentG!=='undefined') ? currentG : null;
   const preKey = (g0 && typeof botStateKey==='function') ? botStateKey(g0,seat) : null;
   try{ fn(); } finally { mySeat=humanSeat; }
+  // CORE-76:动作已提交,但结果要等检测窗口后才知道——先标 'pending',窗口到点由
+  // scheduleBotInvokeFailureCheck 改写成 committed / rejected_or_timeout。
+  markAiDecisionSubmitResult(seat, 'pending');
   if(g0 && preKey!==null){
     scheduleBotInvokeFailureCheck(g0, seat, preKey, g0.pending && g0.pending.type || null);
   }
