@@ -1448,7 +1448,17 @@ function buildAiDecisionDump(){
       turn: (typeof g.turn==='number') ? g.turn : null,
       roundNum: (typeof g.roundNum==='number') ? g.roundNum : null,
       gameMode: g.gameMode || null,
-      over: !!g.over,
+      // CORE-81(issue #128):g.over 从来不是一个真实存在的持久化字段——checkWin(game.js)
+      // 结束对局时只写 g.phase='over'(+winner/winSide),全项目其它每一处判断"对局是否结束"
+      // 都是直接比较 g.phase==='over'(render-controls.js/bot.js/ai-bot.js 自己的
+      // aiTestLastObservedPhase 逻辑均如此),从未有任何代码写过 g.over。这里原来的
+      // `!!g.over` 读的是一个永远是 undefined 的字段,导出结果恒为 false,和真实的
+      // phase==='over' 状态脱节,对局明明已经结束、导出的诊断dump却显示over:false。
+      // 修复方式刻意不是"给 g 补一个 over 字段并在 checkWin 里同步写入"——那会引入第二份
+      // "对局是否结束"的真相,后续任何新增的结束路径都要记得同步维护两个字段,本身就是
+      // bug温床;真正的单一事实来源已经是 g.phase,这里直接从它派生即可,不需要新的
+      // 持久化字段。
+      over: g.phase==='over',
       winner: (g.winner===undefined) ? null : g.winner,
       players: (g.players||[]).map(function(p, i){
         const gen = (p && p.general && typeof getGeneral==='function') ? getGeneral(p.general) : null;
