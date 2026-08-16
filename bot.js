@@ -375,17 +375,49 @@ function recordBotRescueEvidence(g,rescuerSeat,dyingSeat){
   g.aiSuspicionEvents.push({round:g.roundNum,source:rescuerSeat,target:dyingSeat,amount:1,kind:'rescue'});
   if(g.aiSuspicionEvents.length>20) g.aiSuspicionEvents=g.aiSuspicionEvents.slice(-20);
 }
+// CORE-89:身份局的敌我关系是硬策略边界(忠臣绝不能主动伤主公/已知忠臣,反贼绝不能伤
+// 已知反贼队友,主公绝不能伤已知忠臣),不是"排序时打低分就行"——此前这条边界只体现为
+// botTargetScore 里的 -Infinity,而 -Infinity 只影响候选排序,不会把候选从列表里删掉;
+// LLM 被明确告知分数"只是排序参考,不代表最优解",于是能无视分数直接选中这些候选,真实
+// 让 playCard/execute 生效(游戏规则层对"忠臣杀主公"完全合法,不会拦)。把这条边界独立
+// 提成一个纯布尔谓词,专供"生成候选列表"的地方做硬过滤(直接从列表里删除,而不是打分)——
+// 刻意不改 botTargetScore 一个字(它是被大量"score>-Infinity才生效"调用点依赖的既有评分
+// 函数,行为必须逐字保留,包括它历史上就没有按 gameMode 区分、只按 p.role 是否设置来
+// 分支这一点——测试 mock 也可能在非身份局场景下仍设置role字段,依赖旧评分行为)。
+// 这个新函数只在候选生成层作为独立的第二重硬过滤使用,不参与也不改变 botTargetScore
+// 内部的打分逻辑。kind 参数保留只是和 botTargetScore 签名对齐,关系是否允许不依赖 kind
+// (steal/damage 对敌我边界没有区别)。
+// 内奸(nei)刻意不在这里设任何硬边界——内奸的目标选择依赖局势动态判断(前中期避免主公
+// 暴毙、反贼数量等),继续留给 botTargetScore 自己的评分分支决定,不能粗暴套固定敌我过滤
+// (issue 明确要求"内奸继续使用现有动态策略")。
+function botTargetRelationAllowed(g,seat,targetSeat,kind){
+  const me=g.players[seat], target=g.players[targetSeat];
+  if(!me||!target||!target.alive||seat===targetSeat) return false;
+  if(g.gameMode==='team') return !sameTeam(g,seat,targetSeat);
+  // 敌我策略硬边界只在身份局(gameMode==='identity')成立——真实对局里 normalize() 保证
+  // 非身份局 p.role 恒为 null(game.js:104),这条判断本该是多余的;但显式判 gameMode 而
+  // 不是只判 role 是否为 zhong/fan/zhu,能防住任何不经过 normalize 的 g 对象(测试 mock、
+  // 未来新增的模式)把 role 字段挪作它用时被误套身份局限制。乱斗/组队模式的候选生成
+  // 维持现状不设硬边界,只由 botTargetScore 自己的评分分支处理。
+  if(g.gameMode!=='identity') return true;
+  const known=botKnownRole(g,seat,targetSeat);
+  const suspicion=botSuspicion(g,targetSeat);
+  if(me.role==='zhong'){
+    if(known==='zhu'||known==='zhong') return false;
+    if(known==='fan'||known==='nei') return true;
+    return suspicion>=35; // 忠臣宁可不出牌，也不盲杀身份不明者
+  } else if(me.role==='fan'){
+    return known!=='fan';
+  } else if(me.role==='zhu'){
+    if(known==='zhong') return false;
+    if(known==='fan') return true;
+    return suspicion>=30;
+  }
+  return true; // nei / 无身份局:不套固定敌我过滤,由 botTargetScore 自身动态评分
+}
 function botTargetScore(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return -Infinity;
-  // 【组队模式修复】这个函数所有实际调用点传的kind('damage'/'steal'/或杀/决斗/火攻/
-  // 铁索连环/顺手牵羊/过河拆桥这类action名)全部是有害/需要谨慎对待自己人的操作,没有
-  // 任何一处走这里去"帮"目标——组队模式下同队目标一律当作不可选(-Infinity),不参与
-  // 后面按身份局role分支打分。这个判断必须放在role分支之前:组队模式下p.role恒为null
-  // (normalize()保证),不加这条会落进最后的兜底else分支,把队友当成和敌人一样的普通
-  // 目标,只是加个随机数——这正是"机器人会打队友"的根因。sameTeam(data.js)是唯一的
-  // 判队友入口,不在这里重复手写team比较。
-  if(g.gameMode==='team' && sameTeam(g,seat,targetSeat)) return -Infinity;
   const known=botKnownRole(g,seat,targetSeat);
   const suspicion=botSuspicion(g,targetSeat);
   let score=(target.maxHp-target.hp)*8+(4-target.hp)*7+(target.hand||[]).length*2;
@@ -393,6 +425,7 @@ function botTargetScore(g,seat,targetSeat,kind){
     // 组队模式没有身份局那套role/suspicion语义,不生搬硬套——保留和乱斗模式一样的
     // 默认打分风格(优先打体力低/手牌多的敌方目标),只是多了"排除同队"这一步(已在上面
     // 处理)。kind==='steal'的额外加成在函数末尾统一处理,这里不用重复。
+    if(sameTeam(g,seat,targetSeat)) return -Infinity;
     score+=Math.random()*10;
   } else if(me.role==='zhong'){
     if(known==='zhu'||known==='zhong') return -Infinity;
@@ -1993,6 +2026,16 @@ function seatPickBuildCandidates(g, seat){
     if(typeof s.match!=='function' || !s.match(g, seat)) return;
     const list = s.buildSeatCandidates(g, seat) || [];
     list.forEach(function(c){
+      // CORE-89:座位技能(断粮/国色/奇袭/旋风/挑衅/反间/驱虎伤害等)的候选目标同样只
+      // 经过游戏规则合法性过滤(距离/canTarget等),没有身份局敌我边界——硬过滤统一在
+      // 聚合出口做一次,覆盖全部当前和未来的有害类 BOT_SEAT_PICKS 注册项,不用逐个
+      // 技能补。kind 传 null:botTargetRelationAllowed 的关系判定不依赖 kind
+      // (steal/damage对敌我边界无区别,kind 只影响 botTargetScore 的分数加成)。
+      // 【例外:qingnang】当前12个注册项里唯一的正面效果(青囊,治疗),目标本就该优先
+      // 选自己人/已知队友——不能套"禁止选自己人"的敌我过滤,否则会把青囊的合法治疗
+      // 对象过滤光。以后新增座位技能如果也是正面效果,同样要加进这个排除名单。
+      const HARMLESS_SEAT_PICK_KEYS = { qingnang: true };
+      if(!HARMLESS_SEAT_PICK_KEYS[key] && typeof c.seat==='number' && !botTargetRelationAllowed(g, seat, c.seat, null)) return;
       out.push({
         index: 0, // botDecide 会重新规范化
         label: c.label,
@@ -4606,6 +4649,9 @@ function enumerateAllLegalOneStepActions(g, seat){
         g.players.forEach((p,i)=>{
           if(!p || !p.alive || i===seat) return;
           if(spec.canTarget && !spec.canTarget(g, me, card, i)) return;
+          // CORE-89:硬过滤策略禁止目标(如忠臣→已知主公/忠臣),不能只留给排序分数——
+          // LLM 会无视 -Infinity 分数直接选中仍在列表里的候选。
+          if(!botTargetRelationAllowed(g, seat, i, action)) return;
           targets.push(i);
         });
         if(spec.allowSelf && spec.canTarget && spec.canTarget(g, me, card, seat)) targets.push(seat);
@@ -4628,6 +4674,8 @@ function enumerateAllLegalOneStepActions(g, seat){
         g.players.forEach((p,i)=>{
           if(!p || !p.alive || i===seat) return;
           if(spec.canTarget && !spec.canTarget(g, me, card, i)) return;
+          // CORE-89:同上,候选生成阶段硬过滤策略禁止目标,不只是打低分。
+          if(!botTargetRelationAllowed(g, seat, i, action)) return;
           out.push({ label: '出【'+action+'】→'+p.name, action, card: botCardBrief(card), handIndex: idx, seat: i, target: i, localHeuristicScore: botCardPriority(action) + botTargetScore(g, seat, i, action) });
         });
         // allowSelf 自目标兜底(沿用 botPlay 的 L3 通用写法,不按牌名特判):onlySelf 型
