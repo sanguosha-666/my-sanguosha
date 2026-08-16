@@ -3564,10 +3564,28 @@ function resumeAfterInterrupt(g, resume, seat){
     // 从头 startTurn);被桃救回(或郭嘉遗计这种非致命打断)就继续处理这位玩家判定区剩余的牌
     // (可能再次挂起濒死或鬼才或遗计,机制天然支持连续多次——具体怎么继续、怎么区分新挂起的
     // 类型,见 continueDelayResolution)。
-    if(!g.players[resume.seat].alive){
-      startTurn(g, nextAlive(g, resume.seat));
+    // CORE-92(issue #139)崩溃修复:resume.seat 可能是 undefined,必须回退到 seat 参数。
+    // 【怎么发生的】dealDamage 建 afterDamageEffects 队列时写的是
+    // `originalResume:{type:srcType}`(两处,致命分支和存活分支)——它只有 srcType 这个
+    // 字符串,**不知道 seat 是谁**(这一点在 game.js 另外三处注释里早有记载:"resume 只有
+    // {type:'delay'},这里要补上 seat")。那三处补丁只覆盖了 dying/yijiAsk 这类挂起路径;
+    // 走 afterDamageEffects 队列时,resumeAfterInterrupt(g, originalResume, damagedSeat)
+    // 把正确的座位放在**第三个参数**里传了进来,但这个分支只读 resume.seat、完全没用那个
+    // 参数,于是 `g.players[undefined].alive` 直接 TypeError 崩掉整局。
+    // 【为什么回退到 seat 是对的】delay 类伤害(闪电)的受伤者就是判定区的主人本人,
+    // dealDamage 传进来的 damagedSeat 与"该继续处理谁的判定区"恒等。
+    // 【为什么不在源头 originalResume 上补 seat】那会给所有 srcType('sha'/'duel'/'aoe'/
+    // 'kurou'…)的 resume 都塞上一个 seat 字段,而别的分支对 resume.seat 有各自的语义
+    // (见 3539/3611 行),平白改变它们的输入形状风险更大;在这个只属于 delay 的分支里
+    // 回退到本来就已经正确传进来的参数,影响面最小。
+    // 【怎么发现的】issue #139 新建的 E 层(确定性LLM压测)随机对局里崩出来的——
+    // 触发链是"延时锦囊伤害 → 濒死 → 被桃救回 → finishDying → afterDamageEffects 队列
+    // 接回",需要几个低概率条件同时凑齐,现有 FFA soak 与常规单元测试都没覆盖到。
+    const delaySeat = Number.isInteger(resume.seat) ? resume.seat : seat;
+    if(!g.players[delaySeat] || !g.players[delaySeat].alive){
+      startTurn(g, nextAlive(g, delaySeat));
     } else {
-      continueDelayResolution(g, resume.seat);
+      continueDelayResolution(g, delaySeat);
     }
   } else if(resume.type==='xiaoguo'){
     // 骁果"受到1点伤害"选项致命挂起(或遗计这种非致命打断)后的接回:不管目标是否真死,都

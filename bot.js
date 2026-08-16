@@ -1849,7 +1849,17 @@ BOT_DECISIONS.wuguPick = {
 
 BOT_DECISIONS.pickGeneral = {
   match: function(g, seat){
-    if(g.phase==='pickingGeneral'){ const p=g.players[seat]; return !!p && p.isBot && !p.general; }
+    // CORE-92(issue #139)修复:这里原来写死 p.isBot,不认 AI 托管中的真人座位——和
+    // botSeatForState/botFallbackSeats/runBotDecision 的口径全都不一致(它们都认托管座位)。
+    // 后果是真实的死锁:开了托管的真人到了选将阶段,botSeatForState 能解析出这个座位、
+    // runBotDecision 也放行了,但所有 BOT_DECISIONS 都 match 不上,决策直接落空,选将阶段
+    // 永远推进不下去。**这个缺陷是 issue #139 新建的 D 层(托管 scheduler 专项压测)第一次
+    // 跑就抓出来的**——现有的 FFA soak 全员 isBot=true,天然碰不到这条路径,正是 issue
+    // 立项理由("FFA soak 无卡死不能外推为托管 AI 长局稳定")的实证。
+    // 注意 pickingLordGeneral 那条分支不受影响:它判的是 getLordSeat(g)===seat,本来就没有
+    // isBot 要求,所以托管座位选主公将一直是正常的——这也是为什么这个 bug 只在"选完主公将、
+    // 轮到其他人选将"那一步才暴露。
+    if(g.phase==='pickingGeneral'){ const p=g.players[seat]; return !!p && isBotControlledSeat(g, seat) && !p.general; }
     if(g.phase==='pickingLordGeneral'){ return getLordSeat(g)===seat; }
     return false;
   },
