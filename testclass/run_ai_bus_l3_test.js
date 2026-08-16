@@ -1476,21 +1476,138 @@ const testCode = String.raw`
       throw new Error('非team模式候选应为存活非自己1,2,实际 ' + JSON.stringify(c));
   });
 
-  await check('仁德两阶段无密钥:调度1 阶段A挂起;调度2 阶段B提交 renDe(cardIdx,targetSeat) 并重置;无AI调用', async function(){
+  await check('仁德两阶段无密钥:调度1 阶段A挂起;调度2 阶段B给第1张后应continue(不提前重置);无AI调用', async function(){
+    // CORE-116(issue #116):这条断言此前写的是"给完1张就应重置为null"——那正是
+    // bug本身的症状(localFallback无条件stopAfter,提前清空botTwoStepA导致
+    // scheduleBotTurn自我触发条件天生不成立,永久卡死)。这里改成断言修复后的正确
+    // 行为:renDeCount(1)<2 且手牌未空(还剩1张)时应该continue,不应该重置。
     window.__rendeCalls = [];
     window.__mockAiCalls = 0;
     aiApiKey = '';
     aiProvider = null;
     var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r2'), card('桃','r3')] });
+    g.renDeCount = 0; // 显式初始化(mkSeatG不带默认值,execute()的 g.renDeCount<2 判断
+                       // 在 undefined<2===false 时会误走"收尾"分支——这不是修复本身的
+                       // 问题,是这条断言必须先把前置状态摆对,和 A6-3 等既有断言同一写法)
     var r1 = await botDecide('rendeTwoStep', g, 0);
     if(r1 !== true || !botTwoStepA || botTwoStepA.decisionId !== 'rendeTwoStep' || botTwoStepA.a !== 1)
       throw new Error('调度1后应挂起 {rendeTwoStep,a:1},实际 ' + JSON.stringify(botTwoStepA));
     var r2 = await botDecide('rendeTwoStep', g, 0);
     if(r2 !== true) throw new Error('调度2应返回 true,实际 ' + r2);
-    if(botTwoStepA !== null) throw new Error('调度2提交后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
+    if(!botTwoStepA || !botTwoStepA.continue)
+      throw new Error('给完第1张后(renDeCount未到2且手牌未空)应continue,不应重置为null,实际 ' + JSON.stringify(botTwoStepA));
     if(window.__rendeCalls.length !== 1 || window.__rendeCalls[0][0] !== 0 || window.__rendeCalls[0][1] !== 1)
       throw new Error('应 renDe(0,1),实际 ' + JSON.stringify(window.__rendeCalls));
     if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
+    botTwoStepA = null;
+  });
+
+  await check('CORE-116(issue #116): 无密钥仁德应能连续给出最多2张牌并正确收尾(renDeCount达到2后停止,不多给不少给)', async function(){
+    // 这是issue #116复现场景的直接回归:真实renDe会 splice手牌+renDeCount+1,
+    // 用能真正改变g状态的mock(而不是通用spyService那种纯记录参数、从不改变g的
+    // mock)才能验证execute()里"renDeCount<2且手牌未空则继续"这条判断在多轮调度下
+    // 真的会正确终止在第2张,而不是像bug那样卡在第1张,也不是无限制地一直给下去。
+    window.__rendeCalls = [];
+    var savedRenDe = renDe;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r5'), card('桃','r6'), card('闪','r7')] });
+    renDe = function(cardIdx, targetSeat){
+      window.__rendeCalls.push([cardIdx, targetSeat]);
+      g.players[0].hand.splice(cardIdx, 1);
+      g.renDeCount = (g.renDeCount || 0) + 1;
+    };
+    aiApiKey = ''; aiProvider = null;
+    try{
+      var r1 = await botDecide('rendeTwoStep', g, 0); // 阶段A:选目标
+      if(r1 !== true || !botTwoStepA || botTwoStepA.a !== 1)
+        throw new Error('调度1后应挂起阶段A,实际 ' + JSON.stringify(botTwoStepA));
+
+      var r2 = await botDecide('rendeTwoStep', g, 0); // 阶段B:给第1张
+      if(r2 !== true || !botTwoStepA || !botTwoStepA.continue)
+        throw new Error('给完第1张后(renDeCount=1<2,手牌未空)应continue,实际 ' + JSON.stringify(botTwoStepA));
+
+      var r3 = await botDecide('rendeTwoStep', g, 0); // 阶段B续:给第2张
+      if(r3 !== true || botTwoStepA !== null)
+        throw new Error('给完第2张后(renDeCount=2)应正确收尾重置为null,实际 ' + JSON.stringify(botTwoStepA));
+
+      if(window.__rendeCalls.length !== 2)
+        throw new Error('应恰好给出2张牌,实际给了 ' + window.__rendeCalls.length + ' 张: ' + JSON.stringify(window.__rendeCalls));
+      if(g.renDeCount !== 2) throw new Error('renDeCount应为2,实际 ' + g.renDeCount);
+      if((g.players[0].hand||[]).length !== 1) throw new Error('给完2张后手牌应剩1张,实际 ' + g.players[0].hand.length);
+    } finally {
+      renDe = savedRenDe;
+      botTwoStepA = null;
+    }
+  });
+
+  await check('CORE-116(issue #116): 手牌只剩1张时给完就该收尾,不应因renDeCount未到2而继续要求给不存在的牌', async function(){
+    window.__rendeCalls = [];
+    var savedRenDe = renDe;
+    var g = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','r8')] }); // 只有1张手牌
+    renDe = function(cardIdx, targetSeat){
+      window.__rendeCalls.push([cardIdx, targetSeat]);
+      g.players[0].hand.splice(cardIdx, 1);
+      g.renDeCount = (g.renDeCount || 0) + 1;
+    };
+    aiApiKey = ''; aiProvider = null;
+    try{
+      await botDecide('rendeTwoStep', g, 0); // 阶段A
+      var r2 = await botDecide('rendeTwoStep', g, 0); // 阶段B:给唯一的1张
+      if(r2 !== true || botTwoStepA !== null)
+        throw new Error('手牌已耗尽,即使renDeCount(1)<2也应正确收尾重置为null,不应continue(会导致下次候选为空/异常),实际 ' + JSON.stringify(botTwoStepA));
+      if(window.__rendeCalls.length !== 1) throw new Error('应恰好给出1张(手牌已耗尽),实际 ' + window.__rendeCalls.length);
+      if((g.players[0].hand||[]).length !== 0) throw new Error('手牌应已清空,实际剩 ' + g.players[0].hand.length);
+    } finally {
+      renDe = savedRenDe;
+      botTwoStepA = null;
+    }
+  });
+
+  await check('CORE-116(issue #116): renDe通过独立tx()提交、不会同步反映到execute()当次调用手持的g/me引用上时,仍应恰好给2张(不因单次调用内的g过期而多给)', async function(){
+    // 【这条测试要防什么,和真实生产的对应关系】真实生产里 renDe() 内部走自己的 tx(),
+    // 对服务端状态的改动提交在一次独立的事务快照里——**这次 execute() 调用期间**手上的
+    // g/me 引用不会同步更新(renDe()提交的是另一份克隆快照)。但**下一次**调度时,
+    // scheduleBotTurn 会通过 Firebase 的 onValue 回调把 currentG 刷新成最新值——这中间
+    // 的界限很关键:同一次 execute() 调用内,g 是过期的;跨越到下一次调度,g 才会更新。
+    // 这里用"两份不同的g快照,分别对应'给第1张前'和'给第2张前'的真实状态"来精确模拟
+    // 这个界限,而不是像上面几条测试那样让mock直接原地改同一个g对象(会掩盖'调用内过期'
+    // 这个真实生产的关键特征),也不是让g在所有调用间都完全冻结(那样反而不真实——
+    // 真实生产两次调度之间currentG确实会刷新)。
+    window.__rendeCalls = [];
+    var savedRenDe = renDe;
+    renDe = function(cardIdx, targetSeat){
+      window.__rendeCalls.push([cardIdx, targetSeat]);
+      // 刻意不碰调用方传入的g——模拟renDe()通过独立tx()提交,不会同步反映到
+      // execute()这次调用手上的g/me引用这一行为特征(調用内过期)。
+    };
+    aiApiKey = ''; aiProvider = null;
+    try{
+      var g1 = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','rs1'), card('桃','rs2'), card('闪','rs3')] });
+      g1.renDeCount = 0;
+      await botDecide('rendeTwoStep', g1, 0); // 阶段A(用g1)
+
+      // 阶段B·给第1张:此时"下一次调度前"的真实状态仍是renDeCount=0/3张手牌(还没给),
+      // 传入g2代表这次调度**开始时**读到的快照(给牌前),给牌后的效果只应该靠
+      // execute()自己的本地算术(+1/-1)推算,不应该依赖g2在调用期间被更新。
+      var g2 = mkSeatG({ caps0: { rende: true }, myHand: [card('杀','rs1'), card('桃','rs2'), card('闪','rs3')] });
+      g2.renDeCount = 0;
+      await botDecide('rendeTwoStep', g2, 0);
+      if(!botTwoStepA || !botTwoStepA.continue)
+        throw new Error('给完第1张后应continue(本地推算renDeCount=1<2),实际 ' + JSON.stringify(botTwoStepA));
+
+      // 阶段B续·给第2张:下一次调度前的真实状态是"已经给过1张"——renDeCount=1、手牌剩2张,
+      // g3代表这次调度开始时读到的、真实反映上一次给牌结果的快照。
+      var g3 = mkSeatG({ caps0: { rende: true }, myHand: [card('桃','rs2'), card('闪','rs3')] });
+      g3.renDeCount = 1;
+      await botDecide('rendeTwoStep', g3, 0);
+
+      if(window.__rendeCalls.length !== 2)
+        throw new Error('应恰好给出2张牌就停止,实际给了 ' + window.__rendeCalls.length + ' 张: ' + JSON.stringify(window.__rendeCalls));
+      if(botTwoStepA !== null)
+        throw new Error('给完第2张后(本地推算renDeCount=1+1=2)应正确收尾,不应continue,实际 ' + JSON.stringify(botTwoStepA));
+    } finally {
+      renDe = savedRenDe;
+      botTwoStepA = null;
+    }
   });
 
   await check('仁德阶段B有密钥:mock 选手牌 → renDe(cardIdx,targetSeat);userPrompt 不含他人手牌', async function(){
@@ -1590,7 +1707,14 @@ const testCode = String.raw`
     botTwoStepA = null;
   });
 
-  await check('仁德A6-5 无密钥 fallback:调度1挂起阶段A;调度2只给一张即停(stopAfter 生效),不设 continue,与改动前一致', async function(){
+  await check('仁德A6-5(CORE-116修复后重写) 无密钥 fallback:调度1挂起阶段A;调度2给第1张后应continue(不再无条件stopAfter一张即停)', async function(){
+    // 【这条断言的历史】原名"仁德A6-5"曾经直接断言"一张即停(stopAfter生效),不设
+    // continue,与改动前一致"——那正是issue #116报告的bug本身:localFallback无条件
+    // stopAfter,execute提交后立即resetBotTwoStep(),botTwoStepA提前清空导致
+    // scheduleBotTurn的自我触发条件天生不成立,机器人刘备给完第1张牌后永久卡死
+    // (安静房间下没有任何机制能救回来)。这条断言当时把bug症状钉成了"预期行为",
+    // 这次CORE-116修复后按验收标准1"应能按renDeCount<2的既定规则连续给出最多2张牌"
+    // 重写,断言给完第1张后应该continue,而不是提前停。
     window.__rendeCalls = [];
     window.__mockAiCalls = 0;
     aiApiKey = '';
@@ -1603,12 +1727,10 @@ const testCode = String.raw`
     var r2 = await botDecide('rendeTwoStep', g, 0);
     if(r2 !== true) throw new Error('调度2应返回 true,实际 ' + r2);
     if(window.__rendeCalls.length !== 1 || window.__rendeCalls[0][0] !== 0 || window.__rendeCalls[0][1] !== 1)
-      throw new Error('只应给一张 renDe(0,1),实际 ' + JSON.stringify(window.__rendeCalls));
-    if(botTwoStepA !== null) throw new Error('一张即停后应 reset 且不设 continue,实际 ' + JSON.stringify(botTwoStepA));
+      throw new Error('第1次应给 renDe(0,1),实际 ' + JSON.stringify(window.__rendeCalls));
+    if(!botTwoStepA || !botTwoStepA.continue || botTwoStepA.a !== 1)
+      throw new Error('给完第1张后(renDeCount未到2、手牌未空)应continue,不应提前reset,实际 ' + JSON.stringify(botTwoStepA));
     if(window.__mockAiCalls !== 0) throw new Error('无密钥不应有AI调用,实际 ' + window.__mockAiCalls);
-    var r3 = await botDecide('rendeTwoStep', g, 0);
-    if(r3 !== true || !botTwoStepA || botTwoStepA.continue || botTwoStepA.a !== 1)
-      throw new Error('调度3应重新从阶段A挂起(未设continue),实际 ' + JSON.stringify(botTwoStepA));
     botTwoStepA = null;
   });
 
