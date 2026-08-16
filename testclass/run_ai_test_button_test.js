@@ -415,14 +415,50 @@ const testCode = String.raw`
     if(aiDecisionRecords.length!==1) throw new Error('结束托管不应清空记录');
     if(_g.players[0].aiAutopilot) throw new Error('结束托管应清除房间公开标识');
   });
-  await check('只有清空按钮或游戏结束清空记录', function(){
+  await check('清空按钮清空记录', function(){
     aiTestAutopilot = {active:false, seat:0}; aiDecisionRecords = [{summary:'a',isAutopilot:true}];
     clearAiTestRecords();
     if(aiDecisionRecords.length!==0) throw new Error('清空按钮应清空记录');
+  });
+  await check('CORE-83(issue #130): 游戏结束(phase=over)不再清空记录——结束后复盘/导出正是面板核心用途', function(){
+    // 这条断言此前写的是"游戏结束应清空记录"——那正是issue #130报告的bug本身
+    // (托管信息窗时代的旧语义,CORE-73/75把决策记录升级成"结束后复盘/导出数据源"之后
+    // 没同步调整,导致结束后面板空白、导出dump的aiDecisions:[])。这里按修复后的正确
+    // 行为重写:phase变成over不应该清空任何记录。
+    aiTestLastObservedSeed = null; aiTestLastObservedPhase = null;
+    aiTestAutopilot = {active:false, seat:0};
     aiDecisionRecords=[{summary:'b',isAutopilot:true}];
-    syncAiTestGamePhase('play');
-    syncAiTestGamePhase('over');
-    if(aiDecisionRecords.length!==0) throw new Error('游戏结束应清空记录');
+    syncAiTestGamePhase('play', 111);
+    syncAiTestGamePhase('over', 111); // 同一局(seed未变)结束
+    if(aiDecisionRecords.length!==1) throw new Error('游戏结束不应清空记录,实际 '+aiDecisionRecords.length);
+  });
+  await check('CORE-83(issue #130): 游戏结束时仍应自动停止托管(和记录清空解耦,这部分行为不变)', function(){
+    aiTestLastObservedSeed = null; aiTestLastObservedPhase = null;
+    _g = {players:[{cid:myClientId, aiAutopilot:true}]};
+    aiTestAutopilot = {active:true, seat:0};
+    aiDecisionRecords=[{summary:'c',isAutopilot:true}];
+    syncAiTestGamePhase('play', 222);
+    syncAiTestGamePhase('over', 222);
+    if(aiTestAutopilot.active) throw new Error('游戏结束应仍然自动停止托管,实际仍在托管');
+    if(aiDecisionRecords.length!==1) throw new Error('停止托管这个动作本身不应清空记录,实际 '+aiDecisionRecords.length);
+  });
+  await check('CORE-83(issue #130): 只有确认进入下一局(g.seed变化)才清空上一局的记录', function(){
+    aiTestLastObservedSeed = null; aiTestLastObservedPhase = null;
+    aiTestAutopilot = {active:false, seat:0};
+    aiDecisionRecords = [{summary:'第一局的决策',isAutopilot:true}];
+    syncAiTestGamePhase('play', 1001); // 观察到第一局(seed=1001),不应清空(本来就是新观察到的)
+    if(aiDecisionRecords.length!==1) throw new Error('首次观察到某个seed不应清空,实际 '+aiDecisionRecords.length);
+    syncAiTestGamePhase('over', 1001); // 第一局结束(seed未变)
+    if(aiDecisionRecords.length!==1) throw new Error('结束不应清空,实际 '+aiDecisionRecords.length);
+    syncAiTestGamePhase('play', 1002); // 再来一局:seed变成1002,这才是真正的"新一局开始"
+    if(aiDecisionRecords.length!==0) throw new Error('确认进入新一局(seed变化)后应清空上一局记录,实际 '+aiDecisionRecords.length);
+  });
+  await check('CORE-83(issue #130): seed缺失(理论上不该发生)时不误清空,不报错', function(){
+    aiTestLastObservedSeed = null; aiTestLastObservedPhase = null;
+    aiTestAutopilot = {active:false, seat:0};
+    aiDecisionRecords = [{summary:'x',isAutopilot:true}];
+    syncAiTestGamePhase('lobby', undefined); // 大厅阶段g.seed还没生成
+    if(aiDecisionRecords.length!==1) throw new Error('seed缺失时不应清空,实际 '+aiDecisionRecords.length);
   });
   await check('appendAiTestRecord: 追加后records增长且摘要含决策文本', function(){
     aiTestAutopilot = {active:true, seat:0}; aiDecisionRecords = [];
