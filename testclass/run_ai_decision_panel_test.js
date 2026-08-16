@@ -283,6 +283,60 @@ const testCode = String.raw`
     if(d.game.roundNum!==3) throw new Error('应含对局元信息');
   });
 
+  // ============ CORE-81(issue #128):导出的 over 字段应与 phase==='over' 同步 ============
+  // g.over 从来不是真实存在的持久化字段(checkWin 只写 g.phase='over',全项目其它判断
+  // "对局是否结束"的地方都是直接比较 phase==='over'),此前 buildAiDecisionDump 却读了
+  // 这个恒为 undefined 的字段(写法是 over: !!g.over),导致对局明明已经结束(phase==='over')、
+  // 导出的诊断dump却显示 over:false——用户实测(issue #128 附带的完整对局dump)复现过这个不一致。
+  await check('CORE-81: phase==="over" 时导出的 over 应为 true(此前恒为false,因为读了不存在的g.over字段)', function(){
+    currentG = {
+      phase:'over', turn:0, roundNum:5, gameMode:'identity', winner:'反贼',
+      // 故意不设置 over 字段(和真实生产状态一致——checkWin从不写这个字段),验证修复后
+      // 不再依赖它,而是从 phase 派生。
+      players: mkG().players,
+      log: [{seq:0,text:'游戏结束,胜方：反贼'}]
+    };
+    var d = buildAiDecisionDump();
+    if(d.game.over!==true) throw new Error('phase===over 时导出的 over 应为 true,实际 '+d.game.over);
+    if(d.game.phase!=='over') throw new Error('phase 本身应正确导出,实际 '+d.game.phase);
+    if(d.game.winner!=='反贼') throw new Error('winner 应正确导出,实际 '+d.game.winner);
+  });
+
+  await check('CORE-81对照组: phase!=="over" 时导出的 over 应为 false(无回归)', function(){
+    currentG = {
+      phase:'play', turn:0, roundNum:3, gameMode:'ffa', winner:null,
+      players: mkG().players,
+      log: []
+    };
+    var d = buildAiDecisionDump();
+    if(d.game.over!==false) throw new Error('phase!==over 时导出的 over 应为 false,实际 '+d.game.over);
+  });
+
+  await check('CORE-81破坏性验证: 还原成读g.over(而不是从phase派生)的旧写法,即使phase===over也会导出false(证明断言有鉴别力)', function(){
+    // 临时把 buildAiDecisionDump 换成逐字复刻旧bug写法(over:!!g.over)的版本,验证确实
+    // 会重新观察到 issue #128 的症状——不重新加载整个源文件(testCode 运行在沙箱内部,
+    // 拿不到 fs/vm 这些 Node 宿主对象),只需要复刻这一行的差异就足以证明鉴别力。
+    var original = buildAiDecisionDump;
+    var currentGRef = function(){ return (typeof currentG!=='undefined') ? currentG : null; };
+    buildAiDecisionDump = function(){
+      var g = currentGRef();
+      var d = original();
+      d.game.over = !!(g && g.over); // 旧bug写法:g.over 从来没被真实写过,恒为 undefined
+      return d;
+    };
+    try{
+      currentG = {
+        phase:'over', turn:0, roundNum:5, gameMode:'identity', winner:'反贼',
+        players: mkG().players,
+        log: []
+      };
+      var d = buildAiDecisionDump();
+      if(d.game.over!==false) throw new Error('改回旧写法后,phase===over 也应该(错误地)导出false,如果没有说明上面两条断言对这段逻辑没有鉴别力');
+    } finally {
+      buildAiDecisionDump = original;
+    }
+  });
+
   await check('CORE-75: 导出不含AI密钥(导出文件会被转发)', function(){
     aiApiKey = 'sk-secret-should-not-leak';
     var text = JSON.stringify(buildAiDecisionDump());
