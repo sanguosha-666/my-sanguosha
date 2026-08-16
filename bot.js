@@ -24,15 +24,28 @@ function isBotController(g){
 // 只会退化成"不行动"(=修复前的行为),绝不会让错误的机器人替别人行动。
 // 新增技能/阶段时:在 runBotDecision 里加分支,就要在这里补一条,否则该阶段会掉进下面的
 // 未覆盖兜底(能走,但不如查表精确)。
+// CORE-91(issue #137/#138):"这个座位是不是由 AI 控制"此前有两份各自维护的定义——
+// botSeatForState 内部的 isBotSeat 认"真机器人 或 当前托管的真人座位",而 botFallbackSeats
+// 只认 p.isBot。两份定义不一致本身就是隐患(改一处忘另一处),这里提炼成唯一入口,凡是要问
+// "这个座位归 AI 管吗"一律走它,不再各处手写。
+// isAutopilotSeat:aiTestAutopilot 是 ai-bot.js 的顶层变量,可能尚未定义(加载顺序/测试环境),
+// 用 typeof 守卫;托管关闭(active=false)时恒 false,行为与托管前完全一致。
+function isAutopilotSeat(seat){
+  return seat>=0 && (typeof aiTestAutopilot!=='undefined') && aiTestAutopilot
+    && aiTestAutopilot.active && aiTestAutopilot.seat===seat;
+}
+function isBotControlledSeat(g, seat){
+  return Number.isInteger(seat) && !!(g && g.players && g.players[seat])
+    && (g.players[seat].isBot || isAutopilotSeat(seat));
+}
 function botSeatForState(g){
   const d=g.pending||{};
   // 【AI托管】托管中的真人座位视同机器人:isBotSeat 覆盖为"托管座位即真"。
   // 一处改动覆盖 A/B 全部段落(各段都用 isBotSeat 判),托管座位在 draw/play/discard、
   // 响应类 pending(BOT_PHASE_ACTOR)等全部阶段都能被调度。托管关闭(active=false)时
   // aiTestAutopilot 判定恒 false,行为与托管前完全一致。
-  const isAutopilotSeat=s=>s>=0 && (typeof aiTestAutopilot!=='undefined') && aiTestAutopilot
-    && aiTestAutopilot.active && aiTestAutopilot.seat===s;
-  const isBotSeat=s=>Number.isInteger(s)&&g.players[s]&&(g.players[s].isBot||isAutopilotSeat(s));
+  // CORE-91:改为委托给统一入口 isBotControlledSeat,语义逐字不变(原实现就是这两条的或)。
+  const isBotSeat=s=>isBotControlledSeat(g, s);
   // A. 行动者不在 pending 字段上的几个特殊阶段
   if(g.phase==='wugu'&&d.type==='wugu'&&Array.isArray(d.order)){
     const picker=d.order[d.idx||0];
@@ -72,7 +85,13 @@ const BOT_KNOWN_PHASES = new Set(
 function botFallbackSeats(g){
   if(!g.pending || BOT_KNOWN_PHASES.has(g.phase)) return [];
   const out=[];
-  (g.players||[]).forEach((p,i)=>{ if(p&&p.isBot&&p.alive) out.push(i); });
+  // CORE-91(issue #138):原来这里只认 p.isBot,不认当前 AI 托管中的真人座位——和
+  // botSeatForState 主路径的口径不一致(那边"真机器人 或 托管座位"都算)。托管中的真人
+  // 一旦走到需要兜底探测的未覆盖阶段就没人接管。改为统一走 isBotControlledSeat,
+  // 两条路径口径一致;仍然要求 p.alive(死人不需要也不该被探测)。
+  // 【非托管真人绝不会被加入】isBotControlledSeat 只在 isBot 或"正是当前本地托管的那个
+  // 座位"时为真,普通真人两条都不满足。
+  (g.players||[]).forEach((p,i)=>{ if(p&&p.alive&&isBotControlledSeat(g,i)) out.push(i); });
   return out;
 }
 function runBotFallbackProbe(g){
@@ -164,7 +183,15 @@ function scheduleBotTurn(g){
   const seat=botSeatForState(g);
   // 【AI托管】非控制器浏览器(靠 aiTestSelf 放行)只允许调度托管座位自己,
   // 绝不能驱动其它机器人座位(那是控制器浏览器的职责,双浏览器驱动会冲突)。
-  if(!isBotController(g) && !(aiTestSelf && seat===aiTestAutopilot.seat)) return;
+  // CORE-91(issue #138):seat===-1(未覆盖阶段,走 fallback 探测)时,原来这道门对非控制器
+  // 浏览器一律 return——即使实际该响应的就是本地托管的那个座位,也进不来。补一条:兜底
+  // 候选里包含自己的托管座位时同样放行。**放行范围仍然只有自己那个座位**:
+  // botFallbackSeats 对非控制器浏览器只会给出托管座位本身(其它真机器人座位由控制器
+  // 浏览器驱动),不会因为这条放行就去驱动别人的机器人。控制器浏览器不受这条影响
+  // (isBotController 为真时第一个条件就短路了)。
+  const aiTestSelfInFallback = aiTestSelf && seat<0
+    && botFallbackSeats(g).indexOf(aiTestAutopilot.seat)>=0;
+  if(!isBotController(g) && !(aiTestSelf && seat===aiTestAutopilot.seat) && !aiTestSelfInFallback) return;
   // seat>=0 才碰摘要座位:seat===-1 是真人回合(scheduleBotTurn 每次渲染都跑),
   // 此时 reset 会把机器人的跨回合记忆清掉,2人局(1真人+1机器人)记忆永远活不过
   // 一个真人回合。只有"换到另一个机器人座位"(或首遇机器人座位)才该清空。
@@ -199,7 +226,11 @@ function scheduleBotTurn(g){
     // 时放行,否则 return(不执行决策);控制器浏览器行为与原来完全一致。
     const aiTestSelfNow = (typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
       && aiTestAutopilot.seat===mySeat;
-    if(!isBotController(latest) && !(aiTestSelfNow && nowSeat===aiTestAutopilot.seat)) return;
+    // CORE-91:回调门与入口门保持同一口径(含 fallback 分支),否则入口放行了、回调又拦掉,
+    // 等于白排一次定时器。
+    const aiTestSelfNowInFallback = aiTestSelfNow && nowSeat<0
+      && botFallbackSeats(latest).indexOf(aiTestAutopilot.seat)>=0;
+    if(!isBotController(latest) && !(aiTestSelfNow && nowSeat===aiTestAutopilot.seat) && !aiTestSelfNowInFallback) return;
     if(botStateKey(latest,nowSeat)!==key) return;
     botDecisionInFlight=true;
     const watchdogToken = ++botDecisionWatchdogToken;
