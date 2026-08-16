@@ -35,12 +35,15 @@
 //   查询点    : 该技能的 cap 被 hasCap 类函数查询到的源文件(用于快速定位实现位置)
 //   主公技    : 是否仅 role==='zhu' 可发动(经 canTriggerLordAsk 一类守卫)
 //
-// 【已知的两处 GENERALS 数据缺口,本表按真实实现登记,未改动 data.js】
-//   1. simayi(司马懿)的 GENERALS.skill 只写了'反馈',漏了'鬼才'——但 desc 原文和
-//      HUASHEN_SKILL_TABLE 都有'鬼才'、caps 里也确实声明了 guicai。本表补登记为
-//      独立一条 simayi/鬼才,所以总条目是 108 而不是 107。
-//   2. yuji(于吉)的'缠怨'既没有 cap 也没有 hook,靠 player.chanyuan 状态字段实现,
-//      登记为 '状态字段' 类。
+// 【CORE-117(issue #125)已修复的历史数据缺口】simayi(司马懿)的 GENERALS.skill
+// 原本只写了'反馈'、漏了'鬼才'——本表当初按"不改data.js、按真实实现登记"的原则,
+// 把 simayi/鬼才 补登记为独立一条并在测试里用显式豁免记录这个偏差。CORE-117 已把
+// data.js 本身改成 skill:'反馈/鬼才',这条豁免和这里的说明一并撤下,simayi/鬼才
+// 现在和其它107条一样,是从 GENERALS.skill 斜杠拆分自然得到的正常条目,不是特例。
+//
+// 【仍然存在的一处 GENERALS 数据特征,不是缺口】
+//   yuji(于吉)的'缠怨'既没有 cap 也没有 hook,靠 player.chanyuan 状态字段实现,
+//   登记为 '状态字段' 类——这是技能本身的真实实现方式,不是数据遗漏。
 const 技能注册表 = Object.create(null);
 function 登记技能(条目){ 技能注册表[条目.武将+'/'+条目.技能名] = 条目; }
 

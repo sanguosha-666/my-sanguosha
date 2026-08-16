@@ -212,7 +212,7 @@ const GENERALS = {
     desc:'谦逊:锁定技,你不能成为【顺手牵羊】和【乐不思蜀】的目标。连营:当你失去最后一张手牌时,你可以摸1张牌。',
     caps:{ qianxun:true, lianying:true } },
   lvmeng:        { id:'lvmeng',        name:'吕蒙',   gender:'male', faction:'wu',   maxHp:4, skill:'克己', desc:'若你于出牌阶段未使用或打出过【杀】,你可以跳过弃牌阶段(手牌超过体力上限也不必弃牌)。', caps:{ keji:true } },
-  simayi:        { id:'simayi',        name:'司马懿', gender:'male', faction:'wei', maxHp:3, skill:'反馈', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。你进行判定时,可以打出一张手牌替换之(鬼才)。',
+  simayi:        { id:'simayi',        name:'司马懿', gender:'male', faction:'wei', maxHp:3, skill:'反馈/鬼才', desc:'当你受到伤害后,你获得伤害来源的一张手牌(随机)。你进行判定时,可以打出一张手牌替换之(鬼才)。',
     caps:{ guicai:true },
     hooks:{
       // 受伤后从伤害来源随机获得一张手牌。ctx={amount, sourceSeat}。
