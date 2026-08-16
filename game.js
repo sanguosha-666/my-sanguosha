@@ -2850,9 +2850,10 @@ function continueAfterDamageEffects(g){
       triggerHook(g,q.seat,'onDamaged',ctx);
     }else if(action==='jiushi'){
       if(hasCap(p,'jiushi') && q.jiushiFacedownAtDamage && p.faceup===false){
-        g.pending={type:'jiushiFlipAsk',seat:q.seat,wasFacedown:true};
-        g.phase='jiushiFlipAsk';
-        g.log=pushLog(g.log,p.name+' 是否发动【酒诗】翻回正面…');
+        // 曹植【酒诗②】翻回正面:只是解除背面朝上状态,没有下行风险,不再询问,直接生效。
+        p.faceup=true;
+        g.log=pushLog(g.log, p.name+' 发动【酒诗】,翻回正面');
+        markSkillSound(g, '酒诗');
       }
     }else if(action==='chengxiang'){
       if(hasCap(p,'chengxiang')){
@@ -5090,9 +5091,11 @@ function continueHuashenChangeCheckAtTurnEnd(g, endingSeat){
 function continueBiyueCheck(g, endingSeat){
   const p=g.players[endingSeat];
   if(p && p.alive && hasCap(p,'biyue')){
-    g.pending={type:'biyue', seat:endingSeat};
-    g.phase='biyue';
-    g.log=pushLog(g.log, p.name+' 是否发动【闭月】摸1张牌…');
+    // 貂蝉【闭月】:回合结束摸1张牌,零代价、零下行风险,不再询问,直接生效。
+    drawN(g, endingSeat, 1);
+    g.log=pushLog(g.log, p.name+' 发动【闭月】,摸1张牌');
+    markSkillSound(g, '闭月');
+    startTurn(g, nextAlive(g, endingSeat));
     return;
   }
   startTurn(g, nextAlive(g, endingSeat));
@@ -5565,8 +5568,9 @@ function startTurn(g, seat){
 // finishDying 的 delay-resume 分支都走这里,别各自重复判断)。
 // 兵粮寸断的 g.skipDraw 在这里消费:为真则直接跳过摸牌阶段,交给 advancePastPlay 继续判断
 // 出牌/弃牌阶段是否也被跳过——不在这里各自重复"检查下一个标志"的逻辑。
-// **真实bug修复**:甄姬【洛神】的三个"循环判定结束"分支(respondLuoshen 的"不发动"/
-// "牌堆无牌可判",finishLuoshenJudge 的判红分支)原本都是直接调用这个函数,没有先把
+// **真实bug修复(历史记录)**:甄姬【洛神】的三个"循环判定结束"分支(当时还是respondLuoshen
+// 的"不发动"/"牌堆无牌可判",现已随"确定正收益技能自动发动"改造合并进 autoLuoshenRound,
+// finishLuoshenJudge 的判红分支)原本都是直接调用这个函数,没有先把
 // g.pending 置空——和骁果(advanceXiaoguo)是完全独立的第二个真实bug,但同一种模式:
 // 洛神判定结束、马上要进入摸牌阶段,这个函数假定"进来时 pending 已经是 null",一旦这条
 // 假定被违反,已经问完的洛神 pending 就会带着过期数据漏进摸牌/出牌阶段,同样会卡住
@@ -5793,32 +5797,23 @@ function continueDelayResolution(g, seat){
 // 都经 continueDelayResolution 走到这里,不用各自重复判断。
 function continueTurnStart(g, seat){
   if(hasCap(g.players[seat],'luoshen')){
-    g.pending={type:'luoshen', seat};
-    g.phase='luoshen';
-    g.log=pushLog(g.log, g.players[seat].name+' 是否发动【洛神】进行判定…');
+    autoLuoshenRound(g, seat);
     return;
   }
   enterDrawPhase(g);
 }
-// respondLuoshen: 仅 pending.seat 本人可响应。不发动:直接进摸牌阶段;发动:judge() 翻牌
-// (可被鬼才改判,和其它判定场景同一套 maybeGuicai),结果延后到 finishLuoshenJudge 处理。
-function respondLuoshen(activate){
-  tx(g=>{
-    if(g.phase!=='luoshen'||!g.pending||g.pending.type!=='luoshen'||g.pending.seat!==mySeat) return g;
-    const seat=mySeat;
-    if(!activate){
-      g.log=pushLog(g.log, g.players[seat].name+'：不再发动【洛神】');
-      enterDrawPhase(g);
-      return g;
-    }
-    const card=judge(g);
-    if(!card){ enterDrawPhase(g); return g; } // 无牌可判,视为发动失败,直接进摸牌阶段
-    markHongyanIfConverted(g,g.players[seat],card);
-    markSkillSound(g, '洛神');
-    if(maybeGuicai(g, seat, card, {kind:'luoshenJudge', seat})==='pending') return g;
-    finishLuoshenJudge(g, seat, card);
-    return g;
-  });
+// autoLuoshenRound: 甄姬【洛神】自动判定一轮——黑色继续拿牌(没有下行风险,循环判定
+// 直到判红/无牌可判为止),红色结束,不再询问是否发动("不发动"和"发动后判红"结果
+// 完全等价,只是多耗一张判定牌,不存在真人/机器人会因此变差的分支)。判定牌仍会经过
+// maybeGuicai(可能被别人的鬼才/鬼道改判),那是另一名玩家的独立决策,不是这里要跳过的
+// "洛神本人是否继续发动"这一层,遇到改判进行中(返回'pending')照常等待、不催不跳过。
+function autoLuoshenRound(g, seat){
+  const card=judge(g);
+  if(!card){ enterDrawPhase(g); return; } // 无牌可判,视为发动失败,直接进摸牌阶段
+  markHongyanIfConverted(g,g.players[seat],card);
+  markSkillSound(g, '洛神');
+  if(maybeGuicai(g, seat, card, {kind:'luoshenJudge', seat})==='pending') return; // 鬼才/鬼道改判进行中,等待响应
+  finishLuoshenJudge(g, seat, card);
 }
 // finishLuoshenJudge: 洛神判定结算(不管是否被鬼才改判过)。红色=判定失败,牌进弃牌堆,洛神结束;
 // 黑色=判定牌归玩家所有——judge(g) 已经把牌推进了 g.discard,这里要把它弹出来改放进手牌,
@@ -5838,9 +5833,8 @@ function finishLuoshenJudge(g, seat, card){
     const idx=g.discard.lastIndexOf(card);
     if(idx>=0) g.discard.splice(idx,1); // 从弃牌堆移除,改成玩家获得
     p.hand.push(card);
-    g.log=pushLog(g.log, p.name+' 发动【洛神】,判定为黑,获得判定牌,可以再次发动');
-    g.pending={type:'luoshen', seat};
-    g.phase='luoshen';
+    g.log=pushLog(g.log, p.name+' 发动【洛神】,判定为黑,获得判定牌,继续判定');
+    autoLuoshenRound(g, seat);
   }
 }
 
@@ -5878,20 +5872,24 @@ function removeHandCards(g, seat, indices){
   if(removed.length > 0) maybeStartLianying(g, seat, removed.length);
   return removed;
 }
-// 当前无其它挂起时,从队列取出一名连营角色开询问。
+// 陆逊【连营】:失去最后1张手牌时摸1张,零代价、零下行风险,不再询问,直接生效。队列里
+// 可能同时排了多个连营角色(同一次操作让多人各自弃光最后一张手牌),不再像"发起询问"那样
+// 一次只处理队首一个就 return——既然每一项都是确定性生效,直接把整条队列在这次调用里
+// 处理完(仍然遵守"当前无其它更高优先级挂起"这条前提,保持和原来一致的调用时机)。
 function tryFlushLianying(g){
   if(!g || g.pending || g.aoe) return false;
   if(!Array.isArray(g.lianyingQueue) || g.lianyingQueue.length===0) return false;
+  let flushed=false;
   while(g.lianyingQueue.length>0){
     const seat = g.lianyingQueue.shift();
     const p = g.players[seat];
     if(!p || !p.alive || !hasCap(p,'lianying')) continue;
-    g.pending = setResponseAskedAt({ type:'lianyingAsk', seat });
-    g.phase = 'lianyingAsk';
-    g.log = pushLog(g.log, p.name+' 是否发动【连营】,摸1张牌…');
-    return true;
+    drawN(g, seat, 1);
+    g.log = pushLog(g.log, p.name+' 发动【连营】,摸一张牌');
+    markSkillSound(g, '连营');
+    flushed=true;
   }
-  return false;
+  return flushed;
 }
 
 // respondLianying: 响应连营询问

@@ -248,7 +248,7 @@ if(!partial){
       if(!e.机器人接入 || !Array.isArray(e.机器人接入.决策) || !Array.isArray(e.机器人接入.座位选择))
         bad.push(k + ' 机器人接入结构不对');
       if(typeof e.主公技 !== 'boolean') bad.push(k + ' 主公技不是布尔');
-      if(['cap-被动查询','cap-主动阶段','hook','cap+hook','状态字段'].indexOf(e.实现方式) < 0)
+      if(['cap-被动查询','cap-主动阶段','cap-自动生效','hook','cap+hook','状态字段'].indexOf(e.实现方式) < 0)
         bad.push(k + ' 实现方式取值非法:' + e.实现方式);
     });
     if(bad.length) throw new Error(bad.join(' | '));

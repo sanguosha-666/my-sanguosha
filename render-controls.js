@@ -287,7 +287,6 @@ Object.entries({
   xiaoguoChoice:      {skill:'骁果', render:renderPendingXiaoguoChoice},
   cixiongChoice:      {skill:'雌雄双股剑', render:renderPendingCixiongChoice},
   zhijiChoice:        {skill:'志继', render:renderPendingZhijiChoice},
-  luoshen:            {skill:'洛神', render:renderPendingLuoshen},
   huogongReveal:      {skill:'火攻', render:renderPendingHuogongReveal},
   guicai:             {skill:'鬼才', render:renderPendingGuicai},
   ganglieChoice:      {skill:'刚烈', render:renderPendingGanglieChoice},
@@ -652,11 +651,9 @@ function renderPendingZhijiChoice(g,c){
   const draw=document.createElement('button');draw.textContent='摸两张牌';draw.onclick=()=>respondZhijiChoice(false);c.appendChild(draw);
   setBanner(escapeHtml(pName)+' 【志继】觉醒,体力上限已-1,请选择:回复1点体力或摸两张牌');
 }
-function renderPendingLuoshen(g,c){
-  const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【洛神】判定';yes.onclick=()=>respondLuoshen(true);c.appendChild(yes);
-  const no=document.createElement('button');no.textContent='不再发动';no.onclick=()=>respondLuoshen(false);c.appendChild(no);
-  setBanner('是否发动【洛神】进行判定?黑色可获得判定牌并继续发动,红色则结束。');
-}
+// renderPendingLuoshen 已随"确定正收益技能自动发动"改造移除:g.phase 不再出现 'luoshen'
+// 这个值(continueTurnStart/finishLuoshenJudge 现在直接调 autoLuoshenRound 循环判定,不再
+// 挂起询问),这个渲染函数连同下面注册表里对应的一行一并删除,不留不可达的死渲染分支。
 function renderPendingHuogongReveal(g,c){
   setBanner('【火攻】请选择一张手牌展示。');
   (g.players[mySeat].hand||[]).forEach((card,idx)=>{const b=document.createElement('button');b.className='primary';b.innerHTML='展示 '+cardFace(card)+'【'+escapeHtml(card.name)+'】';b.onclick=()=>respondHuogongReveal(idx);c.appendChild(b);});

@@ -1666,9 +1666,18 @@ function maybeStartLiRangRecover(g, endingSeat){
   if(!kong || !kong.alive || !hasCap(kong,'lirang')) return false;
   const cards=liRangDiscardCardsInPile(g, r.discarded);
   if(cards.length===0) return false;
-  g.pending=setResponseAskedAt({type:'lirangRecover', from:r.from, to:endingSeat, cards});
-  g.phase='lirangRecover';
-  g.log=pushLog(g.log, kong.name+' 是否发动【礼让】,获得 '+g.players[endingSeat].name+' 本弃牌阶段弃置的牌…');
+  // 孔融【礼让】回收:白拿回自己之前送出的牌,对孔融自己零代价、纯收益,不再询问,直接生效。
+  const gained=[];
+  cards.forEach(card=>{
+    const idx=(g.discard||[]).findIndex(c=>c===card || (c && card && c.id!==undefined && c.id===card.id));
+    if(idx>=0) gained.push(g.discard.splice(idx,1)[0]);
+  });
+  if(gained.length){
+    kong.hand.push(...gained);
+    g.log=pushLog(g.log, kong.name+' 发动【礼让】,获得 '+g.players[endingSeat].name+' 本弃牌阶段弃置的'+gained.length+'张牌');
+    markSkillSound(g, '礼让');
+  }
+  advanceXiaoguo(g, endingSeat, endingSeat);
   return true;
 }
 

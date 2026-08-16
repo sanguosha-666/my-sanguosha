@@ -20,7 +20,10 @@ const expected=[
   'pick',
   'haoshiPick','leijiChoose','leijiJudge','mengjin','mingcePickTarget','mingceChoice',
   'qiaobianMove','enyuanChoose','jiushiFlipAsk','wangxiAsk','buquAsk','luanwuChoose','wugu',
-  'hanbingAsk','jujianPickCard','jushouChoose','shuangxiongAsk','luoyiAsk','xunxunPick','luoshen',
+  // 【自动发动改造】'luoshen' 已从这份清单移除:甄姬【洛神】不再有交互阶段
+  // (autoLuoshenRound 直接自动循环判定),对应的 registerStageTimeoutAction 也已删除,
+  // 不再需要超时托管(没有"询问"这一步可超时)。
+  'hanbingAsk','jujianPickCard','jushouChoose','shuangxiongAsk','luoyiAsk','xunxunPick',
   'enyuanChooseOption','enyuanGiveCard','guhuoTarget','guanxingReview','quhuDamageChoice','tianyiRespond',
   'jiemingAsk','xinshengAsk','yijiAssign','tiaoxinDiscard','qiaomengPickEquip','lieRenRespond',
   'jujianPickTarget','jujianChooseEffect','luoyingAsk','cixiongAsk','chengxiangAsk','chengxiangChoose',

@@ -1,6 +1,9 @@
 // #103 回归:陆逊【连营】必须覆盖所有手牌失去路径。
 // 使用最后一张手牌/响应打出最后一张闪/杀/被顺走最后一张/一次失去多张到0都要触发;
 // 一次失去多张只触发一次;不因 pending 被覆盖而丢询问、不重复触发。
+// 【自动发动改造】连营对陆逊自己零代价、纯收益,不再询问是否发动——tryFlushLianying
+// 现在直接摸牌生效,不再挂起 g.pending={type:'lianyingAsk',...}。本文件全部断言从
+// "应挂起连营询问"改为"应直接摸1张牌",队列本身的触发/去重/延迟结算逻辑不变。
 const vm=require('vm'),fs=require('fs'),assert=require('assert');
 const el=()=>({onclick:null,onchange:null,style:{},innerHTML:'',textContent:'',value:'',classList:{add(){},remove(){},toggle(){}}});
 const context={firebase:{initializeApp(){return{database(){return{ref(){return{on(){},once(){},transaction(){},set(){},update(){},child(){return this;},remove(){}};}};}};},database(){return this.initializeApp().database();}},document:{getElementById:el,createElement:el,querySelector(){return null;},querySelectorAll(){return[];},addEventListener(){}},window:{location:{search:'',href:''},localStorage:{getItem(){return null;},setItem(){}},addEventListener(){},setTimeout,clearTimeout,alert(){}},console,Math,Date,JSON,RegExp,Array,Object,String,Number,Boolean,parseInt,isNaN,setTimeout,clearTimeout};
@@ -21,18 +24,17 @@ const queued=()=>Array.isArray(g.lianyingQueue)&&g.lianyingQueue.includes(0);
 g=state();g.players[0].hand=[card('h1','杀')];sandbox.__g=g;
 run("playCard(0,'杀',1)");
 assert.strictEqual(queued(),true,'使用最后一张手牌应入连营队列');
-g.pending=null;assert.strictEqual(flush(),true,'空闲时应挂起连营询问');
-assert.strictEqual(g.pending.type,'lianyingAsk','应开连营询问');
-run('respondLianying(true)');
-assert.strictEqual(g.players[0].hand.length,1,'发动连营应摸1张');
+g.pending=null;assert.strictEqual(flush(),true,'空闲时应直接生效(摸牌)');
+assert.strictEqual(g.pending,null,'连营不再挂起询问,g.pending应仍为null');
+assert.strictEqual(g.players[0].hand.length,1,'发动连营应摸1张(自动生效,无需respondLianying)');
 
 // 2. 响应打出最后一张闪(respondShan)触发
 g=state();g.players[0].hand=[card('h1','闪','♥')];
 g.pending={type:'respond',from:1,to:0,sourceCard:card('s1','杀')};g.phase='respond';sandbox.__g=g;
 run('respondShan(true,0)');
 assert.strictEqual(queued(),true,'打出最后一张闪应入连营队列');
-assert.strictEqual(flush(),true,'打出最后一张闪后空闲应挂起连营询问');
-assert.strictEqual(g.pending.type,'lianyingAsk','打出最后一张闪应开连营询问');
+assert.strictEqual(flush(),true,'打出最后一张闪后空闲应直接生效');
+assert.strictEqual(g.players[0].hand.length,1,'打出最后一张闪后应自动摸回1张(连营)');
 
 // 3. 响应打出最后一张杀(duelResponse)触发
 g=state();g.players[0].hand=[card('h1','杀')];
@@ -59,24 +61,22 @@ run('discardCards([0,1])');
 assert.strictEqual(g.players[0].hand.length,0,'批量弃牌后手牌应为0');
 assert.strictEqual(queued(),true,'一次失去多张到0应触发连营');
 assert.strictEqual(g.lianyingQueue.filter(s=>s===0).length,1,'一次失去多张只应入队一次');
-assert.strictEqual(flush(),true,'批量弃牌到0后应能挂起询问');
-assert.strictEqual(g.pending.type,'lianyingAsk','批量弃牌到0应开连营询问');
+assert.strictEqual(flush(),true,'批量弃牌到0后应能直接生效');
+assert.strictEqual(g.players[0].hand.length,1,'批量弃牌到0后应自动摸回1张(连营)');
 
-// 7. 不因 pending 被覆盖而丢询问、不重复触发
+// 7. 不因 pending 被覆盖而丢失自动结算、不重复触发
 g=state();g.players[0].hand=[card('h1','杀')];sandbox.__g=g;
 run("playCard(0,'杀',1)");
 assert.strictEqual(queued(),true,'入队成功');
 assert.strictEqual(g.lianyingQueue.filter(s=>s===0).length,1,'同一失去事件只入队一次');
 // 模拟后续结算继续覆盖 pending(杀响应→被抵消→回到出牌)
 g.pending={type:'respond',from:1,to:0,noShan:true}; // 中间又挂了一个 pending
-assert.strictEqual(flush(),false,'pending 非空闲时不应提前开询问(询问不丢,留在队列)');
+assert.strictEqual(flush(),false,'pending 非空闲时不应提前生效(留在队列)');
 assert.strictEqual(queued(),true,'pending 非空闲时连营仍在队列等待');
 g.pending=null;
-assert.strictEqual(flush(),true,'pending 最终空闲后应补开询问');
-assert.strictEqual(g.pending.type,'lianyingAsk','补开连营询问');
-run('respondLianying(true)');
-assert.strictEqual(g.players[0].hand.length,1,'发动连营应摸1张');
-assert.strictEqual(g.lianyingQueue.length,0,'询问结束后队列应清空');
+assert.strictEqual(flush(),true,'pending 最终空闲后应补充生效');
+assert.strictEqual(g.players[0].hand.length,1,'补充生效应摸1张');
+assert.strictEqual(g.lianyingQueue.length,0,'生效结束后队列应清空');
 
 // 8. 被司马懿【反馈】夺走最后一张手牌触发
 g=state();g.players[0].hand=[card('h1','闪','♥')];sandbox.__g=g;
@@ -85,8 +85,8 @@ run("GENERALS.simayi.hooks.onDamaged(__g, 1, {amount:1, sourceSeat:0})");
 assert.strictEqual(g.players[0].hand.length,0,'被反馈拿走最后一张后手牌应为0');
 assert.strictEqual(g.players[1].hand.length,2,'反馈拿到牌应进司马懿手牌');
 assert.strictEqual(queued(),true,'被反馈夺走最后一张应入连营队列');
-assert.strictEqual(flush(),true,'被反馈夺走后空闲应挂起连营询问');
-assert.strictEqual(g.pending.type,'lianyingAsk','被反馈夺走应开连营询问');
+assert.strictEqual(flush(),true,'被反馈夺走后空闲应直接生效');
+assert.strictEqual(g.players[0].hand.length,1,'被反馈夺走后应自动摸回1张(连营)');
 
 // 9. 被【英魂】弃置最后一张手牌触发
 g=state();g.players[0].hand=[card('h1','闪','♥')];
@@ -94,8 +94,8 @@ g.pending={type:'yinghunDiscard',ownerSeat:1,targetSeat:0,remaining:1};g.phase='
 run('discardYinghunCard(0)');
 assert.strictEqual(g.players[0].hand.length,0,'被英魂弃最后一张后手牌应为0');
 assert.strictEqual(queued(),true,'被英魂弃最后一张应入连营队列');
-assert.strictEqual(flush(),true,'被英魂弃后空闲应挂起连营询问');
-assert.strictEqual(g.pending.type,'lianyingAsk','被英魂弃应开连营询问');
+assert.strictEqual(flush(),true,'被英魂弃后空闲应直接生效');
+assert.strictEqual(g.players[0].hand.length,1,'被英魂弃后应自动摸回1张(连营)');
 
 // 10. 烈刃拼点失去最后一张手牌触发
 g=state();g.players[0].hand=[card('h1','闪','♥')];g.players[1].hand=[card('z1','杀')];
@@ -105,7 +105,7 @@ assert.strictEqual(g.players[0].hand.length,0,'拼点后陆逊手牌应为0');
 assert.strictEqual(g.players[1].hand.length,0,'拼点后祝融手牌应为0');
 assert.strictEqual(g.discard.length,2,'双方拼点牌应进弃牌堆');
 assert.strictEqual(queued(),true,'拼点失去最后一张应入连营队列');
-assert.strictEqual(flush(),true,'拼点后空闲应挂起连营询问');
-assert.strictEqual(g.pending.type,'lianyingAsk','拼点失去最后一张应开连营询问');
+assert.strictEqual(flush(),true,'拼点后空闲应直接生效');
+assert.strictEqual(g.players[0].hand.length,1,'拼点后应自动摸回1张(连营)');
 
-console.log('lianying all paths: 36/36 passed');
+console.log('lianying all paths: 34/34 passed');

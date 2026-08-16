@@ -36,11 +36,11 @@ assert.strictEqual(R("CARD_PLAYS['乐不思蜀'].canTarget(__g,__g.players[1],{n
 
 g.players[0].hand=[]; // 调用点语义：最后一张牌已经移走，cardsLost 说明本次失去1张
 assert.strictEqual(R('maybeStartLianying(__g,0,1)'),true,'失去最后一张手牌应排入连营');
-assert.strictEqual(R('tryFlushLianying(__g)'),true,'空闲时应开启连营询问');
-assert.strictEqual(g.pending.type,'lianyingAsk');
-assert.strictEqual(typeof g.pending.askedAt,'number','连营询问应具备30秒超时');
-R('respondLianying(true)');
-assert.strictEqual(g.players[0].hand.length,1,'发动连营应摸1张');
-assert.strictEqual(g.pending,null);
+// 【自动发动改造】连营对陆逊自己零代价、纯收益,不再询问是否发动——tryFlushLianying
+// 现在空闲时直接摸牌生效,不再挂起 g.pending={type:'lianyingAsk',...}(也就不再需要
+// askedAt 超时兜底,没有"询问"这一步可超时)。
+assert.strictEqual(R('tryFlushLianying(__g)'),true,'空闲时应直接生效(摸牌)');
+assert.strictEqual(g.pending,null,'连营不再挂起询问,g.pending应仍为null');
+assert.strictEqual(g.players[0].hand.length,1,'发动连营应自动摸1张(无需respondLianying)');
 
 console.log('luxun tests: 14/14 passed');
