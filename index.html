@@ -2225,6 +2225,10 @@
 <script src="config.js?v=394"></script>
 <script src="data.js?v=399"></script>
 <script src="stages/stage-table.js?v=401"></script>
+<!-- CORE-78 第一期:技能注册表(纯数据登记,本期不被任何代码读取,第二/三期才按表驱动)。
+     零依赖(只含字面量与自身的 登记技能() 辅助函数),放在 data.js 之后仅为归类到
+     "数据类脚本"一段,不引入任何加载顺序约束。 -->
+<script src="skills/skill-registry.js?v=1"></script>
 <script src="debug-log.js?v=399"></script>
 <script src="room-lifecycle.js?v=405"></script>
 <script src="game.js?v=426"></script>
