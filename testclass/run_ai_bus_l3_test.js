@@ -630,15 +630,62 @@ const testCode = String.raw`
       throw new Error('本地兜底应选酒,实际 ' + JSON.stringify(fallback));
   });
 
-  await check('酒→杀顺序修复回归:酒/杀单独出现时分数不受影响(不污染 botCardPriority 通用表)', function(){
+  await check('酒→杀顺序修复回归:酒单独出现且本回合确实没有杀候选时(CORE-82),分数应被压低到本地兜底阈值(25)以下,而不是保持40', function(){
+    // 【CORE-82 更新说明】这条断言曾经要求"只有酒时分数应保持原值40"——那是修 酒→杀顺序
+    // 时顺手加的零回归验证,当时只关心"顺序修复逻辑不应该在酒单独出现时误触发",没有意识到
+    // "酒单独出现(没有任何杀候选)"这个场景本身就是 issue #129/CORE-82 描述的真实bug现场:
+    // 主公装备连弩+喝酒后,当回合再没有出过一张杀直接结束——根因正是这里,酒在没有杀候选
+    // 陪跑时仍然保留原始40分,被 localFallbackPlayWindow(本地兜底,取最高分候选)当成一次
+    // "值得打出"的候选选中,而酒的效果只在"本回合下一张杀"上生效,喝了却没有后续杀可用
+    // 纯粹是资源浪费。CORE-82 的修复把这个场景纳入了同一段酒相关的分数修正逻辑:酒和杀
+    // 一起出现→维持既有的"酒分数拉到比杀更高"(顺序修复,下面第二条断言覆盖);酒单独出现
+    // (没有任何杀候选)→压到阈值(25)以下,让机器人不再把它当高优先候选选中。
     var g1 = clearRoles(mkSeatG({ myHand: [card('酒','jo3','♥')] }));
     var jiuAlone = enumerateAllLegalOneStepActions(g1, 0).find(function(c){ return c.action==='酒'; });
-    if(!jiuAlone || jiuAlone.localHeuristicScore !== 40)
-      throw new Error('只有酒时分数应保持原值40,实际 ' + (jiuAlone && jiuAlone.localHeuristicScore));
+    if(!jiuAlone || jiuAlone.localHeuristicScore >= 25)
+      throw new Error('只有酒、没有杀候选时分数应被压到25以下(避免被本地兜底当高优先候选选中),实际 ' + (jiuAlone && jiuAlone.localHeuristicScore));
     var g2 = clearRoles(mkSeatG({ myHand: [card('杀','jo4','♠')] }));
     var shaAlone = enumerateAllLegalOneStepActions(g2, 0).find(function(c){ return c.action==='杀'; });
     if(!shaAlone || shaAlone.localHeuristicScore <= 40)
       throw new Error('只有杀时分数不应被酒的修正逻辑影响,实际 ' + (shaAlone && shaAlone.localHeuristicScore));
+  });
+
+  await check('CORE-82:酒单独在手且没有杀候选时,本地兜底应放弃打酒(不再制造"喝酒后无杀可用"的资源浪费)', function(){
+    var g = clearRoles(mkSeatG({ myHand: [card('酒','jo5','♥')] }));
+    var candidates = enumerateAllLegalOneStepActions(g, 0);
+    var fallback = localFallbackPlayWindow(g, 0, candidates);
+    if(!fallback || fallback.action === '酒')
+      throw new Error('本地兜底不应再选择喝酒(没有杀候选陪跑,喝了也没有下文),实际 ' + JSON.stringify(fallback));
+  });
+
+  await check('CORE-82破坏性验证:去掉"无杀候选压分"这段逻辑,酒的分数会回到40、本地兜底重新错误选中酒(证明上面两条断言有鉴别力)', function(){
+    var g = clearRoles(mkSeatG({ myHand: [card('酒','jo6','♥')] }));
+    var candidates = enumerateAllLegalOneStepActions(g, 0);
+    var jiu = candidates.find(function(c){ return c.action==='酒'; });
+    // 手动模拟"修复前"的分数(还原成未压低的原始40分),验证如果没有这段修复,
+    // 本地兜底确实会错误选中酒——证明上面两条断言不是巧合通过。
+    jiu.localHeuristicScore = 40;
+    var fallback = localFallbackPlayWindow(g, 0, candidates);
+    if(!fallback || fallback.action !== '酒')
+      throw new Error('还原成修复前的40分后,本地兜底应该(错误地)选中酒,如果没有说明上面的断言对这段逻辑没有鉴别力');
+  });
+
+  await check('CORE-82真实场景复现:身份局主公面对全场低嫌疑未知目标,杀被CORE-89硬过滤后酒也不应被打出(issue #135 dump 复现)', function(){
+    // 精确复现issue #129(CORE-82)dump现场:8人身份局,主公装备诸葛连弩+喝酒后当回合
+    // 再没有出过一张杀直接结束——根因是CORE-89硬过滤让"杀"完全没有合法候选(全场对主公
+    // 而言都是suspicion<30的未知身份),而这条修复之前酒仍然保留40分被本地兜底选中。
+    var g = mkSeatG({ n: 4, myHand: [card('杀','d1','♠'), card('酒','d2','♥')] });
+    g.gameMode = 'identity';
+    g.aiRebelSuspicion = {}; // 全员嫌疑值默认0,均<30门槛
+    var candidates = enumerateAllLegalOneStepActions(g, 0);
+    var sha = candidates.find(function(c){ return c.action==='杀'; });
+    if(sha) throw new Error('CORE-89应已硬过滤掉全部杀候选(全场suspicion<30未知目标),实际仍存在 ' + JSON.stringify(sha));
+    var jiu = candidates.find(function(c){ return c.action==='酒'; });
+    if(!jiu || jiu.localHeuristicScore >= 25)
+      throw new Error('没有杀候选陪跑时酒的分数应被压到25以下,实际 ' + (jiu && jiu.localHeuristicScore));
+    var fallback = localFallbackPlayWindow(g, 0, candidates);
+    if(fallback && fallback.action === '酒')
+      throw new Error('本地兜底不应再选择喝酒(dump复现的资源浪费场景)');
   });
 
   await check('武圣有密钥:mock 选目标 → playCard(第一张合法红牌idx, 杀, 目标);无密钥 null 不调', async function(){

@@ -4706,6 +4706,22 @@ function enumerateAllLegalOneStepActions(g, seat){
   if(jiuCandidate){
     const maxShaScore = out.reduce(function(m,c){ return c.action==='杀' ? Math.max(m,c.localHeuristicScore) : m; }, -Infinity);
     if(maxShaScore > -Infinity) jiuCandidate.localHeuristicScore = maxShaScore + 1;
+    // 【CORE-82:酒的无效果空耗修复】上面那条只处理"酒和杀都是候选时谁先出"的顺序问题,
+    // 没处理"这一次枚举里压根没有一张能打出去的杀"这种情况——酒的效果只在"本回合下一张
+    // 杀"上生效,一旦这个回合已经没有任何合法杀目标(典型如主公面对全场未知身份/低嫌疑值,
+    // CORE-89 硬过滤后 out 里根本不会出现杀候选),喝酒就是纯粹的资源浪费,和"装备了永远
+    // 用不上的武器"是同一类无意义操作。此前 botCardPriority('酒')=40 是一张不带上下文的
+    // 静态分,即使没有杀候选也照样排到较高位置(>25 的本地兜底出牌阈值),会被
+    // localFallbackPlayWindow(无密钥兜底,取最高分候选)和 AI 参考分同样误导,选中一个
+    // 没有下文的酒。真实案例:issue #135(CORE-82)dump 复现——主公装备诸葛连弩+喝酒后,
+    // 当回合再没有出过一张杀直接结束,根因就是这里:全场对主公来说都是"suspicion<30 的
+    // 未知目标"，CORE-89 硬过滤后杀完全没有合法候选，酒却仍然保留原样的40分被当成"值得
+    // 打出"的候选选中。修复:只在这一次枚举里连一张杀候选都不存在时(maxShaScore 仍是
+    // 初始的 -Infinity)，把酒的分数压到本地兜底出牌阈值(25)以下，让机器人这一步要么
+    // 选别的候选、要么直接结束出牌阶段——不是彻底禁止喝酒(如果同一回合稍晚因为别的候选
+    // 之后仍可能出现新的杀候选，比如先摸牌/先用某张锦囊后局面变化，那时会走进上面 if 分支
+    // 重新给出正确的高分)，只是不让它在"确定没有下文"的这一刻仍然显得像一次划算的操作。
+    if(maxShaScore === -Infinity) jiuCandidate.localHeuristicScore = Math.min(jiuCandidate.localHeuristicScore, 20);
   }
   // 按 localHeuristicScore 降序截断:保留最高分前 25 条(-Infinity 目标分正常参与排序,
   // 排序稳定,同分保持原枚举顺序);结束项在截断之后才 push,恒在末尾、不参与截断。
