@@ -2844,10 +2844,20 @@ BOT_DECISIONS.rendeTwoStep = {
     });
     return out;
   },
+  // CORE-116(issue #116)修复:localFallback 曾经无条件套用 stopAfter:true,不区分
+  // 阶段A/B——execute 里 choice.stopAfter 为真时立即 resetBotTwoStep(),跳过了下面
+  // "renDeCount<2 则续问"这条既定的 continue 链设计。这不只是"少给了一张牌"这么简单:
+  // resetBotTwoStep() 会把 botTwoStepA 清成 null,而 scheduleBotTurn 的自我触发机制
+  // (bot.js 顶部"botTwoStepA 自我触发"那段注释)只在"这轮调度落地后 botTwoStepA 仍非空"
+  // 时才补一次调度——botTwoStepA 提前变 null 意味着自我触发条件天生不成立,仁德给完
+  // 第1张后就再没有任何机制会主动继续,必须等一个完全不相关的外部Firebase事件才能
+  // 意外脱困,安静房间下即为永久卡死(见issue #116复现记录)。
+  // 修法:local fallback 不再强加 stopAfter,原样返回候选——是否继续完全交给下面
+  // execute 里既有的"renDeCount<2 且手牌未空则继续"判断,和有AI Key时的行为收敛成
+  // 同一套终止条件,不再有"无Key单独走一条提前终止的分支"这个特例。
   localFallback: function(g, seat, candidates){
     if(!candidates.length) return null;
-    // A6:无密钥只给一张即停(改动前行为)。stopAfter 让 execute 提交后不设 continue。
-    return Object.assign({}, candidates[0], { stopAfter: true });
+    return candidates[0];
   },
   execute: function(g, seat, choice){
     if(!choice) return;
@@ -2856,11 +2866,24 @@ BOT_DECISIONS.rendeTwoStep = {
       return; // 等下一调度走阶段 B
     }
     const me = g.players[seat];
-    if(choice.stop){ resetBotTwoStep(); return; } // A6:选停止→不再给
+    if(choice.stop){ resetBotTwoStep(); return; } // 选停止(仅AI策略性选择才会命中)→不再给
+    // CORE-116 修复过程中发现的第二个、更隐蔽的问题(独立于上面的 stopAfter 缺陷,
+    // 该缺陷修好后才暴露出来):renDe() 内部走自己的 tx(),对服务端状态的修改提交在一次
+    // 独立的事务快照里,不会同步反映到这里这个 g/me 引用上——这次 execute() 调用期间,
+    // g.renDeCount/me.hand 永远是"这次给牌之前"的旧值,不是"刚给完这张之后"的新值。
+    // 如果直接拿这份旧值做"是否继续"判断,会永远慢一拍:真实renDeCount已经到2了,
+    // 判断却还在用给牌前的1去比较,继续问下一次,导致多给一张(用一次不模拟generateSeed
+    // 那种"探针没跟上生产环境"的真实vm沙箱驱动复现过:renDeCount最终变成3而不是2)。
+    // 修法:不依赖g/me的旧值,直接用"这次调用自己知道的信息"在本地推算给牌后的状态——
+    // 这次只给了 choice.cardIdx 这一张(buildCandidates每次只挂一张牌的候选,不会
+    // 一次给多张),所以"给牌后 renDeCount"="给牌前 renDeCount"+1,"给牌后手牌数"
+    // ="给牌前手牌数"-1,不需要等下一次tick才能看到真实新值。
+    const renDeCountAfter = (g.renDeCount||0) + 1;
+    const handLenAfter = (me.hand||[]).length - 1;
     botInvoke(seat, function(){ renDe(choice.cardIdx, choice.targetSeat); });
-    if(choice.stopAfter){ resetBotTwoStep(); return; } // A6:无密钥一张即停,不设 continue
-    // A6:逐张给牌——renDeCount<2 且手牌还有牌就继续(下一调度给下一张或停止),否则收尾。
-    if(g.renDeCount < 2 && (me.hand||[]).length > 0){
+    // 逐张给牌——renDeCount<2 且手牌还有牌就继续(下一调度给下一张),否则收尾。
+    // 有/无AI Key在这条终止判断上完全一致,不再有 stopAfter 这个提前退出的特例分支。
+    if(renDeCountAfter < 2 && handLenAfter > 0){
       botTwoStepA = { decisionId: 'rendeTwoStep', a: choice.targetSeat, continue: true };
     } else {
       resetBotTwoStep();
