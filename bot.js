@@ -3612,26 +3612,11 @@ async function runBotDecision(g,seat){
   const isAutopilot=(typeof aiTestAutopilot!=='undefined')&&aiTestAutopilot&&aiTestAutopilot.active
     && aiTestAutopilot.seat===seat;
   if(!p.isBot&&!isAutopilot) return;
-  // 【AI托管】每次托管决策追加一条信息窗 record。hook 内部自行组装 stateInfo/reason
-  // (reason 回退 aiTestLastReason);prompt/rawResponse 来自 callAiChooseIndex 写下的
-  // aiTestLastCall(托管命中时有值)。choice 传 null 表示"未知具体动作"(execute 后的真实
-  // 动作摘要由后续任务回填)。采集失败绝不影响决策主流程,故外层再包一层 try/catch。
-  if(isAutopilot && typeof aiTestDecisionHook==='function'){
-    try{
-      // 注意:hook 在决策分支执行前调用,此时本次 AI 调用尚未发生——prompt/rawResponse
-      // 一律传空,绝不读 aiTestLastCall/aiTestLastReason(那是上一条决策的缓存,读了会把
-      // 上一条 AI 数据错误地贴到本条记录上,多条记录重复显示同一内容)。本次 AI 调用的
-      // prompt/rawResponse/choice/reason 由 callAiChooseIndex 解析完成后经
-      // aiTestFillLastRecord 回填到"最后一条待填充记录"。
-      aiTestDecisionHook(g, seat, {
-        summary: '决策(' + g.phase + ')',
-        prompt: '',
-        rawResponse: '',
-        choice: undefined,  // hook 内部不再回退旧值(避免上一条数据污染),待回填
-        reason: undefined
-      });
-    }catch(e){ /* 防御:采集异常不影响决策主流程 */ }
-  }
+  // 【CORE-73 采集下沉】这里原本有一个"仅托管命中才建骨架记录"的 aiTestDecisionHook
+  // 调用。现在采集统一放在 callAiChooseIndex(全部 AI 决策路径的唯一收敛点),覆盖机器人
+  // 与托管座位两类,不再在这里建记录——留在这里会和下沉后的采集重复,同一次决策出现
+  // 两条记录。副作用(有意为之):不调用 AI 的确定性决策(如 draw 直接 doDraw)不再产生
+  // 记录,改动前那种"只有骨架、prompt/AI返回全空"的空壳记录随之消失。
   const d=g.pending||{};
   const stageSpec=STAGE_TABLE[g.phase];
   if(stageSpec && typeof stageSpec.botDecision==='string'){

@@ -255,14 +255,18 @@ function buildBotDefaultUserPrompt(state, candidates){
 // 所以托管命中时把这两处替换成"返回choice+理由"口径;若传入的自定义 prompt 里仍
 // 残留"不要解释",在末尾追加一条理由指令压过它(AI 服从最后指令)。未托管路径
 // 完全不经过这两个函数,行为零变化。
-function buildAutopilotSystemPrompt(systemPrompt){
+// CORE-73:第二参数 isAutopilot 决定是否带"(本次为AI托管)"标记。理由格式指令本身
+// 现在对全部 AI 决策生效(决策面板要展示每台 AI 的理由),托管标记仍只在托管时出现。
+function buildAutopilotSystemPrompt(systemPrompt, isAutopilot){
+  if(isAutopilot===undefined) isAutopilot = true; // 兼容旧单参调用
   const base = systemPrompt || buildBotDefaultSystemPrompt();
   // 把"只输出 {"choice":数字}，不要解释。"整体去掉(前面已有"只能选列表内选项。")——
   // 格式说明统一收敛到末尾的托管标记行,只在 prompt 里出现一次:既消除"不要解释"与
   // "附理由"的矛盾,又不重复格式指令浪费 token。自定义 prompt 若残留"不要解释",
   // 末尾标记行作为最后指令压过它(AI 服从最后指令)。
   const s = base.replace('只输出 {"choice":数字}，不要解释。', '');
-  return s + '\n\n(本次为AI托管)返回choice时必须同时附一句中文理由,格式 {"choice":数字,"reason":"理由文本"}。';
+  return s + '\n\n' + (isAutopilot ? '(本次为AI托管)' : '')
+    + '返回choice时必须同时附一句中文理由,格式 {"choice":数字,"reason":"理由文本"}。';
 }
 function buildAutopilotUserPrompt(userPrompt){
   const reasonLine = '请按格式返回 {"choice":数字,"reason":"理由文本"}';
@@ -303,11 +307,26 @@ async function callAiChooseIndex(opts){
   // 一字不变——两条路径互不干扰。aiTestLastCall 采集的 prompt 与下方实发逐字一致。
   let sysText = (opts.systemPrompt || buildBotDefaultSystemPrompt()) + summaryNote;
   let userPromptText = opts.userPrompt;
+  // 【CORE-73】理由模板从"仅托管"扩展到全部 AI 决策:决策面板要对每台 AI 展示中文
+  // 理由,而理由只有在 prompt 明确要求时模型才会给。托管标记"(本次为AI托管)"仍只在
+  // 托管命中时出现(两条路径的 prompt 仍可区分),但"附理由"的格式指令现在两边都有。
+  sysText = buildAutopilotSystemPrompt(sysText, autopilotHit);
+  userPromptText = buildAutopilotUserPrompt(opts.userPrompt);
   if(autopilotHit){
-    sysText = buildAutopilotSystemPrompt(sysText);
-    userPromptText = buildAutopilotUserPrompt(opts.userPrompt);
     aiTestLastCall = { prompt: sysText + '\n\n' + userPromptText, rawResponse: null };
   }
+  // 【CORE-73 采集下沉】改动前只有托管命中才建记录(bot.js 的 aiTestDecisionHook 调用点),
+  // 现在全部 AI 决策在这里统一建骨架记录 —— callAiChooseIndex 是所有 AI 决策路径的唯一
+  // 收敛点(见 CLAUDE.md「统一入口」),放在这里等于零遗漏地覆盖机器人与托管座位。
+  // 注意本函数顶部已过 aiApiKey 守卫:未配置密钥时根本走不到这里,故"无密钥不产生记录"
+  // 自动成立,不需要额外判断。
+  const decisionRec = (typeof aiDecisionRecordStart==='function')
+    ? aiDecisionRecordStart(g, seat, {
+        summary: opts.summary || ('决策(' + (g && g.phase) + ')'),
+        prompt: sysText + '\n\n' + userPromptText,
+        isAutopilot: autopilotHit
+      })
+    : null;
   // 轮换模式判定:groq/hf/cerebras/tri 且走多选轮换(aiApiModel 为空 = 不是手动单选)。
   // 这四种场景才有"换下一个模型"可言;手动单选/非轮换 provider 重试只会打同一个模型,
   // 维持单次。groq/cerebras 是 round-robin、hf/tri 是优先级扫描,统一在这里进重试循环。
@@ -337,7 +356,10 @@ async function callAiChooseIndex(opts){
       result = await callAI(aiProvider, aiApiKey, {
         systemPrompt: sysText,
         userPrompt: userPromptText,
-        maxTokens: opts.maxTokens || 80,
+        // CORE-73:理由指令现在对全部决策生效,返回体从 {"choice":N} 变成
+        // {"choice":N,"reason":"…"},80 token 容易把 JSON 截断成解析失败(=退本地兜底,
+        // 决策质量下降)。给一个 160 的下限,调用方声明更大时仍取更大值。
+        maxTokens: Math.max(opts.maxTokens || 80, 160),
         // 多模型轮换:同 updateAiSummary 的 callAI 调用点,见该处注释。
         model,
       });
@@ -372,28 +394,45 @@ async function callAiChooseIndex(opts){
       }catch(e){ /* 诊断日志本身出错不影响主决策流程 */ }
     }
     if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; } // 未托管零触碰
+    // CORE-73:调用失败的记录也要回填(否则面板上只剩一条空骨架,看不出是"调用失败"
+    // 还是"还没回来")。model 记最后一次实际尝试的模型,全池冷却时为空。
+    if(typeof fillAiDecisionRecord==='function'){
+      fillAiDecisionRecord(decisionRec, {
+        rawResponse: '(AI调用失败:' + (allCooled ? '轮换池全部冷却,未发请求'
+          : ((result&&result.reason||'unknown')+' - '+(result&&result.detail||''))) + ')',
+        model: attemptedModel || null
+      });
+    }
     return null;
   }
-  let idx, reason;
-  if(autopilotHit){
-    const pr = parseBotPlayAiChoiceWithReason(result.text);
-    idx = pr.idx; reason = pr.reason;
-  } else {
-    idx = parseBotPlayAiChoice(result.text);
-    reason = null;
+  // CORE-73:理由解析不再受托管开关限制——prompt 现在对所有决策都要求附理由,
+  // 解析器在没有 reason 时会优雅回退(reason=null),不影响 choice 的取值。
+  const pr = parseBotPlayAiChoiceWithReason(result.text);
+  const idx = pr.idx;
+  const reason = pr.reason;
+  // aiTestLastReason/aiTestLastChoice 仍是托管专用的旧全局(信息窗遗留读取点),
+  // 维持"未托管零触碰"的既有约定:新面板的数据一律走 aiDecisionRecords,不读这两个。
+  if(autopilotHit){ aiTestLastReason = reason; aiTestLastChoice = idx; }
+  else { aiTestLastReason = null; }
+  // 【CORE-73 回填】把本次 AI 调用的真实数据回填进本次调用自己的记录引用(不再用
+  // "最后一条待回填记录"的全局单例——多台机器人的 AI 调用可能交错,单例会串台)。
+  if(typeof fillAiDecisionRecord==='function'){
+    fillAiDecisionRecord(decisionRec, {
+      rawResponse: result.text || '',
+      choice: idx,
+      reason: reason,
+      model: attemptedModel || null
+    });
   }
-  aiTestLastReason = reason;
-  if(autopilotHit) aiTestLastChoice = idx;
-  // 【AI托管回填】解析完成后,把本次 AI 调用的真实数据回填进"最后一条待回填骨架记录"
-  // (runBotDecision 决策前由 aiTestDecisionHook 建立)。注意:只有解析成功(idx 合法)才回填
-  // choice/reason;解析失败/越界时本条记录保持骨架状态(choice 显示"(无动作/本地兜底)"是
-  // 真实语义——AI 没能给出合法选择,走了本地兜底)。
-  if(autopilotHit && typeof aiTestFillPendingRecord==='function'){
+  // 兼容:托管路径的旧骨架记录(若有人直调 aiTestDecisionHook 建立)仍需被消费掉,
+  // 避免它一直挂着 pending 影响后续回填。
+  if(autopilotHit && typeof aiTestFillPendingRecord==='function' && typeof aiTestPendingRecord!=='undefined' && aiTestPendingRecord){
     aiTestFillPendingRecord({
       prompt: (aiTestLastCall && aiTestLastCall.prompt) || '',
       rawResponse: (aiTestLastCall && aiTestLastCall.rawResponse) || '',
       choice: idx,
-      reason: reason
+      reason: reason,
+      model: attemptedModel || null
     });
   }
   if(idx===null || idx<0 || idx>=candidates.length){
@@ -404,11 +443,18 @@ async function callAiChooseIndex(opts){
     if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
     return null;
   }
-  logBotDecisionTrace(g, seat, 'llm',
-    'AI从'+candidates.length+'个候选中选择了#'+idx+(candidates[idx]&&candidates[idx].label?'('+candidates[idx].label+')':'')
-    +(autopilotHit?'(托管座位)':''));
+  // 【CORE-72】这里原本无条件记一条 source=llm 的 bot_decision_trace。已删除:debugLogs
+  // 的既定设计原则是"只在异常/该关注的情况下写"(见 debug-log.js 顶部注释),而 AI 正常
+  // 决策在一局里极其频繁,把 js_error/timeout_stuck/bot_decision_failed/ai_call_failed/
+  // ai_lock_stuck 这些真正需要排查的信号整个淹掉。正常决策流水本身仍有价值,但已经有了
+  // 专门的去处:CORE-73 的统一存储 aiDecisionRecords + AI 决策面板(数据不丢,只是换地方,
+  // 而且比这条日志更全——带 prompt/原始返回/理由/武将/模型)。异常类照常记(上面那条
+  // ai_response_unusable 分支)。
   return idx;
 }
+// CORE-72:允许写进 debugLogs 的 bot_decision_trace 来源(异常类)。正常决策('llm')
+// 刻意不在其中——debugLogs 只记异常,正常流水归 AI 决策面板(CORE-73)。
+const BOT_DECISION_TRACE_ABNORMAL_SOURCES = new Set(['ai_response_unusable']);
 // logBotDecisionTrace: CORE-109 决策流水的唯一写入口——只在 callAiChooseIndex 内部调用
 // (该函数是全部 AI 决策路径——L1 controlsChoice/L2-L3 决策总线/botPlay选牌选目标/强C
 // 同窗循环——唯一实际发起 AI 请求的收敛点,见 CLAUDE.md"统一入口"),不需要在各个上层
@@ -416,6 +462,11 @@ async function callAiChooseIndex(opts){
 // 候选规模/选中结果,不记录候选列表全文(可能带手牌相关的具体文案,以及避免单条日志过大)。
 function logBotDecisionTrace(g, seat, source, message){
   if(typeof writeDebugLog!=='function') return;
+  // 【CORE-72】按 source 区分:只有异常类才进 debugLogs。'llm'(AI 正常决策且提交成功)
+  // 是正常流水,不是需要关注的异常,写进来会淹没真正的排查信号——它的去处是 CORE-73 的
+  // AI 决策面板(aiDecisionRecords)。这道守卫留在唯一写入口上,而不是只删调用点:以后
+  // 再有人往这里传正常类 source,也不会悄悄把噪音写回 debugLogs。
+  if(!BOT_DECISION_TRACE_ABNORMAL_SOURCES.has(source)) return;
   try{
     writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_trace', {
       phase: g && g.phase || null,

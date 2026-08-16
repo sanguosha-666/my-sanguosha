@@ -178,9 +178,11 @@ function resolveAiModel(provider){
 }
 
 // ===== AI托管(纯客户端本地状态,不写入Firebase) =====
-// active:托管开关;seat:被托管的座位(当前浏览器玩家的 mySeat);records:本次托管期间
-// 的决策记录(供信息窗展示,关闭弹窗不清空、刷新即丢)。
-let aiTestAutopilot = { active:false, seat:null, records:[] };
+// active:托管开关;seat:被托管的座位(当前浏览器玩家的 mySeat)。
+// 【CORE-73】决策记录已迁出:改由独立于托管开关的统一存储 aiDecisionRecords 承载
+// (全部 AI 决策,含非托管机器人),这里不再挂 records 字段——托管信息窗渲染时按
+// isAutopilot 过滤该统一存储,语义与改动前一致。
+let aiTestAutopilot = { active:false, seat:null };
 let aiTestAutopilotDisconnectRef = null;
 
 (function hydrateAiStateFromSession(){
@@ -1400,17 +1402,136 @@ function closeAiTestModal(){
   const m=document.getElementById('aiTestModal');
   if(m) m.classList.add('hidden');
 }
-function renderAiTestRecords(){
-  const body=document.getElementById('aiTestBody');
-  if(!body) return;
-  body.innerHTML = aiTestAutopilot.records.map(recordHtml).join('');
+// ============ CORE-75:本局全量导出(游戏log + AI决策 + 对局元信息) ============
+// 【为什么要它】"本局发生了什么"分散在三个入口:游戏日志(📜)、调试日志(🐛,而且按
+// CORE-72 只记异常)、AI 决策(面板)。出问题后要复现/调查得逐个翻,没有一次性拿到全量
+// 的手段。这里把三者拼成一个 JSON 交给浏览器下载。
+// 【硬约束】纯本地导出,不产生任何 Firebase 写入——不调 tx/gameRef/writeDebugLog,
+// 只读 currentG(render 的本地快照)与 aiDecisionRecords(纯客户端数组)。
+function buildAiDecisionDump(){
+  const g = (typeof currentG!=='undefined') ? currentG : null;
+  return {
+    exportedAt: new Date().toISOString(),
+    roomId: (typeof roomId!=='undefined') ? roomId : null,
+    mySeat: (typeof mySeat!=='undefined') ? mySeat : null,
+    ai: {
+      provider: (typeof aiProvider!=='undefined') ? aiProvider : null,
+      model: (typeof aiApiModel!=='undefined' && aiApiModel) ? aiApiModel : null,
+      modelPool: (typeof aiApiModels!=='undefined' && Array.isArray(aiApiModels)) ? aiApiModels.slice() : []
+      // 刻意不导出 aiApiKey:导出文件会被转发给别人看,密钥不能跟着走。
+    },
+    game: g ? {
+      phase: g.phase || null,
+      turn: (typeof g.turn==='number') ? g.turn : null,
+      roundNum: (typeof g.roundNum==='number') ? g.roundNum : null,
+      gameMode: g.gameMode || null,
+      over: !!g.over,
+      winner: (g.winner===undefined) ? null : g.winner,
+      players: (g.players||[]).map(function(p, i){
+        const gen = (p && p.general && typeof getGeneral==='function') ? getGeneral(p.general) : null;
+        return {
+          seat: i,
+          name: (p && p.name) || '',
+          general: (gen && gen.name) || (p && p.general) || '',
+          isBot: !!(p && p.isBot),
+          alive: !!(p && p.alive),
+          hp: (p && p.hp), maxHp: (p && p.maxHp)
+        };
+      })
+    } : null,
+    // 游戏日志全量(pushLog 的记录,和 📜 弹窗同一份数据)
+    log: (g && Array.isArray(g.log)) ? g.log.map(function(l){
+      return (l && typeof l==='object') ? { seq: l.seq, text: l.text } : { seq: null, text: String(l) };
+    }) : [],
+    // AI 决策全量(字段与决策面板/托管信息窗展示的一致)
+    aiDecisions: (typeof aiDecisionRecords!=='undefined' ? aiDecisionRecords : []).map(function(r){
+      return {
+        time: r.time, seat: r.seat, seatName: r.seatName, general: r.general,
+        phase: r.phaseLabel, summary: r.summary, model: r.model,
+        isAutopilot: !!r.isAutopilot,
+        choice: r.choice, reason: r.reason,
+        prompt: r.prompt, rawResponse: r.rawResponse, stateInfo: r.stateInfo
+      };
+    })
+  };
 }
-// recordHtml:单条记录的完整 HTML(摘要行 + 详情区)。索引来自 records 数组位置,
-// 与 DOM 中 data-idx 一致,供 toggleAiTestRecord / aiTestFillPendingRecord 定位。
+function downloadAiDecisionDump(){
+  try{
+    const dump = buildAiDecisionDump();
+    const text = JSON.stringify(dump, null, 2);
+    const name = 'sgs-dump-' + (dump.roomId || 'room') + '-'
+      + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+    const blob = new Blob([text], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 0);
+    return name;
+  }catch(e){
+    console.warn('导出本局数据失败', e);
+    return null;
+  }
+}
+// ===== CORE-73:AI 决策查看面板(独立于托管开关,托管关着也能看机器人决策) =====
+function openAiPanelModal(){
+  const m=document.getElementById('aiPanelModal');
+  if(!m) return;
+  m.classList.remove('hidden');
+  const p=m.querySelector('.aitest-panel');
+  if(p) p.onclick=(e)=>e.stopPropagation();
+  renderAiPanelRecords();
+}
+function closeAiPanelModal(){
+  const m=document.getElementById('aiPanelModal');
+  if(m) m.classList.add('hidden');
+}
+// ============ CORE-73/74:AI 决策记录的统一存储(独立于托管开关) ============
+// 【为什么要独立存储】改动前 AI 决策的来源数据(理由/prompt/原始返回)只在托管命中
+// (autopilotHit)时才采集,而且只存进 aiTestAutopilot.records 这个"托管作用域"的数组
+// ——正常对局里各机器人座位的 AI 决策完全没有可视化入口,事后无从得知"某台 AI 为什么
+// 这么选"(这正是 CORE-109 把决策流水塞进 debugLogs 的原因:当时没有别的地方可放)。
+// 现在改为:全部 AI 决策(机器人 + 托管座位)统一记进 aiDecisionRecords,采集点下沉到
+// callAiChooseIndex(全部 AI 决策路径的唯一收敛点)。两个窗口按各自语义渲染同一份数据:
+//   - 托管信息窗(#aiTestModal):只渲染 isAutopilot 的记录,语义与改动前一致;
+//   - AI 决策面板(#aiPanelModal,CORE-73 新增):渲染全部记录,含非托管机器人。
+// 记录额外带上武将名(general)与本次实际使用的模型名(model),两个窗口都展示(CORE-74)。
+// 【索引口径】data-idx 一律是记录在 aiDecisionRecords 里的下标(不是各窗口过滤后的
+// 位置),两个窗口用同一个下标指向同一条记录,回填/展开互不错位。
+let aiDecisionRecords = [];
+// 两个渲染容器:id -> 该窗口是否只看托管记录
+const AI_RECORD_VIEWS = [
+  { bodyId:'aiTestBody',  modalId:'aiTestModal',  autopilotOnly:true  },
+  { bodyId:'aiPanelBody', modalId:'aiPanelModal', autopilotOnly:false }
+];
+function aiRecordViewList(view){
+  // 返回 [记录, 统一下标] 对的列表(保持统一下标,过滤只影响"显示哪些")
+  const out=[];
+  aiDecisionRecords.forEach(function(rec,i){
+    if(view.autopilotOnly && !rec.isAutopilot) return;
+    out.push([rec,i]);
+  });
+  return out;
+}
+function renderAiRecordView(view){
+  const body=document.getElementById(view.bodyId);
+  if(!body) return;
+  body.innerHTML = aiRecordViewList(view).map(function(pair){ return recordHtml(pair[0], pair[1]); }).join('');
+}
+function renderAiTestRecords(){ renderAiRecordView(AI_RECORD_VIEWS[0]); }
+function renderAiPanelRecords(){ renderAiRecordView(AI_RECORD_VIEWS[1]); }
+// recordHtml:单条记录的完整 HTML(摘要行 + 详情区)。索引是 aiDecisionRecords 下标,
+// 与 DOM 中 data-idx 一致,供 toggleAiTestRecord / fillAiDecisionRecord 定位。
 function recordHtml(rec, i){
+  // CORE-73:摘要行补"座位·武将",非托管面板里同时看多台 AI 时才分得清是谁的决策。
+  const who = (Number.isInteger(rec.seat) ? ('#'+rec.seat) : '')
+    + (rec.general ? ('·'+rec.general) : '');
   return '<div class="aitest-record">'
     +'<div class="aitest-record-summary" onclick="toggleAiTestRecord('+i+')">'
     +'<span class="aitest-arrow">▸</span><b>'+escapeHtml(rec.time)+'</b>'
+    +(who ? '<span class="aitest-who">'+escapeHtml(who)+'</span>' : '')
     +'<span>['+escapeHtml(rec.phaseLabel)+']</span><span>'+escapeHtml(rec.summary)+'</span>'
     +'</div>'
     +recordDetailHtml(rec, i)
@@ -1423,19 +1544,26 @@ function recordDetailHtml(rec, i){
     +'<div class="aitest-sec">① AI获取的信息</div><pre>'+escapeHtml(rec.stateInfo)+'</pre>'
     +(rec.prompt ? '<div class="aitest-sec">发送的Prompt</div><pre>'+escapeHtml(rec.prompt)+'</pre>' : '')
     +'<div class="aitest-sec">② AI返回的信息</div><pre>'+escapeHtml(rec.rawResponse || '(无)')+'</pre>'
-    +'<div class="aitest-sec">解析choice</div><div>'+(rec.choice===null?'(无动作/本地兜底)':escapeHtml(String(rec.choice)))+'</div>'
+    +'<div class="aitest-sec">解析choice</div><div>'+(rec.choice===null||rec.choice===undefined?'(无动作/本地兜底)':escapeHtml(String(rec.choice)))+'</div>'
     +'<div class="aitest-sec">③ 理由</div><div>'+escapeHtml(rec.reason || '(无)')+'</div>'
+    // CORE-74:本次决策实际使用的模型名。多模型轮换池下,排查"某个模型表现异常"时
+    // 必须能对上"哪条决策用了哪个模型";取自 callAiChooseIndex 的 attemptedModel。
+    +'<div class="aitest-sec">④ 使用的模型</div><div>'+escapeHtml(rec.model || '(未知)')+'</div>'
+    +'<div class="aitest-sec">⑤ 武将</div><div>'+escapeHtml(rec.general || '(未知)')+'</div>'
     +'</div>';
 }
 function toggleAiTestRecord(idx){
-  const el=document.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
-  if(!el) return;
-  el.classList.toggle('hidden');
+  // 同一条记录可能同时出现在托管信息窗和决策面板里(同一 data-idx),两处一起开合,
+  // 不用 querySelector 只取第一个——否则另一个窗口点了没反应。
+  const list=document.querySelectorAll('.aitest-record-detail[data-idx="'+idx+'"]');
+  if(!list || !list.length) return;
+  Array.prototype.forEach.call(list, function(el){ el.classList.toggle('hidden'); });
 }
 function clearAiTestRecords(){
-  aiTestAutopilot.records = [];
+  aiDecisionRecords = [];
   aiTestPendingRecord = null;
   renderAiTestRecords();
+  renderAiPanelRecords();
 }
 let aiTestLastObservedPhase = null;
 function syncAiTestGamePhase(phase){
@@ -1449,11 +1577,70 @@ function syncAiTestGamePhase(phase){
 // innerHTML——整窗重建会把已展开的详情全部收起、滚动位置重置回顶部;增量插入只动
 // 新记录自己的节点,其余原样。
 function appendAiTestRecord(rec){
-  aiTestAutopilot.records.push(rec);
-  const body=document.getElementById('aiTestBody');
-  const m=document.getElementById('aiTestModal');
-  if(!body || (m && m.classList.contains('hidden'))) return;
-  body.insertAdjacentHTML('beforeend', recordHtml(rec, aiTestAutopilot.records.length-1));
+  aiDecisionRecords.push(rec);
+  const idx = aiDecisionRecords.length-1;
+  AI_RECORD_VIEWS.forEach(function(view){
+    if(view.autopilotOnly && !rec.isAutopilot) return;
+    const body=document.getElementById(view.bodyId);
+    const m=document.getElementById(view.modalId);
+    if(!body || (m && m.classList.contains('hidden'))) return;
+    body.insertAdjacentHTML('beforeend', recordHtml(rec, idx));
+  });
+}
+// ============ CORE-73:统一采集入口(供 callAiChooseIndex 调用) ============
+// aiDecisionRecordStart:在一次 AI 调用发起前建立骨架记录并返回它本身(不是下标)——
+// 调用方拿着这个引用在调用结束后回填,不再依赖"最后一条待回填记录"这种全局单例
+// (多台机器人的 AI 调用可能交错,单例会把 A 的返回贴到 B 的记录上)。
+function aiDecisionRecordStart(g, seat, info){
+  try{
+    info = info || {};
+    const p = (g && g.players && g.players[seat]) || null;
+    const gen = p && p.general && typeof getGeneral==='function' ? getGeneral(p.general) : null;
+    const rec = {
+      time: (typeof debugLogIsoTime==='function')
+        ? debugLogIsoTime(Date.now()) : new Date().toTimeString().slice(0,8),
+      seat: Number.isInteger(seat) ? seat : null,
+      seatName: (p && p.name) || '',
+      general: (gen && gen.name) || (p && p.general) || '',
+      phaseLabel: (g && g.phase) || '',
+      summary: info.summary || ('决策(' + (g && g.phase) + ')'),
+      stateInfo: (typeof buildBotVisibleState==='function')
+        ? JSON.stringify(buildBotVisibleState(g, seat)) : '',
+      prompt: info.prompt || '',
+      rawResponse: '',
+      choice: null,
+      reason: null,
+      model: null,
+      isAutopilot: !!info.isAutopilot
+    };
+    appendAiTestRecord(rec);
+    return rec;
+  }catch(e){ return null; } // 采集失败绝不影响决策主流程
+}
+// fillAiDecisionRecord:AI 调用结束后回填真实数据(rawResponse/choice/reason/model),
+// 并就地替换该条记录在各窗口里的详情区 DOM(保留展开状态与滚动位置)。
+function fillAiDecisionRecord(rec, fields){
+  try{
+    if(!rec || !fields) return;
+    ['prompt','rawResponse','choice','reason','model'].forEach(function(k){
+      if(fields[k]!==undefined) rec[k]=fields[k];
+    });
+    const idx = aiDecisionRecords.indexOf(rec);
+    if(idx<0) return;
+    AI_RECORD_VIEWS.forEach(function(view){
+      if(view.autopilotOnly && !rec.isAutopilot) return;
+      const m=document.getElementById(view.modalId);
+      if(!m || m.classList.contains('hidden')) return;
+      const det = m.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
+      if(!det) return;
+      const wasOpen = !det.classList.contains('hidden');
+      det.outerHTML = recordDetailHtml(rec, idx);
+      if(wasOpen){
+        const nd = m.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
+        if(nd) nd.classList.remove('hidden');
+      }
+    });
+  }catch(e){ /* 静默:回填失败不影响决策主流程 */ }
 }
 
 // aiTestPendingRecord:最近一次由 aiTestDecisionHook 建立的"待回填"骨架记录。
@@ -1465,27 +1652,17 @@ let aiTestPendingRecord = null;
 // prompt/rawResponse/choice/reason 留待 callAiChooseIndex 解析完成后回填——
 // 绝不在决策前读 aiTestLastCall/aiTestLastReason(那是上一条决策的缓存,读了会把上一条
 // AI 数据错贴到本条记录,多条记录重复显示同一内容)。
+// CORE-73 后:采集主路径已下沉到 callAiChooseIndex(aiDecisionRecordStart),本函数保留
+// 为"托管骨架记录"的兼容入口(直调建一条 isAutopilot 记录),内部改用统一存储。
 function aiTestDecisionHook(g, seat, info){
   try{
     if(typeof info!=='object' || !info) return;
     if(typeof aiTestAutopilot==='undefined' || !aiTestAutopilot) return;
-    // phaseName 是 render.js 里 render() 的局部 const,这里拿不到中文名,直接用原始
-    // phase 字符串(信息窗里展示英文 phase 已足够定位阶段)。
-    const phaseLabel = (g && g.phase) || '';
-    const stateInfo = (typeof buildBotVisibleState==='function')
-      ? JSON.stringify(buildBotVisibleState(g, seat)) : '';
-    aiTestPendingRecord = {
-      time: (typeof debugLogIsoTime==='function')
-        ? debugLogIsoTime(Date.now()) : new Date().toTimeString().slice(0,8),
-      phaseLabel: phaseLabel,
-      summary: info.summary || ('决策(' + (g && g.phase) + ')'),
-      stateInfo: stateInfo,
+    aiTestPendingRecord = aiDecisionRecordStart(g, seat, {
+      summary: info.summary,
       prompt: '',
-      rawResponse: '',
-      choice: null,
-      reason: null
-    };
-    appendAiTestRecord(aiTestPendingRecord);
+      isAutopilot: true
+    });
   }catch(e){ /* 静默:采集失败不影响决策主流程 */ }
 }
 // aiTestFillPendingRecord:callAiChooseIndex 托管命中解析完成后调用,把本次 AI 调用的
@@ -1494,37 +1671,27 @@ function aiTestDecisionHook(g, seat, info){
 function aiTestFillPendingRecord(fields){
   try{
     if(!aiTestPendingRecord) return;
-    if(fields){
-      if(fields.prompt!==undefined) aiTestPendingRecord.prompt = fields.prompt;
-      if(fields.rawResponse!==undefined) aiTestPendingRecord.rawResponse = fields.rawResponse;
-      if(fields.choice!==undefined) aiTestPendingRecord.choice = fields.choice;
-      if(fields.reason!==undefined) aiTestPendingRecord.reason = fields.reason;
-    }
-    const idx = aiTestAutopilot.records.indexOf(aiTestPendingRecord);
+    const rec = aiTestPendingRecord;
     aiTestPendingRecord = null;
-    const m=document.getElementById('aiTestModal');
-    if(!m || m.classList.contains('hidden') || idx<0) return;
-    const det = m.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
-    if(!det) return;
-    // 只替换这一条记录的详情区,保留其它记录节点与滚动位置;替换前记住展开状态,
-    // 用户正点开看着的这条记录回填后保持展开(内容实时可见)。
-    const wasOpen = !det.classList.contains('hidden');
-    det.outerHTML = recordDetailHtml(aiTestAutopilot.records[idx], idx);
-    if(wasOpen){
-      const nd = m.querySelector('.aitest-record-detail[data-idx="'+idx+'"]');
-      if(nd) nd.classList.remove('hidden');
-    }
+    fillAiDecisionRecord(rec, fields || {});
   }catch(e){ /* 静默:回填失败不影响决策主流程 */ }
 }
 
 // 拖动:header mousedown/mousemove 更新 left/top;resize:右下角手柄更新 width/height。
 // 桌面 mouse 事件;触屏依赖浏览器合成 mouse 序列(体验可接受,测试工具场景)。
+// aiModalOfEvent:从窗口内任意元素往上找它所属的那个窗体(#aiTestModal 或 #aiPanelModal)。
+function aiModalOfEvent(el){
+  if(!el || !el.closest) return null;
+  return el.closest('#aiTestModal, #aiPanelModal');
+}
 (function initAiTestModalDrag(){
   if(typeof document==='undefined'||!document.addEventListener) return;
   document.addEventListener('mousedown', function(e){
     const hd=e.target && e.target.closest ? e.target.closest('.aitest-header') : null;
     if(!hd) return;
-    const m=document.getElementById('aiTestModal');
+    // CORE-73:两个窗口(#aiTestModal / #aiPanelModal)共用 .aitest-* 结构,这里改成
+    // 从事件目标往上找所属窗口,而不是写死取托管信息窗——否则拖决策面板会去拖另一个窗。
+    const m=aiModalOfEvent(hd);
     if(!m || m.classList.contains('hidden')) return;
     e.preventDefault();
     const sx=e.clientX, sy=e.clientY, ox=m.offsetLeft, oy=m.offsetTop;
@@ -1543,7 +1710,7 @@ function aiTestFillPendingRecord(fields){
   document.addEventListener('mousedown', function(e){
     const hd=e.target && e.target.closest ? e.target.closest('.aitest-resize-handle') : null;
     if(!hd) return;
-    const m=document.getElementById('aiTestModal');
+    const m=aiModalOfEvent(hd);
     if(!m || m.classList.contains('hidden')) return;
     e.preventDefault(); e.stopPropagation();
     const sx=e.clientX, sy=e.clientY, ow=m.offsetWidth, oh=m.offsetHeight;

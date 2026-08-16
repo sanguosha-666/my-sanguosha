@@ -2,9 +2,11 @@
  * CORE-109:AI 机器人行为事后不可查 —— 最小验证。
  *
  * 覆盖 issue 修复要求里代码层面能做的四块:
- *  1. AI 决策流水(bot_decision_trace):callAiChooseIndex 唯一入口——AI 真实决定一次记
- *     source=llm;AI 返回但解析失败/越界记 source=ai_response_unusable。只在配置了 AI
- *     密钥时才记(无密钥直接走本地启发式是预期默认状态,不产生诊断噪音)。
+ *  1. AI 决策流水(bot_decision_trace):callAiChooseIndex 唯一入口。
+ *     【CORE-72 收窄】只有异常类(source=ai_response_unusable,AI 返回但解析失败/越界)
+ *     才写 debugLogs;source=llm 的正常决策流水已移除——debugLogs 只记异常,正常流水
+ *     改由 CORE-73 的 AI 决策面板(aiDecisionRecords)承载。只在配置了 AI 密钥时才可能
+ *     产生记录(无密钥直接走本地启发式是预期默认状态,不产生诊断噪音)。
  *  2. callAI 失败统一记录(ai_call_failed):网络/超时/解析/HTTP错误/全池冷却统一写入,
  *     含 provider/model/失败类别。
  *  3. 提交被拒统一信号(bot_decision_failed 的通用兜底):botInvoke 是机器人几乎全部动作
@@ -134,7 +136,13 @@ const testCode = String.raw`
     });
   });
 
-  await check('callAiChooseIndex: AI真实决定一次时记录bot_decision_trace(source=llm)', async function(){
+  // 【CORE-72 语义变更:原断言已作废】原断言是"AI 真实决定一次 → 记录 1 条 source=llm 的
+  // bot_decision_trace"。那条命题现在**故意**不再成立:debugLogs 的既定原则是只记异常
+  // (debug-log.js 顶部),AI 正常决策极其频繁,会把 js_error/timeout_stuck/
+  // bot_decision_failed/ai_call_failed/ai_lock_stuck 这些真信号淹掉。正常流水改由
+  // CORE-73 的 AI 决策面板(aiDecisionRecords)承载,数据不丢反而更全。新命题:正常决策
+  // 一条 debugLogs 都不写,但决策本身照常返回正确 idx。
+  await check('CORE-72: AI正常决策不写debugLogs(流水已改由决策面板承载)', async function(){
     var cap = captureWriteDebugLog();
     var savedCallAI = callAI;
     aiApiKey = 'fake-key'; aiProvider = 'groq'; aiApiModel = 'llama-3.3-70b-versatile'; aiApiModels = [];
@@ -142,10 +150,25 @@ const testCode = String.raw`
     var g = mkSeatG({}); g.phase='play';
     var idx = await callAiChooseIndex({ g: g, seat: 0, systemPrompt: 'sys', userPrompt: 'user', candidates: [{label:'A'},{label:'B'}] });
     cap.restore(); callAI = savedCallAI; aiApiKey=''; aiProvider=null;
-    if(idx !== 1) throw new Error('应解析出choice=1,实际='+idx);
-    var trace = cap.logged.filter(function(l){ return l.kind==='bot_decision_trace'; });
-    if(trace.length !== 1) throw new Error('应记录1条bot_decision_trace,实际='+trace.length);
-    if(trace[0].payload.message.indexOf('[llm]') !== 0) throw new Error('message应以[llm]开头,实际='+trace[0].payload.message);
+    if(idx !== 1) throw new Error('决策本身应照常解析出choice=1,实际='+idx);
+    if(cap.logged.length !== 0)
+      throw new Error('正常决策不应产生任何debugLogs,实际='+JSON.stringify(cap.logged.map(function(l){return l.kind;})));
+    // 决策数据没有丢:改由统一存储承载(CORE-73)
+    if(typeof aiDecisionRecords==='undefined' || aiDecisionRecords.length < 1)
+      throw new Error('正常决策仍应进 aiDecisionRecords(数据不丢,只是换存放位置)');
+  });
+
+  // CORE-72 的守卫留在唯一写入口 logBotDecisionTrace 上(按 source 区分),不是只删调用点
+  // ——直调 source='llm' 也必须被挡住,否则以后有人新增调用点会把噪音悄悄写回来。
+  await check('CORE-72: 直调 logBotDecisionTrace(source=llm) 被守卫挡住,异常类照常写入', function(){
+    var cap = captureWriteDebugLog();
+    var g = mkSeatG({}); g.phase='play';
+    logBotDecisionTrace(g, 0, 'llm', '正常决策流水');
+    if(cap.logged.length !== 0) throw new Error('source=llm 应被挡住,实际写入='+cap.logged.length+' 条');
+    logBotDecisionTrace(g, 0, 'ai_response_unusable', '解析失败');
+    cap.restore();
+    if(cap.logged.length !== 1) throw new Error('异常类 source 应照常写入,实际='+cap.logged.length+' 条');
+    if(cap.logged[0].kind !== 'bot_decision_trace') throw new Error('kind 应仍为 bot_decision_trace,实际='+cap.logged[0].kind);
   });
 
   await check('callAiChooseIndex: AI返回但解析失败/越界时记录bot_decision_trace(source=ai_response_unusable)', async function(){
@@ -190,7 +213,10 @@ const testCode = String.raw`
     if(failLog.length !== 1) throw new Error('应记录1条ai_call_failed,实际='+failLog.length);
     if(failLog[0].payload.message.indexOf('network') < 0) throw new Error('message应含失败类别network,实际='+failLog[0].payload.message);
     if(failLog[0].payload.message.indexOf('llama-3.3-70b-versatile') < 0) throw new Error('message应含model,实际='+failLog[0].payload.message);
-    // bot_decision_trace不应额外记一条(失败路径只走ai_call_failed,不重复)
+    // bot_decision_trace不应额外记一条(失败路径只走ai_call_failed,不重复)。
+    // 【CORE-72 后的强度说明】llm 流水整体移除后,这条断言已不可能因为"正常流水误记"
+    // 而变红,剩下的守备范围是"失败路径别去记 ai_response_unusable 这类异常 trace"
+    // ——仍有意义(两类信号不该混),但不再是强断言,别把它当成流水行为的证据。
     var trace = cap.logged.filter(function(l){ return l.kind==='bot_decision_trace'; });
     if(trace.length !== 0) throw new Error('callAI失败路径不应额外记bot_decision_trace,实际='+trace.length);
   });
