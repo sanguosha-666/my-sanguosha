@@ -29,7 +29,15 @@ const context={
   stripUndefined:function(g){return g;},
   setResponseAskedAt:function(d){d.askedAt=now;return d;},
   pushLog:function(log,text){return (log||[]).concat(text);},
-  resumeAfterInterrupt:function(g,resume){g.phase=resume.type;}
+  resumeAfterInterrupt:function(g,resume){g.phase=resume.type;},
+  // CORE-77(issue #122)第一期:tx() 内新增了 commandLog 采集(见 game.js tx() 顶部)——
+  // 这里只 regex 提取了 tx() 函数体本身(txBlock)，没有加载整个 game.js，所以 tx() 依赖
+  // 的 commandLog/commandLogSeq/COMMAND_LOG_MAX/captureCommandName 这几个模块级变量/
+  // 函数需要在这个最小 context 里补上最简单的桩，和同一个 context 里已有的
+  // normalize/pruneExchangeCards/stripUndefined 等桩同一个写法——这个测试关心的是超时
+  // 相关逻辑，不需要真实的命令日志行为（那由 run_core77_replay_infra_test.js 覆盖）。
+  commandLog:[], commandLogSeq:0, COMMAND_LOG_MAX:500,
+  captureCommandName:function(){ return null; }
 };
 vm.createContext(context);
 vm.runInContext(stageBlock[0],context);
