@@ -306,6 +306,17 @@ async function runZeroBehaviorChangeCheck(){
       // 剔除,否则这条断言会因为"新增了一个记录字段"这个预期内的差异而误报,不能说明
       // 任何问题。commandLog 本来就不在 g 上(已由上面①的单元断言钉住),不需要额外剔除。
       delete gNew.seed;
+      // g.lastLightningFx(闪电判定特效事件,data.js DELAY_TRICKS['闪电'].effect 写入)同为
+      // 后来**故意新增**的字段:改动前的 normalize 不会把它补成 null,导致改动后状态在未
+      // 触发闪电时多出 "lastLightningFx":null 一条——和 seed 同理,比对前两边都剔除。
+      // 该字段的正确性由 testclass/run_lightning_fx_detect_test.js 单独钉住。
+      delete gOld.lastLightningFx;
+      delete gNew.lastLightningFx;
+      // g.lastMovieFx(过场动画事件,game.js markMovieFx 写入)同理为**故意新增**的字段,
+      // normalize 会在未触发时补 null 造成字节差异——和上面两个字段同因,比对前剔除。
+      // 其正确性由 testclass/run_movie_fx_detect_test.js 单独钉住。
+      delete gOld.lastMovieFx;
+      delete gNew.lastMovieFx;
       const jOld = JSON.stringify(gOld);
       const jNew = JSON.stringify(gNew);
       if(jOld !== jNew){

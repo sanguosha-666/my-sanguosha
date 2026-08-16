@@ -176,10 +176,12 @@ function stopGameBg(){
   if(bgRafId){ cancelAnimationFrame(bgRafId); bgRafId = 0; }
   fallingCards = [];
   if(bgCtx && bgCanvas) bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
-  // 回大厅兜底:若死亡动画仍在播放/显示,立即停止并隐藏,恢复默认背景
+  // 回大厅兜底:若全屏特效动画仍在播放/显示,立即停止并隐藏,恢复默认背景
   if(typeof document !== 'undefined'){
-    var dv = document.getElementById('deathFxVideo');
-    if(dv) hideDeathFxVideo(dv);
+    ['deathFxVideo','lightningFxVideo','movieFxVideo'].forEach(function(id){
+      var dv = document.getElementById(id);
+      if(dv) hideFxVideo(dv);
+    });
   }
 }
 
@@ -218,6 +220,55 @@ var DEATH_VIDEOS = [
   'assets/video/death-2.mp4'
 ];
 
+// ============ 闪电判定特效 ============
+// 任何角色的【闪电】判定一有结果,所有客户端全屏播放对应动画(判定不中 hit:false 播
+// flash0、判定劈中 hit:true 播 flash1),播放完毕自动隐藏恢复原背景——与死亡动画同款
+// 机制,触发由 render.js 检测 g.lastLightningFx.seq 变化后调用 triggerLightningFx。
+// 新增动画文件:命名 flash0.mp4(未劈中)/ flash1.mp4(劈中)放入 assets/video/,
+// 可在下面数组追加候选(多段随机播放)。
+var LIGHTNING_VIDEOS = {
+  false: ['assets/video/flash0.mp4'],
+  true:  ['assets/video/flash1.mp4']
+};
+
+function triggerLightningFx(hit){
+  if(typeof document === 'undefined') return;
+  var list = LIGHTNING_VIDEOS[hit ? 'true' : 'false'];
+  var v = document.getElementById('lightningFxVideo');
+  if(!v || !list || !list.length) return;
+  v.src = list[Math.floor(Math.random() * list.length)];
+  v.style.visibility = 'visible';
+  if(typeof v.load === 'function') v.load();
+  var p = v.play();
+  if(p && typeof p.catch === 'function') p.catch(function(){ hideFxVideo(v); });
+  bindFxVideo(v); // 绑定 ended/error,播放完/失败即隐藏恢复
+}
+
+// ============ 过场动画(武将死亡/胜负结算剧情点) ============
+// 触发由 render.js 检测 g.lastMovieFx.seq 变化 + 座位/身份过滤后调用 triggerMovieFx(kind)。
+// 各 kind 播放条件见 render.js maybePlayMovieFx 的注释;素材命名按下面数组放入 assets/video/,
+// 每 kind 可追加多段候选(随机播放)。
+var MOVIE_VIDEOS = {
+  yujiDeath:  ['assets/video/yuji1.mp4'],   // 于吉死 → 于吉以外的玩家
+  yujiKill:   ['assets/video/yuji0.mp4'],   // 于吉杀人 → 于吉以外且仍存活的玩家
+  zuociDeath: ['assets/video/zuoci0.mp4'],  // 左慈死 → 仅杀死左慈的玩家
+  zuociLose:  ['assets/video/zuoci1.mp4'],  // 结算时左慈所在阵营输 → 仅使用左慈的玩家
+  neiWin:     ['assets/video/han.mp4']      // 内奸胜 → 使用主公/忠臣的玩家
+};
+
+function triggerMovieFx(kind){
+  if(typeof document === 'undefined') return;
+  var list = MOVIE_VIDEOS[kind];
+  var v = document.getElementById('movieFxVideo');
+  if(!v || !list || !list.length) return;
+  v.src = list[Math.floor(Math.random() * list.length)];
+  v.style.visibility = 'visible';
+  if(typeof v.load === 'function') v.load();
+  var p = v.play();
+  if(p && typeof p.catch === 'function') p.catch(function(){ hideFxVideo(v); });
+  bindFxVideo(v); // 绑定 ended/error,播放完/失败即隐藏恢复
+}
+
 function triggerDeathFx(kind){
   if(kind !== 'self') return; // 他人死亡:无特效
   if(typeof document === 'undefined') return;
@@ -228,12 +279,12 @@ function triggerDeathFx(kind){
   v.style.visibility = 'visible';
   if(typeof v.load === 'function') v.load();
   var p = v.play();
-  if(p && typeof p.catch === 'function') p.catch(function(){ hideDeathFxVideo(v); });
-  bindDeathFxVideo(v); // 绑定 ended/error,播放完/失败即隐藏恢复
+  if(p && typeof p.catch === 'function') p.catch(function(){ hideFxVideo(v); });
+  bindFxVideo(v); // 绑定 ended/error,播放完/失败即隐藏恢复
 }
 
 // 播放结束或失败:隐藏视频,原背景(飘牌 canvas)自然恢复
-function hideDeathFxVideo(v){
+function hideFxVideo(v){
   if(!v) return;
   if(typeof v.pause === 'function') v.pause();
   v.style.visibility = 'hidden';
@@ -241,11 +292,11 @@ function hideDeathFxVideo(v){
   if(typeof v.load === 'function') v.load(); // 释放视频资源
 }
 
-function bindDeathFxVideo(v){
+function bindFxVideo(v){
   if(v.__fxBound) return;
   v.__fxBound = true;
-  v.addEventListener('ended', function(){ hideDeathFxVideo(v); });
-  v.addEventListener('error', function(){ hideDeathFxVideo(v); });
+  v.addEventListener('ended', function(){ hideFxVideo(v); });
+  v.addEventListener('error', function(){ hideFxVideo(v); });
 }
 
 // 页面首次加载时初始化一个随机背景视频。

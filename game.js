@@ -137,6 +137,14 @@ function normalize(g){
   // 实际扣血事件:渲染端据此播放受击动画和音效。只保留最新一次,seq 用于各客户端去重。
   if(g.lastDamageEffect===undefined) g.lastDamageEffect=null;
   else if(g.lastDamageEffect!==null && (!Number.isInteger(g.lastDamageEffect.seq) || !Number.isInteger(g.lastDamageEffect.target) || !Number.isFinite(g.lastDamageEffect.amount) || g.lastDamageEffect.amount<=0)) g.lastDamageEffect=null;
+  // 闪电判定特效事件:旧存档可能没有这个字段,回退 null(表示"还没有任何一次闪电判定特效");
+  // 渲染端据此播放 flash0/flash1 全屏动画,hit 必须为布尔(判定中 true / 未中 false)。
+  if(g.lastLightningFx===undefined) g.lastLightningFx=null;
+  else if(g.lastLightningFx!==null && (!Number.isInteger(g.lastLightningFx.seq) || !Number.isInteger(g.lastLightningFx.seat) || typeof g.lastLightningFx.hit!=='boolean')) g.lastLightningFx=null;
+  // 过场动画事件(武将死亡/胜负结算剧情点):旧存档可能没有这个字段,回退 null。kind 必须是
+  // 字符串,seat 为事件主体座位(可为 null),渲染端据此按 kind+座位/身份过滤播放对应视频。
+  if(g.lastMovieFx===undefined) g.lastMovieFx=null;
+  else if(g.lastMovieFx!==null && (!Number.isInteger(g.lastMovieFx.seq) || typeof g.lastMovieFx.kind!=='string' || (g.lastMovieFx.seat!==null && !Number.isInteger(g.lastMovieFx.seat)))) g.lastMovieFx=null;
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
   // 每一项的 targets 字段防御(原来只在单独的 g.tableCard.targets 上做,现在 g.tableCard 已经
   // 消灭、统一到 g.exchangeCards,防御要作用于数组里的每一项)。这条是纯粹的"数据形状防御"
@@ -767,6 +775,14 @@ function markDiscardReveal(g, seat, cards){
 function markSkillSound(g, skillName){
   const seq = (g.lastSkillSound && g.lastSkillSound.seq) ? g.lastSkillSound.seq : 0;
   g.lastSkillSound = { name: skillName, seq: seq+1 };
+}
+// markMovieFx: 过场动画事件——游戏逻辑在关键剧情点(武将死亡/胜负结算)写入,各客户端
+// render.js 的 maybePlayMovieFx 检测 seq 变化后按 kind+座位/身份过滤播放对应全屏视频
+// (见 game-bg.js MOVIE_VIDEOS)。和 markCardSound/g.lastDamageEffect 同一套"seq 自增去重、
+// 只保留最新一次"的模式。seat 语义按 kind 而定(死者/杀手/事件主体座位),不需要时传 null。
+function markMovieFx(g, kind, seat){
+  const seq=(g.lastMovieFx && Number.isInteger(g.lastMovieFx.seq)) ? g.lastMovieFx.seq : 0;
+  g.lastMovieFx={seq:seq+1, kind:kind, seat:(Number.isInteger(seat)?seat:null)};
 }
 function nextAlive(g, from){
   const n=g.players.length; // 按实际玩家数取模,支持 2 或 3 人
@@ -3412,6 +3428,15 @@ function finishDying(g, actuallyDied){
     // 身份局击杀奖惩(须在 checkWin 之前)。杀手=resume.sourceSeat(与断肠同源)。
     // onLoseEquip 可能挂起 pending(如旋风):终局 checkWin 优先;未终局则保留 hook pending。
     const killerForReward = resume && typeof resume.sourceSeat==='number' ? resume.sourceSeat : undefined;
+    // 过场动画事件(武将死亡):于吉死→于吉以外玩家播 yuji1;左慈死→仅杀手播 zuoci0;
+    // 杀手是于吉(于吉杀人)→于吉以外且存活玩家播 yuji0。同一次死亡可能命中多条
+    // (如于吉杀死左慈:zuociDeath+yujiKill),按序覆盖、各客户端只播最后一条。
+    if(p.general==='yuji') markMovieFx(g, 'yujiDeath', seat);
+    if(typeof killerForReward==='number'){
+      if(p.general==='zuoci') markMovieFx(g, 'zuociDeath', killerForReward);
+      const killerP=g.players[killerForReward];
+      if(killerP && killerP.general==='yuji') markMovieFx(g, 'yujiKill', killerForReward);
+    }
     applyIdentityKillReward(g, seat, killerForReward);
     
     // 蔡文姬【断肠】：杀死你的角色失去所有武将技能(锁定技)
@@ -3866,6 +3891,12 @@ function checkWin(g){
     // 的路径上提前泄露隐藏身份。
     g.players.forEach(p=>{ if(p) p.roleRevealed=true; });
     g.log=pushLog(g.log, '游戏结束，胜方：'+g.winner);
+    // 过场动画事件(胜负结算):左慈玩家所在阵营输了→仅左慈玩家播 zuoci1
+    // (winSide='none' 无人胜,全员视为输);内奸胜→主公/忠臣玩家播 han(后写,
+    // 内奸胜场景优先生效——若左慈本人恰好是输方主公/忠臣,播 han 而非 zuoci1)。
+    const winRoles = winSide==='fan' ? ['fan'] : winSide==='nei' ? ['nei'] : winSide==='lord' ? ['zhu','zhong'] : [];
+    g.players.forEach((pp,i)=>{ if(pp && pp.general==='zuoci' && winRoles.indexOf(pp.role)<0) markMovieFx(g, 'zuociLose', i); });
+    if(winSide==='nei') markMovieFx(g, 'neiWin');
     return true;
   }
   if(aliveCount(g)<=1){

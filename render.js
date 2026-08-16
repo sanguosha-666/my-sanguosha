@@ -654,6 +654,47 @@ function maybeShowDamageEffect(g){
   playDamageHitSound(g,evt.target);
 }
 
+// ===== 闪电判定特效:所有客户端共用 g.lastLightningFx.seq 去重 =====
+// 触发点在 data.js 的 DELAY_TRICKS['闪电'].effect(判定结果一出来就写):hit:true=劈中播
+// falsh1、hit:false=未劈中播 falsh0(见 game-bg.js triggerLightningFx)。哨兵模式与
+// maybePlayCardSound/maybeShowDamageEffect 同款:首次进入/刷新不补播历史,seq 未变不重复。
+let lastLightningFxSeq = undefined;
+function maybePlayLightningFx(g){
+  const evt=g.lastLightningFx;
+  if(!evt || !Number.isInteger(evt.seq)){ if(lastLightningFxSeq===undefined) lastLightningFxSeq=0; return; }
+  if(lastLightningFxSeq===undefined){ lastLightningFxSeq=evt.seq; return; } // 刷新不补播历史
+  if(evt.seq===lastLightningFxSeq) return;
+  lastLightningFxSeq=evt.seq;
+  if(typeof triggerLightningFx==='function') triggerLightningFx(evt.hit===true);
+}
+
+// ===== 过场动画:所有客户端共用 g.lastMovieFx.seq 去重 =====
+// 写入端在 game.js 的 finishDying(武将死亡)/checkWin(胜负结算),kind+seat 决定播放条件:
+//   yujiDeath :于吉死 → 于吉以外的玩家播 yuji1
+//   yujiKill  :于吉杀人 → 于吉以外且仍存活的玩家播 yuji0
+//   zuociDeath:左慈死 → 仅杀死左慈的玩家播 zuoci0
+//   zuociLose :结算时左慈所在阵营输 → 仅使用左慈的玩家播 zuoci1
+//   neiWin    :内奸胜 → 使用主公/忠臣的玩家播 han
+// 视频文件映射见 game-bg.js MOVIE_VIDEOS;哨兵模式与 maybePlayLightningFx 同款。
+let lastMovieFxSeq = undefined;
+function maybePlayMovieFx(g){
+  const evt=g.lastMovieFx;
+  if(!evt || !Number.isInteger(evt.seq)){ if(lastMovieFxSeq===undefined) lastMovieFxSeq=0; return; }
+  if(lastMovieFxSeq===undefined){ lastMovieFxSeq=evt.seq; return; } // 刷新不补播历史
+  if(evt.seq===lastMovieFxSeq) return;
+  lastMovieFxSeq=evt.seq;
+  const me=g.players && g.players[mySeat];
+  let shouldPlay=false;
+  switch(evt.kind){
+    case 'yujiDeath':  shouldPlay = (mySeat!==evt.seat); break;
+    case 'yujiKill':   shouldPlay = (mySeat!==evt.seat && !!me && !!me.alive); break;
+    case 'zuociDeath': shouldPlay = (mySeat===evt.seat); break;
+    case 'zuociLose':  shouldPlay = (mySeat===evt.seat); break;
+    case 'neiWin':     shouldPlay = !!(me && (me.role==='zhu'||me.role==='zhong')); break;
+  }
+  if(shouldPlay && typeof triggerMovieFx==='function') triggerMovieFx(evt.kind);
+}
+
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
 function showConfirm(message, onOk, onCancel){
@@ -1322,6 +1363,8 @@ function render(g){
   }
   maybePlayCardSound(g); // 打出手牌语音:和上面playTurnDrum同一批"每次状态更新都检测一次"的位置
   maybePlaySkillSound(g); // 技能发动语音:同一批检测
+  maybePlayLightningFx(g); // 闪电判定特效:同一批检测(劈中/未劈中分别播 flash1/flash0)
+  maybePlayMovieFx(g); // 过场动画:同一批检测(武将死亡/胜负结算,按 kind+座位/身份过滤)
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
   // 同款兜底:只要不在「自己的弃牌阶段」,就清空已勾选待弃置的手牌下标——覆盖克己跳过/确认

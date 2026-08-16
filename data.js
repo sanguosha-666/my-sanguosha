@@ -111,10 +111,16 @@ const DELAY_TRICKS = {};
 DELAY_TRICKS['闪电'] = {
   onlySelf:true,
   effect:(g, seat, judgeCard, card)=>{
+    // 闪电判定特效事件:判定结果一出来就写(不依赖后续去向/濒死),供各客户端 render.js 哨兵
+    // 检测后播放全屏动画——劈中播 flash1、未劈中播 flash0(见 game-bg.js LIGHTNING_VIDEOS)。
+    // 写法与 game.js 的 g.lastDamageEffect 同款:seq 自增跨读取稳定,只保留最新一次。
+    const fxSeq=(g.lastLightningFx && Number.isInteger(g.lastLightningFx.seq)) ? g.lastLightningFx.seq : 0;
     if(cardSuitForPlayer(g.players[seat], judgeCard)==='♠' && judgeCard.rank>=2 && judgeCard.rank<=9){
+      g.lastLightningFx={seq:fxSeq+1, seat, hit:true};
       const dying = dealDamage(g, seat, 3, undefined, '【闪电】发动', 'delay', card);
       return dying ? 'pending' : undefined;
     }
+    g.lastLightningFx={seq:fxSeq+1, seat, hit:false};
     // 判定不中:移到下一名"判定区里没有【闪电】"的其他存活角色(官方通则:同一判定区不能有两张同名牌)。
     // 找不到合法去处(极端边界:2人局且对方判定区已有另一张闪电)则作废进弃牌堆、不传回自己,
     // 否则本回合判定循环会立刻再判一次造成死循环。
