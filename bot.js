@@ -415,6 +415,37 @@ function botTargetRelationAllowed(g,seat,targetSeat,kind){
   }
   return true; // nei / 无身份局:不套固定敌我过滤,由 botTargetScore 自身动态评分
 }
+// CORE-90(issue #137):**帮助型**效果的敌我策略边界。上面 botTargetRelationAllowed 建模的
+// 是"有害效果能不能打这个人",帮助型(青囊回血这类)是它的镜像问题——"能不能把好处送给
+// 这个人"——两者不能共用同一个谓词:有害效果对已知反贼是"允许"(忠臣该打反贼),帮助型
+// 效果对已知反贼却是"禁止"(忠臣不该给反贼回血),方向正好相反。issue 原文点名要求把
+// harmful/helpful 分开建模,不能只有一套。
+// 判据只拦"明确的敌对阵营"这一种确定错误(忠臣/主公 → 已知反贼;反贼 → 已知主公/忠臣),
+// 身份未知的一律放行——帮助未知身份的人最多是浪费一次技能,不像有害效果打错人那样直接
+// 送掉自己阵营的胜利条件,不需要像 botTargetRelationAllowed 那样再叠一层 suspicion 门槛。
+// 内奸(nei)同样不设硬边界(issue 明确要求"内奸保持现有动态策略");自己给自己回血恒允许。
+function botTargetHelpfulAllowed(g,seat,targetSeat){
+  const me=g.players[seat], target=g.players[targetSeat];
+  if(!me||!target||!target.alive) return false;
+  if(seat===targetSeat) return true; // 自己给自己用帮助型技能永远合法
+  if(g.gameMode==='team') return sameTeam(g,seat,targetSeat); // 组队模式:只帮同队
+  if(g.gameMode!=='identity') return true;
+  const known=botKnownRole(g,seat,targetSeat);
+  if(!known) return true; // 身份未知:放行(最坏只是浪费一次技能)
+  if(me.role==='zhu'||me.role==='zhong') return known!=='fan';
+  if(me.role==='fan') return known!=='zhu' && known!=='zhong';
+  return true; // nei / 其它:不设硬边界
+}
+// botTargetPolicyAllows:harmful/helpful 两套策略的统一分发入口。候选生成层一律经这里问
+// "这个目标在策略上允不允许",不要各自记住该调哪个谓词——新增技能只需要在注册项里声明
+// effectKind,不需要理解底下是哪套判断。effectKind 缺省按 'harmful' 处理:seatPick 注册表里
+// 绝大多数是有害技能,而且"漏声明时按更严格的那一侧兜底"比反过来安全(把帮助型误判成
+// 有害,最坏是少发动一次技能;把有害误判成帮助,就会真的打到自己人)。
+function botTargetPolicyAllows(g,seat,targetSeat,effectKind){
+  if(effectKind==='helpful') return botTargetHelpfulAllowed(g,seat,targetSeat);
+  if(effectKind==='neutral') return true;
+  return botTargetRelationAllowed(g,seat,targetSeat,null);
+}
 function botTargetScore(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return -Infinity;
@@ -474,11 +505,28 @@ function botBestTarget(g,seat,card,actionId){
 // 共用helper复用既有的botTargetScore(botBestTarget同款口径),不新造评分体系:
 // pickBestCandidateSeat 用于"进攻/负面效果"类技能(伤害/拆牌/拼点等,越是该打的目标
 // 分越高);pickHealFallbackSeat 用于"扶持/治疗"类技能(血量越低越优先,且避开已知敌方)。
+// CORE-90(issue #137):这个函数原来把"策略禁止"当成"分数很低"处理,有两条确定错误的路径:
+//   ①`if(candidates.length===1) return candidates[0].seat;` 唯一候选完全不检查策略,直接返回;
+//   ②所有候选都是 -Infinity 时,没有任何 `s>bestScore` 成立(bestScore 初值就是 -Infinity),
+//     最终返回初始化时那个 `candidates[0].seat`,也就是一个禁止目标。
+// 两条都会让忠臣/主公/反贼的阵营安全策略在"技能选目标"这条路径上直接失效。**这不是
+// CORE-89(#136)那次修复的遗漏**:那次在 seatPickBuildCandidates 聚合出口加了硬过滤,但
+// 11 个 seatPick 技能各自的 fallbackSeat 都是直接调 `BOT_SEAT_PICKS.xxx.buildSeatCandidates()`
+// (未过滤的原始清单)再交给这个函数,绕过了那道过滤;太史慈【天义】选拼点目标那处更是
+// 自己现攒候选数组直接调这个函数,和 seatPick 聚合路径完全无关,一点都没被保护到。
+// 修法:把策略判断提到选择之前做硬过滤(禁止目标直接从候选里删掉),过滤后为空返回 null
+// ——调用方(各技能的 fallbackSeat / 天义分支)本来就都能正确处理 null(seatPickLocalFallback
+// 遇到 null 会 continue 试下一个技能,天义分支会 cancelTianyi),不需要改调用方。
 function pickBestCandidateSeat(g, seat, candidates, kind){
   if(!candidates || !candidates.length) return null;
-  if(candidates.length===1) return candidates[0].seat;
-  let best=candidates[0].seat, bestScore=-Infinity;
-  candidates.forEach(function(c){
+  // 自己作为候选(allowSelf 场景)不参与敌我策略过滤——对自己用技能不存在"打错阵营"。
+  const allowed = candidates.filter(function(c){
+    return c.seat===seat || botTargetPolicyAllows(g, seat, c.seat, 'harmful');
+  });
+  if(!allowed.length) return null; // 全部被策略禁止 = 这个技能这一刻没有合法目标,不发动
+  if(allowed.length===1) return allowed[0].seat;
+  let best=allowed[0].seat, bestScore=-Infinity;
+  allowed.forEach(function(c){
     // 自己作为候选(allowSelf场景,如桃园结义)时botTargetScore(seat===targetSeat)恒
     // 返回-Infinity,不能直接套用——给中性分0,不让"自己"因为公式副作用被系统性排除,
     // 但也不会在有其他真实目标时被优先选中。
@@ -487,23 +535,23 @@ function pickBestCandidateSeat(g, seat, candidates, kind){
   });
   return best;
 }
+// CORE-90(issue #137):帮助型技能(青囊)的目标选择。原来只给"明确敌方"加一个 1000 的软
+// 惩罚——软惩罚只能保证"在有别人可选时不优先选敌人",但**唯一候选就是明确敌方**时,它
+// 依然会被选中(1000+hp 仍然是当时最小的 key),机器人会老老实实给敌人回血。改成和
+// pickBestCandidateSeat 同一套做法:策略禁止的目标直接从候选里删掉,过滤后为空返回 null
+// (=这一刻没有值得帮的人,不发动青囊),不再依赖"分数够低就不会被选中"这种软保证。
 function pickHealFallbackSeat(g, seat, candidates){
   if(!candidates || !candidates.length) return null;
-  const me = g.players[seat];
+  const allowed = candidates.filter(function(c){
+    return g.players[c.seat] && botTargetPolicyAllows(g, seat, c.seat, 'helpful');
+  });
+  if(!allowed.length) return null;
   let best=null, bestKey=Infinity;
-  candidates.forEach(function(c){
+  allowed.forEach(function(c){
     const p = g.players[c.seat];
-    if(!p) return;
-    const known = botKnownRole(g, seat, c.seat);
-    // 身份局:明确的敌方角色加一个大惩罚,让"血量再低也不主动扶持敌人"这个基本判断优先于
-    // 血量高低本身;非身份局/未知身份不受影响,纯按血量选。
-    let enemyPenalty = 0;
-    if(me && me.role && known){
-      if((me.role==='zhu'||me.role==='zhong') && known==='fan') enemyPenalty = 1000;
-      else if(me.role==='fan' && (known==='zhu'||known==='zhong')) enemyPenalty = 1000;
-    }
-    const key = enemyPenalty + p.hp;
-    if(key < bestKey){ bestKey = key; best = c.seat; }
+    // 策略过滤已经把"不该帮的人"整个删掉了,这里只剩纯粹的"帮谁收益最大"——血量最低的
+    // 优先,不再需要那个 1000 的敌方惩罚项(它的职责已经上移到硬过滤)。
+    if(p.hp < bestKey){ bestKey = p.hp; best = c.seat; }
   });
   return best;
 }
@@ -2027,17 +2075,17 @@ function seatPickBuildCandidates(g, seat){
     const s = BOT_SEAT_PICKS[key];
     if(typeof s.match!=='function' || !s.match(g, seat)) return;
     const list = s.buildSeatCandidates(g, seat) || [];
+    // CORE-89 起:座位技能的候选目标只经过游戏规则合法性过滤(距离/canTarget等),没有
+    // 身份局敌我边界,硬过滤统一在这个聚合出口做一次。
+    // CORE-90(issue #137)改进:原来用一张写死的 HARMLESS_SEAT_PICK_KEYS={qingnang:true}
+    // 名单把青囊排除在过滤之外——但"排除在过滤之外"等于**完全不过滤**,青囊照样能把
+    // 回血送给已知反贼,只是换了个方向出错。现在改成每个注册项显式声明 effectKind,由
+    // botTargetPolicyAllows 分发到 harmful/helpful 两套相反方向的判断上(见其定义),
+    // 不再有"某个技能干脆不过滤"这种状态。effectKind 缺省 'harmful'(见 botTargetPolicyAllows
+    // 的缺省注释:漏声明时按更严格的一侧兜底)。
+    const effectKind = s.effectKind || 'harmful';
     list.forEach(function(c){
-      // CORE-89:座位技能(断粮/国色/奇袭/旋风/挑衅/反间/驱虎伤害等)的候选目标同样只
-      // 经过游戏规则合法性过滤(距离/canTarget等),没有身份局敌我边界——硬过滤统一在
-      // 聚合出口做一次,覆盖全部当前和未来的有害类 BOT_SEAT_PICKS 注册项,不用逐个
-      // 技能补。kind 传 null:botTargetRelationAllowed 的关系判定不依赖 kind
-      // (steal/damage对敌我边界无区别,kind 只影响 botTargetScore 的分数加成)。
-      // 【例外:qingnang】当前12个注册项里唯一的正面效果(青囊,治疗),目标本就该优先
-      // 选自己人/已知队友——不能套"禁止选自己人"的敌我过滤,否则会把青囊的合法治疗
-      // 对象过滤光。以后新增座位技能如果也是正面效果,同样要加进这个排除名单。
-      const HARMLESS_SEAT_PICK_KEYS = { qingnang: true };
-      if(!HARMLESS_SEAT_PICK_KEYS[key] && typeof c.seat==='number' && !botTargetRelationAllowed(g, seat, c.seat, null)) return;
+      if(typeof c.seat==='number' && !botTargetPolicyAllows(g, seat, c.seat, effectKind)) return;
       out.push({
         index: 0, // botDecide 会重新规范化
         label: c.label,
@@ -2110,6 +2158,7 @@ BOT_DECISIONS.seatPick = {
 // guhuoActionId → CARD_PLAYS[actionId].target/.canTarget/.allowSelf 三重校验,
 // 这里逐条镜像(只读 g/pending,不读客户端 mode 变量)。
 BOT_SEAT_PICKS.guhuoTarget = {
+  effectKind:'harmful', // CORE-90:蛊惑声明为【杀】指定目标
   match: function(g, seat){
     const d = g.pending;
     return !!(d && d.type==='guhuoTarget' && d.sourceSeat===seat);
@@ -2150,6 +2199,7 @@ BOT_SEAT_PICKS.guhuoTarget = {
 // ================= L3: 旋风目标(凌统【旋风】失去装备后选弃置目标) =================
 // 【合法性来源】render.js 座位卡分支(xuanfengPick 高亮段):存活且非自己。
 BOT_SEAT_PICKS.xuanfeng = {
+  effectKind:'harmful', // CORE-90:旋风弃置对手的牌
   match: function(g, seat){
     const d = g.pending;
     return !!(d && d.type==='xuanfengPick' && d.from===seat && d.stage==='selecting');
@@ -2265,6 +2315,7 @@ function seatHasTargetableCards(p){
 }
 
 BOT_SEAT_PICKS.duanliang = {
+  effectKind:'harmful', // CORE-90:断粮=兵粮寸断,负面判定
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2298,6 +2349,7 @@ BOT_SEAT_PICKS.duanliang = {
 };
 
 BOT_SEAT_PICKS.qixi = {
+  effectKind:'harmful', // CORE-90:奇袭=过河拆桥,拆对手牌
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2332,6 +2384,7 @@ BOT_SEAT_PICKS.qixi = {
 };
 
 BOT_SEAT_PICKS.guose = {
+  effectKind:'harmful', // CORE-90:国色=乐不思蜀,负面判定
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2369,6 +2422,7 @@ BOT_SEAT_PICKS.guose = {
 };
 
 BOT_SEAT_PICKS.wusheng = {
+  effectKind:'harmful', // CORE-90:武圣转化出【杀】
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2400,6 +2454,7 @@ BOT_SEAT_PICKS.wusheng = {
 };
 
 BOT_SEAT_PICKS.longdan = {
+  effectKind:'harmful', // CORE-90:龙胆转化出【杀】
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2431,6 +2486,7 @@ BOT_SEAT_PICKS.longdan = {
 };
 
 BOT_SEAT_PICKS.shuangxiong = {
+  effectKind:'harmful', // CORE-90:双雄转化出【决斗】
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2473,6 +2529,7 @@ BOT_SEAT_PICKS.shuangxiong = {
 // (quhuDamageChoice,pending.seat===本人),seatPickMatch 外层闸门已加
 // pending.type==='quhuDamageChoice' 放行;quhuRespond 拼点阶段不在本任务。
 BOT_SEAT_PICKS.tiaoxin = {
+  effectKind:'harmful', // CORE-90:挑衅,逼对方出杀或被弃牌
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2498,6 +2555,7 @@ BOT_SEAT_PICKS.tiaoxin = {
 };
 
 BOT_SEAT_PICKS.fanjian = {
+  effectKind:'harmful', // CORE-90:反间,负面判定+可能掉血
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2522,6 +2580,7 @@ BOT_SEAT_PICKS.fanjian = {
 };
 
 BOT_SEAT_PICKS.qingnang = {
+  effectKind:'helpful', // CORE-90:青囊回复体力——全表唯一的帮助型技能
   match: function(g, seat){
     if(!g || g.phase!=='play' || g.turn!==seat) return false;
     const me = g.players && g.players[seat];
@@ -2550,6 +2609,7 @@ BOT_SEAT_PICKS.qingnang = {
 };
 
 BOT_SEAT_PICKS.quhuDamage = {
+  effectKind:'harmful', // CORE-90:驱虎伤害,指定承受伤害者
   match: function(g, seat){
     const d = g.pending;
     return !!(g && g.phase==='quhuDamageChoice' && d && d.type==='quhuDamageChoice'
