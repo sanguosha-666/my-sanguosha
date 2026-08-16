@@ -1462,13 +1462,25 @@ function buildAiDecisionDump(){
       winner: (g.winner===undefined) ? null : g.winner,
       players: (g.players||[]).map(function(p, i){
         const gen = (p && p.general && typeof getGeneral==='function') ? getGeneral(p.general) : null;
+        // CORE-80(issue #127):身份局的身份是隐藏信息,导出这份诊断dump可能被转发给别人看
+        // (见上面 ai.provider 那块"密钥不能跟着走"同一条纪律),不能无条件把 p.role 全量
+        // 导出——用 canSeeRole(g,mySeat,i) 复用和真实UI(座位卡 .seat-identity)完全同一套
+        // 判断:这名导出者(mySeat)此刻本来就能在界面上看到的身份(自己的/主公恒公开的/
+        // 已经死亡揭晓的/游戏结束后 checkWin 批量翻转 roleRevealed 的),导出里才带出来;
+        // 看不到的身份导出为 null,和真人玩家在界面上看到的信息量完全一致,不会因为多了
+        // 一份"完整dump"就意外泄露原本该保密的身份。非身份局(gameMode!=='identity')
+        // canSeeRole 恒返回 false,role 恒为 null,不受影响。
+        const roleVisible = (typeof canSeeRole==='function') && g.gameMode==='identity'
+          && canSeeRole(g, (typeof mySeat!=='undefined') ? mySeat : null, i);
+        const roleLabel = roleVisible && p && p.role && typeof ROLE_LABEL!=='undefined' ? (ROLE_LABEL[p.role]||p.role) : null;
         return {
           seat: i,
           name: (p && p.name) || '',
           general: (gen && gen.name) || (p && p.general) || '',
           isBot: !!(p && p.isBot),
           alive: !!(p && p.alive),
-          hp: (p && p.hp), maxHp: (p && p.maxHp)
+          hp: (p && p.hp), maxHp: (p && p.maxHp),
+          role: roleLabel
         };
       })
     } : null,
