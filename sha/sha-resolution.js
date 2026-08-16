@@ -1,31 +1,41 @@
 // 【杀】目标、响应与武器后续结算。纯函数搬移，加载于 game.js 之后。
 
-function maybeStartShaOffsetEffects(g, from, to, sourceCard){
+// CORE-88:jiuBonus(酒 +1 伤害) 必须和 sourceCard 一样,作为参数逐层透传到这条"杀被抵消
+// 后的效果调度"链条的每一站——它属于"被抵消的这同一张杀"这次结算的一部分,猛进/贯石斧
+// 都是让这同一张杀继续/被迫命中(不是重新使用一张新杀),酒的加成理应继续生效;唯独青龙
+// 偃月刀是真正"重新使用一张新杀"(resolveShaUse 走全新流程),按官方规则酒的加成只在
+// "本回合第一张杀"结算时算一次(在 CARD_PLAYS['杀'].effect 里通过 consumeJiuShaBonus 在
+// 使用时就已经消耗/清零,不会在青龙的新杀上重新触发),所以 startShaOffsetEffect 的
+// qinglong 分支刻意不把 jiuBonus 传给 maybeStartQinglong 自己的伤害计算——但仍要把它存进
+// qinglong 的 pending(和 sourceCard 同一存法),因为"发动青龙偃月刀"是可以被攻击者主动
+// 放弃的("不发动"分支,见 respondQinglong),放弃后如果贯石斧仍可用,贯石斧面对的还是最初
+// 那张被抵消的杀,jiuBonus 不能因为"路过了一次青龙偃月刀的可选环节"就丢失。
+function maybeStartShaOffsetEffects(g, from, to, sourceCard, jiuBonus){
   const available = [];
   const attacker = g.players[from];
   const target = g.players[to];
-  
+
   // 检查猛进
   if(attacker && attacker.alive && target && target.alive && hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0){
     available.push('mengjin');
   }
-  
+
   // 检查青龙偃月刀
   if(canStartQinglong(g, from)){
     available.push('qinglong');
   }
-  
+
   // 检查贯石斧
   if(canStartGuanshifu(g, from)){
     available.push('guanshifu');
   }
-  
+
   if(available.length === 0) return false;
   if(available.length === 1) {
-    startShaOffsetEffect(g, from, to, available[0], sourceCard);
+    startShaOffsetEffect(g, from, to, available[0], sourceCard, jiuBonus);
     return true;
   }
-  
+
   // 多个效果,需要选择
   g.pending = {
     type: 'shaOffsetChoice',
@@ -34,11 +44,12 @@ function maybeStartShaOffsetEffects(g, from, to, sourceCard){
     available: available
   };
   if(sourceCard !== undefined) g.pending.sourceCard = sourceCard;
+  if(jiuBonus) g.pending.jiuBonus = true;
   g.phase = 'shaOffsetChoice';
   return true;
 }
 
-function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
+function startShaOffsetEffect(g, from, to, effectId, sourceCard, jiuBonus) {
   const attacker = g.players[from];
   const target = g.players[to];
   
@@ -86,7 +97,7 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
       g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' 一张牌');
       markSkillSound(g, '猛进');
 
-      if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'shaOffset', from, to, sourceCard}; return; } // 旋风挂起,保留
+      if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'shaOffset', from, to, sourceCard, jiuBonus}; return; } // 旋风挂起,保留
       // 处理完猛进后,检查是否还有其他效果需要处理
       const remainingAvailable = ['qinglong', 'guanshifu'].filter(id => {
         if(id === 'qinglong') return canStartQinglong(g, from);
@@ -95,14 +106,14 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
       });
 
       if(remainingAvailable.length > 0) {
-        continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable);
+        continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable, jiuBonus);
       } else {
         g.pending = null;
         finishSingleShaTarget(g);
       }
       return;
     }
-    
+
     // 多个选项:开 pending 让攻击者选择
     g.pending = {
       type: 'mengjin',
@@ -117,25 +128,27 @@ function startShaOffsetEffect(g, from, to, effectId, sourceCard) {
       g.pending.available.push(slot);
     });
     if(sourceCard !== undefined) g.pending.sourceCard = sourceCard;
+    if(jiuBonus) g.pending.jiuBonus = true;
     g.phase = 'mengjin';
     g.log = pushLog(g.log, attacker.name+' 发动【猛进】,选择弃置 '+target.name+' 的一张牌…');
   } else if(effectId === 'qinglong') {
-    // 重新启动青龙
-    maybeStartQinglong(g, from, to, sourceCard);
+    // 重新启动青龙——qinglong 自己的新杀不带 jiuBonus(见函数顶部注释),但仍要把它存进
+    // pending,供"不发动"分支continue到贯石斧时找回。
+    maybeStartQinglong(g, from, to, sourceCard, jiuBonus);
   } else if(effectId === 'guanshifu') {
     // 重新启动贯石斧
-    maybeStartGuanshifu(g, from, to, sourceCard);
+    maybeStartGuanshifu(g, from, to, sourceCard, jiuBonus);
   }
 }
 
-function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable) {
+function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable, jiuBonus) {
   const attacker = g.players[from];
   const target = g.players[to];
-  
+
   // 过滤掉不再合法的效果
   const validAvailable = remainingAvailable.filter(id => {
     if(id === 'mengjin') {
-      return attacker && attacker.alive && target && target.alive && 
+      return attacker && attacker.alive && target && target.alive &&
              hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
     } else if(id === 'qinglong') {
       return canStartQinglong(g, from);
@@ -144,18 +157,18 @@ function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable) {
     }
     return false;
   });
-  
+
   if(validAvailable.length === 0) {
     g.pending = null;
     finishSingleShaTarget(g);
     return true;
   }
-  
+
   if(validAvailable.length === 1) {
-    startShaOffsetEffect(g, from, to, validAvailable[0], sourceCard);
+    startShaOffsetEffect(g, from, to, validAvailable[0], sourceCard, jiuBonus);
     return true;
   }
-  
+
   // 仍然有多个可用效果
   g.pending = {
     type: 'shaOffsetChoice',
@@ -164,6 +177,7 @@ function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable) {
     available: validAvailable
   };
   if(sourceCard !== undefined) g.pending.sourceCard = sourceCard;
+  if(jiuBonus) g.pending.jiuBonus = true;
   g.phase = 'shaOffsetChoice';
   return true;
 }
@@ -171,7 +185,7 @@ function continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable) {
 function respondShaOffsetChoice(effectId) {
   tx(g=>{
     if(g.phase!=='shaOffsetChoice'||!g.pending||g.pending.type!=='shaOffsetChoice'||g.pending.from!==mySeat) return g;
-    const {from, to, available, sourceCard} = g.pending;
+    const {from, to, available, sourceCard, jiuBonus} = g.pending;
     if(!effectId){
       g.pending = null;
       finishSingleShaTarget(g);
@@ -179,7 +193,7 @@ function respondShaOffsetChoice(effectId) {
     }
     if(!Array.isArray(available) || !available.includes(effectId)) return g;
     g.pending = null;
-    startShaOffsetEffect(g, from, to, effectId, sourceCard);
+    startShaOffsetEffect(g, from, to, effectId, sourceCard, jiuBonus);
     return g;
   });
 }
@@ -327,8 +341,9 @@ function continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInf
   if(r){
     const sourceCardForSha = g.pending && g.pending.sourceCard;
     g.pending=null;
-    // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
-    if(maybeStartShaOffsetEffects(g, from, to, sourceCardForSha)) return;
+    // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧(CORE-88:jiuBonus 随 shaInfo 透传,
+    // 不能只带 sourceCard——八卦阵判红这条路径原来同样漏了)
+    if(maybeStartShaOffsetEffects(g, from, to, sourceCardForSha, !!(shaInfo && shaInfo.jiuBonus))) return;
     finishSingleShaTarget(g);
     return;
   }
@@ -510,8 +525,9 @@ function respondShan(useShan, cardIdx){
         if(maybeStartLeiji(g, mySeat, card)) return g;
       }
       if(played<needed){ g.pending.shanCount=played; return g; } // 吕布【无双】:还不够,留在原地再问一次
-      // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
-      if(maybeStartShaOffsetEffects(g, g.pending.from, mySeat, g.pending.sourceCard)) return g;
+      // 杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧(CORE-88:g.pending 此刻还是原始
+      // respond pending,jiuBonus 必须在它被下面覆盖之前读出来一并透传)
+      if(maybeStartShaOffsetEffects(g, g.pending.from, mySeat, g.pending.sourceCard, !!g.pending.jiuBonus)) return g;
     } else {
       // 曹操【护驾】:主公需出闪且未用过主公技 → 先进入求助流程;无人替出则回原响应
       // (铁骑判红的杀不可被闪抵消,连求助也不给——服务端兜底,UI 本就不渲染该按钮)
