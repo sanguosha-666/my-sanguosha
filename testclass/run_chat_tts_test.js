@@ -170,6 +170,62 @@ function check(name, fn){
     const v2 = vm.runInContext("(function(){ try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); } catch(e){ return true; } })()", sandbox);
     if(v2!==true) throw new Error('恢复1后IIFE应返回true(默认开),实际 '+v2);
   });
+  // ==== CORE-85(issue #132):聊天说话者标签必须优先用消息快照,不能优先查当前局座位 ====
+  // 背景:聊天消息跨局保留(存Firebase不清空),但座位-玩家映射会在每局开局随机重排
+  // (#104 shuffleSeats)或玩家离开/替换机器人后变化——发送时(pushChatMessage)已经把
+  // playerName/general 当场快照进消息本身,渲染时必须优先用这份快照,不能优先查"当前局
+  // 这个座位是谁"(否则跨局后旧消息会被错标成新局同座位玩家的名字/武将)。
+  await check('chatSenderLabel: 跨局后座位重排,旧消息应显示发送者本人的快照武将名,不是新局同座位玩家', function(){
+    const chatSenderLabel = vm.runInContext('chatSenderLabel', sandbox);
+    // 消息发送时:座位1是张飞(msg里存了快照 general:'zhangfei'/playerName:'张飞玩家')
+    const msg = { seat:1, playerName:'张飞玩家', general:'zhangfei', text:'看我暴击', type:'text' };
+    // 跨局后(#104洗座重排):当前局座位1变成了完全不同的人——郭嘉
+    const gAfterReshuffle = { started:true, players:[
+      null,
+      { name:'郭嘉玩家', general:'guojia' }
+    ] };
+    const label = chatSenderLabel(gAfterReshuffle, msg);
+    if(label!=='【张飞】') throw new Error('应显示消息快照里的张飞(发送者本人),不应显示当前局座位1的郭嘉,实际 '+label);
+  });
+
+  await check('chatSenderLabel: 消息快照缺失武将名时,退回快照的玩家名(不查当前局座位)', function(){
+    const chatSenderLabel = vm.runInContext('chatSenderLabel', sandbox);
+    const msg = { seat:1, playerName:'孔融玩家', general:null, text:'礼让为先', type:'text' };
+    const gAfterReshuffle = { started:true, players:[ null, { name:'郭嘉玩家', general:'guojia' } ] };
+    const label = chatSenderLabel(gAfterReshuffle, msg);
+    if(label!=='孔融玩家') throw new Error('应显示消息快照的玩家名"孔融玩家",实际 '+label);
+  });
+
+  await check('chatSenderLabel对照组: 消息本身没有快照字段(理论上不该发生,防御性兜底)时才退回查当前局座位', function(){
+    const chatSenderLabel = vm.runInContext('chatSenderLabel', sandbox);
+    const msg = { seat:1, text:'老消息', type:'text' }; // 没有playerName/general字段
+    const g = { started:true, players:[ null, { name:'郭嘉玩家', general:'guojia' } ] };
+    const label = chatSenderLabel(g, msg);
+    if(label!=='【郭嘉】') throw new Error('快照缺失时应兜底显示当前局座位信息,实际 '+label);
+  });
+
+  await check('chatSenderLabel同局内本人消息不受影响(无回归):快照和当前局一致时正常显示', function(){
+    const chatSenderLabel = vm.runInContext('chatSenderLabel', sandbox);
+    const msg = { seat:0, playerName:'刘备玩家', general:'liubei', text:'仁德治天下', type:'text' };
+    const g = { started:true, players:[ { name:'刘备玩家', general:'liubei' } ] };
+    const label = chatSenderLabel(g, msg);
+    if(label!=='【刘备】') throw new Error('同局内快照与当前局一致,应正常显示【刘备】,实际 '+label);
+  });
+
+  await check('chatSenderLabel破坏性验证: 若改回"当前局座位优先",跨局重排后会重新显示成新局玩家(证明第一条断言有鉴别力)', function(){
+    // 逐字复刻issue描述的旧bug写法,验证确实会重新观察到症状。
+    const brokenLabel = function(g, msg){
+      const p = Number.isInteger(msg.seat) && g.players ? g.players[msg.seat] : null;
+      const generalId = (p && p.general) || msg.general;
+      const gen = g.started && generalId ? vm.runInContext('getGeneral', sandbox)(generalId) : null;
+      return gen ? ('【'+gen.name+'】') : ((p && p.name) || msg.playerName || '玩家');
+    };
+    const msg = { seat:1, playerName:'张飞玩家', general:'zhangfei', text:'看我暴击', type:'text' };
+    const gAfterReshuffle = { started:true, players:[ null, { name:'郭嘉玩家', general:'guojia' } ] };
+    const label = brokenLabel(gAfterReshuffle, msg);
+    if(label!=='【郭嘉】') throw new Error('旧写法应该(错误地)显示当前局座位的郭嘉,如果没有说明这条断言对该修复没有鉴别力');
+  });
+
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
 })();

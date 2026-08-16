@@ -335,11 +335,25 @@ function detectAndSpeakNewChat(messages){
     speakChatMessage(text, gender);
   });
 }
+// CORE-85(issue #132):聊天消息跨局保留(存 Firebase,不清空),但座位-玩家映射会在每局
+// 开局随机重排(#104 shuffleSeats)或玩家离开/替换机器人后变化——渲染时如果优先查"当前局
+// 这个座位是谁"，跨局之后旧消息就会被错标成新局同座位玩家的名字/武将，不是发送者本人。
+// 发送时(pushChatMessage)已经把 playerName/general 当场快照进消息本身，这里必须优先用
+// 这份快照，只在快照缺失(消息本身没存,理论上不会发生,防御性兜底)时才退回当前局座位查询。
+// 座位颜色刻意不跟着改(仍按 m.seat 取色，调用点 render-log.js 自己做)——旧消息保持发送
+// 时的座位色语义，和这里的姓名/武将快照优先是两件独立的事，issue 原文明确要求维持不变。
 function chatSenderLabel(g, msg){
   const p=Number.isInteger(msg.seat) && g.players ? g.players[msg.seat] : null;
-  const generalId=(p&&p.general)||msg.general;
-  const gen=g.started && generalId ? getGeneral(generalId) : null;
-  return gen ? ('【'+gen.name+'】') : ((p&&p.name)||msg.playerName||'玩家');
+  // hasSnapshot:pushChatMessage 发送每条新消息时都无条件写 playerName(缺省'玩家')/
+  // general(缺省null)这两个快照字段——只要 playerName 存在(哪怕 general 显式为 null,
+  // 代表发送时这名玩家还没有武将,比如大厅阶段发的消息),就说明这条消息带着完整快照，
+  // 必须用快照本身的值(包括"没有武将"这个事实本身)，不能用当前局同座位玩家的武将去
+  // 顶替一个本该是"无武将"的快照。只有真正没有这两个字段的消息(理论上不该出现,防御性
+  // 兜底)才退回查当前局座位。
+  const hasSnapshot = typeof msg.playerName==='string';
+  const generalId = hasSnapshot ? msg.general : ((p&&p.general)||null);
+  const gen=generalId ? getGeneral(generalId) : null;
+  return gen ? ('【'+gen.name+'】') : (hasSnapshot ? msg.playerName : ((p&&p.name)||'玩家'));
 }
 function pushChatMessage(text, type){
   text=String(text||'').trim().slice(0,60);
