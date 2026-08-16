@@ -21,11 +21,19 @@
  *     9. STAGE_TABLE / BOT_DECISIONS / BOT_SEAT_PICKS 每一项要么被注册表引用,
  *        要么在显式白名单里(白名单也是登记的一部分,不允许"没登记就算了")
  *
- * 【两处已知的 GENERALS 数据缺口,规则2 显式豁免】
- *   - simayi/鬼才:GENERALS.skill 漏写(desc 与 HUASHEN_SKILL_TABLE 都有,caps 也确实
- *     声明了 guicai),注册表按真实实现补登记。
- *   - sunce/魂姿 的 yinghun 能力是觉醒后运行时授予(game.js 里 p.caps.yinghun=true),
- *     不在 GENERALS 静态 caps 里,所以它的触发阶段登记在魂姿名下、能力标识为空。
+ * 【CORE-117(issue #125)已修复,不再需要规则2豁免】simayi/鬼才 原本因为
+ * GENERALS.skill 漏写需要豁免,CORE-117 已把 data.js 改成 skill:'反馈/鬼才',
+ * 现在和其它条目一样自然通过规则2,不再需要特殊处理。
+ *
+ * 【仍然存在的一处特征,不是缺口】sunce/魂姿 的 yinghun 能力是觉醒后运行时授予
+ * (game.js 里 p.caps.yinghun=true),不在 GENERALS 静态 caps 里,所以它的触发阶段
+ * 登记在魂姿名下、能力标识为空——这是技能本身的真实实现方式。
+ *
+ * 【CORE-117 新增:GENERALS.skill 与 HUASHEN_SKILL_TABLE 的全武将一致性校验】
+ * simayi 这次的缺陷之所以能被发现,是因为 HUASHEN_SKILL_TABLE 恰好独立维护了一份
+ * "真实技能名清单",两者一比对就露馅了。这条一致性本该对全部 66 个武将成立、不该
+ * 只在出问题时临时人工比对——补一条通用校验,把 GENERALS[id].skill 斜杠拆分结果
+ * 与 HUASHEN_SKILL_TABLE[id] 的技能名集合逐一比对,覆盖全部武将,不止司马懿一个。
  */
 const vm = require('vm');
 const fs = require('fs');
@@ -76,8 +84,8 @@ console.log('  CORE-78 第一期:技能注册表交叉验证' + (partial ? '（�
 console.log('  注册表条目数: ' + keys.length);
 console.log('='.repeat(64) + '\n');
 
-// GENERALS.skill 漏写、注册表按真实实现补登记的豁免项(见文件头说明)
-const SKILL_NAME_EXEMPT = new Set(['simayi/鬼才']);
+// CORE-117 修复后:GENERALS.skill 已不再有已知缺口,规则2 不再需要豁免任何条目。
+// (历史上 simayi/鬼才 曾在这里豁免,见 issue #125。)
 
 // ---------- 规则 1:武将存在 ----------
 check('规则1:每条登记的武将都在 GENERALS 里存在', function(){
@@ -86,11 +94,10 @@ check('规则1:每条登记的武将都在 GENERALS 里存在', function(){
 });
 
 // ---------- 规则 2:技能名存在于 GENERALS[id].skill ----------
-check('规则2:每条登记的技能名都出现在 GENERALS[id].skill 里(两处已知缺口显式豁免)', function(){
+check('规则2:每条登记的技能名都出现在 GENERALS[id].skill 里', function(){
   const bad = [];
   keys.forEach(function(k){
     const e = REG[k];
-    if(SKILL_NAME_EXEMPT.has(k)) return;
     const names = ((G[e.武将]||{}).skill || '').split('/').map(function(s){ return s.trim(); });
     if(names.indexOf(e.技能名) < 0) bad.push(k + '(GENERALS.skill=' + names.join(',') + ')');
   });
@@ -247,15 +254,61 @@ if(!partial){
     if(bad.length) throw new Error(bad.join(' | '));
   });
 
-  check('登记条目总数符合预期(GENERALS.skill 技能总数 + simayi/鬼才 这一条补登记)', function(){
+  check('登记条目总数符合预期(CORE-117修复后,GENERALS.skill 技能总数与注册表条目数应完全相等,不再需要豁免补登记)', function(){
     let total = 0;
     Object.keys(G).forEach(function(id){
       total += (G[id].skill || '').split('/').map(function(s){ return s.trim(); }).filter(Boolean).length;
     });
-    const expected = total + SKILL_NAME_EXEMPT.size;
-    if(keys.length !== expected)
-      throw new Error('应为 ' + expected + ' 条(GENERALS技能名 ' + total + ' + 豁免补登记 ' + SKILL_NAME_EXEMPT.size + '),实际 ' + keys.length);
-    console.log('    (GENERALS.skill 技能名共 ' + total + ' 条 + 补登记 ' + SKILL_NAME_EXEMPT.size + ' 条 = ' + expected + ')');
+    if(keys.length !== total)
+      throw new Error('应为 ' + total + ' 条(等于 GENERALS.skill 技能名总数),实际 ' + keys.length);
+    console.log('    (GENERALS.skill 技能名共 ' + total + ' 条,注册表条目数 ' + keys.length + ' 条,完全相等)');
+  });
+
+  // ---------- CORE-117:hasSkillName 对已修复的休眠路径回归 ----------
+  check('CORE-117:hasSkillName(司马懿玩家,\'鬼才\')应返回true(此前因GENERALS.skill漏写会错误返回false)', function(){
+    const player = { general:'simayi', skillsLost:false, huashenSkillName:null };
+    vm.runInContext('__hsn_player = ' + JSON.stringify(player) + ';', ctx);
+    const got = vm.runInContext("hasSkillName(__hsn_player, '鬼才')", ctx);
+    if(got !== true) throw new Error('应为 true,实际 ' + got);
+  });
+  check('回归对照:hasSkillName(司马懿玩家,\'反馈\')同样应返回true(确认没有把原有技能改坏)', function(){
+    const got = vm.runInContext("hasSkillName(__hsn_player, '反馈')", ctx);
+    if(got !== true) throw new Error('应为 true,实际 ' + got);
+  });
+  check('回归对照:hasSkillName(司马懿玩家,\'不存在的技能\')应返回false(确认不是恒真)', function(){
+    const got = vm.runInContext("hasSkillName(__hsn_player, '不存在的技能')", ctx);
+    if(got !== false) throw new Error('应为 false,实际 ' + got);
+  });
+
+  // ---------- CORE-117:GENERALS.skill 与 HUASHEN_SKILL_TABLE 全武将一致性(通用校验,不止司马懿) ----------
+  // simayi 这次的缺陷,是靠 HUASHEN_SKILL_TABLE 这份独立维护的"真实技能名清单"和
+  // GENERALS.skill 交叉比对才发现的——但这条一致性**不能要求两个集合完全相等**:
+  // data.js(约528-543行)自己的注释明确记录了 HUASHEN_SKILL_TABLE 按设计排除
+  // 主公技(激将/护驾/黄天/妄尊/血裔/救援/制霸)、马谡"散谣"(caps从未被查询过的死代码,
+  // 单独排除)——这些技能只出现在 GENERALS.skill、不出现在 HUASHEN_SKILL_TABLE 里,
+  // 是**有意为之的设计**,不是数据遗漏。第一版按"完全相等"写这条断言时,把这10个
+  // 正常的设计排除全部误报成了"不一致"(已在开发过程中发现并纠正,过程记录见
+  // progress-log)。
+  // 真正有意义、且能复现 simayi 这次真实缺陷的方向,是**单向子集关系**:
+  // HUASHEN_SKILL_TABLE 里出现的技能名,必须是 GENERALS.skill 的子集——因为
+  // HUASHEN_SKILL_TABLE 是"这个武将确实拥有、且可被借用"的技能,不可能出现一个
+  // GENERALS.skill 里都没有的技能名(simayi 当初正是"鬼才"只在 HUASHEN_SKILL_TABLE
+  // 出现、GENERALS.skill 没有,方向就是这一个)。反过来(GENERALS.skill 有、
+  // HUASHEN没有)则是合法的常态(主公技等),不校验。
+  check('CORE-117:HUASHEN_SKILL_TABLE 里的每个技能名都必须是 GENERALS.skill 的子集(66个武将全覆盖,单向检查,不误报主公技等设计排除项)', function(){
+    const H = vm.runInContext('HUASHEN_SKILL_TABLE', ctx);
+    const bad = [];
+    Object.keys(H).forEach(function(id){
+      if(!G[id]) { bad.push(id + ' 不在 GENERALS 里'); return; }
+      const skillNames = new Set(
+        (G[id].skill || '').split('/').map(function(s){ return s.trim(); }).filter(Boolean)
+      );
+      (H[id] || []).forEach(function(e){
+        if(!skillNames.has(e.name)) bad.push(id + '(' + G[id].name + '): HUASHEN有"' + e.name + '",GENERALS.skill没有(=' + [...skillNames].join(',') + ')');
+      });
+    });
+    if(bad.length) throw new Error(bad.join(' | '));
+    console.log('    (已核对 HUASHEN_SKILL_TABLE 覆盖的全部 ' + Object.keys(H).length + ' 个武将,零遗漏)');
   });
 }
 

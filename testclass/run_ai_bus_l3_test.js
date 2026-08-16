@@ -2067,7 +2067,10 @@ const testCode = String.raw`
     var c = s.buildCandidates(g, 0);
     if(c.length !== 2) throw new Error('应2候选,实际 ' + c.length);
     if(c[0].generalId !== 'zhangfei' || c[1].generalId !== 'simayi') throw new Error('generalId 顺序应同候选池');
-    if(c[0].label !== '张飞(咆哮)' || c[1].label !== '司马懿(反馈)')
+    // CORE-117(issue #125):GENERALS.simayi.skill 从'反馈'修复为'反馈/鬼才'
+    // (司马懿本来就有反馈+鬼才两个技能,原字段漏写了鬼才),label 直接透传
+    // gen.skill,这里的期望值同步更新,不是行为改坏。
+    if(c[0].label !== '张飞(咆哮)' || c[1].label !== '司马懿(反馈/鬼才)')
       throw new Error('label 应含武将名+技能,实际 ' + JSON.stringify(c));
     var gl = mkPickGeneralG({ phase: 'pickingLordGeneral', seat: 1, roles: ['zhong','zhu','fan'], generalChoices: ['xuchu','sunshangxiang'] });
     var cl = s.buildCandidates(gl, 1);
