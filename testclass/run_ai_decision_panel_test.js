@@ -109,7 +109,9 @@ const testCode = String.raw`
   callAI = async function(provider, apiKey, opts){
     window.__mockAiArgs = { provider: provider, apiKey: apiKey, opts: opts };
     if(!window.__mockAiOk) return { ok:false, reason:'timeout', detail:'mock超时' };
-    return { ok: true, text: '{"choice":1,"reason":"血量最低,优先集火"}' };
+    // CORE-76:真实 callAI 现在会带 usage 一并返回(parseAiUsage 归一化后的形状)
+    return { ok: true, text: '{"choice":1,"reason":"血量最低,优先集火"}',
+             usage: { input: 123, output: 45, total: 168 } };
   };
 
   // 座位0 = 刘备(有武将,验证 general 采集);非机器人托管场景下 aiTestAutopilot 关闭。
@@ -336,6 +338,99 @@ const testCode = String.raw`
     if(!name || name.indexOf('room-9527')<0) throw new Error('文件名应含房间号,实际 '+name);
     if(name.slice(-5)!=='.json') throw new Error('应为 .json 文件,实际 '+name);
     if(window.__downloadClicked!==1) throw new Error('应触发一次浏览器下载点击,实际 '+window.__downloadClicked);
+  });
+
+  // ============ 10. CORE-76:token 用量 + 提交结果(全链路补齐) ============
+  await check('CORE-76: parseAiUsage 归一化 OpenAI兼容 与 Claude 两种 usage 命名', function(){
+    var a = parseAiUsage({ usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } });
+    if(!a || a.input!==100 || a.output!==20 || a.total!==120)
+      throw new Error('OpenAI兼容命名应归一化,实际 '+JSON.stringify(a));
+    var b = parseAiUsage({ usage: { input_tokens: 7, output_tokens: 3 } });
+    if(!b || b.input!==7 || b.output!==3 || b.total!==10)
+      throw new Error('Claude命名应归一化且total可推算,实际 '+JSON.stringify(b));
+    if(parseAiUsage({}) !== null) throw new Error('无usage应返回null');
+    if(parseAiUsage(null) !== null) throw new Error('无json应返回null');
+    if(parseAiUsage({usage:{foo:1}}) !== null) throw new Error('结构不符应返回null');
+  });
+
+  await check('CORE-76: 决策记录采集到 token 用量', async function(){
+    aiTestAutopilot = { active:false, seat:null };
+    aiDecisionRecords = [];
+    aiCurrentDecisionRecord = null;
+    var g = mkG();
+    var idx = await callAiChooseIndex({ g:g, seat:0, candidates:CANDS });
+    if(idx!==1) throw new Error('应返回1');
+    var rec = aiDecisionRecords[0];
+    if(!rec.usage) throw new Error('记录应含 usage,实际 '+JSON.stringify(rec.usage));
+    if(rec.usage.input!==123 || rec.usage.output!==45 || rec.usage.total!==168)
+      throw new Error('usage 应为本次调用的真实用量,实际 '+JSON.stringify(rec.usage));
+    var html = recordDetailHtml(rec, 0);
+    if(html.indexOf('token用量')<0 || html.indexOf('123')<0 || html.indexOf('168')<0)
+      throw new Error('详情区应展示 token 用量');
+  });
+
+  await check('CORE-76: AI决策成功后指针挂上本次记录,供botInvoke回写提交结果', function(){
+    if(!aiCurrentDecisionRecord) throw new Error('AI决策成功应挂上当前记录指针');
+    if(aiCurrentDecisionRecord!==aiDecisionRecords[0]) throw new Error('指针应指向本次那条记录');
+  });
+
+  await check('CORE-76: 提交后标pending,状态变化后判committed', function(){
+    var rec = aiDecisionRecords[0];
+    markAiDecisionSubmitResult(0, 'pending');
+    if(rec.submitResult!=='pending') throw new Error('提交时应先标pending,实际 '+rec.submitResult);
+    markAiDecisionSubmitResult(0, 'committed');
+    if(rec.submitResult!=='committed') throw new Error('状态变化应判committed,实际 '+rec.submitResult);
+    var html = recordDetailHtml(rec, 0);
+    if(html.indexOf('提交结果')<0 || html.indexOf('成功')<0) throw new Error('详情区应展示提交结果');
+  });
+
+  await check('CORE-76: 状态未变化判rejected_or_timeout(与bot_decision_failed同一判据)', function(){
+    var rec = aiDecisionRecords[0];
+    markAiDecisionSubmitResult(0, 'rejected_or_timeout');
+    if(rec.submitResult!=='rejected_or_timeout') throw new Error('应判未生效,实际 '+rec.submitResult);
+    // 展示文案必须如实说明这一档分不清"被拒"与"超时",不能假装能分开
+    var t = aiSubmitResultText('rejected_or_timeout');
+    if(t.indexOf('未生效')<0) throw new Error('文案应说明未生效');
+    if(t.indexOf('拒绝')<0 || t.indexOf('超时')<0) throw new Error('文案应如实说明被拒/超时两种可能都涵盖');
+  });
+
+  await check('CORE-76: 座位不一致时不回写(宁可漏记不错记)', function(){
+    var rec = aiDecisionRecords[0];
+    rec.submitResult = 'committed';
+    markAiDecisionSubmitResult(2, 'rejected_or_timeout'); // 别的座位
+    if(rec.submitResult!=='committed') throw new Error('座位不一致不应改写,实际 '+rec.submitResult);
+  });
+
+  await check('CORE-76: AI调用失败/解析不可用时清空指针(不让本地兜底的提交结果错写)', async function(){
+    aiDecisionRecords = [];
+    aiCurrentDecisionRecord = { seat:0, submitResult:null }; // 模拟上一次残留
+    window.__mockAiOk = false;
+    var g = mkG();
+    await callAiChooseIndex({ g:g, seat:0, candidates:CANDS });
+    window.__mockAiOk = true;
+    if(aiCurrentDecisionRecord!==null) throw new Error('AI调用失败应清空指针,实际 '+JSON.stringify(aiCurrentDecisionRecord));
+
+    // 解析失败(返回200但不是合法JSON)同样要清空
+    aiDecisionRecords = [];
+    aiCurrentDecisionRecord = { seat:0, submitResult:null };
+    var savedCallAI = callAI;
+    callAI = async function(){ return { ok:true, text:'这不是JSON' }; };
+    await callAiChooseIndex({ g:mkG(), seat:0, candidates:CANDS });
+    callAI = savedCallAI;
+    if(aiCurrentDecisionRecord!==null) throw new Error('解析不可用应清空指针,实际 '+JSON.stringify(aiCurrentDecisionRecord));
+  });
+
+  await check('CORE-76: 导出文件带上 token 用量与提交结果', function(){
+    aiDecisionRecords = [{
+      time:'12:00:00', seat:0, seatName:'机器人0', general:'刘备', phaseLabel:'play',
+      summary:'决策(play)', model:'m-x', isAutopilot:false, choice:1, reason:'理由甲',
+      prompt:'P', rawResponse:'R', stateInfo:'S',
+      usage:{input:11,output:22,total:33}, submitResult:'committed'
+    }];
+    var d = buildAiDecisionDump();
+    var a = d.aiDecisions[0];
+    if(!a.usage || a.usage.total!==33) throw new Error('导出应含token用量,实际 '+JSON.stringify(a.usage));
+    if(a.submitResult!=='committed') throw new Error('导出应含提交结果,实际 '+a.submitResult);
   });
 
   console.log('\n' + '='.repeat(60));

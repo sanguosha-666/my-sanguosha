@@ -403,6 +403,9 @@ async function callAiChooseIndex(opts){
         model: attemptedModel || null
       });
     }
+    // CORE-76:这次没有得到 AI 决策(要回退本地兜底),清掉指针——否则随后本地兜底
+    // 触发的 botInvoke 会把提交结果错写到这条"AI调用失败"的记录上。
+    aiCurrentDecisionRecord = null;
     return null;
   }
   // CORE-73:理由解析不再受托管开关限制——prompt 现在对所有决策都要求附理由,
@@ -421,9 +424,16 @@ async function callAiChooseIndex(opts){
       rawResponse: result.text || '',
       choice: idx,
       reason: reason,
-      model: attemptedModel || null
+      model: attemptedModel || null,
+      // CORE-76:token 用量(callAI 归一化后的 {input,output,total},取不到为 null)
+      usage: (result && result.usage) || null
     });
   }
+  // CORE-76:把本次决策记录挂到模块级指针,供随后 execute 里的 botInvoke 回写"提交结果"。
+  // 【为什么单指针够用】同一个浏览器里决策是串行的(botDecisionInFlight 并发保护),
+  // execute 紧跟在本次 callAiChooseIndex 之后同步发生,中间不会插进另一次 AI 决策;
+  // botInvoke 侧还会再核对 seat 一致才回写,座位对不上就不写(宁可漏记不错记)。
+  aiCurrentDecisionRecord = decisionRec;
   // 兼容:托管路径的旧骨架记录(若有人直调 aiTestDecisionHook 建立)仍需被消费掉,
   // 避免它一直挂着 pending 影响后续回填。
   if(autopilotHit && typeof aiTestFillPendingRecord==='function' && typeof aiTestPendingRecord!=='undefined' && aiTestPendingRecord){
@@ -440,6 +450,8 @@ async function callAiChooseIndex(opts){
     // 本地启发式,但"模型说了没用的话"和"模型没响应"是两种不同的诊断信号,分开记。
     logBotDecisionTrace(g, seat, 'ai_response_unusable',
       'AI返回200但解析失败或索引越界(候选数'+candidates.length+',解析结果='+idx+'),回退本地兜底');
+    // CORE-76:同上——退本地兜底,这条记录不该认领随后 botInvoke 的提交结果。
+    aiCurrentDecisionRecord = null;
     if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
     return null;
   }
@@ -452,6 +464,10 @@ async function callAiChooseIndex(opts){
   // ai_response_unusable 分支)。
   return idx;
 }
+// CORE-76:最近一次"AI 真的给出了合法选择"的决策记录。execute 里的 botInvoke 提交动作
+// 后,由 botInvoke 侧回写这条记录的 submitResult(成功/未生效)。只在 AI 决策成功时挂,
+// 失败/解析不可用路径一律置 null(见 callAiChooseIndex 里两处清空)。
+let aiCurrentDecisionRecord = null;
 // CORE-72:允许写进 debugLogs 的 bot_decision_trace 来源(异常类)。正常决策('llm')
 // 刻意不在其中——debugLogs 只记异常,正常流水归 AI 决策面板(CORE-73)。
 const BOT_DECISION_TRACE_ABNORMAL_SOURCES = new Set(['ai_response_unusable']);
