@@ -113,50 +113,56 @@ const testCode = String.raw`
       { name:'p2', general:'zhangfei', isBot:true, alive:true, hp:4, maxHp:4, hand:[], equips:{}, delays:[], role:'zhong' }
     ];
   }
+  // CORE-84(issue #131):getIdentityMark/setIdentityMark/identityMarkKey 现在都要求
+  // 一个 g(取 g.seed 做局标识,见 render.js 的说明)。这里用一个固定 seed 的最小 g
+  // 代表"同一局"场景(绝大多数既有 CORE-115 断言测的是存储本身的增删改查/房间隔离,
+  // 不关心局隔离,固定 seed 即可);CORE-84 专属的新断言(局隔离本身)在文件末尾单独用
+  // 不同 seed 的 g 对象测试。
+  var G1 = { seed: 1 };
 
   // ============ 1. localStorage 增删改查(设计决定①) ============
   await check('CORE-115: getIdentityMark 初始为 null', function(){
     roomId = 'roomA'; localStorage.clear();
-    if(getIdentityMark(1) !== null) throw new Error('未设置时应为 null');
+    if(getIdentityMark(G1, 1) !== null) throw new Error('未设置时应为 null');
   });
   await check('CORE-115: setIdentityMark 写入后 getIdentityMark 能读回', function(){
-    setIdentityMark(1, 'fan');
-    if(getIdentityMark(1) !== 'fan') throw new Error('应读回 fan,实际 ' + getIdentityMark(1));
+    setIdentityMark(G1, 1, 'fan');
+    if(getIdentityMark(G1, 1) !== 'fan') throw new Error('应读回 fan,实际 ' + getIdentityMark(G1, 1));
   });
   await check('CORE-115: 重新设置(改) 覆盖旧值', function(){
-    setIdentityMark(1, 'nei');
-    if(getIdentityMark(1) !== 'nei') throw new Error('应改为 nei,实际 ' + getIdentityMark(1));
+    setIdentityMark(G1, 1, 'nei');
+    if(getIdentityMark(G1, 1) !== 'nei') throw new Error('应改为 nei,实际 ' + getIdentityMark(G1, 1));
   });
   await check('CORE-115: setIdentityMark(seat, null) 清除标记', function(){
-    setIdentityMark(1, null);
-    if(getIdentityMark(1) !== null) throw new Error('应清空,实际 ' + getIdentityMark(1));
+    setIdentityMark(G1, 1, null);
+    if(getIdentityMark(G1, 1) !== null) throw new Error('应清空,实际 ' + getIdentityMark(G1, 1));
   });
   await check('CORE-115: 非法值一律视为清除(防脏数据)', function(){
-    setIdentityMark(2, 'zhong');
-    localStorage.setItem(identityMarkKey(2), 'garbage'); // 模拟手改localStorage
-    if(getIdentityMark(2) !== null) throw new Error('非法值应读作 null,实际 ' + getIdentityMark(2));
+    setIdentityMark(G1, 2, 'zhong');
+    localStorage.setItem(identityMarkKey(G1, 2), 'garbage'); // 模拟手改localStorage
+    if(getIdentityMark(G1, 2) !== null) throw new Error('非法值应读作 null,实际 ' + getIdentityMark(G1, 2));
   });
   await check('CORE-115: key 格式含房间号+座位号,不同房间/座位互不干扰', function(){
     localStorage.clear();
-    roomId = 'roomA'; setIdentityMark(0, 'zhong');
-    roomId = 'roomB'; setIdentityMark(0, 'fan');
-    if(getIdentityMark(0) !== 'fan') throw new Error('roomB座位0应为fan,实际 ' + getIdentityMark(0));
+    roomId = 'roomA'; setIdentityMark(G1, 0, 'zhong');
+    roomId = 'roomB'; setIdentityMark(G1, 0, 'fan');
+    if(getIdentityMark(G1, 0) !== 'fan') throw new Error('roomB座位0应为fan,实际 ' + getIdentityMark(G1, 0));
     roomId = 'roomA';
-    if(getIdentityMark(0) !== 'zhong') throw new Error('roomA座位0应仍为zhong(不受roomB影响),实际 ' + getIdentityMark(0));
-    var k0 = identityMarkKey(0), k1 = identityMarkKey(1);
+    if(getIdentityMark(G1, 0) !== 'zhong') throw new Error('roomA座位0应仍为zhong(不受roomB影响),实际 ' + getIdentityMark(G1, 0));
+    var k0 = identityMarkKey(G1, 0), k1 = identityMarkKey(G1, 1);
     if(k0.indexOf('roomA')<0 || k0.indexOf('0')<0) throw new Error('key应含房间号与座位号,实际 ' + k0);
   });
   await check('CORE-115: 不写入 g(共享房间状态),纯本地', function(){
     var g = { players: mkPlayers(), gameMode:'identity', started:true };
     var before = JSON.stringify(g);
-    setIdentityMark(0, 'nei');
+    setIdentityMark(G1, 0, 'nei');
     if(JSON.stringify(g) !== before) throw new Error('setIdentityMark 不应触碰传入的 g 对象');
     // 也确认没有经过 tx/gameRef.transaction
     var txCalls = 0;
     var savedTx = tx;
     tx = function(){ txCalls++; return null; };
-    setIdentityMark(0, 'fan');
-    getIdentityMark(0);
+    setIdentityMark(G1, 0, 'fan');
+    getIdentityMark(G1, 0);
     tx = savedTx;
     if(txCalls !== 0) throw new Error('不应经过 tx,实际调用 ' + txCalls + ' 次');
   });
@@ -196,7 +202,7 @@ const testCode = String.raw`
     // 模拟真实DOM:openIdentityMarkMenu写完innerHTML后会querySelectorAll拿到按钮并挂onclick,
     // 这里手工构造3个"按钮"让querySelectorAll返回它们,拿到onclick后手动触发验证效果。
     buttons.push({ dataset:{mark:'zhong'}, onclick:null });
-    currentG = { players: mkPlayers() };
+    currentG = { players: mkPlayers(), seed: G1.seed }; // 与后面用G1读回的key对齐
     var savedRender = render;
     render = function(){}; // render-controls.js 未加载,真实 render() 会因 resetZhangba 等未定义而报错——
                             // 这里只关心"点击后localStorage是否写入",不关心真实重绘,mock掉即可
@@ -205,7 +211,7 @@ const testCode = String.raw`
     if(typeof buttons[0].onclick !== 'function') throw new Error('按钮应被挂上onclick');
     buttons[0].onclick(); // 触发时 render 仍是 mock(还没恢复),不会碰到未加载的 render-controls.js
     render = savedRender;
-    if(getIdentityMark(2) !== 'zhong') throw new Error('点击"忠"按钮后应写入zhong,实际 ' + getIdentityMark(2));
+    if(getIdentityMark(G1, 2) !== 'zhong') throw new Error('点击"忠"按钮后应写入zhong,实际 ' + getIdentityMark(G1, 2));
   });
 
   // ============ 3. 仅 identity 模式且已开局才渲染(设计决定③) ============
@@ -232,11 +238,14 @@ const testCode = String.raw`
     if(html.indexOf('seat-identity-mark')<0) throw new Error('identity模式+已开局应渲染标记入口');
   });
   await check('CORE-115: 已设置的标记同样仅在identity+已开局时显示(不因模式切换泄露)', function(){
-    roomId='roomA'; setIdentityMark(1, 'fan');
-    var gFfa = { players: mkPlayers(), gameMode:'ffa', started:true, turn:0 };
+    roomId='roomA'; setIdentityMark(G1, 1, 'fan');
+    // gFfa/gId 的 seed 与 G1 一致(=1),否则CORE-84的局隔离会让这条标记读不出来——
+    // 这条测的是"模式"这个维度是否泄露,不是测局隔离(局隔离有专属的CORE-84断言),
+    // 所以这里刻意让 seed 对齐,不引入局隔离这个无关变量。
+    var gFfa = { players: mkPlayers(), gameMode:'ffa', started:true, turn:0, seed:1 };
     var htmlFfa = renderSeatCard(gFfa, 1, false);
     if(htmlFfa.indexOf('has-mark')>=0) throw new Error('ffa模式不应显示已设置的标记');
-    var gId = { players: mkPlayers(), gameMode:'identity', started:true, turn:0 };
+    var gId = { players: mkPlayers(), gameMode:'identity', started:true, turn:0, seed:1 };
     var htmlId = renderSeatCard(gId, 1, false);
     if(htmlId.indexOf('has-mark')<0) throw new Error('identity模式应显示已设置的fan标记');
     if(htmlId.indexOf('>反<')<0) throw new Error('应显示"反"这个字,实际未找到,html片段:' + htmlId.slice(htmlId.indexOf('has-mark')-20,htmlId.indexOf('has-mark')+150));
@@ -246,8 +255,8 @@ const testCode = String.raw`
   await check('CORE-115: newGame() 清空当前房间全部座位的标记', function(){
     roomId = 'roomNG';
     localStorage.clear();
-    setIdentityMark(0, 'zhong'); setIdentityMark(1, 'fan'); setIdentityMark(2, 'nei');
-    if(getIdentityMark(0)!=='zhong' || getIdentityMark(1)!=='fan' || getIdentityMark(2)!=='nei')
+    setIdentityMark(G1, 0, 'zhong'); setIdentityMark(G1, 1, 'fan'); setIdentityMark(G1, 2, 'nei');
+    if(getIdentityMark(G1, 0)!=='zhong' || getIdentityMark(G1, 1)!=='fan' || getIdentityMark(G1, 2)!=='nei')
       throw new Error('前置条件:三个座位应都已设置标记');
     // newGame() 内部会调用 tx(...)——room owner 判定等真实逻辑很重,这里只关心
     // "本地标记清空"这一件事是否在 tx 之前无条件执行(resetBotTwoStep 同款写法)。
@@ -256,21 +265,85 @@ const testCode = String.raw`
     var savedIsRoomOwner = (typeof isRoomOwner!=='undefined') ? isRoomOwner : undefined;
     newGame();
     tx = savedTx;
-    if(getIdentityMark(0)!==null || getIdentityMark(1)!==null || getIdentityMark(2)!==null)
+    if(getIdentityMark(G1, 0)!==null || getIdentityMark(G1, 1)!==null || getIdentityMark(G1, 2)!==null)
       throw new Error('newGame后三个座位的标记都应被清空,实际 ' +
-        JSON.stringify([getIdentityMark(0),getIdentityMark(1),getIdentityMark(2)]));
+        JSON.stringify([getIdentityMark(G1, 0),getIdentityMark(G1, 1),getIdentityMark(G1, 2)]));
   });
   await check('CORE-115: newGame() 只清空当前房间,不影响别的房间残留的标记', function(){
     localStorage.clear();
-    roomId = 'roomX'; setIdentityMark(0, 'zhong');
-    roomId = 'roomY'; setIdentityMark(0, 'fan');
+    roomId = 'roomX'; setIdentityMark(G1, 0, 'zhong');
+    roomId = 'roomY'; setIdentityMark(G1, 0, 'fan');
     var savedTx = tx;
     tx = function(){ return null; };
     newGame(); // 此时 roomId==='roomY'
     tx = savedTx;
-    if(getIdentityMark(0)!==null) throw new Error('roomY应已清空');
+    if(getIdentityMark(G1, 0)!==null) throw new Error('roomY应已清空');
     roomId = 'roomX';
-    if(getIdentityMark(0)!=='zhong') throw new Error('roomX不应受影响,实际 ' + getIdentityMark(0));
+    if(getIdentityMark(G1, 0)!=='zhong') throw new Error('roomX不应受影响,实际 ' + getIdentityMark(G1, 0));
+  });
+
+  // ============ 5. CORE-84(issue #131):局隔离,不依赖跨设备清除 ============
+  // 复现根因(修复前会失败):"再来一局"仅房主可见可点(isRoomOwner守卫),房主点击
+  // newGame() 只能清自己浏览器的 localStorage,清不到其他玩家设备上的——localStorage
+  // 本身是设备本地的,不存在"房主帮别人清掉"这回事。修复方式(方案A):key 带上
+  // g.seed(每局唯一,CORE-77在finishGeneralAssign时生成),不同局seed不同,任何客户端
+  // (不管是不是房主)读旧key天然读不到值,不需要跨设备清除。
+  await check('CORE-84: 同一房间、不同局(seed不同)的标记互不可见,不需要clearAllIdentityMarks介入', function(){
+    roomId = 'roomZ'; localStorage.clear();
+    var gOldGame = { seed: 111 };
+    var gNewGame = { seed: 222 }; // 模拟"再来一局"后 g.seed 变了(新局)
+    setIdentityMark(gOldGame, 1, 'fan'); // 上一局,座位1标记为"反"
+    // 不调用 clearAllIdentityMarks/newGame——直接用新局的 g 去读,验证"新局天然读不到"
+    if(getIdentityMark(gNewGame, 1) !== null)
+      throw new Error('新局(不同seed)不应读到上一局的标记,实际 ' + getIdentityMark(gNewGame, 1));
+    // 旧局自己的视角(seed仍是111)应该还能读到——这不是"被清空了",是"新局看不到"
+    if(getIdentityMark(gOldGame, 1) !== 'fan')
+      throw new Error('旧局自己的seed下标记应仍可读到(证明不是被删除,只是新局天然隔离),实际 ' + getIdentityMark(gOldGame, 1));
+  });
+  await check('CORE-84: 非房主客户端(从不调用newGame)在新局下同样看不到旧局标记(修复前会失败的核心场景)', function(){
+    roomId = 'roomZ2'; localStorage.clear();
+    var gGame1 = { seed: 555 };
+    // 模拟一个非房主玩家:整个测试期间从未调用过 newGame()/clearAllIdentityMarks
+    // (这正是issue描述的"其他玩家旧标记残留"场景的真实还原——不是"忘了清",是这个
+    // 客户端压根不会执行清空逻辑)。
+    setIdentityMark(gGame1, 2, 'zhong');
+    if(getIdentityMark(gGame1, 2) !== 'zhong') throw new Error('前置条件:第一局应已设置标记');
+    // 房间开了下一局,seed 变化(finishGeneralAssign 每局重新调用 generateSeed);
+    // 非房主客户端从未调用 clearAllIdentityMarks,localStorage 里旧key原样还在。
+    var gGame2 = { seed: 556 };
+    if(getIdentityMark(gGame2, 2) !== null)
+      throw new Error('修复前会在这里失败:非房主客户端应该也看不到旧局标记了,实际 ' + getIdentityMark(gGame2, 2));
+    // 补充确认:旧key客观上确实还残留在localStorage里(印证"不依赖删除,是天然隔离")
+    var oldKeyStillThere = localStorage.getItem(identityMarkKey(gGame1, 2));
+    if(oldKeyStillThere !== 'zhong')
+      throw new Error('旧key本身应仍残留(未被删除)——本方案是隔离而不是删除,实际 ' + oldKeyStillThere);
+  });
+  await check('CORE-84: identityMarkKey 里 seed 缺失(理论上不该发生)时回退空串,不产生字面量"undefined"字符串', function(){
+    roomId = 'roomZ3';
+    var k = identityMarkKey({}, 1); // g 存在但没有 seed 字段
+    if(k.indexOf('undefined')>=0) throw new Error('key不应包含字面量undefined,实际 ' + k);
+    var k2 = identityMarkKey(null, 1); // g 本身是 null(更极端的防御场景)
+    if(k2.indexOf('undefined')>=0) throw new Error('g为null时key也不应包含字面量undefined,实际 ' + k2);
+  });
+  await check('CORE-84: renderSeatCard 对不同局(不同g.seed)的座位卡,标记显示天然隔离(端到端)', function(){
+    roomId = 'roomZ4'; localStorage.clear();
+    var gA = { players: mkPlayers(), gameMode:'identity', started:true, turn:0, seed: 7001 };
+    var gB = { players: mkPlayers(), gameMode:'identity', started:true, turn:0, seed: 7002 };
+    setIdentityMark(gA, 1, 'nei'); // 在"局A"给座位1打上"内"标记
+    var htmlA = renderSeatCard(gA, 1, false);
+    if(htmlA.indexOf('has-mark')<0 || htmlA.indexOf('>内<')<0)
+      throw new Error('局A自己应能看到刚打的标记,实际html片段:' + htmlA.slice(htmlA.indexOf('seat-identity-mark')-10,htmlA.indexOf('seat-identity-mark')+150));
+    var htmlB = renderSeatCard(gB, 1, false); // "局B"是同房间的下一局(seed不同)
+    if(htmlB.indexOf('has-mark')>=0)
+      throw new Error('局B不应显示局A的标记(修复前的bug场景),实际html片段:' + htmlB.slice(htmlB.indexOf('seat-identity-mark')-10,htmlB.indexOf('seat-identity-mark')+150));
+  });
+  await check('CORE-84: clearAllIdentityMarks 仍按房间前缀清空(降级为房主本机的localStorage卫生,不再是正确性必要条件)', function(){
+    roomId = 'roomZ5'; localStorage.clear();
+    setIdentityMark({seed:1}, 0, 'zhong');
+    setIdentityMark({seed:2}, 0, 'fan'); // 同房间、不同局
+    clearAllIdentityMarks();
+    if(getIdentityMark({seed:1}, 0) !== null) throw new Error('clearAllIdentityMarks应仍能清掉该房间下任意局的残留key');
+    if(getIdentityMark({seed:2}, 0) !== null) throw new Error('同上,应连带清掉');
   });
 
   console.log('\n' + '='.repeat(60));

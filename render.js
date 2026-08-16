@@ -859,29 +859,44 @@ function computeTurnOrderNumbers(g){
 // 【为什么不写进 g】这是"我自己的判断",不同玩家对同一个人的猜测允许不一样,不是需要
 // 跨客户端同步的公开游戏状态——存 localStorage,和 sgsClientId(game.js:17)同一套本地
 // 持久化写法,不经过 tx/Firebase。
-// 【key 设计】按房间号+座位号区分,格式 identityMark:<roomId>:<seat>,清晰可辨识、不会
-// 和其它 localStorage key(sgsClientId 等)冲突。
+// 【key 设计,CORE-84(issue #131)修正】格式 identityMark:<roomId>:<seed>:<seat>——
+// 原设计只有 <roomId>:<seat>,依赖"重开时执行 newGame()→clearAllIdentityMarks() 清空
+// 本机 localStorage"来让新局不显示旧标记,但"再来一局"按钮仅房主可见可点
+// (render-controls.js isRoomOwner 守卫),房主点击只能清自己浏览器的 localStorage,
+// 清不到其他玩家设备上的——localStorage 本身就是设备本地的,跨设备清除在架构上不成立。
+// 加入 <seed>(g.seed,CORE-77/issue #122 在 finishGeneralAssign 时生成的每局唯一值)
+// 后,新一局的 seed 必然不同于上一局,任何客户端(不管是不是房主)读旧 key 天然读不到
+// 值——**不需要跨设备清除**,从根源上规避了"本地存储无法被他人清除"这个矛盾,是 issue
+// 正文里的推荐方案A。clearAllIdentityMarks()(仍按 roomId 前缀扫描,不含 seed)继续保留
+// 在 newGame() 里调用,现在降级为"房主本机的历史陈旧 key 清理"这个次要用途(纯粹是
+// localStorage 卫生,不再是正确性的必要条件)——即使它完全不执行,新局的 seed 隔离
+// 本身已经足够保证不显示旧标记。
 const IDENTITY_MARK_OPTIONS = ['zhong','fan','nei']; // 忠/反/内——'zhu'(主公)身份从不隐藏,不需要猜
 const IDENTITY_MARK_LABEL = { zhong:'忠', fan:'反', nei:'内' };
 const IDENTITY_MARK_FULL_LABEL = { zhong:'忠臣', fan:'反贼', nei:'内奸' };
-function identityMarkKey(seat){
-  return 'identityMark:'+(typeof roomId!=='undefined'&&roomId?roomId:'')+':'+seat;
+// g 参数取 g.seed 做局标识;seed 未定义时(理论上不该发生——标记UI仅在g.started时渲染,
+// 而g.started与g.seed在同一次finishGeneralAssign里一起写入)回退空串,不让key直接变成
+// 字面量'undefined'字符串。
+function identityMarkKey(g, seat){
+  const seed = (g && typeof g.seed==='number') ? g.seed : '';
+  return 'identityMark:'+(typeof roomId!=='undefined'&&roomId?roomId:'')+':'+seed+':'+seat;
 }
-function getIdentityMark(seat){
+function getIdentityMark(g, seat){
   try{
-    const v = localStorage.getItem(identityMarkKey(seat));
+    const v = localStorage.getItem(identityMarkKey(g, seat));
     return IDENTITY_MARK_OPTIONS.indexOf(v)>=0 ? v : null; // 防脏数据(如手改localStorage)
   }catch(e){ return null; } // 隐私模式/localStorage被禁用时静默返回"无标记",不影响主流程
 }
-function setIdentityMark(seat, mark){
+function setIdentityMark(g, seat, mark){
   try{
-    if(IDENTITY_MARK_OPTIONS.indexOf(mark)>=0) localStorage.setItem(identityMarkKey(seat), mark);
-    else localStorage.removeItem(identityMarkKey(seat)); // mark 为 null/非法值一律视为"清除"
+    if(IDENTITY_MARK_OPTIONS.indexOf(mark)>=0) localStorage.setItem(identityMarkKey(g, seat), mark);
+    else localStorage.removeItem(identityMarkKey(g, seat)); // mark 为 null/非法值一律视为"清除"
   }catch(e){ /* 同上,静默放弃 */ }
 }
-// clearAllIdentityMarks:newGame()收尾调用,清空**当前房间**全部座位的标记——不同局身份
-// 不同,上一局的标记对新一局没有参考价值,避免误导(见issue #115验收标准)。按 key 前缀
-// 扫描,不依赖固定座位数上限(SEATS 变化也天然覆盖)。
+// clearAllIdentityMarks:newGame()收尾调用,清空**当前房间**全部座位、全部历史局的标记
+// ——不依赖 seed(按 roomId 前缀扫描,覆盖该房间下所有旧局留下的 key),继续保留是为了
+// 房主本机的 localStorage 卫生(不清理也不影响正确性,新局 seed 隔离已经足够,见上方
+// 大段说明),不依赖固定座位数上限(SEATS 变化也天然覆盖)。
 function clearAllIdentityMarks(){
   try{
     const prefix = 'identityMark:'+(typeof roomId!=='undefined'&&roomId?roomId:'')+':';
@@ -901,7 +916,7 @@ function clearAllIdentityMarks(){
 // stopPropagation写法)。
 function openIdentityMarkMenu(seat){
   const m=document.getElementById('confirmModal');
-  const current = getIdentityMark(seat);
+  const current = getIdentityMark(currentG, seat);
   const p = currentG && currentG.players && currentG.players[seat];
   const name = p ? p.name : ('座位'+(seat+1));
   const optBtn = (mark, label) => '<button class="ghost'+(current===mark?' identity-mark-current':'')+'" data-mark="'+mark+'">'+label+'</button>';
@@ -914,7 +929,7 @@ function openIdentityMarkMenu(seat){
   m.classList.remove('hidden');
   const hide=()=>{ m.classList.add('hidden'); m.innerHTML=''; };
   m.querySelectorAll('.identity-mark-btns button[data-mark]').forEach(b=>{
-    b.onclick=()=>{ setIdentityMark(seat, b.dataset.mark || null); hide(); render(currentG); };
+    b.onclick=()=>{ setIdentityMark(currentG, seat, b.dataset.mark || null); hide(); render(currentG); };
   });
   m.querySelector('#confirmCancelMark').onclick=hide;
   m.onclick=(e)=>{ if(e.target===m) hide(); };
@@ -1120,7 +1135,7 @@ function renderSeatCard(g, seat, isSelf){
   // 放在这里不与标题栏/左侧武将信息列/右上角身份·托管角标/底部装备判定区冲突。
   const identityMarkEntry = (g.gameMode==='identity' && g.started)
     ? (function(){
-        const mark = getIdentityMark(seat);
+        const mark = getIdentityMark(g, seat);
         const label = mark ? IDENTITY_MARK_LABEL[mark] : '🔖';
         const cls = mark ? ' has-mark' : '';
         const title = mark
