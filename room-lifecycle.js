@@ -12,6 +12,15 @@ function joinRoom(){
   errEl.textContent = '';
   if (NOT_CONFIGURED){ errEl.textContent = '请先在文件里填入 Firebase 配置再部署。'; return; }
   const room = document.getElementById('roomInput').value.trim();
+  // CORE-110(issue #110)XSS 审计已确认:玩家名 name 在这里(以及全项目)不做任何字符
+  // 过滤,只 trim() 空白——可以是任意字符,包括 <>"' 这类 HTML 特殊字符。这是刻意的
+  // 策略选择,不是遗漏:采用"渲染侧统一转义"而不是"输入侧过滤"作为唯一防线——过滤
+  // 本身存在被绕过的风险(HTML 实体编码/大小写混用/Unicode 变体等),且过滤会误伤玩家
+  // 正常想用的特殊字符(emoji/带符号的花名)。渲染层的强制约束是:任何把玩家名/聊天
+  // 文本等用户输入拼进 innerHTML 的地方,必须经过 escapeHtml()(定义在 render.js)——
+  // 已审计过全部 setBanner(155处)/innerHTML/insertAdjacentHTML 调用点，把当时发现的
+  // 17 处未转义玩家名裸拼接全部补上了 escapeHtml。textContent 赋值天然安全,不需要转义
+  // (浏览器不会把 textContent 的内容当 HTML 解析)。
   const name = document.getElementById('nameInput').value.trim();
   if(!room){ errEl.textContent='请填房间号'; return; }
   // bug1:房间号被拼进 Firebase 路径,key 不允许 . # $ [ ] / 等字符,只放行字母/数字/-/_

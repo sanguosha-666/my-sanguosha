@@ -757,6 +757,12 @@ function seatColor(seat){ return NAME_COLORS[((seat%NAME_COLORS.length)+NAME_COL
 // 里独立维护一份 hint,两处各写各的、经常重复或遗漏——现在只有 renderControls 这一处书写者,
 // 每个分支把"谁对谁/发生了什么"和"你该做什么(含没有可用牌等兜底提示)"合并成一句话。
 // style 可选,仅 game-over 播报胜利时需要金色特殊样式。
+// 【CORE-110(issue #110)XSS安全约束】html 参数原样写进 innerHTML,setBanner 自身不做
+// 任何转义(不能做——banner 本身需要拼 <span> 倒计时这类合法HTML标签)。这意味着**调用方
+// 必须自行保证**:任何拼进 html 参数的用户输入(玩家名/聊天文本等,不包括武将名/牌名/
+// 技能名这类固定数据)在拼接前都经过 escapeHtml()——这是审计后确立的强制约束,全部
+// 155处调用点已核对过(见 render-controls.js 逐处的 escapeHtml 包裹),新增调用点必须
+// 遵守同一纪律。
 function setBanner(html, style){
   // A1 响应超时托管:询问型 pending 时在 banner 末尾拼"⏱ Ns 后自动…"倒计时
   // (renderResponseCountdown 定义在 bot-ai-bus.js,加载早于本文件;currentG 是本文件

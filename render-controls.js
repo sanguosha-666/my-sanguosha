@@ -520,7 +520,7 @@ function renderPendingMengjin(g,c){
     const b=document.createElement('button'); b.className='primary'; const equip=target.equips[opt];
     b.textContent=equip?'弃置装备【'+equip.name+'】':'弃置装备槽('+opt+')'; b.onclick=()=>mengjinPick(opt); c.appendChild(b);
   });
-  setBanner(g.players[d.from].name+' 发动【猛进】,选择弃置 '+target.name+' 的一张牌…');
+  setBanner(escapeHtml(g.players[d.from].name)+' 发动【猛进】,选择弃置 '+escapeHtml(target.name)+' 的一张牌…');
 }
 function renderPendingYijiAsk(g,c){
   const yes=document.createElement('button'); yes.className='primary'; yes.textContent='发动【遗计】'; yes.onclick=()=>respondYijiAsk(true);
@@ -812,13 +812,13 @@ function renderPendingShensuChoose1(g,c){
   const p=g.players[mySeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【神速】发动时机';div.appendChild(h4);
   const desc=document.createElement('p');desc.textContent='你可以发动【神速1】跳过判定和摸牌阶段，视为使用一张无距离限制的【杀】';div.appendChild(desc);
   const yes=document.createElement('button');yes.className='skill-btn';yes.style.background='#d4a762';yes.textContent='发动神速1';yes.onclick=()=>triggerShensu1();div.appendChild(yes);
-  const no=document.createElement('button');no.className='cancel-btn';no.textContent='不发动';no.onclick=()=>skipShensu1();div.appendChild(no);c.appendChild(div);setBanner(p.name+' 可以发动【神速1】跳过判定和摸牌阶段');
+  const no=document.createElement('button');no.className='cancel-btn';no.textContent='不发动';no.onclick=()=>skipShensu1();div.appendChild(no);c.appendChild(div);setBanner(escapeHtml(p.name)+' 可以发动【神速1】跳过判定和摸牌阶段');
 }
 function renderPendingShensuChoose2(g,c){
   const p=g.players[mySeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【神速】发动时机';div.appendChild(h4);
   const desc=document.createElement('p');desc.textContent='你可以发动【神速2】跳过出牌阶段并弃置一张装备牌，视为使用一张无距离限制的【杀】';div.appendChild(desc);
   const yes=document.createElement('button');yes.className='skill-btn';yes.style.background='#d4a762';yes.textContent='发动神速2';yes.onclick=()=>triggerShensu2();div.appendChild(yes);
-  const no=document.createElement('button');no.className='cancel-btn';no.textContent='不发动';no.onclick=()=>skipShensu2();div.appendChild(no);c.appendChild(div);setBanner(p.name+' 可以发动【神速2】跳过出牌阶段并弃置装备牌');
+  const no=document.createElement('button');no.className='cancel-btn';no.textContent='不发动';no.onclick=()=>skipShensu2();div.appendChild(no);c.appendChild(div);setBanner(escapeHtml(p.name)+' 可以发动【神速2】跳过出牌阶段并弃置装备牌');
 }
 function renderPendingQiaomengPickEquip(g,c){
   const target=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【趫猛】选择装备牌';div.appendChild(h4);
@@ -896,7 +896,7 @@ function renderPendingLuanwuChoose(g,c){
   const h4=document.createElement('h4');h4.textContent=source.name+' 发动【乱武】';div.appendChild(h4);const p=document.createElement('p');p.textContent='请选择：';div.appendChild(p);
   if(available){const sha=document.createElement('button');sha.className='skill-btn';sha.style.background='#e74c3c';sha.textContent='对 '+nearest.name+' 使用【杀】';sha.onclick=()=>chooseLuanwuOption('sha');div.appendChild(sha);}
   const hp=document.createElement('button');hp.className='skill-btn';hp.style.background='#8e44ad';hp.textContent='失去1点体力';hp.onclick=()=>chooseLuanwuOption('hp');div.appendChild(hp);
-  if(!available){const note=document.createElement('p');note.style.color='#7f8c8d';note.textContent='（无法使用杀，只能选择失去体力）';div.appendChild(note);}c.appendChild(div);setBanner(source.name+' 发动【乱武】,你需要选择:使用杀或失去1点体力');
+  if(!available){const note=document.createElement('p');note.style.color='#7f8c8d';note.textContent='（无法使用杀，只能选择失去体力）';div.appendChild(note);}c.appendChild(div);setBanner(escapeHtml(source.name)+' 发动【乱武】,你需要选择:使用杀或失去1点体力');
 }
 function renderPendingHanbing(g,c){
   const target=g.players[g.pending.to];if(target&&(target.hand||[]).length){const b=document.createElement('button');b.className='primary';b.textContent='弃随机一张手牌';b.onclick=()=>hanbingPick('hand');c.appendChild(b);}
@@ -921,15 +921,15 @@ function renderPendingYinghunDiscard(g,c){
 }
 function renderPendingEnyuanChoose(g,c){
   const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【恩怨】触发';div.appendChild(h4);
-  const p=document.createElement('p');p.textContent=source.name+' 受到你的伤害，你需要选择';div.appendChild(p);const b=document.createElement('button');b.className='skill-btn';b.style.background='#d4a762';b.textContent='进行选择';b.onclick=()=>triggerEnyuan();div.appendChild(b);c.appendChild(div);setBanner('你对 '+source.name+' 造成了伤害，需要选择【恩怨】效果');
+  const p=document.createElement('p');p.textContent=source.name+' 受到你的伤害，你需要选择';div.appendChild(p);const b=document.createElement('button');b.className='skill-btn';b.style.background='#d4a762';b.textContent='进行选择';b.onclick=()=>triggerEnyuan();div.appendChild(b);c.appendChild(div);setBanner('你对 '+escapeHtml(source.name)+' 造成了伤害，需要选择【恩怨】效果');
 }
 function renderPendingEnyuanChooseOption(g,c){
   const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【恩怨】选择';div.appendChild(h4);const p=document.createElement('p');p.textContent='你需要选择：';div.appendChild(p);
-  if(g.pending.heartCards&&g.pending.heartCards.length){const give=document.createElement('button');give.className='skill-btn';give.textContent='交一张♥手牌给'+source.name;give.onclick=()=>chooseEnyuanOption('giveCard');div.appendChild(give);}const hp=document.createElement('button');hp.className='skill-btn';hp.textContent='失去1点体力';hp.onclick=()=>chooseEnyuanOption('loseHp');div.appendChild(hp);c.appendChild(div);setBanner('你需要选择：交一张♥手牌给'+source.name+'，或失去1点体力');
+  if(g.pending.heartCards&&g.pending.heartCards.length){const give=document.createElement('button');give.className='skill-btn';give.textContent='交一张♥手牌给'+source.name;give.onclick=()=>chooseEnyuanOption('giveCard');div.appendChild(give);}const hp=document.createElement('button');hp.className='skill-btn';hp.textContent='失去1点体力';hp.onclick=()=>chooseEnyuanOption('loseHp');div.appendChild(hp);c.appendChild(div);setBanner('你需要选择：交一张♥手牌给'+escapeHtml(source.name)+'，或失去1点体力');
 }
 function renderPendingEnyuanGiveCard(g,c){
   const source=g.players[g.pending.sourceSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【恩怨】选择♥手牌';div.appendChild(h4);const p=document.createElement('p');p.textContent='选择要交给 '+source.name+' 的一张♥手牌：';div.appendChild(p);
-  const cards=document.createElement('div');cards.className='card-options';(g.players[mySeat].hand||[]).forEach((card,i)=>{if(!card||card.suit!=='♥')return;const b=document.createElement('button');b.className='card-btn';b.textContent='【'+card.name+'】';b.onclick=()=>giveEnyuanCard(i);cards.appendChild(b);});div.appendChild(cards);c.appendChild(div);setBanner('选择要交给 '+source.name+' 的一张♥手牌');
+  const cards=document.createElement('div');cards.className='card-options';(g.players[mySeat].hand||[]).forEach((card,i)=>{if(!card||card.suit!=='♥')return;const b=document.createElement('button');b.className='card-btn';b.textContent='【'+card.name+'】';b.onclick=()=>giveEnyuanCard(i);cards.appendChild(b);});div.appendChild(cards);c.appendChild(div);setBanner('选择要交给 '+escapeHtml(source.name)+' 的一张♥手牌');
 }
 function renderPendingHuanhuoPick(g,c){
   const div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择目标';div.appendChild(h4);const p=document.createElement('p');p.textContent='选择要交♥手牌的角色：';div.appendChild(p);
@@ -939,12 +939,12 @@ function renderPendingHuanhuoPick(g,c){
 function renderPendingHuanhuoPickCard(g,c){
   const target=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择♥手牌';div.appendChild(h4);const p=document.createElement('p');p.textContent='直接点击下方手牌区的一张♥牌，或点击这里的快捷按钮：';div.appendChild(p);
   const cards=document.createElement('div');cards.className='card-options';(g.players[mySeat].hand||[]).forEach((card,i)=>{if(!card||card.suit!=='♥')return;const b=document.createElement('button');b.className='card-btn';b.textContent='【'+card.name+'】';b.onclick=()=>pickHuanhuoHeartCard(i);cards.appendChild(b);});div.appendChild(cards);
-  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消发动【眩惑】';cancel.onclick=()=>cancelHuanhuo();div.appendChild(cancel);c.appendChild(div);setBanner('选择要交给 '+target.name+' 的一张♥手牌（可直接点击下方手牌）');
+  const cancel=document.createElement('button');cancel.className='cancel-btn';cancel.textContent='取消发动【眩惑】';cancel.onclick=()=>cancelHuanhuo();div.appendChild(cancel);c.appendChild(div);setBanner('选择要交给 '+escapeHtml(target.name)+' 的一张♥手牌（可直接点击下方手牌）');
 }
 function renderPendingHuanhuoPickGotCard(g,c){
   const target=g.players[g.pending.targetSeat],div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择获得的牌';div.appendChild(h4);const p=document.createElement('p');p.textContent='获得 '+target.name+' 的一张牌（手牌暗置随机，装备可指定）：';div.appendChild(p);
   const cards=document.createElement('div');cards.className='card-options';if((target.hand||[]).length){const hand=document.createElement('button');hand.className='card-btn';hand.textContent='随机获得一张手牌（共'+target.hand.length+'张）';hand.onclick=()=>pickHuanhuoGotCard('hand');cards.appendChild(hand);}const names={weapon:'武器',armor:'防具',plus1:'+1马',minus1:'-1马'};
-  EQUIP_SLOTS.forEach(slot=>{const card=target.equips&&target.equips[slot];if(!card)return;const b=document.createElement('button');b.className='card-btn';b.textContent=names[slot]+'【'+card.name+'】';b.onclick=()=>pickHuanhuoGotCard('equip',slot);cards.appendChild(b);});div.appendChild(cards);c.appendChild(div);setBanner('获得 '+target.name+' 的一张手牌或装备');
+  EQUIP_SLOTS.forEach(slot=>{const card=target.equips&&target.equips[slot];if(!card)return;const b=document.createElement('button');b.className='card-btn';b.textContent=names[slot]+'【'+card.name+'】';b.onclick=()=>pickHuanhuoGotCard('equip',slot);cards.appendChild(b);});div.appendChild(cards);c.appendChild(div);setBanner('获得 '+escapeHtml(target.name)+' 的一张手牌或装备');
 }
 function renderPendingHuanhuoPickSecond(g,c){
   const div=document.createElement('div');div.className='centered',h4=document.createElement('h4');h4.textContent='【眩惑】选择交给的角色';div.appendChild(h4);const p=document.createElement('p');p.textContent='选择要将获得的牌交给的角色：';div.appendChild(p);
@@ -1548,13 +1548,13 @@ function renderControls(g){
     cancelBtn.onclick=()=>cancelShensuSha();
     div.appendChild(cancelBtn);
     c.appendChild(div);
-    setBanner(p.name + ' 选择【神速】的【杀】目标');
+    setBanner(escapeHtml(p.name) + ' 选择【神速】的【杀】目标');
     return;
   }
   if(g.pending && g.pending.type==='shensuSha'){
     const p = g.players[g.pending.seat];
     const remaining = g.pending.remaining || 1;
-    setBanner((p?p.name:'夏侯渊') + ' 正在选择第' + (g.shensuShaRemaining - remaining + 1) + '张无距离限制的【杀】目标（还需' + remaining + '次）…');
+    setBanner((p?escapeHtml(p.name):'夏侯渊') + ' 正在选择第' + (g.shensuShaRemaining - remaining + 1) + '张无距离限制的【杀】目标（还需' + remaining + '次）…');
     return;
   }
   
@@ -1965,7 +1965,7 @@ function renderControls(g){
     c.appendChild(b2);
     const canSave = hasTao || hasJiu || canJiushiJiu || jijiuOpts.length>0 || guhuoTaoCount>0;
     setBanner(canSave
-      ? (isSelf ? dyingP.name+' 濒死,你是否使用【桃】自救?' : dyingP.name+' 濒死,是否对其使用【桃】救援?')
+      ? (isSelf ? escapeHtml(dyingP.name)+' 濒死,你是否使用【桃】自救?' : escapeHtml(dyingP.name)+' 濒死,是否对其使用【桃】救援?')
       : escapeHtml(dyingP.name)+' 濒死,你没有可用的【桃】,只能选择不救。');
     return;
   }
@@ -2034,7 +2034,7 @@ function renderControls(g){
     const d=g.pending;
     const source=g.players[d.sourceSeat];
     if(d.asking===mySeat && !(me && me.chanyuan)){
-      setBanner((source?source.name:'于吉')+' 发动【蛊惑】声明为【'+(d.claimedCard&&d.claimedCard.name||'?')+'】,是否质疑?');
+      setBanner((source?escapeHtml(source.name):'于吉')+' 发动【蛊惑】声明为【'+escapeHtml(d.claimedCard&&d.claimedCard.name||'?')+'】,是否质疑?');
       const qb=document.createElement('button'); qb.className='primary';
       qb.textContent='质疑';
       qb.onclick=()=>respondGuhuoQuestion(true);
@@ -2045,7 +2045,7 @@ function renderControls(g){
       c.appendChild(nb);
     } else {
       const asker=g.players[d.asking];
-      setBanner((asker?asker.name:'其他玩家')+' 正在决定是否质疑【蛊惑】…');
+      setBanner((asker?escapeHtml(asker.name):'其他玩家')+' 正在决定是否质疑【蛊惑】…');
     }
     return;
   }
@@ -2139,9 +2139,9 @@ function renderControls(g){
       } else if(d.sourceSeat===mySeat){
         setBanner('【蛊惑】已生效,点上方一名合法角色作为【'+(d.claimedCard&&d.claimedCard.name||'?')+'】目标。');
       } else if(isJiedaoClaim){
-        setBanner((source?source.name:'于吉')+' 正在为【蛊惑】声明的【借刀杀人】选择目标…');
+        setBanner((source?escapeHtml(source.name):'于吉')+' 正在为【蛊惑】声明的【借刀杀人】选择目标…');
       } else {
-        setBanner((source?source.name:'于吉')+' 正在为【蛊惑】选择目标…');
+        setBanner((source?escapeHtml(source.name):'于吉')+' 正在为【蛊惑】选择目标…');
       }
       return;
     }
@@ -2770,7 +2770,7 @@ function renderControls(g){
           const rangeTongji = attackRange(g, mySeat);
           if(distTongji <= rangeTongji) {
             // 当前玩家在袁术的攻击范围内，受到同疾效果影响
-            setBanner('【同疾】: '+yuanshuTongji.name+' 手牌数('+handCountTongji+') > 体力值('+hpTongji+'),你只能对其使用【杀】');
+            setBanner('【同疾】: '+escapeHtml(yuanshuTongji.name)+' 手牌数('+handCountTongji+') > 体力值('+hpTongji+'),你只能对其使用【杀】');
           }
         }
         // 如果当前玩家就是袁术，且在自己回合中显示自己触发了同疾
