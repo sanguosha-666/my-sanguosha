@@ -478,10 +478,13 @@ check('流离转移:攻击者与转移后新目标异性 → 雌雄双股剑应�
   assert.strictEqual(gg.pending.to, 2, '触发对象应是转移后的新目标(座位2),不是原目标(座位1)');
 });
 
-// ===== 优先级交互 2:铁骑/烈弓判定流程走完后,雌雄双股剑仍正确进入 =====
-// 同样用真实调用链(playCard→铁骑/烈弓pending→respondTieqi/respondLiegong→
-// afterShaTargetSkills→maybeStartCixiong),验证"完整杀结算流程里两个技能真的按顺序衔接"。
-check('铁骑判定后,雌雄双股剑仍正确触发(判定流程走完不会跳过或状态错乱)', ()=>{
+// ===== 优先级交互 2:铁骑/烈弓自动生效后,雌雄双股剑仍正确进入 =====
+// 【自动发动改造】铁骑/烈弓对发动者自己零代价、纯收益,不再挂起"是否发动"的询问
+// (sha/sha-resolution.js 里判定/数值检查通过后直接原地生效,不再经过 g.phase='tieqi'/
+// 'liegong' 这一步),用真实调用链(playCard→铁骑/烈弓自动生效→afterShaTargetSkills→
+// maybeStartCixiong)验证"完整杀结算流程里两个技能真的按顺序衔接",一次 playCard 直接
+// 打到 cixiongAsk,不再需要中间的 respondTieqi/respondLiegong 确认。
+check('铁骑自动生效后,雌雄双股剑仍正确触发(判定流程走完不会跳过或状态错乱)', ()=>{
   const machao = mkPlayer('马超','machao'); // 男,自带铁骑
   machao.equips.weapon = {id:1,name:'雌雄双股剑',suit:'♠',rank:2};
   machao.hand = [{id:2,name:'杀',suit:'♥',rank:7}];
@@ -494,19 +497,15 @@ check('铁骑判定后,雌雄双股剑仍正确触发(判定流程走完不会�
   };
   bindG(g);
   vm.runInContext('mySeat=0;', sandbox);
-  R('playCard')(0, '杀', 1);
+  R('playCard')(0, '杀', 1); // 铁骑判定(自动生效)+雌雄双股剑触发,一次调用打完
   let gg = G();
-  assert.strictEqual(gg.phase, 'tieqi', '应先挂起铁骑判定询问,实际='+gg.phase);
-  assert.strictEqual(gg.pending.from, 0);
-  R('respondTieqi')(true); // 马超发动铁骑,真实judge()翻牌
-  gg = G();
   assert.strictEqual(gg.phase, 'cixiongAsk',
-    '铁骑判定流程走完后,雌雄双股剑应正确触发,实际phase='+gg.phase);
+    '铁骑自动判定走完后,雌雄双股剑应正确触发,实际phase='+gg.phase);
   assert.strictEqual(gg.pending.from, 0);
   assert.strictEqual(gg.pending.to, 1);
 });
 
-check('烈弓判定后,雌雄双股剑仍正确触发(同上,验证另一件武器的衔接)', ()=>{
+check('烈弓自动生效后,雌雄双股剑仍正确触发(同上,验证另一件武器的衔接)', ()=>{
   const huangzhong = mkPlayer('黄忠','huangzhong'); // 男,自带烈弓
   huangzhong.equips.weapon = {id:1,name:'雌雄双股剑',suit:'♠',rank:2}; // 射程2,满足烈弓触发条件之一
   huangzhong.hand = [{id:2,name:'杀',suit:'♥',rank:7}];
@@ -519,13 +518,10 @@ check('烈弓判定后,雌雄双股剑仍正确触发(同上,验证另一件武�
   };
   bindG(g);
   vm.runInContext('mySeat=0;', sandbox);
-  R('playCard')(0, '杀', 1);
+  R('playCard')(0, '杀', 1); // 烈弓数值条件满足(自动生效)+雌雄双股剑触发,一次调用打完
   let gg = G();
-  assert.strictEqual(gg.phase, 'liegong', '应先挂起烈弓询问,实际='+gg.phase);
-  R('respondLiegong')(true); // 黄忠发动烈弓
-  gg = G();
   assert.strictEqual(gg.phase, 'cixiongAsk',
-    '烈弓判定流程走完后,雌雄双股剑应正确触发,实际phase='+gg.phase);
+    '烈弓自动生效后,雌雄双股剑应正确触发,实际phase='+gg.phase);
   assert.strictEqual(gg.pending.to, 1);
 });
 

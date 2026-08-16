@@ -20,7 +20,7 @@ const migrated=[
   'quhuRespond','tianyiRespond','zhibaAsk','jiemingAsk','xinshengAsk','liuli','tianxiang',
   'huashenChangeAskStart','huashenChangePickStart','huashenChangeAskEnd','huashenChangePickEnd',
   'biyue','cixiongAsk','hanbingAsk','xiaoguo','xiaoguoChoice','cixiongChoice','zhijiChoice',
-  'luoshen','huogongReveal','guicai','ganglieChoice','yaowu_choose','wangxiAsk',
+  'huogongReveal','guicai','ganglieChoice','yaowu_choose','wangxiAsk',
   'quhuDamageChoice','fanjianSuit','jiedaoChoice','tiaoxinChoice','tiaoxinDiscard',
   'qiaobianTurnStart','qiaobianMove','leijiChoose','leijiJudge','guiduAsk','jijiangAsk','hujiaAsk',
   'lieRenChoose','lieRenPickCard','lieRenRespond','shensuChoose1','shensuChoose2',

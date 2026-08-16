@@ -235,23 +235,30 @@ function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, s
   // 杀链顺序(雌雄双股剑规格):流离后 → 铁骑/烈弓 → 雌雄 → 仁王/毅重 → 八卦/闪。
   // 仁王/毅重无效已挪到 afterShaTargetSkills(雌雄之后),以便 FAQ「可先发动雌雄再因盾无效」。
   g.log=logEvent(g.log, { kind:'sha', actor:fromSeat, targets:[targetSeat], text: me.name+' 对 '+target.name+' '+usedAs });
+  // 【自动发动重构】铁骑/烈弓对发动者自己零代价、纯粹是"要不要判定/满足数值条件时要不要生效"
+  // 的确定性正收益(最差情况=判黑/不满足条件=和不发动完全等价,不存在"发动了反而更差"的分支),
+  // 不再询问真人/机器人,直接原地判定/生效——铁骑仍会经过 maybeGuicai(判定牌可能被别人的
+  // 鬼才/鬼道替换),这是另一名玩家的独立决策,不属于这次要跳过的"发动者自己是否发动"这一层,
+  // 保留原有的判定/改判/finishTieqiJudge 结算链路不变,只是不再经过一次"是否发动"的确认。
   if(hasCap(me,'tieqi')){
-    g.pending=setResponseAskedAt({type:'tieqi', from:fromSeat, to:targetSeat, shaColor});
-    if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
-    if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
-    g.phase='tieqi';
-    g.log=pushLog(g.log, '是否发动【铁骑】进行判定…');
+    const tieqiSourceCard = sourceCard;
+    const tieqiJiuBonus = shaInfo && shaInfo.jiuBonus;
+    const card=judge(g);
+    const tieqiShaInfo = tieqiJiuBonus ? {jiuBonus:true} : undefined;
+    if(!card){ afterShaTargetSkills(g, fromSeat, targetSeat, false, tieqiSourceCard, shaColor, tieqiShaInfo); return; } // 无牌可判,视为未发动
+    markSkillSound(g,'铁骑');
+    if(maybeGuicai(g, fromSeat, card, {kind:'tieqiJudge', from:fromSeat, to:targetSeat, sourceCard:tieqiSourceCard, shaColor, shaInfo:tieqiShaInfo})==='pending') return; // 鬼才/鬼道改判进行中,等待响应
+    finishTieqiJudge(g, fromSeat, targetSeat, card, tieqiSourceCard, shaColor, tieqiShaInfo);
     return;
   }
-  // 黄忠【烈弓】:数值条件同步比较,不需要判定,满足条件时可选发动(不是自动生效)。
+  // 黄忠【烈弓】:数值条件同步比较,不需要判定;满足条件时同样是零代价纯收益("此杀不可被闪
+  // 抵消"对使用者只有好处,不满足条件的分支本来就不会走到这里),直接生效,不再询问。
   if(hasCap(me,'liegong')){
     const targetHandCount=(g.players[targetSeat].hand||[]).length;
     if(targetHandCount>=me.hp || targetHandCount<=attackRange(g,fromSeat)){
-      g.pending=setResponseAskedAt({type:'liegong', from:fromSeat, to:targetSeat, shaColor});
-      if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
-      if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
-      g.phase='liegong';
-      g.log=pushLog(g.log, '是否发动【烈弓】,令此【杀】不可被【闪】抵消…');
+      g.log=pushLog(g.log, me.name+' 发动【烈弓】,此【杀】不可被【闪】抵消');
+      markSkillSound(g, '烈弓');
+      afterShaTargetSkills(g, fromSeat, targetSeat, true, sourceCard, shaColor, shaInfo);
       return;
     }
   }

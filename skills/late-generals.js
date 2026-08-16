@@ -505,6 +505,10 @@ function isClubCard(card){
 }
 // fromSeat: 牌的来源角色; cards: 已进入弃牌堆的牌; reason: 'judge'|'discard'
 // resume: 结束后接回(如 {type:'delay',seat} 或 {phase:'discard'})
+// 曹植【落英】:白拿弃牌堆里的梅花牌,对拾取者自己零代价、纯收益,不再询问,直接生效——
+// 找到第一个持有该技能的候选人(和原来一样,只处理一位;多名落英拥有者的排队限制是既有
+// 设计,不在这次改动范围内)后立即拾取梅花牌,再走原来 respondLuoying(true) 同一套 resume
+// 续接逻辑,不经过 g.pending/g.phase='luoyingAsk' 这一步。
 function maybeStartLuoying(g, fromSeat, cards, reason, resume){
   if(reason!=='judge' && reason!=='discard') return false;
   if(!Array.isArray(cards) || !cards.length) return false;
@@ -516,17 +520,29 @@ function maybeStartLuoying(g, fromSeat, cards, reason, resume){
     if(i===fromSeat) continue;
     const p=g.players[i];
     if(!p||!p.alive||!hasCap(p,'luoying')) continue;
-    g.pending={
-      type:'luoyingAsk',
-      seat:i,
-      fromSeat,
-      reason,
-      cardIds:clubCards.map(c=>c.id).filter(id=>id!=null),
-      cardsPreview:clubCards.map(c=>({id:c.id,name:c.name,suit:c.suit,rank:c.rank})),
-      resume:resume||null
-    };
-    g.phase='luoyingAsk';
-    g.log=pushLog(g.log, p.name+' 是否发动【落英】获得'+clubCards.length+'张梅花牌…');
+    const cardIds=clubCards.map(c=>c.id).filter(id=>id!=null);
+    const got=[];
+    cardIds.forEach(id=>{
+      const idx=(g.discard||[]).findIndex(c=>c && c.id===id);
+      if(idx>=0){
+        const [card]=g.discard.splice(idx,1);
+        got.push(card);
+      }
+    });
+    if(got.length){
+      p.hand.push(...got);
+      g.log=pushLog(g.log, p.name+' 发动【落英】,获得'+got.length+'张牌');
+      markSkillSound(g, '落英');
+    } else {
+      g.log=pushLog(g.log, p.name+' 发动【落英】,但牌已不在弃牌堆');
+    }
+    if(resume && resume.type==='delay' && Number.isInteger(resume.seat)){
+      continueDelayResolution(g, resume.seat);
+    } else if(resume && resume.phase){
+      g.phase=resume.phase;
+    } else {
+      g.phase='play';
+    }
     return true;
   }
   return false;

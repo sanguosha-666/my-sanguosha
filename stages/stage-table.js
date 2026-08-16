@@ -38,7 +38,7 @@ Object.entries({
   jujianPickTarget:'sourceSeat',jujianChooseEffect:'targetSeat',liegong:'from',
   shaOffsetChoice:'from',mengjin:'from',lirangRecover:'from',zhengyi:'asking',
   quhuRespond:'targetSeat',tianyiRespond:'targetSeat',tianxiang:'seat',
-  huashenChangeAskEnd:'seat',huashenChangePickEnd:'seat',cixiongChoice:'to',luoshen:'seat',
+  huashenChangeAskEnd:'seat',huashenChangePickEnd:'seat',cixiongChoice:'to',
   huogongReveal:'to',guicai:'asking',ganglieChoice:'sourceSeat',quhuDamageChoice:'seat',
   qiaobianMove:'seat',leijiJudge:'sourceSeat',hujiaAsk:'asking',lieRenPickCard:'sourceSeat',
   shensuChoose2:'seat',qiaomengPickEquip:'sourceSeat',qilin:'from',
@@ -535,12 +535,6 @@ registerStageNormalizer("huogong", function(g){
       logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(huogong)');
       g.pending=null; g.phase='play';
     }
-  }
-});
-registerStageNormalizer("luoshen", function(g){
-  if(g.pending && g.pending.type==='luoshen' && typeof g.pending.seat!=='number'){
-    logPendingOrphan(g, 'B:normalize校验未通过,pending结构不合法(luoshen)');
-    g.pending=null; g.phase='play';
   }
 });
 registerStageNormalizer("aoeResp", function(g){
@@ -1352,7 +1346,6 @@ registerStageTimeoutAction("jushouChoose", function(g){ return function(){ cance
 registerStageTimeoutAction("shuangxiongAsk", function(g){ return function(){ respondShuangxiong(false); }; });
 registerStageTimeoutAction("luoyiAsk", function(g){ return function(){ respondLuoyi(false); }; });
 registerStageTimeoutAction("xunxunPick", function(g){ return function(){ const d=g.pending,all=(d.cards||[]).map(function(_,i){return i;}),take=d.takeN||2; respondXunxun(all.slice(0,take),all.slice(take)); }; });
-registerStageTimeoutAction("luoshen", function(g){ return function(){ respondLuoshen(false); }; });
 registerStageTimeoutAction("enyuanChooseOption", function(g){ return function(){ chooseEnyuanOption('giveCard'); }; });
 registerStageTimeoutAction("enyuanGiveCard", function(g){ return function(){ const p=g.players[g.pending.damagerSeat],idx=(p&&p.hand||[]).findIndex(function(c){return c&&c.suit==='♥';}); if(idx>=0) giveEnyuanCard(idx); }; });
 registerStageTimeoutAction("guhuoTarget", function(g){ return function(){ cancelGuhuoTarget(); }; });

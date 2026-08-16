@@ -149,13 +149,13 @@ const testCode = String.raw`
     });
   }
 
-  // ---- spy:respondWuxie/respondLuoying/respondLuoshen 是函数声明绑定,整体替换即可 ----
+  // ---- spy:respondWuxie/respondLuoying 是函数声明绑定,整体替换即可 ----
+  // 【自动发动改造】甄姬【洛神】不再有 respondLuoshen/luoshen 这个交互阶段——洛神判定
+  // 现在由 autoLuoshenRound 直接自动循环判定,不再询问是否发动;这里不再需要 spy 它。
   window.__wuxieCalls = [];
   window.__luoyingCalls = [];
-  window.__luoshenCalls = [];
   respondWuxie = function(use){ window.__wuxieCalls.push(use); };
   respondLuoying = function(use){ window.__luoyingCalls.push(use); };
-  respondLuoshen = function(use){ window.__luoshenCalls.push(use); };
   respondLiuli = function(choice, newTargetSeat){ window.__liuliCalls.push([choice, newTargetSeat]); };
   respondTianxiang = function(choice, targetSeat){ window.__tianxiangCalls.push([choice, targetSeat]); };
   respondLiRangRecover = function(activate){ window.__lirangCalls.push(activate); };
@@ -292,16 +292,10 @@ const testCode = String.raw`
     if(window.__luoyingCalls.length !== 1 || window.__luoyingCalls[0] !== true) throw new Error('应 respondLuoying(true),实际 ' + JSON.stringify(window.__luoyingCalls));
   });
 
-  // ---- T8:luoshen 无密钥回退 = 旧硬编码 respondLuoshen(true)(candidates[0]=发动) ----
-  await check('无密钥:luoshen 回退点「发动【洛神】判定」=respondLuoshen(true)', async function(){
-    window.__luoshenCalls = [];
-    aiApiKey = '';
-    aiProvider = null;
-    var g = mkG('luoshen', { type: 'luoshen', seat: 0 }, []);
-    var r = await botDecide('controlsChoice', g, 0);
-    if(r !== true) throw new Error('应返回 true');
-    if(window.__luoshenCalls.length !== 1 || window.__luoshenCalls[0] !== true) throw new Error('应 respondLuoshen(true),实际 ' + JSON.stringify(window.__luoshenCalls));
-  });
+  // 【T8 已移除】原"luoshen 无密钥回退"测试——甄姬【洛神】随"确定正收益技能自动发动"
+  // 改造后不再有 g.phase==='luoshen' 这个交互阶段(autoLuoshenRound 直接自动循环判定),
+  // CONTROLS_CHOICE_ALLOWLIST 里的 'luoshen' 字面量变成永远不会命中的死配置,不需要
+  // 再测这条路径。
 
   // ================= L1 泛化(Task G2):非 allowlist 阶段有密钥时由 L1 接管 =================
   // 代表阶段选 liuli/tianxiang/lirangRecover/zhengyi:render-controls.js 里这四个阶段

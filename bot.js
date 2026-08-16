@@ -950,7 +950,9 @@ function buildBotPlayUserPrompt(state, candidates){
 // L1 直接接管镜像按钮(有密钥=AI 决策,行为由 AI 负责);无密钥时 match 返回 false,继续走
 // runBotDecision 既有分支/botSafePrompt,与改动前逐字一致。EXCLUDE 集合收录"已有专用注册
 // 或专用逻辑"的阶段,防 L1 双重接管。
-const CONTROLS_CHOICE_ALLOWLIST = new Set(['wuxie','luoyingAsk','luoshen']);
+// luoshen 已随"确定正收益技能自动发动"改造移除(不再有这个交互阶段,见 game.js
+// autoLuoshenRound),从白名单里删除。
+const CONTROLS_CHOICE_ALLOWLIST = new Set(['wuxie','luoyingAsk']);
 // 【L1 泛化】已有专用注册/专用逻辑的阶段,L1 不接管(防止双重接管/绕过专用候选的
 // 隐藏信息处理)。维护纪律:新增专用注册时,把该 phase 同步加进这个集合。
 // 除既定清单外,额外收录 guhuoTarget/xuanfengPick/quhuDamageChoice 三个 seatPick 专用
@@ -4537,15 +4539,9 @@ async function runBotDecision(g,seat){
   // ---- 机器人兜底词汇盲区修复(问题3+4):以下几个phase的按钮文案够不到botSafePrompt的
   // 正则,分两类处理——纯流程性的(选哪个都不影响游戏走向)给合理默认;guhuoQuestion真的
   // 有策略含义,用不偷看隐藏信息的随机决策,不是随便点安全按钮。----
-  if(g.phase==='luoyingAsk'&&d.seat===seat){
-    // 曹植【落英】:白拿弃牌堆里的梅花牌,没有下行风险,合理默认是总是获得。
-    botInvoke(seat,()=>respondLuoying(true)); return;
-  }
-  if(g.phase==='luoshen'&&d.seat===seat){
-    // 甄姬【洛神】:循环判定,黑色继续拿牌、红色才结束,没有下行风险,合理默认是总是尝试
-    // 发动(反正判红也只是这个技能结束,不会有额外损失)。
-    botInvoke(seat,()=>respondLuoshen(true)); return;
-  }
+  // luoyingAsk/luoshen 分支已随"确定正收益技能自动发动"改造移除:曹植【落英】/甄姬【洛神】
+  // 现在都在游戏逻辑层(skills/late-generals.js 的 maybeStartLuoying、game.js 的
+  // autoLuoshenRound)直接生效,g.phase 不会再出现这两个值,不需要机器人分支兜底。
   if(g.phase==='huashenChangeAskStart'&&d.seat===seat){
     // 决策已进 BOT_DECISIONS.huashenChangeStart(无密钥回退=不更改,与旧分支逐字一致,
     // 见注册表上方注释)。phase+seat 守卫保留作双保险,命中即 return。

@@ -258,11 +258,11 @@ function 登记技能(条目){ 技能注册表[条目.武将+'/'+条目.技能�
   机器人接入:{ 决策:[], 座位选择:[] },
   效果函数:['respondZaiqi'],
   查询点:['render-controls.js','skills.js'], 主公技:false });
-登记技能({ 武将:'zhenji', 技能名:'洛神', 实现方式:'cap-主动阶段',
+登记技能({ 武将:'zhenji', 技能名:'洛神', 实现方式:'cap-自动生效',
   能力标识:['luoshen'], 钩子:[],
-  触发阶段:['luoshen'],
+  触发阶段:[],
   机器人接入:{ 决策:[], 座位选择:[] },
-  效果函数:['respondLuoshen'],
+  效果函数:['autoLuoshenRound','finishLuoshenJudge'],
   查询点:['game.js'], 主公技:false });
 登记技能({ 武将:'zhenji', 技能名:'倾国', 实现方式:'cap-被动查询',
   能力标识:['qingguo'], 钩子:[],
