@@ -158,6 +158,7 @@ function respondQinglong(activate, cardIdx){
     if(!activate){
       g.log=pushLog(g.log, me.name+'：不发动【青龙偃月刀】');
       const sourceCard = g.pending.sourceCard;
+      const jiuBonus = g.pending.jiuBonus; // CORE-88:被抵消的原杀的酒加成,continue到贯石斧仍要带上
       g.pending = null;
       // 存储剩余可用效果，回到调度
       // 内联mengjinDiscardCount逻辑以避免跨文件依赖
@@ -166,14 +167,14 @@ function respondQinglong(activate, cardIdx){
         if(id === 'mengjin') {
           const attacker = g.players[from];
           const target = g.players[targetSeat];
-          return attacker && attacker.alive && target && target.alive && 
+          return attacker && attacker.alive && target && target.alive &&
                  hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
         }
         if(id === 'guanshifu') return canStartGuanshifu(g, from);
         return false;
       });
       if(remainingAvailable.length > 0) {
-        continueShaOffsetEffects(g, from, targetSeat, sourceCard, remainingAvailable);
+        continueShaOffsetEffects(g, from, targetSeat, sourceCard, remainingAvailable, jiuBonus);
       } else {
         finishSingleShaTarget(g);
       }
@@ -217,11 +218,16 @@ function canStartQinglong(g, fromSeat){
   const attacker=g.players[fromSeat];
   return !!(attacker && attacker.alive && hasCap(attacker,'qinglong') && (attacker.hand||[]).some(c=>canUseAs(attacker,c,'杀')));
 }
-function maybeStartQinglong(g, fromSeat, toSeat, sourceCard){
+function maybeStartQinglong(g, fromSeat, toSeat, sourceCard, jiuBonus){
   const attacker=g.players[fromSeat];
   if(!canStartQinglong(g, fromSeat)) return false;
   g.pending={type:'qinglong', from:fromSeat, to:toSeat};
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+  // CORE-88:青龙偃月刀发动的是全新一张杀,自己不吃 jiuBonus(酒的加成在使用第一张杀时
+  // 就已经通过 consumeJiuShaBonus 消耗,不会在这张新杀上重新触发)——但"不发动"分支若还能
+  // 继续到贯石斧,贯石斧面对的仍是最初那张被抵消的杀,所以这里仍要存一份,只为continue链
+  // 使用,不代表青龙本身的新杀会用到它。
+  if(jiuBonus) g.pending.jiuBonus=true;
   g.phase='qinglong';
   g.log=pushLog(g.log, attacker.name+' 是否发动【青龙偃月刀】,再次使用【杀】…');
   return true;
@@ -230,11 +236,12 @@ function canStartGuanshifu(g, fromSeat){
   const attacker=g.players[fromSeat];
   return !!(attacker && attacker.alive && hasCap(attacker,'guanshifu') && guanshifuOptionCount(attacker)>=2);
 }
-function maybeStartGuanshifu(g, fromSeat, toSeat, sourceCard){
+function maybeStartGuanshifu(g, fromSeat, toSeat, sourceCard, jiuBonus){
   const attacker=g.players[fromSeat];
   if(!canStartGuanshifu(g, fromSeat)) return false;
   g.pending={type:'guanshi', from:fromSeat, to:toSeat};
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+  if(jiuBonus) g.pending.jiuBonus=true; // CORE-88:贯石斧强制命中的仍是原来那张杀,酒的+1继续生效
   g.phase='guanshi';
   g.log=pushLog(g.log, attacker.name+' 是否发动【贯石斧】,弃两张牌令此【杀】依然造成伤害…');
   return true;
@@ -250,6 +257,7 @@ function respondGuanshi(picks){
     if(!Array.isArray(picks) || picks.length!==2){
       g.log=pushLog(g.log, me.name+'：不发动【贯石斧】');
       const sourceCard = g.pending.sourceCard;
+      const jiuBonus = g.pending.jiuBonus; // CORE-88:continue到青龙"不发动"再到别的效果时仍要带上
       g.pending = null;
       // 存储剩余可用效果，回到调度
       // 内联mengjinDiscardCount逻辑以避免跨文件依赖
@@ -258,14 +266,14 @@ function respondGuanshi(picks){
         if(id === 'mengjin') {
           const attacker = g.players[from];
           const target = g.players[to];
-          return attacker && attacker.alive && target && target.alive && 
+          return attacker && attacker.alive && target && target.alive &&
                  hasCap(attacker, 'mengjin') && mengjinDiscardCount(target) > 0;
         }
         if(id === 'qinglong') return canStartQinglong(g, from);
         return false;
       });
       if(remainingAvailable.length > 0) {
-        continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable);
+        continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable, jiuBonus);
       } else {
         finishSingleShaTarget(g);
       }
@@ -284,9 +292,10 @@ function respondGuanshi(picks){
         if(slot==='weapon' || !EQUIP_SLOTS.includes(slot) || !me.equips[slot]) return g;
       } else return g;
     }
-    // sourceCard 必须在弃装备触发 onLoseEquip 钩子之前先取出——钩子(如旋风)可能把 g.pending
-    // 整个换成别的对象,晚取就读不到了。
+    // sourceCard/jiuBonus 必须在弃装备触发 onLoseEquip 钩子之前先取出——钩子(如旋风)可能把
+    // g.pending 整个换成别的对象,晚取就读不到了。
     const sourceCard=g.pending.sourceCard;
+    const jiuBonus=g.pending.jiuBonus; // CORE-88:酒 +1 加成,最终在 finishGuanshiDamage 里生效
     // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条+散谣 finishSanyaoDamage 同一范式】
     // 先把休止相设成 play(贯石斧已经结算完毕、攻击者的出牌阶段继续),再触发 onLoseEquip,
     // 这样旋风钩子捕获的 previousPhase 才是 play(而不是此刻已经死掉的 guanshi)。
@@ -316,11 +325,11 @@ function respondGuanshi(picks){
     // 挂起了新 pending(如旋风),不能再无条件 g.pending=null 把它覆盖掉——记下 resume 续接
     // 信息、这次 tx 到此为止,强制命中的伤害延后到旋风问完之后才真正结算(见 finishGuanshiDamage)。
     if(g.pending !== pendingBefore && g.pending){
-      g.pending.resume = { type:'guanshiDamage', from, to, sourceCard };
+      g.pending.resume = { type:'guanshiDamage', from, to, sourceCard, jiuBonus };
       return g;
     }
     g.pending=null;
-    finishGuanshiDamage(g, from, to, sourceCard);
+    finishGuanshiDamage(g, from, to, sourceCard, jiuBonus);
     return g;
   });
 }
@@ -328,8 +337,11 @@ function respondGuanshi(picks){
 // 两处调用:①respondGuanshi 弃牌未触发钩子打断的直达路径;②resumeAfterInterrupt 的
 // 'guanshiDamage' 分支(弃自己装备触发 onLoseEquip 挂起了新 pending,比如旋风,问完之后
 // 接回来继续造成这次被强制命中的伤害)——和散谣 finishSanyaoDamage 同一范式。
-function finishGuanshiDamage(g, from, to, sourceCard){
-  const dying = dealDamage(g, to, damageAmount(g, from, 1, 'sha'), from, '贯石斧强制命中', 'sha', sourceCard);
+// CORE-88:jiuBonus(酒 +1 伤害)透传给 damageAmount——这张杀被闪抵消、贯石斧强制其依然
+// 命中,结算的仍是"这同一张杀"的伤害,酒的加成不应该因为中途被抵消又被强制命中而丢失
+// (对照 sha/sha-resolution.js:541 正常"不闪"路径同样传 {jiuBonus:!!...})。
+function finishGuanshiDamage(g, from, to, sourceCard, jiuBonus){
+  const dying = dealDamage(g, to, damageAmount(g, from, 1, 'sha', {jiuBonus:!!jiuBonus}), from, '贯石斧强制命中', 'sha', sourceCard);
   if(dying) return; // 濒死流程接管
   finishSingleShaTarget(g);
 }

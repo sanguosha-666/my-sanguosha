@@ -1246,7 +1246,7 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
     const red = finishBaguaColor(g, judgedSeat, replaceCard);
     if(resume.type==='sha'){
       if(red){
-        if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard)) finishSingleShaTarget(g);
+        if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard, !!(resume.shaInfo && resume.shaInfo.jiuBonus))) finishSingleShaTarget(g);
       } else {
         g.pending=setResponseAskedAt({from:resume.from, to:resume.to});
         if(resume.sourceCard!==undefined) g.pending.sourceCard=resume.sourceCard;
@@ -1466,7 +1466,7 @@ function finishGuicai(g, finalCard){
     // 鬼才把这次判定改成红色,视为出闪——和 tryBagua 直接判红同一收尾(方天画戟排队目标需要
     // 继续;杀被闪抵消后的效果调度:猛进/青龙偃月刀/贯石斧
     if(red){
-      if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard)) finishSingleShaTarget(g);
+      if(!maybeStartShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard, !!(resume.shaInfo && resume.shaInfo.jiuBonus))) finishSingleShaTarget(g);
     }
     else {
       g.pending=setResponseAskedAt({from:resume.from, to:resume.to});
@@ -1508,16 +1508,16 @@ function mengjinPick(choice) {
   tx(g=>{
     if(g.phase!=='mengjin'||!g.pending||g.pending.type!=='mengjin'||g.pending.from!==mySeat) return g;
     
-    const {from, to, available, sourceCard} = g.pending;
+    const {from, to, available, sourceCard, jiuBonus} = g.pending;
     const attacker = g.players[from];
     const target = g.players[to];
-    
+
     if(!attacker || !attacker.alive || !target || !target.alive) {
       g.pending = null;
       finishSingleShaTarget(g);
       return g;
     }
-    
+
     if(!available.includes(choice)) return g;
 
     const info = {trick:'猛进', from, to};
@@ -1535,7 +1535,7 @@ function mengjinPick(choice) {
     g.log = pushLog(g.log, attacker.name+' 发动【猛进】,弃置了 '+target.name+' '+ (choice==='hand'?'一张手牌':'的装备【'+(discardedEquipName||choice)+'】'));
     markSkillSound(g, '猛进');
 
-    if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'shaOffset', from, to, sourceCard}; return g; } // 旋风挂起,保留
+    if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'shaOffset', from, to, sourceCard, jiuBonus}; return g; } // 旋风挂起,保留
     g.pending = null;
 
     // 处理完猛进后,检查是否还有其他效果需要处理
@@ -1544,9 +1544,9 @@ function mengjinPick(choice) {
       if(id === 'guanshifu') return canStartGuanshifu(g, from);
       return false;
     });
-    
+
     if(remainingAvailable.length > 0) {
-      continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable);
+      continueShaOffsetEffects(g, from, to, sourceCard, remainingAvailable, jiuBonus);
     } else {
       finishSingleShaTarget(g);
     }
@@ -1560,11 +1560,11 @@ function respondMengjin() {
   tx(g=>{
     if(g.phase!=='shaOffsetChoice'||!g.pending||g.pending.type!=='shaOffsetChoice'||g.pending.from!==mySeat) return g;
     
-    const {from, to, available, sourceCard} = g.pending;
-    
+    const {from, to, available, sourceCard, jiuBonus} = g.pending;
+
     // 从shaOffsetChoice切换到mengjin
     g.pending = null;
-    startShaOffsetEffect(g, from, to, 'mengjin', sourceCard);
+    startShaOffsetEffect(g, from, to, 'mengjin', sourceCard, jiuBonus);
     return g;
   });
 }
@@ -3591,7 +3591,7 @@ function resumeAfterInterrupt(g, resume, seat){
   } else if(resume.type==='guanshiDamage'){
     // 贯石斧(weapons.js)弃自己装备触发 onLoseEquip 钩子(如凌统旋风)中途打断后的接回:
     // 问完之后继续走原本被打断的、贯石斧强制命中的伤害结算。
-    finishGuanshiDamage(g, resume.from, resume.to, resume.sourceCard);
+    finishGuanshiDamage(g, resume.from, resume.to, resume.sourceCard, resume.jiuBonus);
   } else if(resume.type==='sanyaoDamage'){
     // 散谣的弃装备成本触发 onLoseEquip 钩子(如凌统旋风)中途打断后的接回:问完之后继续走
     // 原本被打断的伤害结算。当前项目里马谡自己没有 onLoseEquip 钩子,这条分支实际不可达
@@ -3625,7 +3625,7 @@ function resumeAfterInterrupt(g, resume, seat){
     // 打断时的既有写法逐字一致);continueShaOffsetEffects 内部自己会重新过滤掉已经不成立
     // 的选项,两者都不成立时自动等价于原来 {type:'sha'} 的收尾(finishSingleShaTarget),
     // 不需要在这里分别判断"有没有青龙"。
-    continueShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard, ['qinglong','guanshifu']);
+    continueShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard, ['qinglong','guanshifu'], resume.jiuBonus);
   } else if(resume.type==='liuliAfterDiscard'){
     // 流离用装备支付后，失装技能（如旋风）先取得控制权；完成后再从这里继续转移后的杀。
     const attacker=g.players[resume.from];
@@ -4658,7 +4658,7 @@ function completeLordAsk(g, ask, card){
       g.log=pushLog(g.log, lord.name+' 发动【护驾】,'+g.players[helper].name+' 替其打出【闪】'+(needed>1?('（'+played+'/'+needed+'）'):'抵消'));
       markCardSound(g, '闪', lordSeat, card);
       if(played<needed){ g.pending.shanCount=played; return; }
-      if(maybeStartShaOffsetEffects(g, g.pending.from, lordSeat, g.pending.sourceCard)) return;
+      if(maybeStartShaOffsetEffects(g, g.pending.from, lordSeat, g.pending.sourceCard, !!g.pending.jiuBonus)) return;
       g.pending=null;
       finishSingleShaTarget(g);
       return;
