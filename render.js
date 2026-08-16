@@ -855,6 +855,70 @@ function computeTurnOrderNumbers(g){
   }
   return map;
 }
+// ============ CORE-115:身份猜测标记(玩家自己对某座位身份的个人猜测) ============
+// 【为什么不写进 g】这是"我自己的判断",不同玩家对同一个人的猜测允许不一样,不是需要
+// 跨客户端同步的公开游戏状态——存 localStorage,和 sgsClientId(game.js:17)同一套本地
+// 持久化写法,不经过 tx/Firebase。
+// 【key 设计】按房间号+座位号区分,格式 identityMark:<roomId>:<seat>,清晰可辨识、不会
+// 和其它 localStorage key(sgsClientId 等)冲突。
+const IDENTITY_MARK_OPTIONS = ['zhong','fan','nei']; // 忠/反/内——'zhu'(主公)身份从不隐藏,不需要猜
+const IDENTITY_MARK_LABEL = { zhong:'忠', fan:'反', nei:'内' };
+const IDENTITY_MARK_FULL_LABEL = { zhong:'忠臣', fan:'反贼', nei:'内奸' };
+function identityMarkKey(seat){
+  return 'identityMark:'+(typeof roomId!=='undefined'&&roomId?roomId:'')+':'+seat;
+}
+function getIdentityMark(seat){
+  try{
+    const v = localStorage.getItem(identityMarkKey(seat));
+    return IDENTITY_MARK_OPTIONS.indexOf(v)>=0 ? v : null; // 防脏数据(如手改localStorage)
+  }catch(e){ return null; } // 隐私模式/localStorage被禁用时静默返回"无标记",不影响主流程
+}
+function setIdentityMark(seat, mark){
+  try{
+    if(IDENTITY_MARK_OPTIONS.indexOf(mark)>=0) localStorage.setItem(identityMarkKey(seat), mark);
+    else localStorage.removeItem(identityMarkKey(seat)); // mark 为 null/非法值一律视为"清除"
+  }catch(e){ /* 同上,静默放弃 */ }
+}
+// clearAllIdentityMarks:newGame()收尾调用,清空**当前房间**全部座位的标记——不同局身份
+// 不同,上一局的标记对新一局没有参考价值,避免误导(见issue #115验收标准)。按 key 前缀
+// 扫描,不依赖固定座位数上限(SEATS 变化也天然覆盖)。
+function clearAllIdentityMarks(){
+  try{
+    const prefix = 'identityMark:'+(typeof roomId!=='undefined'&&roomId?roomId:'')+':';
+    const toRemove = [];
+    for(let i=0;i<localStorage.length;i++){
+      const k = localStorage.key(i);
+      if(k && k.indexOf(prefix)===0) toRemove.push(k);
+    }
+    toRemove.forEach(k=>localStorage.removeItem(k));
+  }catch(e){ /* 同上 */ }
+}
+// openIdentityMarkMenu:座位卡标记入口(seat-identity-mark)的点击处理——复用
+// #confirmModal 容器但不走 showConfirm 固定的2按钮语义,自己渲染"忠/反/内/清除/取消"
+// 5个按钮,和 confirmOwnOrSha(render.js)同一套"自渲染多按钮"写法,不新造弹窗组件。
+// 入口本身已在 renderSeatCard 里 onclick="event.stopPropagation();openIdentityMarkMenu(...)",
+// 和座位卡整卡 onclick(出牌选目标)完全独立,互不干扰(与"?"武将说明/装备/判定区角标同一套
+// stopPropagation写法)。
+function openIdentityMarkMenu(seat){
+  const m=document.getElementById('confirmModal');
+  const current = getIdentityMark(seat);
+  const p = currentG && currentG.players && currentG.players[seat];
+  const name = p ? p.name : ('座位'+(seat+1));
+  const optBtn = (mark, label) => '<button class="ghost'+(current===mark?' identity-mark-current':'')+'" data-mark="'+mark+'">'+label+'</button>';
+  m.innerHTML='<div class="confirm-panel"><div class="confirm-msg">我对 '+escapeHtml(name)+' 身份的猜测(仅自己可见,不影响游戏结算)：</div>'
+    +'<div class="confirm-btns identity-mark-btns">'
+      +optBtn('zhong','忠')+optBtn('fan','反')+optBtn('nei','内')
+      +'<button class="ghost" data-mark="">清除标记</button>'
+      +'<button class="ghost" id="confirmCancelMark">取消</button>'
+    +'</div></div>';
+  m.classList.remove('hidden');
+  const hide=()=>{ m.classList.add('hidden'); m.innerHTML=''; };
+  m.querySelectorAll('.identity-mark-btns button[data-mark]').forEach(b=>{
+    b.onclick=()=>{ setIdentityMark(seat, b.dataset.mark || null); hide(); render(currentG); };
+  });
+  m.querySelector('#confirmCancelMark').onclick=hide;
+  m.onclick=(e)=>{ if(e.target===m) hide(); };
+}
 function renderSeatCard(g, seat, isSelf){
   const p = g.players[seat];
   const gen = getGeneral(p.general); // 可能为 null(大厅/旧数据)
@@ -1050,6 +1114,21 @@ function renderSeatCard(g, seat, isSelf){
   const teamBlock = (g.gameMode==='team' && Number.isInteger(p.team))
     ? '<div class="seat-team" style="background:'+(TEAM_COLORS[p.team]||'#999')+'">'+(p.team+1)+'</div>'
     : '';
+  // CORE-115:身份猜测标记入口——仅 identity 模式、且已正式开局(g.started)才显示,
+  // 乱斗/组队模式没有"忠反内"概念、大厅阶段还没有真正在玩,两者都不渲染这个入口。
+  // 卡片中心此前完全空闲(只有.flipped的"翻面"文字和罕见的托管横幅会短暂占用该区域),
+  // 放在这里不与标题栏/左侧武将信息列/右上角身份·托管角标/底部装备判定区冲突。
+  const identityMarkEntry = (g.gameMode==='identity' && g.started)
+    ? (function(){
+        const mark = getIdentityMark(seat);
+        const label = mark ? IDENTITY_MARK_LABEL[mark] : '🔖';
+        const cls = mark ? ' has-mark' : '';
+        const title = mark
+          ? ('我的猜测：'+IDENTITY_MARK_FULL_LABEL[mark]+'（点击修改/清除，仅自己可见）')
+          : '点击标记我对这个人身份的猜测（仅自己可见，不影响游戏结算）';
+        return '<div class="seat-identity-mark'+cls+'" title="'+escapeHtml(title)+'" onclick="event.stopPropagation();openIdentityMarkMenu('+seat+')">'+label+'</div>';
+      })()
+    : '';
   // DOM 顺序 = 层叠顺序(都在同一个 .seat 定位上下文里,后面的盖在前面的上面):
   // 图片 → 顶部遮罩 → 底部遮罩 → 标题栏/武将名/血量(文字层) → 底部区(判定区+装备行)。
   // 判定区和装备行(手牌图标+装备文字)一起包进 .seat-bottom(底部锚定的 flex column),
@@ -1092,6 +1171,7 @@ function renderSeatCard(g, seat, isSelf){
     + teamBlock
     + infoBadge
     + autopilotBadge
+    + identityMarkEntry
     + '<div class="seat-bottom">'+huashenLine+buquRow+delayRow+equipRow+'</div>'
     // orderBadge 排在 .seat-bottom 之后(DOM序=层叠序,后面的盖在前面上面)——两者本来
     // 就靠 .seat-bottom 的 right 收窄互不重叠(见上面注释),这里放在最后只是双重保险:

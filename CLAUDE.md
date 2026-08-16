@@ -4,8 +4,8 @@
 
 > **⚠️ 重要：本文件的历史改动记录已拆分，任何新增记录一律不允许写进本文件本体**
 >
-> - **历史改动的完整记录在 `docs/progress-log-*.md`**（按时间顺序分段，当前共 7 段，
->   `docs/progress-log-1.md` 最早、`docs/progress-log-7.md` 最新）。如果需要了解某个
+> - **历史改动的完整记录在 `docs/progress-log-*.md`**（按时间顺序分段，当前共 10 段，
+>   `docs/progress-log-1.md` 最早、`docs/progress-log-10.md` 最新）。如果需要了解某个
 >   具体功能当初是怎么实现/为什么这么设计的，去这些文件里 grep 关键词（武将名/函数名/
 >   文件名）查，不需要通读。
 > - **`docs/methodology.md` 收录了从历次排查中提炼出的通用经验**（不依赖具体任务上下文
@@ -14,7 +14,7 @@
 >
 > **任何一次任务完成后的改动总结/实现细节记录，一律追加进 `docs/progress-log-N.md` 的
 > 当前最新分段文件——不允许直接写进 `CLAUDE.md` 本体。具体操作**：
-> 1. 打开 `docs/` 目录下编号最大的 `progress-log-N.md`（目前是 `progress-log-7.md`）。
+> 1. 打开 `docs/` 目录下编号最大的 `progress-log-N.md`（目前是 `progress-log-10.md`）。
 > 2. 检查它的字节大小（`wc -c docs/progress-log-N.md`）。**若已经 ≥150KB，新建
 >    `docs/progress-log-(N+1).md`**，把这次的记录写进新文件（不要在一条改动记录的中间
 >    切换文件——同一条记录必须完整写在同一个文件里）；否则直接追加进当前这个文件末尾。

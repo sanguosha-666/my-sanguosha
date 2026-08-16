@@ -471,6 +471,36 @@
     .seat-team{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:4px;color:#fff;
       font-size:12px;font-weight:700;line-height:22px;text-align:center;z-index:6;}
    .seat-team:empty{display:none;}
+   /* ===== CORE-115:身份猜测标记(玩家自己对某座位身份的个人猜测,identity模式专属) =====
+      位置:卡片中心偏下(top:58%,不是正50%)——真中心已经被 .flipped::after("翻面"文字,
+      同样 translate(-50%,-50%) 定在50%,50%)和罕见的 .seat-autopilot-badge(top:30%±,
+      高度可达卡片中段)占用,58%这个位置留出足够间隙,三者理论上仍可能同时出现(翻面+
+      托管+已标记),但都是各自独立的低频/瞬时状态,不追求把全部组合情况都错开,和
+      .flipped::after 当初的取舍一致。
+      **不透明底衬是硬要求**(#1a1410,和 .info-badge 同一色值,已验证过对比度不随立绘
+      漂移,见 CLAUDE.md"每个可见元素都要有自己的不透明底衬"的既定原则)——因为放在
+      卡片中心,这里正是立绘细节最丰富、明暗差异最大的区域,半透明底衬会重蹈血量胶囊
+      当年"最亮立绘2.30对比度不达标"的覆辙。
+      尺寸用 clamp(...,cqw,...) 而不是逐个 @container/@media 断点手写(装备条同款做法,
+      见 .seat-equip-bar 的说明)——按卡片自身宽度连续缩放,不需要为每个新增断点补一行。
+      **仅在鼠标可点击语境下"入口"和"已设置的标记"都归这一个元素**:未标记时显示
+      🔖图标(半透明降低视觉权重,不抢镜),已标记时显示忠/反/内单字(不透明100%);
+      两种状态的可点击区域和位置完全一致，不需要区分"入口"和"标记显示"两个元素。 */
+   .seat-identity-mark{
+     position:absolute;top:58%;left:50%;transform:translate(-50%,-50%);
+     width:clamp(18px,16cqw,30px);height:clamp(18px,16cqw,30px);border-radius:50%;
+     display:flex;align-items:center;justify-content:center;
+     font-size:clamp(9px,8cqw,15px);font-weight:700;line-height:1;
+     background:#1a1410;border:2px dashed var(--gold);color:var(--paper);
+     cursor:pointer;z-index:8;opacity:.55;
+   }
+   .seat-identity-mark.has-mark{opacity:1;}
+   .seat.me .seat-identity-mark{width:clamp(22px,14cqw,34px);height:clamp(22px,14cqw,34px);font-size:clamp(11px,7cqw,17px);}
+   /* 忠/反/内 三个选项的自定义弹窗(openIdentityMarkMenu,复用 #confirmModal 容器):
+      横向排布4个可选按钮+1个取消,和默认的"确定/取消"两按钮布局(.confirm-btns 基础
+      规则)不冲突——.confirm-btns 本身已是 flex+gap 的按钮行,这里不需要额外布局规则,
+      只加一条"当前已选中的选项"高亮标记,复用 button.ghost 已有的样式做底子。 */
+   .identity-mark-btns button.identity-mark-current{border-color:var(--gold);color:var(--gold);}
   /* "?"说明入口(第4次微调:从标题栏挪到这里——右上角、身份方块的正下方)。
      **它在这个新位置上落在顶部遮罩几乎完全透明的区域**(实测 SE 对手卡在该 y 坐标处
      scrim alpha≈0,等于直接压在裸立绘上),所以**必须自带不透明底衬**——通用 .info-badge
@@ -2196,7 +2226,7 @@
 <script src="data.js?v=399"></script>
 <script src="stages/stage-table.js?v=401"></script>
 <script src="debug-log.js?v=399"></script>
-<script src="room-lifecycle.js?v=403"></script>
+<script src="room-lifecycle.js?v=404"></script>
 <script src="game.js?v=425"></script>
 <script src="sha/sha-resolution.js?v=404"></script>
 <script src="weapons.js?v=398"></script>
@@ -2205,7 +2235,7 @@
 <script src="bot-ai-bus.js?v=406"></script>
 <script src="bot.js?v=407"></script>
 <script src="ai-bot.js?v=399"></script>
-<script src="render.js?v=403"></script>
+<script src="render.js?v=404"></script>
 <script src="render-table.js?v=394"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=394"></script>
