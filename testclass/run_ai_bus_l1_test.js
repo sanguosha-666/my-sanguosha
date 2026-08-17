@@ -430,10 +430,12 @@ const testCode = String.raw`
   // ---- T16:四个被覆盖阶段候选文案 = 真实渲染按钮镜像(collect 直取)----
   await check('collect:liuli/tianxiang/lirangRecover/zhengyi 候选文案镜像真实按钮', function(){
     var cases = [
+      // CORE-101(issue #148):候选文案不再用玩家自定义昵称,改用AI专用稳定标识"座位N"
+      // (座位号从1开始;mkG构造的测试局座位2没有分配general,不带武将名后缀)。
       { name: 'liuli', g: mkG('liuli', { type: 'liuli', from: 1, to: 0, usedAs: '杀', shaColor: 'red', targets: [2] }, [card('杀')]),
-        expect: ['弃手牌【杀】 → 玩家2', '不发动'] },
+        expect: ['弃手牌【杀】 → 座位3', '不发动'] },
       { name: 'tianxiang', g: mkG('tianxiang', { type: 'tianxiang', seat: 0, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha', targets: [2], resume: { type: 'sha' } }, [card('桃')]),
-        expect: ['弃【桃】 → 玩家2', '不发动'] },
+        expect: ['弃【桃】 → 座位3', '不发动'] },
       { name: 'lirangRecover', g: mkG('lirangRecover', { type: 'lirangRecover', from: 0, to: 1, cards: [card('闪')] }, []),
         expect: ['获得弃牌', '不获得'] },
       { name: 'zhengyi', g: mkG('zhengyi', { type: 'zhengyi', asking: 0, seat: 1, amount: 1, sourceSeat: 1, reason: 'sha', srcType: 'sha' }, []),
@@ -618,9 +620,10 @@ const testCode = String.raw`
     var res = collectControlsCandidates(g, 0);
     try{
       // 强袭消耗支付后不可取消,只有目标按钮,没有取消按钮
+      // CORE-101(issue #148):按钮文案不再用玩家自定义昵称,改用"座位N"标识。
       if(res.candidates.length !== 2) throw new Error('应恰2个目标按钮,实际 ' + res.candidates.length + ' labels=' + JSON.stringify(res.candidates.map(function(c){return c.label;})));
-      if(res.candidates[0].label !== '玩家1') throw new Error('按钮0应为玩家1,实际 ' + res.candidates[0].label);
-      if(res.candidates[1].label !== '玩家2') throw new Error('按钮1应为玩家2,实际 ' + res.candidates[1].label);
+      if(res.candidates[0].label !== '座位2') throw new Error('按钮0应为座位2,实际 ' + res.candidates[0].label);
+      if(res.candidates[1].label !== '座位3') throw new Error('按钮1应为座位3,实际 ' + res.candidates[1].label);
     } finally {
       res.dispose();
     }

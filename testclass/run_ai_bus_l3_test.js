@@ -1694,7 +1694,8 @@ const testCode = String.raw`
     if(botTwoStepA.continue) throw new Error('阶段A不应带 continue,实际 ' + JSON.stringify(botTwoStepA));
     if(window.__rendeCalls.length !== 0) throw new Error('阶段A不应提交 renDe,实际 ' + JSON.stringify(window.__rendeCalls));
     var up = window.__mockAiArgs.opts.userPrompt;
-    if(up.indexOf('玩家2') < 0) throw new Error('userPrompt 候选应含玩家2(存活非自己),实际 ' + up);
+    // CORE-101(issue #148):候选文案不再用玩家自定义昵称,改用AI专用标识"座位N"。
+    if(up.indexOf('座位3') < 0) throw new Error('userPrompt 候选应含座位3(存活非自己),实际 ' + up);
     var candPart = up.slice(up.indexOf('合法候选'));
     if(candPart.indexOf('机器人0') >= 0) throw new Error('候选列表不应含自己,实际 ' + candPart);
     botTwoStepA = null;
@@ -1984,18 +1985,21 @@ const testCode = String.raw`
       throw new Error('应 respondDying(false),实际 ' + JSON.stringify(window.__dyingCalls));
   });
 
-  await check('dying有密钥:mock 出桃(choice0,候选index=打出)→respondDying(true);mock 不出(choice1)→false;userPrompt 含濒死者公开名、不含他人手牌', async function(){
+  await check('dying有密钥:mock 出桃(choice0,候选index=打出)→respondDying(true);mock 不出(choice1)→false;userPrompt 含濒死者AI标识座位N、不含他人手牌、不含自定义昵称', async function(){
     window.__dyingCalls = []; window.__mockAiCalls = 0;
     window.__mockAiResults = [{ ok: true, text: '{"choice":0}' }];
     aiApiKey = 'test-key'; aiProvider = 'claude';
     var g = mkDyingG({ myHand: [card('桃','t4')], hands: { 1: [card('桃园结义','sec')] } });
+    // CORE-101(issue #148):玩家自定义昵称"濒死者甲"不应进入LLM prompt,AI只应看到
+    // 稳定标识"座位2"(座位号从1开始)。
     g.players[1].name = '濒死者甲';
     var r = await botDecide('dying', g, 0);
     if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
     if(window.__dyingCalls.length !== 1 || window.__dyingCalls[0][0] !== true)
       throw new Error('mock 出桃应 respondDying(true),实际 ' + JSON.stringify(window.__dyingCalls));
     var up = window.__mockAiArgs.opts.userPrompt;
-    if(up.indexOf('濒死者甲') < 0) throw new Error('userPrompt 应含濒死者公开名(濒死者甲),实际 ' + up);
+    if(up.indexOf('座位2') < 0) throw new Error('userPrompt 应含濒死者AI标识座位2,实际 ' + up);
+    if(up.indexOf('濒死者甲') >= 0) throw new Error('userPrompt 不应含玩家自定义昵称(濒死者甲)!实际 ' + up);
     if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
     window.__dyingCalls = []; window.__mockAiCalls = 0;
     window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
@@ -2950,15 +2954,15 @@ const testCode = String.raw`
     if(c1.length !== 2) throw new Error('存活2人候选应为2项,实际 ' + JSON.stringify(c1));
     if(c1[0].idx !== 0 || c1[0].targetSeat !== 0 || c1[0].label !== '给 自己 【桃】')
       throw new Error('候选0应为 自己+桃,实际 ' + JSON.stringify(c1[0]));
-    if(c1[1].idx !== 0 || c1[1].targetSeat !== 1 || c1[1].label !== '给 玩家1 【桃】')
-      throw new Error('候选1应为 玩家1+桃,实际 ' + JSON.stringify(c1[1]));
+    if(c1[1].idx !== 0 || c1[1].targetSeat !== 1 || c1[1].label !== '给 座位2 【桃】')
+      throw new Error('候选1应为 座位2+桃,实际 ' + JSON.stringify(c1[1]));
     botTwoStepA = { decisionId: 'yijiAssign', picks: [1] };
     var c2 = s.buildCandidates(g, 0);
     if(c2.length !== 2) throw new Error('第2张候选应为2项,实际 ' + JSON.stringify(c2));
     if(c2[0].idx !== 1 || c2[0].targetSeat !== 0 || c2[0].label !== '给 自己 【杀】')
       throw new Error('第2张候选0应为 自己+杀,实际 ' + JSON.stringify(c2[0]));
-    if(c2[1].idx !== 1 || c2[1].targetSeat !== 1 || c2[1].label !== '给 玩家1 【杀】')
-      throw new Error('第2张候选1应为 玩家1+杀,实际 ' + JSON.stringify(c2[1]));
+    if(c2[1].idx !== 1 || c2[1].targetSeat !== 1 || c2[1].label !== '给 座位2 【杀】')
+      throw new Error('第2张候选1应为 座位2+杀,实际 ' + JSON.stringify(c2[1]));
     botTwoStepA = null;
   });
 
@@ -3255,8 +3259,9 @@ const testCode = String.raw`
       var key = x.targets.join(',');
       if(seen[key]) throw new Error('目标组合重复,实际 ' + key);
       seen[key] = true;
+      // CORE-101(issue #148):label不再用玩家自定义昵称,改用AI专用标识(botAiName)。
       x.targets.forEach(function(i){
-        if(x.label.indexOf(g.players[i].name) < 0) throw new Error('label 缺少目标名,实际 ' + x.label);
+        if(x.label.indexOf(botAiName(g,i)) < 0) throw new Error('label 缺少目标标识,实际 ' + x.label);
       });
     });
   });
