@@ -3687,8 +3687,11 @@ async function botPlay(g,seat){
       //   跳过自己返回 -1,由下方 allowSelf 自目标兜底纳入——通用写法,不按牌名特判。
       if(!spec||action==='借刀杀人') return;
       if(!spec.canPlay(g,me,card)) return;
-      // 忠臣不主动使用会伤到主公的群体牌。
-      if(me.role==='zhong'&&(action==='南蛮入侵'||action==='万箭齐发')) return;
+      // CORE-98(issue #145):南蛮入侵/万箭齐发没有单一目标,原来只有忠臣一条特判(不打
+      // 会伤到主公的群体牌),主公/反贼没有对应风险判断——主公一样可能无脑南蛮到已知
+      // 忠臣、反贼一样可能无脑南蛮到已知反贼。改用和乱击(CORE-97)共用的
+      // botAoeSelfRiskAllows,覆盖全部角色(内奸继续走既有动态判断,不受影响)。
+      if((action==='南蛮入侵'||action==='万箭齐发')&&!botAoeSelfRiskAllows(g,seat)) return;
       let target=null;
       if(spec.target){
         target=botBestTarget(g,seat,card,action);
@@ -4817,7 +4820,9 @@ function enumerateAllLegalOneStepActions(g, seat){
       const action = botActionId(card), spec = CARD_PLAYS[action];
       if(!spec || action==='借刀杀人') return;
       if(!spec.canPlay(g, me, card)) return;
-      if(me.role==='zhong' && (action==='南蛮入侵'||action==='万箭齐发')) return;
+      // CORE-98(issue #145):同上,覆盖全部角色而不只是忠臣,见 botPlay 里同一条判断的
+      // 完整注释(和乱击共用的 botAoeSelfRiskAllows)。
+      if((action==='南蛮入侵'||action==='万箭齐发') && !botAoeSelfRiskAllows(g, seat)) return;
       if(action==='桃' && me.hp>=me.maxHp) return;
       if(spec.target && action==='铁索连环'){
         const targets = [];

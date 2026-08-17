@@ -261,6 +261,16 @@ function __installViolationHooks(){
           phase:g.phase, turn:g.turn, roundNum:g.roundNum });
       }
     }
+    // CORE-98(issue #145):南蛮入侵/万箭齐发是无单一目标的AOE,不走上面Number.isInteger
+    // (targetSeat)那条单目标检测路径(targetSeat对它们恒为undefined)。用和乱击(CORE-97)
+    // 共用的__aoeSelfRiskViolation单独检测——这是"主动选择使用这张牌"的决策瞬间,不是
+    // 被迫响应AOE伤害的结算,和上面单目标检测同一层级、不会误套被迫响应。
+    if(g && (actionId==='南蛮入侵' || actionId==='万箭齐发')){
+      var aoeActor = mySeat;
+      var av = __aoeSelfRiskViolation(g, aoeActor);
+      if(av) __recordViolation({ via:'playCard', action:actionId, actor:aoeActor, rule:av,
+        phase:g.phase, turn:g.turn, roundNum:g.roundNum });
+    }
     return __realPlayCard.apply(null, arguments);
   };
   __realSeatPickExecute = seatPickExecute;
