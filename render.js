@@ -1338,7 +1338,21 @@ function render(g){
   if(closeRoomBtn) closeRoomBtn.classList.toggle('hidden', !isRoomOwner(g,mySeat));
   // AI托管:mySeat 重定位后同步刷新托管座位。支持"大厅先开托管、进房后再自动生效"
   // (aiTestAutopilot 定义在 ai-bot.js,本文件加载更早,typeof 只是跨文件防御惯例)。
-  if(typeof aiTestAutopilot!=='undefined' && aiTestAutopilot && aiTestAutopilot.active) aiTestAutopilot.seat = mySeat;
+  // CORE-102(issue #149):每次render都顺带校验托管上下文(roomId/cid)是否仍然匹配——
+  // 这是"强制关闭房间未清理托管状态,可能跨房间继承旧座位"这个bug的兜底防线:即使
+  // backToLobby()那条主清理路径因为某种原因没有生效,这里也会在下一次render时发现
+  // roomId不匹配并主动停止,不会让旧房间的托管状态悄悄接管新房间里恰好同座位号的角色。
+  if(typeof aiTestAutopilot!=='undefined' && aiTestAutopilot && aiTestAutopilot.active){
+    if(typeof aiTestAutopilotContextValid==='function' && !aiTestAutopilotContextValid()){
+      if(typeof stopAiTestAutopilot==='function') stopAiTestAutopilot();
+    } else {
+      aiTestAutopilot.seat = mySeat;
+      // 大厅阶段开启托管时 roomId/cid 还是 null(还没进房),进房后第一次绑定真实值——
+      // 这是合法的懒绑定,不是"漂移"(aiTestAutopilotContextValid 对 null 快照直接放行)。
+      if(aiTestAutopilot.roomId===null && typeof roomId!=='undefined' && roomId!==null) aiTestAutopilot.roomId = roomId;
+      if(aiTestAutopilot.cid===null && typeof myClientId!=='undefined' && myClientId!==null) aiTestAutopilot.cid = myClientId;
+    }
+  }
   // 机器人调度必须和渲染解耦(见函数末尾的 finally):scheduleBotTurn 原本是 render 的最后
   // 一行,渲染中途任何一处抛异常都会执行不到它、机器人从此永久停摆——这个症状和"机器人不
   // 行动"的座位判定 bug 长得一模一样,会把排查方向带偏,所以这里用 try/finally 拆开。

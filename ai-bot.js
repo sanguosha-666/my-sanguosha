@@ -182,7 +182,10 @@ function resolveAiModel(provider){
 // 【CORE-73】决策记录已迁出:改由独立于托管开关的统一存储 aiDecisionRecords 承载
 // (全部 AI 决策,含非托管机器人),这里不再挂 records 字段——托管信息窗渲染时按
 // isAutopilot 过滤该统一存储,语义与改动前一致。
-let aiTestAutopilot = { active:false, seat:null };
+// CORE-102(issue #149):roomId/cid 是本次托管建立时的上下文快照,和"active=true"这个
+// 状态一起构成一个不可分割的整体——active 为真必须同时意味着"这确实是当前房间/当前
+// 客户端身份下建立的托管",不能只看 active 一个布尔值。见下方 aiTestAutopilotContextValid()。
+let aiTestAutopilot = { active:false, seat:null, roomId:null, cid:null };
 let aiTestAutopilotDisconnectRef = null;
 
 (function hydrateAiStateFromSession(){
@@ -1343,6 +1346,11 @@ function startAiTestAutopilot(){
   }
   aiTestAutopilot.active=true;
   aiTestAutopilot.seat=mySeat;
+  // CORE-102(issue #149):记录建立托管时的房间/客户端身份快照,供
+  // aiTestAutopilotContextValid() 校验——任一变化都说明这份托管状态已经不再对应
+  // "当前所在的房间/当前浏览器身份",不能继续被当作有效托管使用。
+  aiTestAutopilot.roomId = (typeof roomId!=='undefined') ? roomId : null;
+  aiTestAutopilot.cid = (typeof myClientId!=='undefined') ? myClientId : null;
   publishAiTestAutopilot(true, mySeat);
   updateAiTestStatus();
   const btn=document.getElementById('aiTestBtn');
@@ -1351,10 +1359,25 @@ function startAiTestAutopilot(){
 function stopAiTestAutopilot(){
   const seat=aiTestAutopilot.seat;
   aiTestAutopilot.active=false;
+  aiTestAutopilot.roomId=null;
+  aiTestAutopilot.cid=null;
   publishAiTestAutopilot(false, seat);
   updateAiTestStatus();
   const btn=document.getElementById('aiTestBtn');
   if(btn) btn.classList.remove('aitest-active');
+}
+// aiTestAutopilotContextValid:CORE-102(issue #149)——"active=true"单独一个布尔值不足以
+// 说明这份托管状态仍然有效,必须叠加"roomId/cid 与建立托管时的快照一致"才算数。任一不
+// 匹配(强制关闭房间后重新进入了别的房间、甚至换了浏览器身份)都说明这份状态已经过期,
+// 不能继续被 bot.js 的调度逻辑当作"这个座位正被托管"使用。这是一个纯粹的只读校验函数,
+// 不做任何清理动作——真正的清理(重置 active/roomId/cid、撤销公开标识)交给调用方在
+// 校验失败时显式调用 stopAiTestAutopilot(),职责分离,避免"校验函数顺手做了副作用"这种
+// 容易被忽略的隐式行为。
+function aiTestAutopilotContextValid(){
+  if(!aiTestAutopilot.active) return false;
+  if(aiTestAutopilot.roomId!==null && typeof roomId!=='undefined' && roomId!==aiTestAutopilot.roomId) return false;
+  if(aiTestAutopilot.cid!==null && typeof myClientId!=='undefined' && myClientId!==aiTestAutopilot.cid) return false;
+  return true;
 }
 
 // 房间里只公开“该座位是否托管”这一项。cid 校验保证当前浏览器只能修改自己的座位；

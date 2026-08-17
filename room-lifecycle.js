@@ -637,6 +637,13 @@ function cleanupRoom(){
 }
 
 function backToLobby(){
+  // CORE-102(issue #149):托管清理必须在 mySeat/gameRef 等上下文被置空之前(下面几行
+  // 就会清),否则 stopAiTestAutopilot 内部 publishAiTestAutopilot 想撤销的座位号已经
+  // 读不到了。覆盖房主主动关房(cleanupRoom→backToLobby)和被动收到房间删除(render.js
+  // 的"room was deleted"分支同样调 backToLobby)两条路径——两者都走这一个收敛点,不需要
+  // 分别处理。见 ai-bot.js 里 aiTestAutopilot 的完整说明。
+  if(typeof aiTestAutopilot!=='undefined' && aiTestAutopilot && aiTestAutopilot.active
+    && typeof stopAiTestAutopilot==='function') stopAiTestAutopilot();
   if(typeof aiSummaryReset === 'function') aiSummaryReset();
   if(typeof resetBotTwoStep==='function') resetBotTwoStep(); // CORE-113,同newGame()那处注释
   if(chatQuery) chatQuery.off();
