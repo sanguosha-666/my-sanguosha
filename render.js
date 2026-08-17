@@ -247,8 +247,18 @@ function isPortrait(){
 // 现实机型不会落进夹缝:竖屏最宽的手机(iPhone Pro Max 一类)约 430 CSS px,远低于 640;
 // 折叠屏展开后约 768px,本来就该按小平板对待,放行是正确行为。
 const LANDSCAPE_GATE_MAX_WIDTH = 640;
+// CORE-119(issue #151):这条遮罩此前对大厅和对局一视同仁——大厅只有房间号/昵称两个
+// 输入框和一个按钮,没有横屏的技术需求,但用户必须先转横屏才能点开它们。真正需要横屏的
+// 是"进入对局"之后的横排对手行/中央出牌区这套布局。#game 元素是否带 .hidden class 就是
+// 项目里现成的"是否已经进入对局"信号(joinRoom/backToLobby 等既有生命周期函数一直靠它
+// 切换视图,这里复用同一个信号,不新增状态)。大厅阶段(#game 仍是 hidden)直接放行,不
+// 拦截;进入对局后行为不变。
+// 拿不到 #game 元素的极端环境(和下面拿不到有效宽度同一考虑)保持旧行为:按"已在对局中"
+// 处理,不放宽——线上正常环境里 #game 必定存在于 DOM 中,只在测试/异常环境里才会缺失。
 function shouldShowLandscapeGate(){
   if(!isPortrait()) return false;
+  const gameEl = document.getElementById('game');
+  if(gameEl && gameEl.classList.contains('hidden')) return false; // 大厅阶段,不拦截
   const w = window.innerWidth;
   // 拿不到有效宽度的极端环境(和 isPortrait 自己的兜底同一考虑)保持旧行为:提示横屏。
   if(!Number.isFinite(w) || w <= 0) return true;
@@ -259,8 +269,9 @@ function checkLandscapeGate(){
   if(!gate) return;
   gate.classList.toggle('hidden', !shouldShowLandscapeGate());
 }
-// 和 unlockAudioOnce 同一套写法:页面加载后立即注册监听、立即跑一次初始检测,不等进入
-// 房间/不等第一次 render(g)——大厅表单和游戏内视图都需要这层引导,不依赖任何游戏状态。
+// 和 unlockAudioOnce 同一套写法:页面加载后立即注册监听、立即跑一次初始检测——大厅阶段
+// 也要跑(不能等进入房间),因为 resize/orientationchange 期间用户可能正好从大厅转到对局,
+// 遮罩需要能响应这个切换;shouldShowLandscapeGate 内部会按 #game 是否可见分别处理两种场景。
 checkLandscapeGate();
 window.addEventListener('resize', checkLandscapeGate);
 window.addEventListener('orientationchange', checkLandscapeGate);
