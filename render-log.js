@@ -396,6 +396,45 @@ function sendChatFromInput(){
 function chatInputKeydown(e){
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendChatFromInput(); }
 }
+// ===== CORE-126(issue #164):手机/平板聊天浮层的开关状态与未读计数 =====
+// 只在非桌面布局下有意义(桌面聊天是常驻侧栏,CSS 里那条浮层规则不生效,这两个变量
+// 对桌面完全无副作用——chatPanelOpen 恒为 false,未读徽标所在的 #chatBtn 本身也被
+// CSS 隐藏了)。刷新页面自然重置,不做持久化(和"最近出牌历史"CORE-122 同款取舍)。
+let chatPanelOpen = false;
+let chatSeenCount = 0;
+// toggleChatPanel:💬 按钮入口。打开时把"已读位置"推到当前消息总数并滚到底,
+// 关闭时保留位置——之后新到的消息才算未读。
+function toggleChatPanel(){
+  chatPanelOpen = !chatPanelOpen;
+  const sec = document.querySelector('.chat-panel-section');
+  if(sec) sec.classList.toggle('chat-open', chatPanelOpen);
+  if(chatPanelOpen){
+    chatSeenCount = (chatMessages||[]).length;
+    const body = document.querySelector('.chat-panel-scroll');
+    if(body) body.scrollTop = body.scrollHeight;
+  }
+  updateChatUnreadBadge();
+}
+function closeChatPanel(){
+  if(chatPanelOpen) toggleChatPanel();
+}
+// updateChatUnreadBadge:未读数写进 #chatBtn 的 data-unread(CSS 用 attr() 显示成红点)。
+// 面板开着时不显示红点(消息就在眼前),关着才提示。
+function updateChatUnreadBadge(){
+  const btn = document.getElementById('chatBtn');
+  if(!btn) return;
+  const total = (chatMessages||[]).length;
+  // 【"已读位置"的维护收敛在这一个函数里】面板开着时到达的消息就是"用户当场看见了",
+  // 所以在这里同步把 chatSeenCount 推到最新——不要指望调用方去维护它。这行是被单元
+  // 测试逼出来的:最初把它放在 renderLogPanel 里,生产环境碰巧不出问题(每次聊天同步
+  // 都会调 renderLogPanel),但"开着面板收了几条 → 关闭 → 再来新消息"这条路径一旦有人
+  // 只调 updateChatUnreadBadge 不调 renderLogPanel,未读数就会把开着时早已看过的消息
+  // 重复计进去。不变量该由谁维护,就写在谁身上。
+  if(chatPanelOpen) chatSeenCount = total;
+  const unread = Math.max(0, total - chatSeenCount);
+  btn.setAttribute('data-unread', unread > 99 ? '99+' : String(unread));
+  btn.classList.toggle('has-unread', unread > 0 && !chatPanelOpen);
+}
 function renderLogPanel(g){
   const el = document.getElementById('logPanel');
   if(!el) return;
@@ -419,17 +458,25 @@ function renderLogPanel(g){
   // #chatInput 导致正在输入的文字、输入法组合状态和光标位置被清空。
   if(!el.querySelector('.log-panel-section') || !el.querySelector('.chat-panel-section')){
     el.innerHTML = '<section class="log-panel-section"><div class="log-panel-head"></div><div class="log-panel-scroll"></div></section>'
-      + '<section class="chat-panel-section"><div class="chat-panel-head"></div><div class="chat-panel-scroll"></div>'
+      + '<section class="chat-panel-section"><div class="chat-panel-head"><span class="chat-head-text"></span>'
+      + '<button type="button" class="chat-close-btn" onclick="closeChatPanel()" title="关闭聊天">✕</button></div><div class="chat-panel-scroll"></div>'
       + '<div class="chat-compose">'+voiceBtn+emojiPicker+quick+'<div class="chat-input-row"><button type="button" class="emoji-toggle" onclick="toggleEmojiPicker()" title="选择表情">😊</button><input id="chatInput" maxlength="60" placeholder="说点什么…" onkeydown="chatInputKeydown(event)"><button onclick="sendChatFromInput()">发送</button></div></div></section>';
   }
   const logBody=el.querySelector('.log-panel-scroll');
   const chatBody=el.querySelector('.chat-panel-scroll');
   const logHead=el.querySelector('.log-panel-head');
-  const chatHead=el.querySelector('.chat-panel-head');
+  // CORE-126:标题文字写进 .chat-head-text 这个专门的 span,不能像日志那样直接给整个
+  // .chat-panel-head 设 textContent——那会连带把同在 head 里的关闭按钮一起清掉。
+  const chatHeadText=el.querySelector('.chat-head-text');
   if(logHead) logHead.textContent='本局日志（共'+log.length+'条）';
-  if(chatHead) chatHead.textContent='聊天（'+(chatMessages||[]).length+'条）';
+  if(chatHeadText) chatHeadText.textContent='聊天（'+(chatMessages||[]).length+'条）';
   if(logBody) logBody.innerHTML=log.map(l=>'<div class="log-panel-entry">'+formatLogEntry(g, l && typeof l==='object' ? l.text : l)+'</div>').join('');
   if(chatBody) chatBody.innerHTML=messages||'<div class="chat-empty">还没有人说话</div>';
   if(logBody) logBody.scrollTop = logWasAtBottom ? logBody.scrollHeight : oldLogScrollTop;
   if(chatBody) chatBody.scrollTop = chatWasAtBottom ? chatBody.scrollHeight : oldChatScrollTop;
+  // CORE-126:每次刷新都把浮层开关状态同步回 DOM(首次创建时 innerHTML 是新建的、
+  // 没有 .chat-open),并刷新未读徽标——面板开着时把已读位置跟到最新。
+  const chatSection=el.querySelector('.chat-panel-section');
+  if(chatSection) chatSection.classList.toggle('chat-open', chatPanelOpen);
+  updateChatUnreadBadge(); // 已读位置由它自己维护(见其内部注释),这里不重复一份
 }
