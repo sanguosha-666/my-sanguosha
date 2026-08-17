@@ -614,9 +614,15 @@ function botTryStartExtraSkills(g, seat){
   // 资源投入,和贯石斧/寒冰剑等装备特效同一基调固定发动,但先探测真的有攻击范围内的
   // 目标、且至少一种支付方式可行(呼应规则26,避免发动后在选支付方式阶段无路可走)。
   // 优先弃武器省体力,只有武器不可弃且体力>2(留有余量)才用体力支付。
+  // CORE-96(issue #143):这里的"存在目标"判断只看距离,不看阵营策略——忠臣攻击范围内
+  // 只有已知主公时,旧写法仍会判定"有目标"并发动,后续 qiangxiPickTarget 选目标阶段才
+  // 会读到"候选只有主公"这个既成事实(那一步的过滤修法见下方 runBotDecision 分支)。
+  // 这里提前用 botTargetPolicyAllows 过滤一遍,避免在"没有一个策略允许的目标"时白白
+  // 发动(呼应规则26:发动前先确认真的有用,不能只看游戏规则层面"能不能",还要看"该不该")。
   if(hasCap(me,'qiangxi') && !g.qiangxiUsed){
     const myRange=attackRange(g, seat);
-    const hasTarget=g.players.some((p,i)=>i!==seat && p && p.alive && distance(g,seat,i)<=myRange);
+    const hasTarget=g.players.some((p,i)=>i!==seat && p && p.alive && distance(g,seat,i)<=myRange
+      && botTargetPolicyAllows(g,seat,i,'harmful'));
     const canPay=hasWeaponToDiscard(me) || me.hp>2;
     if(hasTarget && canPay){ botInvoke(seat, startQiangxi); return true; }
   }
@@ -633,9 +639,13 @@ function botTryStartExtraSkills(g, seat){
   // 丁奉【奋迅】:弃1张牌,本回合与指定角色距离视为1。只有存在"当前用canReachSha够不着、
   // 发动后就够得着"的目标、且手里确实有能当杀用的牌时才值得发动——不能只看"手牌够不够"
   // (规则26),否则就是白弃1张牌换不到任何实际用途。要求留至少2张手牌(备用杀+被弃的牌)。
+  // CORE-96(issue #143):同上,"当前够不着"只是游戏规则层面的判断,叠加阵营策略过滤
+  // (奋迅本质是给后续攻击铺路,同属'harmful'方向),避免发动后在 fenxunTarget 选目标
+  // 阶段发现唯一"够不着"的目标恰好是己方/已知主公而白白弃了一张牌。
   if(hasCap(me,'fenxun') && !me.fenxunUsed){
     if(findUsableAs(me.hand||[],me,'杀')>=0 && (me.hand||[]).length>=2){
-      if(g.players.some((p,i)=>i!==seat && p && p.alive && !canReachSha(g,seat,i))){
+      if(g.players.some((p,i)=>i!==seat && p && p.alive && !canReachSha(g,seat,i)
+        && botTargetPolicyAllows(g,seat,i,'harmful'))){
         botInvoke(seat, startFenxun); return true;
       }
     }
@@ -4055,8 +4065,13 @@ async function runBotDecision(g,seat){
   }
   // 【系统性扫描发现的紧急盲区收尾】典韦【强袭】选目标:确定性兜底，固定选候选列表第一个
   // 目标——"消耗支付后不可取消"是既有设计，这里不加取消，只补选目标这一步不再卡死。
+  // CORE-96(issue #143):候选列表本身只按距离生成,没有阵营策略过滤,这里补上——理论上
+  // botTryStartExtraSkills 发动前已经确认存在策略允许目标,这里过滤后不应为空;若真的
+  // 为空(比如目标身份在发动到此步之间被揭晓),不选目标、让这个阶段自己的30秒超时兜底
+  // (registerStageTimeoutAction)接管,不在这里强行选一个被禁止的目标。
   if(g.phase==='qiangxiPickTarget'&&d.type==='qiangxiPickTarget'&&d.seat===seat){
-    const target=(d.candidates||[])[0];
+    const allowed=(d.candidates||[]).filter(i=>botTargetPolicyAllows(g,seat,i,'harmful'));
+    const target=allowed[0];
     if(typeof target==='number') botInvoke(seat,()=>pickQiangxiTarget(target));
     return;
   }
@@ -4084,9 +4099,11 @@ async function runBotDecision(g,seat){
   }
   // 理论上只有先选了要弃的牌才会走到这一步,而上面的分支固定不发动、永远不会推进到这里——
   // 这条分支是防御性兜底(万一以后接了AI或有别的入口把状态推进到这里),固定选候选第一个
-  // 目标,不追求判断哪个更好。
+  // 目标,不追求判断哪个更好。CORE-96(issue #143):举荐是把一张牌白送给别人用,属于
+  // 帮助型效果,叠加botTargetPolicyAllows('helpful')过滤(不给明确敌人送礼)。
   if(g.phase==='jujianPickTarget'&&d.type==='jujianPickTarget'&&d.sourceSeat===seat){
-    const target=(d.candidates||[])[0];
+    const allowed=(d.candidates||[]).filter(i=>botTargetPolicyAllows(g,seat,i,'helpful'));
+    const target=allowed[0];
     if(typeof target==='number') botInvoke(seat,()=>respondJujianPickTarget(target));
     else botInvoke(seat,cancelJujian);
     return;
@@ -4160,8 +4177,12 @@ async function runBotDecision(g,seat){
   // 【第二批-第3组】张角【雷击】选目标:对发动者(张角本人)没有任何下行风险——不用弃牌、
   // 不用摸牌,纯粹是"判定一张牌,黑桃就白得2点伤害"的免费加成,固定发动+固定选候选目标
   // 第一个,不追求判断打谁更好(和落英/洛神同一基调:没有下行风险就默认总是尝试)。
+  // CORE-96(issue #143):雷击没有距离/canTarget限制,availableTargets是全部存活其他
+  // 角色的裸列表,叠加botTargetPolicyAllows阵营过滤后再选第一个——全部被禁止时和"没有
+  // 候选"走同一个cancelLeiji分支(雷击是纯收益技能,没有值得打的目标就不勉强)。
   if(g.phase==='leijiChoose'&&d.type==='leijiChoose'&&d.sourceSeat===seat){
-    const target=(d.availableTargets||[])[0];
+    const allowed=(d.availableTargets||[]).filter(i=>botTargetPolicyAllows(g,seat,i,'harmful'));
+    const target=allowed[0];
     if(typeof target==='number') botInvoke(seat,()=>triggerLeiji(target));
     else botInvoke(seat,cancelLeiji);
     return;
@@ -4172,8 +4193,12 @@ async function runBotDecision(g,seat){
   }
   // 【第二批-剩余清单批量处理】鲁肃【好施】平手多候选:固定选候选第一个(不追求判断
   // "谁更缺牌",这几个候选本身已经是"手牌最少"的并列结果,选谁都一样合理)。
+  // CORE-96(issue #143):好施是给对方摸牌的帮助型效果,叠加botTargetPolicyAllows
+  // ('helpful')过滤;全部候选都是明确敌人时,退化成"候选第一个"(好施是强制性的—场上
+  // 存在手牌最少者就必须选一个,规则本身不允许"谁都不给",这里没有可以取消的选项)。
   if(g.phase==='haoshiPick'&&d.type==='haoshiPick'&&d.seat===seat){
-    const target=(d.candidates||[])[0];
+    const allowed=(d.candidates||[]).filter(i=>botTargetPolicyAllows(g,seat,i,'helpful'));
+    const target=(allowed.length?allowed:(d.candidates||[]))[0];
     if(typeof target==='number') botInvoke(seat,()=>respondHaoshi(target));
     return;
   }
@@ -4286,8 +4311,11 @@ async function runBotDecision(g,seat){
   // 机器人代码调用它,这四条分支实际上永远不会被触发到,只是提前补好、避免"以后接上入口
   // 却忘了接子阶段"这种情况。决策不追求判断,和明策/旋风子阶段选牌同一基调"确定性兜底,
   // 固定选第一个候选"。
+  // CORE-96(issue #143):眩惑是让目标"化身"成任意角色并被使用一次杀/闪,属于对目标的
+  // 有害操控,叠加botTargetPolicyAllows('harmful')过滤。
   if(g.phase==='huanhuoPick'&&d.type==='huanhuoPick'&&d.sourceSeat===seat){
-    const target=(d.candidates||[])[0];
+    const allowed=(d.candidates||[]).filter(i=>botTargetPolicyAllows(g,seat,i,'harmful'));
+    const target=allowed[0];
     if(typeof target==='number') botInvoke(seat,()=>pickHuanhuoTarget(target));
     else botInvoke(seat,cancelHuanhuo);
     return;
@@ -4306,8 +4334,10 @@ async function runBotDecision(g,seat){
     else if(target&&(target.hand||[]).length>0) botInvoke(seat,()=>pickHuanhuoGotCard('hand',null));
     return;
   }
+  // CORE-96(issue #143):第二目标是被眩惑者"视为使用的杀"真正打向的人,同属有害方向。
   if(g.phase==='huanhuoPickSecond'&&d.type==='huanhuoPickSecond'&&d.sourceSeat===seat){
-    const target=(d.candidates||[])[0];
+    const allowed=(d.candidates||[]).filter(i=>botTargetPolicyAllows(g,seat,i,'harmful'));
+    const target=allowed[0];
     if(typeof target==='number') botInvoke(seat,()=>pickHuanhuoSecondTarget(target));
     return;
   }
@@ -4437,8 +4467,11 @@ async function runBotDecision(g,seat){
   // 【Part2补全】丁奉【奋迅】选目标:固定选候选里"当前够不着"的第一个(呼应"发动"那一步
   // 已经校验过的真实用途——奋迅本来就是为了打够不着的目标),找不到这种目标才退化选
   // 候选第一个(理论上不会发生,发动前已校验过)。
+  // CORE-96(issue #143):availableTargets是全部存活其他角色的裸列表,叠加
+  // botTargetPolicyAllows阵营过滤——过滤后为空则取消(cancelFenxun,牌已经弃了,但至少
+  // 不会把距离拉近到己方/已知主公身上给自己招致下一步反制)。
   if(g.phase==='fenxunTarget'&&d.type==='fenxunTarget'&&d.seat===seat){
-    const avail=d.availableTargets||[];
+    const avail=(d.availableTargets||[]).filter(i=>botTargetPolicyAllows(g,seat,i,'harmful'));
     let target=avail.find(i=>!canReachSha(g,seat,i));
     if(typeof target!=='number') target=avail[0];
     if(typeof target==='number') botInvoke(seat,()=>pickFenxunTarget(target));
