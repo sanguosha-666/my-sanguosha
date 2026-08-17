@@ -2694,7 +2694,11 @@ function respondLiuli(choice, newTargetSeat){
     const me=g.players[to], newTarget=g.players[newTargetSeat];
     if(!choice){
       g.log=pushLog(g.log, me.name+'：不发动【流离】');
-      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard);
+      // CORE-93(issue #140):这里回落到原目标(to)结算,原本这张杀已经在 CARD_PLAYS['杀']
+      // 的 canTarget 里校验过一次攻击者→to 的距离(否则杀根本出不来),理论上重新校验也该
+      // 通过——但为了和下面"真实转移"分支保持同一处理方式(不依赖"位置/装备中途没变"这个
+      // 假设),同样传 {noDistance:true} 跳过 resolveShaUseNoLiuli 内部的二次距离校验。
+      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard, {noDistance:true});
       return g;
     }
     if(!newTarget || !newTarget.alive || newTargetSeat===from || newTargetSeat===to || !liuliTargets(g, from, to).includes(newTargetSeat)) return g;
@@ -2722,7 +2726,12 @@ function respondLiuli(choice, newTargetSeat){
         return g;
       }
     }
-    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard);
+    // CORE-93(issue #140):流离转移后不能再用"原攻击者→新目标"的距离二次校验——转移的
+    // 合法性已经由 liuliTargets()(canReachSha(g,to,o.i),即大乔自己的攻击范围)校验过
+    // 一次,resolveShaUseNoLiuli 内部默认的距离校验对象是攻击者自己,和流离的规则基准
+    // 完全不是同一个人,不该在这里重新生效。传 {noDistance:true} 跳过它(和神速
+    // respondShensuSha 用同一套既有模式,skills.js 那边的"无距离限制的杀")。
+    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard, {noDistance:true});
     return g;
   });
 }
@@ -3675,10 +3684,13 @@ function resumeAfterInterrupt(g, resume, seat){
     continueShaOffsetEffects(g, resume.from, resume.to, resume.sourceCard, ['qinglong','guanshifu'], resume.jiuBonus);
   } else if(resume.type==='liuliAfterDiscard'){
     // 流离用装备支付后，失装技能（如旋风）先取得控制权；完成后再从这里继续转移后的杀。
+    // CORE-93(issue #140):和 respondLiuli 的直达路径同一个修复——这次结算的仍然是流离
+    // 已经转移完毕的那张杀,距离合法性早由 liuliTargets() 按大乔自己的攻击范围校验过,
+    // 不能再走 resolveShaUseNoLiuli 默认的"攻击者→目标"距离校验,传 {noDistance:true}。
     const attacker=g.players[resume.from];
     const target=g.players[resume.newTargetSeat];
     if(attacker&&attacker.alive&&target&&target.alive){
-      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard);
+      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard,{noDistance:true});
     }else finishSingleShaTarget(g);
   } else if(resume.type==='dyingJijiu'){
     // 急救用红色装备触发失装技能后，恢复原 dying 快照，再完成这张牌的回复结算。
