@@ -2076,7 +2076,22 @@
     .log-panel{
       position:static;
       width:auto;
-      max-height:110px;
+      /* CORE-122(issue #154):这里原来只写max-height,没写height——.log-panel是
+         flex-direction:column容器,子项.log-panel-section/.chat-panel-section用
+         flex:1 1 0均分空间,但父容器自身没有height(只有max-height这个"上限"),浏览器
+         算不出可分配的具体空间,flex-grow实际不生效,导致无论max-height写多大,真实
+         渲染出来的日志/聊天可见内容都被压缩到几乎只剩标题栏(实测过:max-height:110px
+         时clientHeight只有29px)——这不是平板专属问题,是所有非桌面布局共有的既有状态,
+         只是这次改动过程中才被发现。同时补上height才能让flex-grow真正生效。
+         数值从原来的110px改为300px:.log-panel被.log-panel-section(游戏日志)和
+         .chat-panel-section(聊天)两个flex:1子项对半分,300px能让日志区真正显示约4行
+         完整日志(用Playwright实测过30条日志场景下的可见完整行数,110/132px这类较小
+         数值即使补上height也只能换来1~2行,达不到"平板应该看到更多历史信息"这个目标)。
+         平板布局本身允许页面纵向滚动(.log-panel在文档流里,不是像手机横屏那样"必须
+         一屏装完"),用tools/verify_responsive_layout.js复测过平板横竖屏各档,座位卡/
+         手牌区/触控目标均无回归,仅总页高按预期增加。 */
+      height:300px;
+      max-height:300px;
       margin-top:8px;
     }
   }
