@@ -1151,6 +1151,25 @@
      其余定位/尺寸/配色与 #aiTestBtn 逐项一致,同为 z-index:50、低于弹窗的 120。 */
   #aiPanelBtn{position:fixed;top:12px;left:64px;z-index:50;width:44px;height:44px;
     border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  /* CORE-126(issue #164):聊天浮层入口。占右侧那一列此前空着的 top:64 一格(#helpBtn 是
+     top:12 right:12,#logBtn 是 top:12 right:64),和左侧 #debugLogBtn/#aiTestBtn 的
+     "同列往下一格"排法对称,不和标题抢水平带(见 #debugLogBtn 那条注释里记录的坑)。
+     【只在非桌面布局 + 已进房间时出现】桌面聊天是常驻侧栏,不需要这个入口;大厅阶段没有
+     房间也就没有聊天。两个条件用 :has() 一次表达(项目里 .table-card:has(...)/
+     #game.desktop-layout:has(...) 已经在用同款写法)——注意 #chatBtn 是 #game 的兄弟节点
+     不是子节点,所以不能像 .chat-panel-section 那样直接写 #game:not(.desktop-layout) 前缀。 */
+  #chatBtn{position:fixed;top:64px;right:12px;z-index:50;width:44px;height:44px;
+    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;}
+  body:has(#game:not(.hidden):not(.desktop-layout)) #chatBtn{display:flex;}
+  /* 未读红点:数字由 JS 写进 data-unread。聊天是"推"型的(别人什么时候说话你不知道),浮层
+     默认关着时必须有这个提示,否则消息等于石沉大海——这是聊天和 AI 调试面板(拉型,想看才
+     去点开)的本质区别,不能照搬后者"没有未读提示"的做法。 */
+  #chatBtn.has-unread::after{
+    content:attr(data-unread);position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;
+    padding:0 4px;box-sizing:border-box;border-radius:9px;background:var(--cinnabar-bright,#c0392b);
+    color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;
+    box-shadow:0 1px 4px rgba(0,0,0,.5);}
   .log-modal{max-height:60vh;overflow:auto;font-size:13px;color:var(--paper-dim);text-align:left;}
   .log-modal div{padding:2px 0;}
   /* 调试日志弹窗内容(showDebugLog,复用 #infoModal/.info-panel):列表默认只显示摘要行,
@@ -1191,7 +1210,44 @@
   .log-panel-section{padding:0 0 6px!important;border-bottom:1px solid var(--line);}
   .chat-panel-section{padding:6px 0 0!important;}
   .log-panel-scroll,.chat-panel-scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--gold-dim) rgba(0,0,0,.2);}
-  .chat-panel-head{padding:3px 4px 5px!important;color:var(--gold);font-weight:700;}
+  .chat-panel-head{padding:3px 4px 5px!important;color:var(--gold);font-weight:700;
+    display:flex;align-items:center;gap:6px;}
+  /* ===== CORE-126(issue #164):手机/平板聊天浮层 =====
+     【为什么用 #game:not(.desktop-layout) 而不是 @media 断点】"是不是桌面布局"这件事在本项目
+     里已经有唯一权威判定——isDesktopLayout()(render.js:344,要求 innerWidth>=1200 且
+     hover:hover 且 pointer:fine),结果由 updateDesktopLayoutFlag() 写成 #game 上的
+     .desktop-layout class。如果这里另写一套 @media 条件去"重新推导"同一件事,两边迟早漂移
+     (CLAUDE.md 规则22/CORE-122 都踩过"按宽度分档把手机横屏误当平板"这类坑)。直接复用那个
+     class 取反,和 JS 判定永远同步,不存在第二个真相来源。
+     【为什么聊天能浮起来而日志不动】.chat-panel-section 本来是 #logPanel 的子元素、和日志区
+     对半分 #logPanel 的高度预算。position:fixed 让它脱离这个流,#logPanel 剩下的高度全归日志
+     区(平板上因此还顺带变宽裕了),DOM 结构一行没改、renderLogPanel 的渲染代码也一行没改
+     ——它本来就是 querySelector 找 .chat-panel-scroll 写内容,节点浮不浮起来都找得到。 */
+  #game:not(.desktop-layout) .chat-panel-section{
+    position:fixed;z-index:120;
+    /* right:64px 而不是 12px——💬 入口按钮就在 top:64/right:12 这一格,如果浮层也贴右边
+       12px,按钮会正好压在浮层标题栏的关闭按钮上(实测发现:Playwright 点 .chat-close-btn
+       被 #chatBtn 拦截了 pointer events,真人手指同样会点错)。往左让开一个按钮位,代价是
+       横向空间——手机横屏 667px 宽放一个 340px 的浮层本来就绰绰有余,而纵向(375px)才是
+       真正紧张的那一维,所以宁可让横向也不动 top/bottom。 */
+    top:64px;right:64px;bottom:12px;width:min(340px,72vw);
+    display:none;                        /* 默认关闭,点 💬 按钮才打开 */
+    padding:8px 10px!important;          /* 覆盖基础规则的 padding:6px 0 0!important */
+    background:#1a1410;border:1px solid var(--gold-dim);border-radius:10px;
+    box-shadow:0 6px 22px rgba(0,0,0,.55);
+  }
+  #game:not(.desktop-layout) .chat-panel-section.chat-open{display:flex;}
+  /* 聊天浮起来之后,日志区底部那条"日志/聊天分隔线"就没有分隔对象了(下面已经没有东西),
+     只在非桌面布局下去掉,桌面继续保留(那里两块仍然上下相邻)。 */
+  #game:not(.desktop-layout) .log-panel-section{border-bottom:none;}
+  /* 关闭按钮只在浮层形态下出现;桌面聊天是常驻侧栏的一部分,没有"关闭"这个概念。 */
+  .chat-close-btn{display:none;}
+  #game:not(.desktop-layout) .chat-close-btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    margin-left:auto;width:28px;height:28px;padding:0!important;
+    background:transparent;color:var(--paper-dim);border:1px solid var(--line);
+    border-radius:6px;font-size:15px;line-height:1;cursor:pointer;
+  }
   .chat-message{padding:3px 1px!important;word-break:break-word;color:var(--paper-dim);}
   .chat-message.emoji-message{display:flex;align-items:center;gap:3px;}
   .chat-emoji{display:inline-block;font-size:52px;line-height:1.08;vertical-align:middle;}
@@ -1428,8 +1484,19 @@
        (68px+间距,几乎占了 .panel.table 剩余高度的一半)——它和上面 #myGeneral 的
        完整描述是同一类"有独立入口能查看完整信息、这里只是常驻的便利副本"的东西
        (点击📜按钮能看完整历史日志),矮视口下空间优先级不如把座位卡/中央出牌区/
-       手牌显示完整,这里直接隐藏,不影响任何功能(日志历史依然可查)。 */
-    .log-panel{display:none;}
+       手牌显示完整,这里直接隐藏,不影响任何功能(日志历史依然可查)。
+       【CORE-126(issue #164)修正】原来这里是 .log-panel{display:none},把日志和聊天
+       **一起**隐藏了——聊天区物理上是 .log-panel 的子元素(见 render-log.js 的
+       renderLogPanel),display:none 的父元素会连带隐藏全部子元素,哪怕子元素自己是
+       position:fixed。结果是手机横屏下聊天完全不存在、也没有任何备用入口,而新消息
+       语音播报还在正常工作——用户能"听到"有人说话却看不到也回不了。
+       改成 display:contents:父元素自身不生成任何盒子(padding/border/background/
+       margin 全部不渲染,纵向预算一个像素都不多占,CORE-118/121 抢来的空间全部保住),
+       但子元素照常参与渲染——于是 .log-panel-section 可以单独 display:none 继续隐藏
+       日志,.chat-panel-section 则靠上面 #game:not(.desktop-layout) 那条规则浮成独立
+       弹层。这里刻意只隐藏日志半边,不再一刀切整个容器。 */
+    .log-panel{display:contents;}
+    .log-panel-section{display:none;}
 
     /* #myGeneral(自己的武将名+技能+完整描述)在正常宽视口下只占一行,但描述文字本身
        长短不一(比如郭嘉天妒+遗计两段说明,是全表最长的一条)——矮视口下宽度也跟着
@@ -2211,6 +2278,7 @@
 <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
 <button id="aiTestBtn" class="icon-btn" title="打开AI托管信息窗" onclick="openAiTestModal()">🤖</button>
 <button id="aiPanelBtn" class="icon-btn" title="查看AI决策(理由/武将/模型,含非托管机器人)" onclick="openAiPanelModal()">🧠</button>
+<button id="chatBtn" class="icon-btn" title="聊天" onclick="toggleChatPanel()" data-unread="0">💬</button>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
@@ -2363,7 +2431,7 @@
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=394"></script>
 <script src="render-controls.js?v=421"></script>
-<script src="render-log.js?v=397"></script>
+<script src="render-log.js?v=398"></script>
 <script src="game-bg.js?v=7"></script>
 </body>
 </html>
