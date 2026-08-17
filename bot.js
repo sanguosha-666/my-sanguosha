@@ -421,6 +421,33 @@ function recordBotRescueEvidence(g,rescuerSeat,dyingSeat){
 // 内奸(nei)刻意不在这里设任何硬边界——内奸的目标选择依赖局势动态判断(前中期避免主公
 // 暴毙、反贼数量等),继续留给 botTargetScore 自己的评分分支决定,不能粗暴套固定敌我过滤
 // (issue 明确要求"内奸继续使用现有动态策略")。
+// botAoeSelfRiskAllows:主动发动全场AOE(南蛮入侵/万箭齐发/乱击这类无单一目标、打全场
+// 其他存活角色的技能/锦囊)前的阵营风险评估——CORE-97(issue #144)/CORE-98(issue #145)
+// 共用这一个入口。这类技能没有单一目标,无法用botTargetPolicyAllows(那是单目标硬过滤)
+// 覆盖,需要单独建模。这里只检查"会不会误伤己方到致命线"这一条最朴素也最重要的风险
+// (已知同阵营/同队友中有人hp<=1,AOE的1点伤害就有很大概率直接杀死他们——hp是公开信息,
+// 不像手牌数量/牌面那样受隐藏信息限制,可以放心直接读),不是完整的期望收益/概率精算
+// 模型(项目一贯的保守取向:没有把握就不主动冒险,不追求"精算出最优解")。
+// identity模式:忠臣/主公互为友军,反贼互为友军,内奸不设固定敌我(继续走既有的动态
+// 判断基调,呼应botTargetRelationAllowed对nei角色的处理)。team模式:同队即友军。
+// FFA:不评估,直接放行(零回归——FFA本来就没有阵营概念,旧行为不受此函数影响)。
+function botAoeSelfRiskAllows(g,seat){
+  const me=g.players[seat];
+  if(!me) return false;
+  if(g.gameMode==='team'){
+    return !g.players.some((p,i)=>i!==seat && p && p.alive && p.hp<=1 && sameTeam(g,seat,i));
+  }
+  if(g.gameMode!=='identity') return true;
+  if(me.role==='nei') return true;
+  const allySets={ zhu:['zhu','zhong'], zhong:['zhu','zhong'], fan:['fan'] };
+  const allies=allySets[me.role]||[];
+  if(!allies.length) return true;
+  return !g.players.some((p,i)=>{
+    if(i===seat || !p || !p.alive || p.hp>1) return false;
+    const known=botKnownRole(g,seat,i);
+    return known && allies.indexOf(known)>=0;
+  });
+}
 function botTargetRelationAllowed(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return false;
@@ -628,9 +655,12 @@ function botTryStartExtraSkills(g, seat){
   }
   // 袁绍【乱击】:花2张同花色手牌当万箭齐发使用(全场AOE,自己免疫)。只有存在≥2名其他
   // 存活角色时才划算(否则花2张牌只打1个人,不如直接出一张杀更省资源)。
+  // CORE-97(issue #144):原来只看人数和同花色牌,不评估任何阵营/存活风险——忠臣袁绍、
+  // 主公仅1点体力时旧写法仍会无条件发动。叠加botAoeSelfRiskAllows(已知己方/同队友中
+  // 有人命悬一线时不发动,内奸/FFA不受影响,见该函数定义处的完整说明)。
   if(hasCap(me,'luanji')){
     const otherAlive=g.players.filter((p,i)=>i!==seat && p && p.alive).length;
-    if(otherAlive>=2){
+    if(otherAlive>=2 && botAoeSelfRiskAllows(g,seat)){
       const suitCount={};
       (me.hand||[]).forEach(c=>{ if(c) suitCount[c.suit]=(suitCount[c.suit]||0)+1; });
       if(Object.values(suitCount).some(n=>n>=2)){ botInvoke(seat, startLuanji); return true; }

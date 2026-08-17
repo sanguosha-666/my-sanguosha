@@ -183,6 +183,15 @@ var __HELPFUL_CARDS = { '桃':1, '无中生有':1 };
 function __recordViolation(ctx){ __violations.push(ctx); }
 function __resetViolations(){ __violations = []; }
 function __getViolations(){ return __violations; }
+// CORE-97(issue #144)/CORE-98(issue #145):AOE(乱击/南蛮入侵/万箭齐发)没有单一目标,
+// 打不到上面那套"选错了自己人"检测,需要单独的"自伤风险"检测——发动瞬间,已知同阵营
+// (identity)/同队(team)里是否存在 hp<=1 的角色。这里直接复用 bot.js 里真实的
+// botAoeSelfRiskAllows(不重新实现一遍风险模型,避免两处判断标准不一致),取反即为违规。
+function __aoeSelfRiskViolation(g, actorSeat){
+  if(g.gameMode!=='identity' && g.gameMode!=='team') return null;
+  if(typeof botAoeSelfRiskAllows!=='function') return null;
+  return botAoeSelfRiskAllows(g, actorSeat) ? null : 'aoe:self-risk-'+(g.gameMode==='team'?'teammate':g.players[actorSeat].role);
+}
 
 // ============ 确定性 LLM stub(CORE-92 E层) ============
 // 【为什么包在 callAiChooseIndex 外面、而不是直接替换它】直接替换会跳过真实的解析/越界
@@ -237,7 +246,7 @@ function __aiStubCallCount(){ return __aiStubCalls; }
 // bug本身就是"这两条路径没有过阵营策略过滤",如果soak也不检测这两条路径,压测再多局
 // 也测不出这类问题。挂钩方式和 playCard/seatPickExecute 同一套(记录真实调用参数、
 // 判违规、再转发给真实实现),harmful kind(两者都是主动出杀,恒有害)。
-var __realPlayCard = null, __realSeatPickExecute = null, __realPlayZhangbaSha = null, __realPlayShaFangtian = null, __hooksOn = false;
+var __realPlayCard = null, __realSeatPickExecute = null, __realPlayZhangbaSha = null, __realPlayShaFangtian = null, __realConfirmLuanji = null, __hooksOn = false;
 function __installViolationHooks(){
   if(__hooksOn) return; __hooksOn = true;
   __realPlayCard = playCard;
@@ -292,6 +301,22 @@ function __installViolationHooks(){
     }
     return __realPlayShaFangtian.apply(null, arguments);
   };
+  // CORE-97(issue #144):乱击是AOE,confirmLuanji是"真正打出去"的确认提交点(startLuanji
+  // 只是打开选牌流程,可能被cancelLuanji取消,不是真正的主动决策),在这里检测发动瞬间
+  // 的自伤风险,而不是挂在startLuanji上(那样会把"打开菜单看了一眼又取消"也算进去)。
+  if(typeof confirmLuanji==='function'){
+    __realConfirmLuanji = confirmLuanji;
+    confirmLuanji = function(){
+      var g = currentGameState();
+      if(g){
+        var actor = mySeat;
+        var v = __aoeSelfRiskViolation(g, actor);
+        if(v) __recordViolation({ via:'confirmLuanji', action:'乱击', actor:actor, rule:v,
+          phase:g.phase, turn:g.turn, roundNum:g.roundNum });
+      }
+      return __realConfirmLuanji.apply(null, arguments);
+    };
+  }
 }
 
 // ============ 主驱动 ============
