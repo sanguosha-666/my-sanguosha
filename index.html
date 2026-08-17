@@ -1266,7 +1266,7 @@
   /* 记录摘要行里的"座位·武将"标签:面板同时列多台 AI 的决策时用来分辨是谁的。 */
   .aitest-who{flex:0 0 auto;padding:0 4px;border:1px solid var(--paper-dim,#a0926e);border-radius:3px;font-size:11px;opacity:.85}
   .aitest-panel{position:relative;display:flex;flex-direction:column;width:100%;height:100%;background:var(--paper,#f5ecd9);border:1px solid var(--paper-dim,#a0926e);border-radius:8px;overflow:hidden;box-sizing:border-box}
-  .aitest-header{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cinnabar,#a03a2a);color:#fff;font-size:14px;font-weight:600;cursor:move;user-select:none}
+  .aitest-header{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--cinnabar,#a03a2a);color:#fff;font-size:14px;font-weight:600;cursor:move;user-select:none;touch-action:none}
   .aitest-close{margin-left:auto;background:transparent;color:#fff}
   /* .aitest-close 的 hover 覆盖全局 button:hover:not(:disabled){background:#2e2823}
      (特异性 (0,2,1) 高于单独 .aitest-close 的 (0,1,0),会把它盖成深灰块)——加一层
@@ -1284,7 +1284,7 @@
   .aitest-footer{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:4px 10px;border-top:1px solid var(--paper-dim,#a0926e)}
   /* 对比度修复：paper-dim在paper背景上对比度仅1.40:1，改用ink-soft提升至11.38:1 */
   .aitest-hint{font-size:11px;color:var(--ink-soft,#2c2722);margin-left:auto}
-  .aitest-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--cinnabar,#a03a2a) 50%);border-bottom-right-radius:8px}
+  .aitest-resize-handle{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--cinnabar,#a03a2a) 50%);border-bottom-right-radius:8px;touch-action:none}
   #aiTestBtn.aitest-active{background:var(--cinnabar,#a03a2a);color:#fff}
 
   /* ===== 强制横屏软引导——骨架级重建阶段3 =====
@@ -2322,7 +2322,7 @@
 <script src="skills/late-generals.js?v=404"></script>
 <script src="bot-ai-bus.js?v=406"></script>
 <script src="bot.js?v=422"></script>
-<script src="ai-bot.js?v=403"></script>
+<script src="ai-bot.js?v=404"></script>
 <script src="render.js?v=414"></script>
 <script src="render-table.js?v=394"></script>
 <script src="render-discard.js?v=395"></script>
