@@ -137,6 +137,13 @@
   .discard-reveal-card{display:flex;flex-direction:column;align-items:center;gap:2px;}
   .discard-reveal-card .table-card-mini{width:52px;height:72px;}
   .table-strip:has(.discard-reveal.show){min-height:108px;}
+  /* CORE-122(issue #154)方向2:"最近N次出牌"文字历史chip,默认隐藏——只在平板断点内
+     (见下面@media 641~1199px块)display:flex显示,手机/桌面都不展示这块(手机纵向预算
+     本来就紧张,桌面已经有常驻的.log-panel游戏日志覆盖同样的信息需求)。纯文字chip,不带
+     卡面图片,和#tableCard内部渲染逻辑/动画坐标系统完全独立,是它的兄弟节点。 */
+  .recent-plays-history{display:none;}
+  .recent-play-chip{font-size:11px;color:var(--paper-dim);background:rgba(0,0,0,.25);
+    border:1px solid var(--line);border-radius:10px;padding:2px 8px;white-space:nowrap;}
   @keyframes discardRevealFade{
     0%{opacity:0;transform:scale(.96);} 8%{opacity:1;transform:scale(1);}
     86%{opacity:1;} 100%{opacity:0;}
@@ -2119,6 +2126,18 @@
   @media (min-width:641px) and (max-width:1199px) and (min-height:521px),
          (min-width:641px) and (hover:none) and (pointer:coarse) and (min-height:521px){
     #controls button{min-height:44px;}
+    /* CORE-122(issue #154)方向2:"最近N次出牌"文字历史chip(纯客户端本地记忆,渲染
+       逻辑见render-table.js的recentPlaysHistory/pushRecentPlayHistory)。这条规则
+       刻意复用上面#controls button同一个min-height:521px门槛,而不是放进641~1199px
+       那个只按宽度分档的通用平板块——手机横屏(如iPhone SE横屏667x375)宽度667落在
+       641~1199区间里,如果不加min-height门槛,这块历史chip会在手机横屏也被显示出来
+       (实测过:不加门槛时手机横屏SE页高从376px涨到380px,虽然只有4px但纯属不该出现
+       的回归)。.table-strip补flex-wrap:wrap+#recentPlaysHistory自身width:100%,让它
+       被挤到#tableCard下方独立一行;#discardReveal是绝对定位覆盖层,不参与flex流,
+       不受这条wrap影响。 */
+    .table-strip{flex-wrap:wrap;}
+    .recent-plays-history{display:flex;flex-wrap:wrap;gap:6px;width:100%;
+      justify-content:center;order:3;margin-top:4px;}
   }
 
   /* 平板竖屏：武将信息描述收起，给座位、操作区和手牌保留稳定空间。完整说明仍可
@@ -2286,6 +2305,7 @@
     <div class="table-strip" id="tableStrip">
       <div id="tableCard" class="table-card"></div>
       <div id="discardReveal" class="discard-reveal" aria-live="polite"></div>
+      <div id="recentPlaysHistory" class="recent-plays-history"></div>
     </div>
 
     <div class="panel table">
@@ -2339,7 +2359,7 @@
 <script src="bot.js?v=422"></script>
 <script src="ai-bot.js?v=404"></script>
 <script src="render.js?v=414"></script>
-<script src="render-table.js?v=394"></script>
+<script src="render-table.js?v=395"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=394"></script>
 <script src="render-controls.js?v=421"></script>
