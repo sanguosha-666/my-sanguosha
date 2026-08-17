@@ -30,6 +30,61 @@ function tableCardFaceHtml(card){
 // 好几次,"链结束"是最后单独发生的一次,不一定伴随新牌)。
 let lastShownEntrySeq = undefined;
 let lastFadedBatchSeq = undefined;
+// CORE-122(issue #154)方向2:平板"最近N次出牌"历史记忆——纯客户端本地内存,不写入g,
+// 不碰pruneExchangeCards/game.js任何共享状态。固定大小FIFO(RECENT_PLAYS_LIMIT条),
+// 超出自动丢最老的一条,不额外监听"新对局开始"信号做重置——新对局里最多3次真实出牌,
+// 旧对局的记录就被自然挤出窗口,逻辑更简单、和服务端状态零交集。刷新页面/重进房间时
+// 这个模块级变量本来就会重新初始化,天然清空,不需要专门处理。
+const RECENT_PLAYS_LIMIT = 3;
+let recentPlaysHistory = [];
+// summarizeCompletedChain: 把一条刚结束的结算链(g.exchangeCards这一批)总结成一行纯
+// 文字chip(不带卡面图片,故意保持轻量——只在平板断点内展示,见index.html对应CSS)。
+// 出牌方取链里第一项的seat(链条自始至终都是同一个人在操作,取第一项和取最后一项等价,
+// 这里选第一项是因为语义上"是谁发起了这条链"更贴近直觉);牌名按链里出现顺序拼接
+// (决斗/铁索连环这类一条链打出多张牌时,能看到完整过程,不止最后一张);目标座位取
+// 最后一项的targets(响应链条打到最后,目标信息一般也稳定在最后一项)。
+// 任何字段缺失都不抛错、静默降级成更短的文本——这是纯装饰性历史记忆,不能因为异常
+// 数据影响主渲染(和上面飞牌/连线动画的异常处理原则一致)。
+function summarizeCompletedChain(g, chainEntries){
+  try{
+    if(!Array.isArray(chainEntries) || chainEntries.length===0) return null;
+    const first = chainEntries[0];
+    const lastEntry = chainEntries[chainEntries.length-1];
+    const actorSeat = Number.isInteger(first.seat) ? first.seat : null;
+    const actorLabel = (actorSeat!==null && g.players && g.players[actorSeat])
+      ? getPlayerDisplayLabel(g, g.players[actorSeat]) : '？';
+    const cardNames = chainEntries.map(e=>e && e.name ? e.name : '').filter(Boolean).join('、') || '？';
+    let targetsLabel = '';
+    if(Array.isArray(lastEntry.targets) && lastEntry.targets.length>0){
+      const names = lastEntry.targets
+        .map(t => (g.players && g.players[t]) ? getPlayerDisplayLabel(g, g.players[t]) : null)
+        .filter(Boolean);
+      if(names.length) targetsLabel = '→'+names.join('、');
+    }
+    return actorLabel+' '+cardNames+targetsLabel;
+  }catch(e){
+    return null; // 静默降级:纯展示性历史记忆,数据异常时宁可不显示这一条,不影响主渲染
+  }
+}
+function pushRecentPlayHistory(g, chainEntries){
+  const summary = summarizeCompletedChain(g, chainEntries);
+  if(!summary) return;
+  recentPlaysHistory.push(summary);
+  if(recentPlaysHistory.length > RECENT_PLAYS_LIMIT){
+    recentPlaysHistory.splice(0, recentPlaysHistory.length - RECENT_PLAYS_LIMIT);
+  }
+  renderRecentPlaysHistory();
+}
+// renderRecentPlaysHistory: #recentPlaysHistory是#tableCard的独立兄弟节点(见index.html
+// #tableStrip结构),只在平板断点内可见(CSS控制display,这里始终渲染内容、不判断断点——
+// 和.log-panel同款"始终渲染、靠CSS决定看不看得见"的既有写法一致)。最新一条排最前面。
+function renderRecentPlaysHistory(){
+  const el = document.getElementById('recentPlaysHistory');
+  if(!el) return;
+  if(recentPlaysHistory.length===0){ el.innerHTML=''; return; }
+  el.innerHTML = recentPlaysHistory.slice().reverse()
+    .map(s=>'<span class="recent-play-chip">'+escapeHtml(s)+'</span>').join('');
+}
 function renderWuguPool(g, el, pending){
   const pool=Array.isArray(pending.pool)?pending.pool:[];
   const picker=Array.isArray(pending.order)?pending.order[pending.idx]:null;
@@ -212,6 +267,10 @@ function renderTableCard(g){
   if(idle){
     if(lastFadedBatchSeq !== last.seq){
       lastFadedBatchSeq = last.seq;
+      // CORE-122(issue #154)方向2:这条链即将淡出的这一刻,存一份文字摘要副本进本地历史
+      // 记忆(list此刻就是这条链打出的全部牌,和下面淡出动画读的是同一份数据)。纯新增
+      // 这一行,不影响下面原有的淡出动画逻辑一个字。
+      pushRecentPlayHistory(g, list);
       // 和 #logToast 同款"淡入-停留-淡出"手法:先移除 .show 强制回流,再加回去,保证 CSS
       // 动画每次都从头重新播放。这一刻数组里已经包含了这条链打出的全部牌,不会出现"最后
       // 一张牌被瞬间清空来不及看清"的问题(清空数据是等下一条链开始时才会发生的完全独立的
