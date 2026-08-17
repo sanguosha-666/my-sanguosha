@@ -79,6 +79,13 @@ function enterGame(){
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('configWarn').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
+  // CORE-119(issue #151):shouldShowLandscapeGate() 现在按 #game 是否可见判断要不要拦截
+  // 竖屏(见 render.js)——但这里只是切了一个 class,不触发 resize/orientationchange,
+  // 遮罩不会自动感知"刚刚进入对局"这个变化。如果用户在竖屏状态下点"进入房间",不补这一
+  // 行调用,遮罩会一直停留在大厅阶段"不拦截"的状态,直到用户下一次真的旋转设备才会重新
+  // 出现——等于放这段时间完全绕过横屏保护,不是可以接受的行为。这里显式跑一次,和页面
+  // 加载时的初始检测(render.js 底部 `checkLandscapeGate()`)同一套写法。
+  if(typeof checkLandscapeGate==='function') checkLandscapeGate();
   if(typeof pauseBgVideo==='function') pauseBgVideo();          // 大厅视频暂停,避免后台耗流量
   if(typeof startGameBg==='function') startGameBg();            // 启动游戏内飘牌 Canvas
   gameRef.on('value', snap => render(snap.val()));
@@ -651,6 +658,12 @@ function backToLobby(){
   mySeat = null; selectedCardIdx = null; resetZhangba();
   document.getElementById('game').classList.add('hidden');
   document.getElementById('lobby').classList.remove('hidden');
+  // CORE-119(issue #151):和 enterGame() 那处同一个理由的对称修复——离开对局回大厅同样
+  // 只是切 class,不触发 resize/orientationchange。如果窄屏竖屏用户当时正被遮罩正确拦截
+  // 在对局里(比如房间被强制关闭、走的是"被动收到删除"这条路径,不是用户自己点按钮离开),
+  // 不补这一行,遮罩会在回到大厅后继续错误拦截本该放行的大厅表单,直到用户碰巧旋转一次
+  // 设备才会解除。
+  if(typeof checkLandscapeGate==='function') checkLandscapeGate();
   if(typeof stopGameBg==='function') stopGameBg();              // 停止并清空飘牌
   if(typeof resumeBgVideo==='function') resumeBgVideo();        // 恢复大厅视频(随机换一个)
   document.getElementById('lobbyErr').textContent = '房间已清理,可重新进入。';
