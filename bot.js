@@ -2843,6 +2843,21 @@ BOT_DECISIONS.lijianTwoStep = {
 // playZhangbaSha 的次数/将驰守卫(!jiangchiNoSlash、shaUsed 且无 unlimitedSha 且无
 // jiangchiExtraShaLeft 时拒绝)。match 额外要求存在至少一个合法杀目标——目标不可达时
 // 服务端必然拒绝、三阶段流程白挂起,且陈旧挂起态会堵住其它多步决策,不如不进流程。
+// CORE-95(issue #142):丈八蛇矛走独立候选路径,原来只检查存活+距离+空城,没有过
+// botTargetPolicyAllows——会让身份局的忠臣/主公/反贼阵营保护在这条特殊出杀路径上
+// 失效。抽出这个共用 helper,match(存在性判断)和 buildCandidates 阶段C(真正枚举)
+// 统一用它,不要各自重复一遍筛选逻辑。
+function botZhangbaLegalTargets(g, seat){
+  const out = [];
+  g.players.forEach(function(p, i){
+    if(!p || !p.alive || i===seat) return;
+    if(!canReachSha(g, seat, i)) return;
+    if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
+    if(!botTargetPolicyAllows(g, seat, i, 'harmful')) return;
+    out.push(i);
+  });
+  return out;
+}
 BOT_DECISIONS.zhangbaTwoStep = {
   match: function(g, seat){
     if(g.phase!=='play' || g.turn!==seat) return false;
@@ -2852,12 +2867,7 @@ BOT_DECISIONS.zhangbaTwoStep = {
     if(me.jiangchiNoSlash) return false; // 曹彰【将驰】选项1:本回合不能使用/打出杀
     if(g.shaUsed && !hasCap(me,'unlimitedSha') && !(g.jiangchiExtraShaLeft > 0)) return false;
     if((me.hand||[]).length < 2) return false;
-    return g.players.some(function(p, i){
-      if(!p || !p.alive || i===seat) return false;
-      if(!canReachSha(g, seat, i)) return false;
-      if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return false;
-      return true;
-    });
+    return botZhangbaLegalTargets(g, seat).length > 0;
   },
   buildCandidates: function(g, seat){
     const me = g.players[seat];
@@ -2872,13 +2882,11 @@ BOT_DECISIONS.zhangbaTwoStep = {
         });
         return out;
       }
-      // 阶段 C:镜像 render.js 1234-1252 —— 存活、非自己、canReachSha、非空城
+      // 阶段 C:镜像 render.js 1234-1252 —— 存活、非自己、canReachSha、非空城,叠加
+      // botTargetPolicyAllows 阵营策略过滤(CORE-95)。
       const b = botTwoStepA.b;
-      g.players.forEach(function(p, i){
-        if(!p || !p.alive || i===seat) return;
-        if(!canReachSha(g, seat, i)) return;
-        if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
-        out.push({ index: 0, label: '丈八:两张牌当【杀】打 '+p.name, step:'C', a: a, b: b, targetSeat: i });
+      botZhangbaLegalTargets(g, seat).forEach(function(i){
+        out.push({ index: 0, label: '丈八:两张牌当【杀】打 '+g.players[i].name, step:'C', a: a, b: b, targetSeat: i });
       });
       return out;
     }
@@ -2900,12 +2908,16 @@ BOT_DECISIONS.zhangbaTwoStep = {
   },
 };
 
+// CORE-95(issue #142):方天画戟同样走独立候选路径,只过了游戏规则 canTarget,没有过
+// botTargetPolicyAllows——多目标组合(botFangtianCombinations)里任何一个目标都可能是
+// 己方阵营,必须先在单目标这一层就把策略禁止的目标筛掉,组合阶段才不会混入。
 function botFangtianTargets(g, seat){
   const me=g.players[seat], out=[];
   if(!me) return out;
   g.players.forEach(function(p, i){
     if(!p || !p.alive || i===seat) return;
     if(!CARD_PLAYS['杀'].canTarget(g,me,{name:'杀',virtual:true},i)) return;
+    if(!botTargetPolicyAllows(g, seat, i, 'harmful')) return;
     out.push(i);
   });
   return out;

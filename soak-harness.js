@@ -232,7 +232,12 @@ function __uninstallAiStub(){
 function __aiStubCallCount(){ return __aiStubCalls; }
 
 // ============ 主动决策挂钩(供违规检测) ============
-var __realPlayCard = null, __realSeatPickExecute = null, __hooksOn = false;
+// CORE-95(issue #142):丈八蛇矛/方天画戟走独立的执行入口(playZhangbaSha/
+// playShaFangtian),不经过 playCard,原来完全没有被这套违规检测覆盖到——issue的
+// bug本身就是"这两条路径没有过阵营策略过滤",如果soak也不检测这两条路径,压测再多局
+// 也测不出这类问题。挂钩方式和 playCard/seatPickExecute 同一套(记录真实调用参数、
+// 判违规、再转发给真实实现),harmful kind(两者都是主动出杀,恒有害)。
+var __realPlayCard = null, __realSeatPickExecute = null, __realPlayZhangbaSha = null, __realPlayShaFangtian = null, __hooksOn = false;
 function __installViolationHooks(){
   if(__hooksOn) return; __hooksOn = true;
   __realPlayCard = playCard;
@@ -261,6 +266,31 @@ function __installViolationHooks(){
       }
     }
     return __realSeatPickExecute.apply(null, arguments);
+  };
+  __realPlayZhangbaSha = playZhangbaSha;
+  playZhangbaSha = function(idxA, idxB, targetSeat){
+    var g = currentGameState();
+    if(g && Number.isInteger(targetSeat)){
+      var actor = mySeat;
+      var v = __factionViolation(g, actor, targetSeat, 'harmful');
+      if(v) __recordViolation({ via:'playZhangbaSha', action:'丈八蛇矛', actor:actor, target:targetSeat, rule:v,
+        phase:g.phase, turn:g.turn, roundNum:g.roundNum });
+    }
+    return __realPlayZhangbaSha.apply(null, arguments);
+  };
+  __realPlayShaFangtian = playShaFangtian;
+  playShaFangtian = function(cardIdx, targets){
+    var g = currentGameState();
+    if(g && Array.isArray(targets)){
+      var actor = mySeat;
+      targets.forEach(function(t){
+        if(!Number.isInteger(t)) return;
+        var v = __factionViolation(g, actor, t, 'harmful');
+        if(v) __recordViolation({ via:'playShaFangtian', action:'方天画戟', actor:actor, target:t, rule:v,
+          phase:g.phase, turn:g.turn, roundNum:g.roundNum });
+      });
+    }
+    return __realPlayShaFangtian.apply(null, arguments);
   };
 }
 
