@@ -887,11 +887,26 @@ function renderPendingYijiAssign(g,c){
   alive.forEach(o=>{const b=document.createElement('button');b.textContent='给 '+(o.i===mySeat?'自己':o.p.name);b.onclick=isLast?()=>{const picks=[...yijiPicks,o.i];resetYiji();respondYijiAssign(picks);}:()=>{yijiPicks=[...yijiPicks,o.i];render(g);};c.appendChild(b);});
   if(idx>0){const back=document.createElement('button');back.className='ghost';back.textContent='上一步(重选)';back.onclick=()=>{yijiPicks=yijiPicks.slice(0,-1);render(g);};c.appendChild(back);}setBanner('【遗计】选择第'+(idx+1)+'/'+cards.length+'张牌交给谁?');
 }
+// CORE-94(issue #141):targetMap[seat] 现在是数组(并列同距离全保留,包括发动者本人)。
+// 唯一候选时保持原来"一键出杀"的体验(自带目标不用再点一次);多个并列候选时,每个候选
+// 各出一个按钮,真人自己挑一个。
 function renderPendingLuanwuChoose(g,c){
-  const source=g.players[g.pending.sourceSeat],map=g.pending.targetMap||{},nearestSeat=map[mySeat],nearest=typeof nearestSeat==='number'&&nearestSeat!==mySeat?g.players[nearestSeat]:null;
-  const available=hasShaCard(g,mySeat)&&nearestSeat!==null&&canReachSha(g,mySeat,nearestSeat)&&nearest&&nearest.alive,div=document.createElement('div');div.className='centered';
-  const h4=document.createElement('h4');h4.textContent=source.name+' 发动【乱武】';div.appendChild(h4);const p=document.createElement('p');p.textContent='请选择：';div.appendChild(p);
-  if(available){const sha=document.createElement('button');sha.className='skill-btn';sha.style.background='#e74c3c';sha.textContent='对 '+nearest.name+' 使用【杀】';sha.onclick=()=>chooseLuanwuOption('sha');div.appendChild(sha);}
+  const source=g.players[g.pending.sourceSeat],map=g.pending.targetMap||{};
+  const targets=(map[mySeat]||[]).filter(i=>g.players[i]&&g.players[i].alive);
+  const iHasSha=hasShaCard(g,mySeat);
+  const div=document.createElement('div');div.className='centered';
+  const h4=document.createElement('h4');h4.textContent=source.name+' 发动【乱武】';div.appendChild(h4);
+  const p=document.createElement('p');p.textContent='请选择：';div.appendChild(p);
+  const available=iHasSha&&targets.length>0;
+  if(available){
+    targets.forEach(seat=>{
+      const t=g.players[seat];
+      const sha=document.createElement('button');sha.className='skill-btn';sha.style.background='#e74c3c';
+      sha.textContent='对 '+t.name+' 使用【杀】';
+      sha.onclick=()=>chooseLuanwuOption('sha',seat);
+      div.appendChild(sha);
+    });
+  }
   const hp=document.createElement('button');hp.className='skill-btn';hp.style.background='#8e44ad';hp.textContent='失去1点体力';hp.onclick=()=>chooseLuanwuOption('hp');div.appendChild(hp);
   if(!available){const note=document.createElement('p');note.style.color='#7f8c8d';note.textContent='（无法使用杀，只能选择失去体力）';div.appendChild(note);}c.appendChild(div);setBanner(escapeHtml(source.name)+' 发动【乱武】,你需要选择:使用杀或失去1点体力');
 }

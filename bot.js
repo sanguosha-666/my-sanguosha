@@ -1464,44 +1464,47 @@ BOT_DECISIONS.beigeChoose = {
 function luanwuChoiceMatch(g, seat){
   return g.phase==='luanwuChoose' && g.pending && g.pending.type==='luanwuChoose' && g.pending.currentSeat===seat;
 }
+// CORE-94(issue #141):targetMap[seat] 现在是数组(并列同距离全保留,包括发动者本人),
+// 每个候选目标各生成一条独立的 sha 候选,而不是只镜像唯一一个 nearestPlayer。
 function luanwuChoiceBuildCandidates(g, seat){
   const d = g.pending || {};
   const map = d.targetMap || {};
-  const nearestSeat = map[seat];
-  const nearestPlayer = (typeof nearestSeat==='number' && nearestSeat!==seat) ? g.players[nearestSeat] : null;
-  const shaAvailable = !!(nearestPlayer && nearestPlayer.alive
-    && hasShaCard(g, seat) && canReachSha(g, seat, nearestSeat));
+  const targets = (map[seat] || []).filter(i=>g.players[i] && g.players[i].alive);
+  const iHasSha = hasShaCard(g, seat);
   const out = [{ action:'失去1点体力', option:'hp' }];
-  if(shaAvailable) out.push({ action:'对'+nearestPlayer.name+'使用【杀】', option:'sha' });
+  if(iHasSha){
+    targets.forEach(targetSeat=>{
+      out.push({ action:'对'+g.players[targetSeat].name+'使用【杀】', option:'sha', targetSeat });
+    });
+  }
   return out;
 }
 function luanwuChoiceLocalFallback(g, seat, candidates){
   return candidates.find(c=>c.option==='sha') || candidates.find(c=>c.option==='hp') || candidates[0];
 }
 function luanwuChoiceExecute(g, seat, choice){
-  botInvoke(seat, ()=>chooseLuanwuOption(choice.option));
+  botInvoke(seat, ()=>chooseLuanwuOption(choice.option, choice.targetSeat));
 }
 function buildBotLuanwuVisibleState(g, seat){
   const d = g.pending || {};
   const map = d.targetMap || {};
-  const nearestSeat = map[seat];
-  const nearestPlayer = (typeof nearestSeat==='number' && nearestSeat!==seat) ? g.players[nearestSeat] : null;
+  const targets = (map[seat] || []).filter(i=>g.players[i] && g.players[i].alive);
   const source = g.players[d.sourceSeat];
   return {
     luanwu: {
       sourceName: source ? source.name : null,
-      nearestTargetName: nearestPlayer ? nearestPlayer.name : null,
-      nearestTargetIsSelf: nearestSeat===seat,
+      nearestTargetNames: targets.map(i=>g.players[i].name),
     }
   };
 }
 function buildBotLuanwuSystemPrompt(g, seat){
   return botPromptWithIdentity('你在扮演一款网页版三国杀里的AI机器人玩家。场上一名角色'
-  +'(贾诩)发动了【乱武】，轮到你选择:对局面数据 luanwu.nearestTargetName 标注的最近'
-  +'角色使用一张【杀】(若该选项存在于候选列表)，或者失去1点体力——这是强制二选一，'
-  +'不选也必须承担其中一个后果。请结合你与最近角色的敌我关系判断是否值得消耗一张杀。'
-  +'请只输出一个严格的JSON对象，格式固定为 {"choice": 数字}，不要输出任何解释文字、'
-  +'代码块标记或多余字段。', g, seat);
+  +'(贾诩)发动了【乱武】，轮到你选择:对局面数据 luanwu.nearestTargetNames 列出的某一名'
+  +'距离最近的角色(可能有多个并列,候选列表里每个目标各有一条对应选项;也可能包含发动'
+  +'乱武的角色本人)使用一张【杀】(若该选项存在于候选列表)，或者失去1点体力——这是'
+  +'强制二选一,不选也必须承担其中一个后果。请结合你与候选目标的敌我关系判断是否值得'
+  +'消耗一张杀、以及并列多个目标时该打谁。请只输出一个严格的JSON对象，格式固定为'
+  +'{"choice": 数字}，不要输出任何解释文字、代码块标记或多余字段。', g, seat);
 }
 BOT_DECISIONS.luanwuChoice = {
   match: luanwuChoiceMatch,

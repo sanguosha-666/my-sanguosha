@@ -43,8 +43,19 @@ function restrict(g,kind,targetSeat,attackerSeat,tongjiSeat){
   }
 }
 
-// 乱武：座位1的唯一最近角色是座位2。若该目标受规则保护，不得改杀更远的座位3。
-['kongcheng','tongji','zhichi'].forEach(kind=>{
+// 乱武：座位1视角,座位0(发动者)和座位2(最近目标)同距离并列最近(4人环形局座位1到
+// 座位0/座位2均为距离1,座位3距离2)。CORE-94(issue #141)修复前发动者被无条件排除、
+// 修复后发动者和座位2按同距离并列——若座位2因规则保护失去合法性,座位0应仍留在候选
+// 集合里(不能整体清空)。
+// 同疾例外：restrict('tongji',...) 把 caps.tongji 设在座位3(owner)身上,而同疾的效果是
+// "拥有者在攻击者射程内时,攻击者只能以拥有者为目标"——这会连座位0(发动者)一并排除,
+// 只剩座位3(不在最短距离1以内)合法,因此这一档并列的两个候选(0和2)会同时被过滤为空集,
+// 和 kongcheng/zhichi(只影响座位2本身)行为不同,需要单独断言。
+[
+  {kind:'kongcheng', expect:[0]},
+  {kind:'zhichi', expect:[0]},
+  {kind:'tongji', expect:[]},
+].forEach(({kind,expect})=>{
   const g=game([
     player('贾诩','jiaxu',[]),
     player('响应者','caocao',[card('杀')]),
@@ -55,12 +66,13 @@ function restrict(g,kind,targetSeat,attackerSeat,tongjiSeat){
   restrict(g,kind,2,1,3);
   sandbox.__g=g;
   R('startLuanwu()');
-  assert.strictEqual(g.pending.targetMap[1],null,'乱武 '+kind+'：非法最近目标不得进入 targetMap');
+  assert.deepStrictEqual(g.pending.targetMap[1]||[],expect,'乱武 '+kind+'：候选集合应为 '+JSON.stringify(expect));
 });
 {
   const g=game([player('贾诩','jiaxu',[]),player('响应者','caocao',[card('杀')]),player('正常目标','caocao',[card('闪')]),player('远处角色','caocao',[])]);
   g.players[0].caps.luanwu=true; sandbox.__g=g; R('startLuanwu()');
-  assert.strictEqual(g.pending.targetMap[1],2,'乱武：正常最近目标仍可选择');
+  // 4人环形局,座位1到座位0(发动者)、座位2均距离1,无规则限制时两者并列合法。
+  assert.deepStrictEqual(g.pending.targetMap[1],[0,2],'乱武：正常最近目标(含并列的发动者)仍可选择');
 }
 
 // 明策：接牌者座位1视为使用杀，第二目标座位2必须走完整 canTarget。

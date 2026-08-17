@@ -3187,19 +3187,21 @@ function getAttackRange(g, seat) {
 // 乱武最近目标只存 g.pending.targetMap(Firebase 同步),禁止客户端全局变量——
 // 非发动者浏览器没有发动时写入的 map,读全局会拿空/错目标。
 
-// findNearestTarget: 找到一个角色距离最近的其他角色（排除自己和源头）
-function findNearestTarget(g, seat, excludeSeat) {
-  const aliveSeats = g.players.map((p, i) => i).filter(i => 
-    g.players[i] && g.players[i].alive && i !== seat && i !== excludeSeat
+// findNearestTargets: 找出一个角色距离最近的全部其他角色(并列同距离全保留,包括乱武
+// 发动者本人——官方卡面"距离最近的一名角色"不排除发动者,CORE-94/issue #141 修复前
+// 这里错误地额外排除了 excludeSeat=发动者)。返回通过真实【杀】canTarget()校验的座位数组
+// (可能为空)。
+function findNearestTargets(g, seat) {
+  const aliveSeats = g.players.map((p, i) => i).filter(i =>
+    g.players[i] && g.players[i].alive && i !== seat
   );
-  
-  if (aliveSeats.length === 0) return null;
-  
+
+  if (aliveSeats.length === 0) return [];
+
   const minDistance = Math.min(...aliveSeats.map(targetSeat=>distance(g,seat,targetSeat)));
   const source=g.players[seat], virtualSha={name:'杀',virtual:true};
-  const nearestSeat=aliveSeats.find(targetSeat=>distance(g,seat,targetSeat)===minDistance &&
+  return aliveSeats.filter(targetSeat=>distance(g,seat,targetSeat)===minDistance &&
     CARD_PLAYS['杀'].canTarget(g,source,virtualSha,targetSeat));
-  return typeof nearestSeat==='number' ? nearestSeat : null;
 }
 
 // hasShaCard: 检查角色是否有杀
@@ -3243,11 +3245,13 @@ function startLuanwu() {
       return g;
     }
     
-    // 为每个角色预计算最近的目标(写入 pending,随 Firebase 同步到所有客户端)
+    // 为每个角色预计算最近的目标(写入 pending,随 Firebase 同步到所有客户端)。
+    // CORE-94(issue #141):targetMap[seat] 现在是数组(并列同距离全保留,包括发动者本人)。
+    // 数组可能是空数组——Firebase 不保存空数组,读回来会变 undefined,读取处一律按
+    // `map[seat]||[]` 兜底(见 chooseLuanwuOption/proceedToNextLuanwu/render-controls.js/bot.js)。
     const targetMap = {};
     for (const seat of otherSeats) {
-      const nearest = findNearestTarget(g, seat, mySeat);
-      targetMap[seat] = nearest;
+      targetMap[seat] = findNearestTargets(g, seat);
     }
     
     // 进入乱武选择阶段,从第一个角色开始
@@ -3266,45 +3270,44 @@ function startLuanwu() {
   });
 }
 
-// chooseLuanwuOption: 乱武选择处理
-function chooseLuanwuOption(option) {
+// chooseLuanwuOption: 乱武选择处理。CORE-94(issue #141):option==='sha' 时新增
+// targetSeat 参数——并列最近目标不再只有一个,必须显式指定选哪一个(UI 只有唯一候选时
+// 自动带上那一个,不需要额外点一次;并列多个时才需要真人先选目标)。
+function chooseLuanwuOption(option, targetSeat) {
   tx(g => {
     if (g.pending.type !== 'luanwuChoose') return g;
     if (g.pending.currentSeat !== mySeat) return g;
 
     const currentSeat = g.pending.currentSeat;
-    const sourceSeat = g.pending.sourceSeat;
     const currentPlayer = g.players[currentSeat];
-    
+
     if (!currentPlayer || !currentPlayer.alive) {
       // 当前角色已死亡，跳过
       proceedToNextLuanwu(g);
       return g;
     }
-    
+
     // 处理选择——pending.targetMap 供全客户端显示；提交时仍按当前状态重算，防止旧快照绕过规则。
     if (option === 'sha') {
       const map = g.pending.targetMap || (g.pending.targetMap={});
-      // 前面角色的乱武结算可能改变存活、手牌或体力，提交时重新计算并同步当前最近合法目标。
-      const targetSeat = findNearestTarget(g,currentSeat,sourceSeat);
-      map[currentSeat]=targetSeat;
-      
-      if (typeof targetSeat === 'number' && targetSeat !== currentSeat) {
-        const hasSha = hasShaCard(g, currentSeat);
-        const canAttack = CARD_PLAYS['杀'].canTarget(g,currentPlayer,{name:'杀',virtual:true},targetSeat);
-        
-        if (hasSha && canAttack) {
-          useShaForLuanwu(g, currentSeat, targetSeat);
-        } else {
-          loseHpForLuanwu(g, currentSeat);
-        }
+      // 前面角色的乱武结算可能改变存活、手牌或体力，提交时重新计算并同步当前合法最近目标集合。
+      const freshTargets = findNearestTargets(g, currentSeat);
+      map[currentSeat] = freshTargets;
+      // 提交的 targetSeat 必须真的在这一刻重算出的候选集合里,防止旧快照/伪造请求绕过规则。
+      if (!freshTargets.includes(targetSeat)) { loseHpForLuanwu(g, currentSeat); return g; }
+
+      const hasSha = hasShaCard(g, currentSeat);
+      const canAttack = CARD_PLAYS['杀'].canTarget(g,currentPlayer,{name:'杀',virtual:true},targetSeat);
+
+      if (hasSha && canAttack) {
+        useShaForLuanwu(g, currentSeat, targetSeat);
       } else {
         loseHpForLuanwu(g, currentSeat);
       }
     } else if (option === 'hp') {
       loseHpForLuanwu(g, currentSeat);
     }
-    
+
     return g;
   });
 }
@@ -3406,7 +3409,7 @@ function proceedToNextLuanwu(g) {
     g.pending.currentSeat = remainingSeats[0];
     g.pending.remainingSeats = remainingSeats.slice(1);
     if(!g.pending.targetMap) g.pending.targetMap={};
-    g.pending.targetMap[g.pending.currentSeat]=findNearestTarget(g,g.pending.currentSeat,g.pending.sourceSeat);
+    g.pending.targetMap[g.pending.currentSeat]=findNearestTargets(g,g.pending.currentSeat);
     setResponseAskedAt(g.pending); // 换下一名乱武响应者时重新开始其独立30秒倒计时
     g.phase = 'luanwuChoose';
   } else {
