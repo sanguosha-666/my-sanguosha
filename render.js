@@ -1181,7 +1181,15 @@ function renderSeatCard(g, seat, isSelf){
   const delayRow = (g.started && (p.delays||[]).length>0)
     ? '<div class="seat-delays">'+p.delays.map(c=>{
         const dDesc = getCardDesc(c.name);
-        return '<span class="dchip" title="'+escapeHtml(dDesc||'')+'" onclick="event.stopPropagation();showDelayInfo(\''+c.name+'\')">'+(cardFace(c)||'')+escapeHtml(c.name)+'</span>';
+        // CORE-127(issue #166):同时输出"完整"和"缩略"两种写法,由 CSS 的 @container 分档
+        // 决定显示哪一个(见 index.html 的 .dchip-full/.dchip-abbr)。小卡片上只显示牌名首字
+        // (乐/兵/闪——三种延时锦囊首字互不相同,DELAY_TRICKS 全表就这三种),chip 宽度从
+        // 52~56px 降到十几px,三张能排进一行而不是各占一行。完整信息不丢失:title 属性和
+        // 点击 showDelayInfo 弹窗都保持原样,手指点一下就能看到完整牌名+效果说明。
+        const dFull = (cardFace(c)||'')+escapeHtml(c.name);
+        const dAbbr = escapeHtml(String(c.name||'').slice(0,1));
+        return '<span class="dchip" title="'+escapeHtml(dDesc||'')+'" onclick="event.stopPropagation();showDelayInfo(\''+c.name+'\')">'
+          + '<span class="dchip-full">'+dFull+'</span><span class="dchip-abbr">'+dAbbr+'</span></span>';
       }).join('')+'</div>'
     : '';
   // 标题栏(叠在顶部遮罩上):玩家名(居中)+状态标签(回合中/连环/濒死)。

@@ -674,6 +674,15 @@
   .seat-delays .dchip{font-size:8px;padding:0 3px;border:1px solid #7a5fa0;border-radius:4px;
     color:#e2d6f5;background:rgba(40,25,60,.75);white-space:nowrap;
     text-shadow:0 1px 2px rgba(0,0,0,.9);}
+  /* CORE-127(issue #166):判定区标签的"完整/缩略"两种写法。默认(大卡片)显示完整的
+     花色点数+牌名,小卡片档只显示牌名首字——见下面 @container (max-width:115px)。
+     【为什么是换内容而不是缩字号】.dchip 原本是座位卡里唯一没进 @container 分档的元素,
+     最直觉的修法是"把它也按档缩小字号"。但实测发现那样会和 CORE-129(issue #168,座位卡
+     字号已经低到 6~7px)直接打架——再缩就更看不清了。换成"小卡片上少显示内容、字号不动",
+     两个问题一起变好而不是互相牺牲:chip 宽度从 52~56px 降到十几px(实测带花色点数的
+     "♣10兵粮寸断"在 64px 宽的卡上要占 56px,几乎铺满整张卡),三张排进一行,判定区从占
+     卡片高度 51~56% 降到约 19%,和竖排武将名的重叠也随之消失。 */
+  .dchip-abbr{display:none;}
   /* 左慈【化身】声明后的"化身：XX·YY"提示行:和 .seat-delays 的紫色系(锦囊)、
      .seat-equip-bar 的金色系(装备)区分开,用青色系代表"借用的技能"这个新概念。
      字号跟 .seat-equip-bar 同一套 clamp(cqw) 写法(按卡片自身宽度缩放,不需要额外的
@@ -749,6 +758,19 @@
     .seat .seat-info-badge{top:27px;width:11px;height:11px;font-size:7px;}
     .seat-order-badge{width:11px;height:11px;font-size:7px;}
     .seat-bottom{right:17px;} /* 4+11+2 */
+    /* CORE-127(issue #166):判定区标签在这一档起改用缩略写法(只显示牌名首字)。
+       【为什么门槛定在 115px】实测各档卡片宽度与判定区实际表现(3张延时锦囊、带花色点数):
+         桌面8人局 145px → 占卡高15%,不重叠;   桌面4人局 180px → 15%,不重叠
+         平板横屏   135px → 18%,不重叠
+         平板竖屏    99px → 36%,不重叠(偏高)
+         小平板641   90px → 40%,**重叠**
+         手机横屏SE  70px → 51%,**重叠**;      手机横屏15/16 64px → 56%,**重叠**
+       重叠从 ≤90px 起出现,而 115px 和 105px 这两个候选门槛对上面全部实测卡宽的分割
+       结果完全一致(都只切下 99/90/70/64 这四档,不碰 135/145/180)——选 115px 是因为
+       它已经是既有的座位卡文字分档门槛,不新增第三个数值。桌面和平板横屏因此完全不受
+       影响,保持显示完整牌名。 */
+    .seat-delays .dchip-full{display:none;}
+    .seat-delays .dchip-abbr{display:inline;}
   }
   /* 横屏矮视口(见下方 max-height:460px 断点)把座位卡尺寸驱动方向反转成"按高度算宽度"
      之后,7人局在 SE 这类矮视口下能算出比这之前任何"按宽度分档"场景都窄的卡(实测约
@@ -765,6 +787,16 @@
     .seat .seat-info-badge{top:22px;width:10px;height:10px;font-size:6px;}
     .seat-order-badge{width:10px;height:10px;font-size:6px;}
     .seat-bottom{right:16px;} /* 4+10+2 */
+    /* CORE-127(issue #166)最小档补充收紧。上面 115px 档的"只显示首字"在 99px/90px 卡上
+       已经够用(判定区从36~40%降到12~13%、不再重叠),但 70px/64px 这两档还不够——实测
+       64px 卡上判定区容器实际只有 46px 宽(被 .seat-bottom 的 right:16px 内缩),扣掉
+       padding 只剩 40px 可用,而三个带 padding+border 的首字 chip 要 52px,仍然换行成两行;
+       且 chip 右对齐后向左延伸到 x=28,而竖排武将名占 x=23~34,横向就撞上了。
+       这里把 chip 压到"只剩字+底色"(去掉左右 padding 和描边、gap 收到1px),三个首字
+       占约 26px,能排进一行且不再伸进武将名那一列。保留底色和圆角,仍然看得出是标签不是
+       散字;紫色系配色不变,和装备条的金色系依旧区分得开。 */
+    .seat-delays{gap:1px;padding:0 2px 2px;}
+    .seat-delays .dchip{padding:0;border:none;border-radius:3px;}
   }
   /* 三选一选将阶段:候选卡片纵向堆叠,继续用 .avatar-box/.avatar/.avatar-placeholder
      这套独立于座位卡片的头像展示(侧边固定宽度+信息在旁边),和上面 .seat-art
@@ -2147,6 +2179,18 @@
     .hand .card{width:88px;height:126px;--badge:19px;}
     .table-card-mini{width:76px;height:106px;}
     .exchange-card .table-card-mini{width:64px;height:90px;}
+    /* CORE-128(issue #167):对局进行中收起大厅装饰性内容(标题压扁、副标题和页脚隐藏)。
+       【为什么平板此前漏了这一条】桌面那三条隐藏规则的选择器都带 .desktop-layout
+       (isDesktopLayout() 写上去的 class,要求 innerWidth>=1200 且 hover:hover 且
+       pointer:fine),触屏平板即使宽到 1024/1366 也永远匹配不上;手机那两条写在
+       @media(max-height:460px) 里,平板高度够也匹配不上。平板作为中间形态被两次优化
+       的作用域各自漏掉,是唯一一个对局中还完整显示"标题45px+副标题20px+页脚37px"
+       共 102px 装饰内容的形态——而它恰恰是需要滚动最多的形态(实测8人局页高1271/768,
+       要滚503px,这102px占了需滚动量的约20%)。
+       标题的处理照抄手机横屏那条(压扁成小字保留,不是整个删掉)——平板空间比手机宽裕,
+       留一行压扁的标题比完全去掉更完整;副标题和页脚则和桌面/手机一致直接隐藏。
+       :has(#game:not(.hidden)) 这个"仅对局中生效"的作用域写法和既有两处保持一致,
+       大厅阶段三块内容照常完整显示。 */
     .log-panel{
       position:static;
       width:auto;
@@ -2193,6 +2237,26 @@
   @media (min-width:641px) and (max-width:1199px) and (min-height:521px),
          (min-width:641px) and (hover:none) and (pointer:coarse) and (min-height:521px){
     #controls button{min-height:44px;}
+    /* CORE-128(issue #167):对局进行中收起大厅装饰性内容(标题压扁、副标题和页脚隐藏)。
+       【为什么平板此前漏了这一条】桌面那三条隐藏规则的选择器都带 .desktop-layout
+       (isDesktopLayout() 写上去的 class,要求 innerWidth>=1200 且 hover:hover 且
+       pointer:fine),触屏平板即使宽到 1024/1366 也永远匹配不上;手机那两条写在
+       @media(max-height:460px) 里,平板高度够也匹配不上。平板作为中间形态被两次优化的
+       作用域各自漏掉,是唯一一个对局中还完整显示"标题45px+副标题20px+页脚37px"共102px
+       装饰内容的形态——而它恰恰是需要滚动最多的形态(改动前实测8人局页高1271/768)。
+       【为什么必须挂在这个带 min-height:521px 的块里,而不是上面那个只按宽度分档的平板块】
+       手机横屏(SE 667px、15/16 734px)的宽度同样落在 641~1199px 区间里。第一版就是写进
+       那个块的,实测立刻回归:手机 h1 被这里的 15px 压过它自己的 13px、页高从376涨到379,
+       突破了 CORE-121 基线——和 CLAUDE.md 规则22、CORE-126 踩过的是同一个坑,这里第三次
+       确认"只按宽度分档必然误伤手机横屏"。复用 CORE-86 建立的 min-height:521px 门槛
+       (手机横屏最高也就 375px,天然被排除在外)。
+       标题照抄手机横屏那条的压扁思路(保留小字标题而不是整个删掉)——平板空间比手机宽裕,
+       留一行压扁标题比完全去掉更完整;副标题和页脚则和桌面/手机一致直接隐藏。
+       :has(#game:not(.hidden)) 这个"仅对局中生效"的作用域和既有两处写法保持一致,
+       大厅阶段三块内容照常完整显示。 */
+    .wrap:has(#game:not(.hidden)) h1{font-size:15px;letter-spacing:.1em;text-indent:.1em;margin:0;}
+    .wrap:has(#game:not(.hidden)) .sub{display:none;}
+    #game:not(.hidden) ~ .footnote{display:none;}
     /* CORE-122(issue #154)方向2:"最近N次出牌"文字历史chip(纯客户端本地记忆,渲染
        逻辑见render-table.js的recentPlaysHistory/pushRecentPlayHistory)。这条规则
        刻意复用上面#controls button同一个min-height:521px门槛,而不是放进641~1199px
@@ -2426,7 +2490,7 @@
 <script src="bot-ai-bus.js?v=406"></script>
 <script src="bot.js?v=422"></script>
 <script src="ai-bot.js?v=404"></script>
-<script src="render.js?v=414"></script>
+<script src="render.js?v=415"></script>
 <script src="render-table.js?v=395"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=394"></script>
