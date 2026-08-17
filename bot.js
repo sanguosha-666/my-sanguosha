@@ -504,6 +504,33 @@ function botTargetPolicyAllows(g,seat,targetSeat,effectKind){
   if(effectKind==='neutral') return true;
   return botTargetRelationAllowed(g,seat,targetSeat,null);
 }
+// botNeiSituation:内奸局势摘要,只用公开信息计算,CORE-99(issue #146)/CORE-100
+// (issue #147)共用。项目自定义身份局胜利条件(见 game.js checkWin 的
+// gameMode==='identity' 分支):主公死亡时,反贼若还有人活着则反贼胜、否则(反贼已全灭)
+// 内奸若活着则内奸胜——**忠臣是否存活完全不参与这个判断**。这意味着一旦反贼被公开信息
+// 确认全灭,内奸的终局目标就是主公本人,不需要先解决忠臣、也不需要再对低血主公手软。
+// - totalRebels:反贼总数,来自 IDENTITY_TABLE[g.players.length](按人数固定分配的公开
+//   规则,任何人都能推算,不是隐藏信息;g.players.length 是开局roster大小,死亡不会让
+//   数组变短,和 assignIdentities 当初洗牌时用的人数口径一致)。
+// - rebelsConfirmedDead:数"已阵亡且身份公开是反贼"的人数——身份局里阵亡必然揭晓身份
+//   (game.js dealDamage死亡分支 p.roleRevealed=true),存活的反贼在游戏结束前几乎不可能
+//   公开身份,所以这个计数不会把"还活着但身份已知"的反贼算进来,不存在虚报。
+// - rebelsMayRemain:false 代表"已确认全部反贼死亡"(不代表"一定还有反贼活着"是true的
+//   反面语义,是"不能排除还有反贼"的保守判断——只要没被公开信息证伪,就当作可能还在)。
+// - killLordNow:反贼确认全灭且主公还活着时为真,内奸应该以主公为最优先终局目标。
+function botNeiSituation(g, seat){
+  const totalTable = (typeof IDENTITY_TABLE!=='undefined' && IDENTITY_TABLE[(g.players||[]).length]) || [];
+  const totalRebels = totalTable.filter(r=>r==='fan').length;
+  const rebelsConfirmedDead = (g.players||[]).filter(p=>p && !p.alive && p.roleRevealed && p.role==='fan').length;
+  const rebelsMayRemain = rebelsConfirmedDead < totalRebels;
+  const lordSeat = getLordSeat(g);
+  const lordAlive = lordSeat>=0 && g.players[lordSeat] && g.players[lordSeat].alive;
+  return {
+    totalRebels, rebelsConfirmedDead, rebelsMayRemain,
+    killLordNow: !rebelsMayRemain && lordAlive,
+    lordSeat
+  };
+}
 function botTargetScore(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return -Infinity;
@@ -533,10 +560,27 @@ function botTargetScore(g,seat,targetSeat,kind){
     else if(suspicion<30) return -Infinity;
     else score+=suspicion*2;
   } else if(me.role==='nei'){
-    if(known==='zhu'&&target.hp<=2) return -Infinity; // 前中期不让主公突然死亡
-    const lord=getLordSeat(g), rebels=g.players.filter(p=>p&&p.alive&&p.roleRevealed&&p.role==='fan').length;
-    if(known==='fan') score+=(rebels>0?45:0);
-    if(targetSeat===lord) score-=60;
+    // CORE-99(issue #146)/CORE-100(issue #147):原来的 `rebels` 统计条件是
+    // `alive&&roleRevealed&&role==='fan'`——身份局里存活的反贼在游戏结束前几乎不会
+    // 公开身份(roleRevealed 只在阵亡或游戏结束时置真),这个统计几乎恒为0,`rebels>0`
+    // 恒假,"仍有反贼存活给已知反贼加分"这条规则实际从未生效过。改用 botNeiSituation
+    // 的 rebelsConfirmedDead/totalRebels 才能真正区分"反贼可能还活着"和"反贼已确认
+    // 全灭"这两个阶段。
+    const situation = botNeiSituation(g, seat);
+    if(situation.killLordNow){
+      // 终局:反贼已被公开信息确认全灭,主公是项目自定义胜利条件里唯一还需要解决的
+      // 目标(忠臣是否存活不参与判断,见 botNeiSituation 的完整说明)——取消前中期的
+      // 低血保护,主公就是当前最优先目标。
+      if(known==='zhu') score+=300;
+      else if(known==='zhong') score+=20; // 忠臣仍是潜在威胁,但优先级明显低于直接推主公
+      else score+=suspicion*0.5; // 未知目标仍给一个弱倾向,不强求
+    } else {
+      if(known==='zhu'&&target.hp<=2) return -Infinity; // 前中期不让主公提前死亡
+      if(known==='fan') score+=45; // 反贼是内奸此阶段乐见其存在的"工具人",给正分
+      else if(known==='zhong') score+=10;
+      else score+=suspicion; // 用公开嫌疑值弱倾向偏好"更像反贼"的未知目标,不强绑定
+      if(targetSeat===situation.lordSeat) score-=60;
+    }
     score+=(target.hand||[]).length+target.hp;
   } else {
     score+=Math.random()*10;
@@ -997,11 +1041,18 @@ const BOT_IDENTITY_GUIDANCE = {
     +'单挑反贼,那同样是在替内奸创造机会。候选目标信息里如果带有嫌疑提示'
     +'(suspicionHint),那是基于场上公开行为(比如是否打过主公、是否救过疑似反贼)'
     +'算出来的参考,不是凭空猜测——嫌疑越明显的目标,越值得优先怀疑、考虑针对性行动。',
-  nei: '判断当前大致该往哪个方向想:场上还有较多反贼时,倾向于配合主公清理反贼,同时'
-    +'避免抢头功、暴露自己;反贼所剩不多时,可以考虑找机会针对忠臣;若局面已经收缩到'
-    +'只剩你、主公、忠臣三方,这个阶段不要主动招惹主公,优先设法解决忠臣,再考虑后续。'
-    +'候选目标的嫌疑提示(suspicionHint)同样有用,帮助判断谁更可能是反贼、谁更可能是'
-    +'忠臣,配合上面的阶段判断使用。',
+  // CORE-99(issue #146):这条原本在"只剩你、主公、忠臣三方"的终局阶段写的是"不要主动
+  // 招惹主公,优先设法解决忠臣"——这和本项目实际的胜利判定(game.js checkWin:主公死时,
+  // 反贼若已全灭则内奸直接获胜,忠臣是否存活完全不参与这个判断)正好相反。已改成明确
+  // 指出:一旦公开信息能确认反贼已经全部阵亡,主公才是终局阶段真正需要解决的目标,忠臣
+  // 存活与否不影响这个判断——不再要求"先解决忠臣"这个不成立的前置条件。
+  nei: '判断当前大致该往哪个方向想:场上可能还有反贼存活时,倾向于配合主公清理反贼,同时'
+    +'避免抢头功、暴露自己,也不要让主公过早阵亡(反贼还在时主公死了,内奸自己不会赢,'
+    +'只会便宜反贼)。一旦从公开信息(阵亡角色的已揭晓身份)能够确认反贼已经全部阵亡,'
+    +'局势就进入终局阶段——按本局的胜负规则,只要反贼已经全部阵亡且你还活着,主公一死'
+    +'你就直接获胜,忠臣是否存活完全不影响这个判定,不需要额外先解决忠臣;这个阶段应该'
+    +'以主公为最优先目标,不再对主公手软。候选目标的嫌疑提示(suspicionHint)同样有用,'
+    +'帮助判断谁更可能是反贼、谁更可能是忠臣,配合上面的阶段判断使用。',
   zhu: '生存优先于输出,倾向保留桃、杀等防身手段,不要轻易消耗殆尽;早期适度低调;'
     +'候选目标信息里的嫌疑提示(suspicionHint)就是"谁在集火你、谁在护着你"这类公开'
     +'行为的汇总,可以直接参考来反推场上身份,不用凭空猜测。',
@@ -3791,7 +3842,10 @@ function botCanSave(g,seat,dyingSeat){
   if(me.role==='zhong') return dying.role==='zhu'||(dying.roleRevealed&&dying.role==='zhong');
   if(me.role==='zhu') return dying.roleRevealed&&dying.role==='zhong';
   if(me.role==='fan') return dying.roleRevealed&&dying.role==='fan';
-  if(me.role==='nei') return dying.role==='zhu'&&dying.hp<=0;
+  // CORE-99(issue #146):这条原来"只要濒死者是主公就救"恒真,不分阶段——反贼被公开
+  // 信息确认全灭后(botNeiSituation.killLordNow),主公死正是内奸的终局胜利条件,这时候
+  // 反而不该救,放主公去死才是对的。反贼可能还活着时维持原逻辑(保主公当缓冲/挡箭牌)。
+  if(me.role==='nei') return dying.role==='zhu' && botNeiSituation(g, seat).rebelsMayRemain;
   return false;
 }
 function botPickGeneral(g,seat,lordPick){
