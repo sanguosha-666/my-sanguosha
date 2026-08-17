@@ -884,6 +884,15 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     nextPlayer: calculateNextPlayer(), // 下一个行动的玩家座位
     // 自己的手牌/身份完全可见——这是这个座位本来就该看到的东西,不是特权。
     myRole: me.role || null,
+    // CORE-100(issue #147):内奸局势摘要,仅在身份局+内奸座位时出现(其余情况undefined,
+    // JSON里不出现这个键)。数字来源见botNeiSituation定义处说明,全部是公开信息推算,
+    // 不泄露任何未公开身份;和botIdentityGuidance拼进prompt文字里的是同一份数据、
+    // 同一个函数算出来的,LLM与本地兜底(botTargetScore)三方口径一致。
+    neiSituation: (g.gameMode==='identity' && me.role==='nei') ? (function(){
+      const s = botNeiSituation(g, seat);
+      return { totalRebels: s.totalRebels, rebelsConfirmedDead: s.rebelsConfirmedDead,
+        rebelsMayRemain: s.rebelsMayRemain, killLordNow: s.killLordNow };
+    })() : undefined,
     myHp: me.hp, myMaxHp: me.maxHp,
     myHand: (me.hand||[]).map(botCardBriefMin),
     myEquips: botPublicEquipsView(me),
@@ -1064,7 +1073,22 @@ function botIdentityGuidance(g, seat){
   const role = me && me.role;
   const content = role && BOT_IDENTITY_GUIDANCE[role];
   if(!content) return '';
-  return '这局是身份局,你当前的身份是'+BOT_IDENTITY_ROLE_LABEL[role]+':'+content;
+  let extra = '';
+  // CORE-100(issue #147):内奸的三阶段模型此前完全停留在 prompt 文字描述,LLM 只能靠
+  // 自己从零散日志里猜"反贼还剩几个"——这里把 botNeiSituation(和本地兜底 botTargetScore
+  // 共用同一个函数)算出的具体数字直接拼进 prompt,让 LLM 和本地兜底看到的是同一份阶段
+  // 判断依据,不是分别猜测。这些数字全部来自公开信息(见 botNeiSituation 定义处的完整
+  // 说明),不泄露任何未公开身份。
+  if(role==='nei'){
+    const s = botNeiSituation(g, seat);
+    extra = ' 当前局势:按人数推算反贼总共'+s.totalRebels+'人,其中已通过阵亡公开确认'
+      +s.rebelsConfirmedDead+'人是反贼。'
+      +(s.killLordNow
+        ? '这些反贼已经确认全部阵亡——现在就是终局阶段,主公是你唯一需要解决的目标。'
+        : '不能排除还有反贼没有阵亡/未公开身份——现在仍处于前中期,继续按上面的阶段'
+          +'原则判断,不要提前把主公当成终局目标。');
+  }
+  return '这局是身份局,你当前的身份是'+BOT_IDENTITY_ROLE_LABEL[role]+':'+content+extra;
 }
 
 // 【提示词增强 G2 统一拼接】响应类注册项的 buildSystemPrompt 都要带身份引导
