@@ -1405,7 +1405,18 @@
     .deckinfo{font-size:8px;}
     .banner{padding:3px 5px;margin:1px 0 0;font-size:10px;line-height:1.25;}
     .controls{gap:4px;margin-top:1px;}
-    .controls button{padding:3px 7px;font-size:10px;}
+    /* CORE-118(issue #150):这条紧凑断点原来的 padding:3px 7px+font-size:10px 实测真实
+       渲染高度只有23px,远低于WCAG 2.5.5建议的44px触控目标(用Playwright真实测量过,不是
+       估算,见issue讨论记录)。目标定在32px而不是44px——44px在这一档视口下需要挤占别处
+       至少18~23px纵向预算,当前没有那么多富余空间(见下面"你的手牌"标签隐藏那条注释里
+       的预算说明);32px只需要+9px,能用回收的空间覆盖,且刻意没有吃满全部回收量,给
+       CORE-121(issue #153,手牌换行时的纵向预算风险,截至这次修复仍未处理)留一部分缓冲,
+       两个issue共用同一个预算池,这次不抢光。
+       padding从3px提到7px(垂直方向,水平7px不变——只影响高度,不额外挤占按钮换行时的
+       横向空间预算)+font-size从10px提到11px,组合后实测真实渲染高度=32px(已用
+       tools/verify_responsive_layout.js在SE/15/15Pro/15ProMax/16/16Pro/16ProMax全系列
+       验证过,见issue讨论)。 */
+    .controls button{padding:7px 7px;font-size:11px;}
     /* .log-panel(常驻的最近几条日志面板)是排查这次溢出时才发现漏算的一块真实开销
        (68px+间距,几乎占了 .panel.table 剩余高度的一半)——它和上面 #myGeneral 的
        完整描述是同一类"有独立入口能查看完整信息、这里只是常驻的便利副本"的东西
@@ -1422,6 +1433,17 @@
        只测了几个短描述的武将就当作验证过了。 */
     .hand-label{font-size:9px;margin:2px 0 1px;}
     #myGeneral span{display:none;}
+    /* CORE-118(issue #150):index.html 2238-2239行有两个 .hand-label——#myGeneral(你的
+       武将:XX·技能,每局不同的实质信息)和紧跟着的第二个无id纯文字标签"你的手牌"(位置
+       已经天然说明这是手牌行的标题,不携带任何本局特有信息)。此前误以为#myGeneral结束
+       位置到.bottom-row开始位置之间有一段"未解释的16.5px空隙"(见issue讨论的初版误判),
+       实测排查后确认那不是空隙,就是这第二个标签自己的margin(2px+1px)+内容高度
+       (13.5px)——选择器用和桌面布局同款的 :not(#myGeneral) 写法(见下面
+       #game.desktop-layout .hand-label:not(#myGeneral) 那条,同一套排除#myGeneral、
+       只命中第二个label的既有写法),不需要改HTML加id/class。隐藏它回收的16.5px用于
+       上面.controls button的触控目标扩大,但只用了其中约9px(32px目标只比原23px多9px),
+       刻意没有吃满这16.5px——剩余部分留给CORE-121(issue #153,手牌换行纵向预算)。 */
+    .hand-label:not(#myGeneral){display:none;}
     .bottom-row{gap:6px;}
     .card{width:44px;height:64px;--badge:12px;}
   }
