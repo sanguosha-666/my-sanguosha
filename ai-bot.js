@@ -1794,8 +1794,12 @@ function aiTestFillPendingRecord(fields){
   }catch(e){ /* 静默:回填失败不影响决策主流程 */ }
 }
 
-// 拖动:header mousedown/mousemove 更新 left/top;resize:右下角手柄更新 width/height。
-// 桌面 mouse 事件;触屏依赖浏览器合成 mouse 序列(体验可接受,测试工具场景)。
+// 拖动:header pointerdown/pointermove 更新 left/top;resize:右下角手柄更新 width/height。
+// CORE-120(issue #152):原实现只监听 mouse* 事件,触屏设备(pointer:coarse,如平板)完全
+// 无法拖动/调整大小——改用 Pointer Events(pointerdown/pointermove/pointerup)一套实现
+// 同时覆盖鼠标+触屏+笔,不写两套并行逻辑。配合 CSS 的 touch-action:none(见 index.html
+// .aitest-header/.aitest-resize-handle)防止触屏拖动时触发页面滚动/缩放等原生手势;
+// setPointerCapture 确保手指快速滑动超出 header/手柄区域时不丢失拖动状态。
 // aiModalOfEvent:从窗口内任意元素往上找它所属的那个窗体(#aiTestModal 或 #aiPanelModal)。
 function aiModalOfEvent(el){
   if(!el || !el.closest) return null;
@@ -1803,44 +1807,60 @@ function aiModalOfEvent(el){
 }
 (function initAiTestModalDrag(){
   if(typeof document==='undefined'||!document.addEventListener) return;
-  document.addEventListener('mousedown', function(e){
+  document.addEventListener('pointerdown', function(e){
     const hd=e.target && e.target.closest ? e.target.closest('.aitest-header') : null;
     if(!hd) return;
+    // 关闭按钮在 header 内部,不拦截它的 pointerdown——否则 setPointerCapture 会让
+    // 后续的 click 判定在被 capture 的 header 上做,风险不必要;直接放行让按钮走自己
+    // 的 onclick,拖动只在按下的是 header 空白处(非关闭按钮)时才启动。
+    if(e.target && e.target.closest && e.target.closest('.aitest-close')) return;
     // CORE-73:两个窗口(#aiTestModal / #aiPanelModal)共用 .aitest-* 结构,这里改成
     // 从事件目标往上找所属窗口,而不是写死取托管信息窗——否则拖决策面板会去拖另一个窗。
     const m=aiModalOfEvent(hd);
     if(!m || m.classList.contains('hidden')) return;
     e.preventDefault();
+    if(hd.setPointerCapture) { try{ hd.setPointerCapture(e.pointerId); }catch(err){} }
     const sx=e.clientX, sy=e.clientY, ox=m.offsetLeft, oy=m.offsetTop;
     function move(ev){
+      if(ev.pointerId!==e.pointerId) return;
       m.style.left=Math.max(0, ox+ev.clientX-sx)+'px';
       m.style.top=Math.max(0, oy+ev.clientY-sy)+'px';
       m.style.right='auto'; m.style.bottom='auto';
     }
-    function up(){
-      document.removeEventListener('mousemove',move);
-      document.removeEventListener('mouseup',up);
+    function up(ev){
+      if(ev.pointerId!==e.pointerId) return;
+      if(hd.releasePointerCapture) { try{ hd.releasePointerCapture(e.pointerId); }catch(err){} }
+      document.removeEventListener('pointermove',move);
+      document.removeEventListener('pointerup',up);
+      document.removeEventListener('pointercancel',up);
     }
-    document.addEventListener('mousemove',move);
-    document.addEventListener('mouseup',up);
+    document.addEventListener('pointermove',move);
+    document.addEventListener('pointerup',up);
+    document.addEventListener('pointercancel',up);
   });
-  document.addEventListener('mousedown', function(e){
+  document.addEventListener('pointerdown', function(e){
     const hd=e.target && e.target.closest ? e.target.closest('.aitest-resize-handle') : null;
     if(!hd) return;
     const m=aiModalOfEvent(hd);
     if(!m || m.classList.contains('hidden')) return;
     e.preventDefault(); e.stopPropagation();
+    if(hd.setPointerCapture) { try{ hd.setPointerCapture(e.pointerId); }catch(err){} }
     const sx=e.clientX, sy=e.clientY, ow=m.offsetWidth, oh=m.offsetHeight;
     function move(ev){
+      if(ev.pointerId!==e.pointerId) return;
       m.style.width=Math.max(280, ow+ev.clientX-sx)+'px';
       m.style.height=Math.max(200, oh+ev.clientY-sy)+'px';
     }
-    function up(){
-      document.removeEventListener('mousemove',move);
-      document.removeEventListener('mouseup',up);
+    function up(ev){
+      if(ev.pointerId!==e.pointerId) return;
+      if(hd.releasePointerCapture) { try{ hd.releasePointerCapture(e.pointerId); }catch(err){} }
+      document.removeEventListener('pointermove',move);
+      document.removeEventListener('pointerup',up);
+      document.removeEventListener('pointercancel',up);
     }
-    document.addEventListener('mousemove',move);
-    document.addEventListener('mouseup',up);
+    document.addEventListener('pointermove',move);
+    document.addEventListener('pointerup',up);
+    document.addEventListener('pointercancel',up);
   });
 })();
 
