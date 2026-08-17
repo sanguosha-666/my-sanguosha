@@ -2122,6 +2122,37 @@
     .hand .card{width:60px;height:86px;--badge:15px;}
     .table-card-mini{width:58px;height:80px;}
     .exchange-card .table-card-mini{width:50px;height:70px;}
+    /* CORE-121(issue #153):手牌数较多(实测9~10张起)时,基础规则的flex-wrap:wrap会把
+       手牌换到第2行,在这一档矮视口下把整页纵向撑出+81~+105px的溢出(远超CORE-118处理
+       的个位数~十几px量级)——真实测过,第2行的卡片几乎完全落在视口外,需要滚动页面才能
+       看到,不是"稍微溢出"。改成横向不换行+横向滚动(flex-wrap:nowrap+overflow-x:auto):
+       手牌永远只占一行,彻底消除这个纵向溢出来源,不是"缓解"。
+       只加在这一个断点里,不影响平板(min-width:641px那块)和桌面(desktop-layout)的
+       .hand——那两处的手牌数量密度问题不一样(平板/桌面纵向空间本来就宽裕,见CORE-121
+       issue讨论里那几档机型的对照数据,10张手牌都没触发换行)。
+       出牌交互本身是纯onclick、没有拖拽出牌机制(核实过render-hand.js全文),横向滚动
+       手势和点击出牌不冲突;长按预览(attachLongPressPreview,render-hand.js)的
+       touchmove会取消长按计时器,和原生横向滚动手势天然互斥不冲突,已实测验证(见issue
+       讨论)。
+       overscroll-behavior-x:contain防止横向划到头之后把滚动动作"漏"给页面本身触发
+       意外的纵向弹性效果(iOS Safari常见的连锁滚动问题)。滚动条样式复用项目里
+       .log-panel-scroll/.chat-panel-scroll已有的同一套thin+gold-dim配色(index.html
+       1186行),不是这次新发明的视觉规范。
+       没有做"右侧还有更多手牌"的渐隐提示——正确实现(只在真的还能横向滚动时才显示,
+       不能是滚到头之后还留着一条误导性的提示)需要JS动态判断scrollWidth并跟着滚动
+       位置切换class,涉及render-hand.js改动+联动的cache-bust版本号,复杂度明显高于
+       纯CSS功能性滚动本身;纯CSS的"scroll-shadow"渐变技巧在没有真机可视化验证的情况下
+       风险也不小(容易调出效果不对但没人发现)。按之前约定,这类视觉细节可以先跳过,
+       留到后续单独迭代。 */
+    .hand{
+      flex-wrap:nowrap;
+      overflow-x:auto;
+      overflow-y:hidden;
+      overscroll-behavior-x:contain;
+      scrollbar-width:thin;
+      scrollbar-color:var(--gold-dim) rgba(0,0,0,.2);
+    }
+    .hand .card{flex:0 0 auto;}
   }
 
   /* ===== 背景视觉层（大厅视频 + 游戏内飘牌 Canvas） ===== */
