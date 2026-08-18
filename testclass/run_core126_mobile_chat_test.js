@@ -195,10 +195,21 @@ check('浮层右边界让开 💬 按钮那一格(right:64px,不是12px),避免�
 check('💬 入口按钮存在,且只在"非桌面布局 + 已进房间"时显示', function(){
   if(!/id="chatBtn"[^>]*onclick="toggleChatPanel\(\)"/.test(html))
     throw new Error('未找到 #chatBtn 按钮或其 onclick 绑定');
-  if(!/#chatBtn\{[^}]*display:none[^}]*\}/.test(html))
-    throw new Error('#chatBtn 基础规则应为 display:none');
-  if(!/body:has\(#game:not\(\.hidden\):not\(\.desktop-layout\)\) #chatBtn\{display:flex;\}/.test(html))
-    throw new Error('未找到 :has() 门控规则(非桌面布局 + 非大厅 才显示)');
+  // 【CORE-130(issue #170) 之后门控机制变了,这条断言随之更新——行为不变,实现方式变了】
+  // 改动前:按钮是 #game 的兄弟节点、position:fixed 悬浮,所以要用
+  //   #chatBtn{display:none} + body:has(#game:not(.hidden):not(.desktop-layout)) #chatBtn{display:flex}
+  //   一条规则同时表达"排除大厅"和"排除桌面"两个条件。
+  // 改动后:七个图标按钮整体挪进 #game 内部的 .panel.table(#gameToolbar),大厅阶段随
+  //   #game.hidden 自动隐藏,"排除大厅"这一半不再需要显式写,只剩"排除桌面"。
+  // 断言的**意图**没变(💬 只在非桌面布局的对局中出现),所以这里改成校验新机制,而不是
+  // 保留一条已经不成立的旧命题——CLAUDE.md 规则20:设计变更后必须回头检查旧断言语义。
+  if(!/id="gameToolbar"/.test(html))
+    throw new Error('未找到 #gameToolbar——CORE-130 之后 #chatBtn 应在这个容器内');
+  const toolbarBlock = html.slice(html.indexOf('id="gameToolbar"'), html.indexOf('id="gameToolbar"') + 1200);
+  if(!/id="chatBtn"/.test(toolbarBlock))
+    throw new Error('#chatBtn 应位于 #gameToolbar 内(这样大厅阶段随 #game.hidden 自动隐藏)');
+  if(!/#game\.desktop-layout #chatBtn\{display:none;\}/.test(html))
+    throw new Error('未找到桌面端门控规则 #game.desktop-layout #chatBtn{display:none}');
 });
 
 check('未读徽标用 data-unread 属性驱动(::after content:attr)', function(){

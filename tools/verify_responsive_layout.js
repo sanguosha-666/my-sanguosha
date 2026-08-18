@@ -109,9 +109,19 @@ const SETUP = `
       const seats = allSeats.map(rect);
       const cards = Array.from(document.querySelectorAll('.hand .card')).map(rect);
       // 所有可点击控件(用于触控目标尺寸检查)
-      const tappables = Array.from(document.querySelectorAll('#controls button, .hand .card'))
-        .map(el => { const b = el.getBoundingClientRect(); return { tag: el.tagName, text: (el.textContent||'').trim().slice(0,10), w: b.width, h: b.height }; })
+      // CORE-130(issue #170):补上 .icon-btn 的覆盖——这是之前排查发现的测试盲区:图标按钮
+      // (🚪🧠🐛🤖📜❓💬)此前完全不在这个集合里,把它们缩到 20px 这个工具也会照样全绿,
+      // 拿它当验收依据是假绿灯。加进来时用 kind 区分种类:既有的"手机横屏按钮必须保持紧凑
+      // (<44px)"反向断言针对的是 #controls 的响应按钮,不能被 44px 的图标按钮混进去搅乱,
+      // 所以下面两处断言各自只看自己那一类。
+      const collect = (sel, kind) => Array.from(document.querySelectorAll(sel))
+        .map(el => { const b = el.getBoundingClientRect(); return { kind, tag: el.tagName, text: (el.textContent||'').trim().slice(0,10), w: b.width, h: b.height }; })
         .filter(t => t.w > 0 && t.h > 0);
+      const tappables = [
+        ...collect('#controls button', 'control'),
+        ...collect('.hand .card', 'card'),
+        ...collect('.icon-btn', 'icon'),
+      ];
       return {
         gateVisible,
         docScrollW: document.documentElement.scrollWidth,
@@ -146,15 +156,31 @@ const SETUP = `
       // 触控目标:触屏设备下可点击控件应达到 44px 惯例(取最小的那个报出来)
       if (vp.compact && r.tappables.length) {
         // 反向断言:手机横屏必须保持紧凑按钮(<44px),证明平板的 min-height:44px 规则确实被
-        // (min-height:521px) 挡在门外,不是"碰巧没生效"
-        const btns = r.tappables.filter(t => t.tag === 'BUTTON');
-        if (btns.length && btns.every(t => t.h >= 44)) issues.push('手机横屏按钮被平板触控规则误抬到44px(应保持紧凑)');
+        // (min-height:521px) 挡在门外,不是"碰巧没生效"。**只看 #controls 的响应按钮**——
+        // CORE-130 之后 .icon-btn 也进了这个集合,而图标按钮就是 44px(不受紧凑折中约束),
+        // 混进来会让这条断言恒不触发(永远有元素<44px),失去鉴别力。
+        const btns = r.tappables.filter(t => t.kind === 'control');
+        if (btns.length && btns.every(t => t.h >= 44)) issues.push('手机横屏响应按钮被平板触控规则误抬到44px(应保持紧凑)');
         if (vp.maxDocH && r.docScrollH > vp.maxDocH) issues.push(`手机横屏页高回归: ${r.docScrollH} > 基线${vp.maxDocH}`);
       } else if (vp.touch && r.tappables.length) {
-        const tooSmall = r.tappables.filter(t => Math.min(t.w, t.h) < 44);
+        const tooSmall = r.tappables.filter(t => t.kind !== 'icon' && Math.min(t.w, t.h) < 44);
         if (tooSmall.length) {
           const worst = tooSmall.reduce((a, b) => (Math.min(a.w,a.h) < Math.min(b.w,b.h) ? a : b));
-          issues.push(`${tooSmall.length}/${r.tappables.length}个触控目标<44px(最小: ${worst.tag}"${worst.text}" ${worst.w.toFixed(0)}x${worst.h.toFixed(0)})`);
+          issues.push(`${tooSmall.length}个触控目标<44px(最小: ${worst.tag}"${worst.text}" ${worst.w.toFixed(0)}x${worst.h.toFixed(0)})`);
+        }
+      }
+      // CORE-130(issue #170)新增:图标按钮触控目标断言。图标按钮不参与 CORE-118 那次的
+      // "32px 紧凑折中"(那是给 #controls 响应按钮在纵向预算极限下的让步),它们应当在**所有**
+      // 触屏视口下都维持 44px 下限。手机横屏(compact)同样适用——本次 CORE-130 把它们挪进
+      // .panel.table 时明确没有缩小尺寸,这条断言就是钉住这一点。
+      if (vp.touch) {
+        const icons = r.tappables.filter(t => t.kind === 'icon');
+        if (icons.length) {
+          const small = icons.filter(t => Math.min(t.w, t.h) < 44);
+          if (small.length) {
+            const worst = small.reduce((a, b) => (Math.min(a.w,a.h) < Math.min(b.w,b.h) ? a : b));
+            issues.push(`${small.length}/${icons.length}个图标按钮(.icon-btn)<44px(最小: "${worst.text}" ${worst.w.toFixed(0)}x${worst.h.toFixed(0)})`);
+          }
         }
       }
       // 座位卡不该退化到不可读的尺寸

@@ -1142,61 +1142,38 @@
 
   /* 圆形图标按钮统一样式(#helpBtn 与 .info-close 共用):固定尺寸的圆 + flex 居中图形,
      覆盖全局 button 的 padding/line-height,避免字形因内边距不对称而偏移错位。 */
-  .icon-btn{padding:0;line-height:1;display:flex;align-items:center;justify-content:center;border-radius:50%;}
-  #helpBtn{position:fixed;top:12px;right:12px;z-index:50;width:44px;height:44px;
-    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:20px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
-  /* 日志按钮:和 helpBtn 同款固定圆形图标,挨着放(往左让位),点开复用 showInfo/infoModal 浮层——
-     日志默认收起,只留这一个入口,和第4步"banner常驻焦点 + 完整历史收进可展开面板"的设计一致。 */
-  #logBtn{position:fixed;top:12px;right:64px;z-index:50;width:44px;height:44px;
-    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
-  /* 常驻"关闭房间"入口(cleanupRoom):不管游戏处于什么阶段都可见,固定挂在页面角落、不随
-     render(g)重绘变化。放左上角(而不是和 #helpBtn/#logBtn 同一个右上角)——避开已有的圆形
-     图标按钮堆叠,同时这个按钮本身是"危险操作"入口,和"帮助/日志"这类常规查看类按钮分开
-     放置,视觉上不容易被误认成同一组功能、也不容易被手误连续点错。
-     【真机踩过的坑】最初做成文字按钮("关闭房间"四个字,自适应宽度),在375px这类窄屏下
-     实测(Playwright量bounding box,不是只凭肉眼截图判断)发现文字按钮宽达74px,右边缘
-     (x=83.8)确实穿进了标题里"杀"字印章图标(h1 .seal,x从63.15起)的范围,是真实的视觉
-     重叠,不是误报。改成和 #helpBtn/#logBtn 同款的44x44圆形图标按钮(用🚪表示"离开/关闭
-     房间"这个语义,title属性保留完整文字说明给屏幕阅读器/鼠标悬停提示),右边缘固定在
-     x=56,比标题印章图标的起始位置(x=63.15)更靠左,不会有任何重叠——图标按钮的固定尺寸
-     比文字按钮的"按内容自适应宽度"更容易通过量出来的具体数值保证不越界。 */
-  #closeRoomBtn{position:fixed;top:12px;left:12px;z-index:100;width:44px;height:44px;
-    border:1px solid var(--cinnabar-bright);background:#1a1410;color:var(--cinnabar-bright);
-    font-size:20px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
-  /* 调试日志入口(debugLogBtn):和 #closeRoomBtn 同一列、往下一格(top:64,不是同一行往右挪),
-     不是照抄 #logBtn 相对 #helpBtn 的"同一行往左挪64px"那套——h1 标题是 text-align:center,
-     视口变窄时标题("杀"印章图标)会向左移动、越靠近页面左上角,如果在 left:12 这一行再加一个
-     往右挪的按钮(比如 left:64),窄屏下右边缘64+44=108 这段区域正是标题可能移动到的地方，
-     和 CLAUDE.md 记录的 #closeRoomBtn 当年"文字按钮右边缘穿进标题印章"是同一类坑，这次
-     刻意换个方向避开(往下而不是往右),不在同一水平带上和标题抢位置。top:64 和 .log-panel
-     宽屏覆盖规则里"top:64 避开顶部44px高按钮"用的是同一个数值,两者互不冲突(.log-panel
-     在 right 侧,这里在 left 侧)。 */
-  #debugLogBtn{position:fixed;top:64px;left:12px;z-index:50;width:44px;height:44px;
-    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
-  /* AI托管入口(aiTestBtn):和 #debugLogBtn 同一行、往右一格(debugLogBtn left:12,这里 left:64),
-     同款固定圆形图标按钮,复用 #closeRoomBtn/#debugLogBtn 那套定位+尺寸+配色。z-index:50
-     与其他图标按钮一致、低于弹窗(#aiTestModal 是 z-index:120),点开弹窗不会压住弹窗交互。 */
-  #aiTestBtn{position:fixed;top:64px;left:64px;z-index:50;width:44px;height:44px;
-    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
-  /* AI决策面板入口(aiPanelBtn,CORE-73):#aiTestBtn 的正上方(同 left:64,top 由 64 上移到
-     12——那一格此前空着:top:12 只有 left:12 的 #closeRoomBtn 和右上角的 helpBtn/logBtn)。
-     其余定位/尺寸/配色与 #aiTestBtn 逐项一致,同为 z-index:50、低于弹窗的 120。 */
-  #aiPanelBtn{position:fixed;top:12px;left:64px;z-index:50;width:44px;height:44px;
-    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.4);}
-  /* CORE-126(issue #164):聊天浮层入口。占右侧那一列此前空着的 top:64 一格(#helpBtn 是
-     top:12 right:12,#logBtn 是 top:12 right:64),和左侧 #debugLogBtn/#aiTestBtn 的
-     "同列往下一格"排法对称,不和标题抢水平带(见 #debugLogBtn 那条注释里记录的坑)。
-     【只在非桌面布局 + 已进房间时出现】桌面聊天是常驻侧栏,不需要这个入口;大厅阶段没有
-     房间也就没有聊天。两个条件用 :has() 一次表达(项目里 .table-card:has(...)/
-     #game.desktop-layout:has(...) 已经在用同款写法)——注意 #chatBtn 是 #game 的兄弟节点
-     不是子节点,所以不能像 .chat-panel-section 那样直接写 #game:not(.desktop-layout) 前缀。 */
-  #chatBtn{position:fixed;top:64px;right:12px;z-index:50;width:44px;height:44px;
-    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;cursor:pointer;
-    box-shadow:0 2px 6px rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;}
-  body:has(#game:not(.hidden):not(.desktop-layout)) #chatBtn{display:flex;}
-  /* 未读红点:数字由 JS 写进 data-unread。聊天是"推"型的(别人什么时候说话你不知道),浮层
-     默认关着时必须有这个提示,否则消息等于石沉大海——这是聊天和 AI 调试面板(拉型,想看才
-     去点开)的本质区别,不能照搬后者"没有未读提示"的做法。 */
+  /* ===== CORE-130(issue #170):图标按钮从 fixed 悬浮改为 .panel.table 行内工具栏 =====
+     改动前:七个按钮各自 position:fixed 钉在 top:12/top:64 两行的四个角,z-index 50~100,
+     实测(Playwright,8人局)七个按钮**全部**与对手座位区矩形相交,手机横屏下尤其明显。
+     改动后:它们是 #gameToolbar 的子元素,#gameToolbar 又是 .panel.table 这个 flex-wrap
+     行的一项,靠 margin-left:auto 推到行末,和左侧的 phase-pill/deckinfo 共用同一行。
+     【为什么选这一行而不是自己独占一行】.panel.table 本来就有 93px 高(>44px 按钮)且横向
+     有空位,并入它纵向几乎零成本;实测"独占一行替代 h1"要多付 25px(iPhone 15/15 Pro 横屏
+     溢出会从 +16px 涨到 +41px),并入这一行只多付 7px,再叠加下面的 .wrap padding 回收
+     (12px)之后反而比改动前净减 5px。
+     按钮尺寸维持 44px 不变(CORE-118 验证过的触控目标量级),本次不缩小。 */
+  #gameToolbar{display:flex;align-items:center;gap:6px;flex:0 0 auto;margin-left:auto;}
+  .icon-btn{padding:0;line-height:1;display:flex;align-items:center;justify-content:center;
+    border-radius:50%;position:relative;flex:0 0 auto;
+    width:44px;height:44px;cursor:pointer;
+    border:1px solid var(--gold);background:#1a1410;color:var(--gold);font-size:19px;
+    box-shadow:0 2px 6px rgba(0,0,0,.4);}
+  #helpBtn,#lobbyHelpBtn{font-size:20px;font-weight:700;}
+  /* 关闭房间是"危险操作"入口,保留它原来的朱红描边,和其它查看类按钮区分开(沿用改动前的配色)。 */
+  #closeRoomBtn{border-color:var(--cinnabar-bright);color:var(--cinnabar-bright);}
+  /* 大厅专用的规则说明按钮:只在 #game 隐藏(即大厅阶段)时出现,进对局后由 .panel.table
+     里那个 #helpBtn 接管,两者不会同时显示。仍用 fixed 钉在右上角——大厅是一个短表单页面,
+     没有会被遮挡的游戏内容,这正是 fixed 悬浮原本合适的场景。 */
+  #lobbyHelpBtn{position:fixed;top:12px;right:12px;z-index:50;display:none;}
+  body:has(#game.hidden) #lobbyHelpBtn{display:flex;}
+  /* CORE-126(issue #164)门控延续:💬 只在**非桌面布局**出现——桌面聊天是常驻侧栏,不需要
+     这个开关入口。改动前这条写成 body:has(#game:not(.hidden):not(.desktop-layout)) #chatBtn
+     (既要排除大厅、又要排除桌面);现在按钮已经在 #game 内部,大厅阶段随 #game.hidden 自动
+     隐藏,所以只剩"排除桌面布局"这一半条件需要显式写。 */
+  #game.desktop-layout #chatBtn{display:none;}
+  /* 未读红点:数字由 JS 写进 data-unread。聊天是"推"型的(别人什么时候说话你不知道),
+     浮层默认关着时必须有这个提示,否则消息等于石沉大海——这是聊天和 AI 调试面板(拉型,
+     想看才去点开)的本质区别,不能照搬后者"没有未读提示"的做法。 */
   #chatBtn.has-unread::after{
     content:attr(data-unread);position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;
     padding:0 4px;box-sizing:border-box;border-radius:9px;background:var(--cinnabar-bright,#c0392b);
@@ -2271,6 +2248,36 @@
       justify-content:center;order:3;margin-top:4px;}
   }
 
+  /* ===== CORE-130(issue #170):手机横屏 .wrap padding 回收 =====
+     【这是一条既有 bug 的修复,不是新增的压缩】手机横屏断点(@media(max-height:460px) and
+     (orientation:landscape),本文件靠前处)里本来就写了 .wrap{padding:4px 8px 4px},但它
+     **从来没有生效过**:上面那个平板块 @media(min-width:641px) and (max-width:1199px)
+     里的 .wrap{padding:10px 12px} 同特异性(0,1,0)且源码更靠后,直接把它压掉了——而所有
+     现代 iPhone 横屏宽度都 ≥641px(iPhone 16e 726px 到 16 Pro Max 838px,连 SE 横屏的
+     667px 也在内),所以那条手机横屏 padding 在任何真机上都是死代码。和 CLAUDE.md 规则22、
+     CORE-126/CORE-128 踩过的是同一个坑(只按宽度分档必然误伤手机横屏),这是第四次。
+     实测回收 12px 纵向(iPhone 15/15 Pro 横屏页高 359→347)。
+     【为什么用 max-height:520px 而不是把平板那条加 min-height 门槛】评估过两种改法:
+     把平板 .wrap 移进 min-height:521px 那个块会让"宽≥641 且高在 461~520"的横屏设备
+     (实测样本 800×480、854×480)掉出所有断点、回退基础规则 padding:18px 16px 40px,
+     纵向反而多付 38px,是真实回归。这里改用 max-height:520px 的独立规则,与平板块的
+     min-height:521px 严格互补、不留空隙,已用上述两个视口实测确认。
+     放在全部平板规则之后,靠源码顺序赢过 2174 那条(同特异性下后写的赢)。 */
+  @media (max-height:520px) and (orientation:landscape){
+    .wrap{padding:4px 8px 4px;}
+  }
+
+  /* CORE-130(issue #170):对局进行中隐藏标题栏。
+     七个图标按钮挪进 .panel.table 之后,标题行就只剩"极简三国杀"这几个字本身,而对局中
+     标题不承载任何操作/状态信息(阶段看 phase-pill、焦点看 banner),纯装饰。桌面布局早就
+     把它隐藏了(.wrap:has(#game.desktop-layout:not(.hidden)) h1{display:none}),这里把同样
+     的处理补给手机/平板——手机横屏回收 20px、平板回收 23px,正是这次把按钮并入 .panel.table
+     所需要的纵向预算来源之一。
+     作用域用 :has(#game:not(.hidden)) 限定在"对局中",大厅阶段标题照常完整显示(约束③)。
+     放在全部断点规则之后,靠源码顺序压过手机横屏那条 font-size:13px 和 CORE-128 给平板加的
+     font-size:15px(那两条现在只在大厅之外的极端回退场景才有意义,保留不删)。 */
+  .wrap:has(#game:not(.hidden)) h1{display:none;}
+
   /* 平板竖屏：武将信息描述收起，给座位、操作区和手牌保留稳定空间。完整说明仍可
      通过武将牌上的“?”查看。 */
   @media (min-width:641px) and (max-width:900px) and (orientation:portrait){
@@ -2335,14 +2342,17 @@
      src 由 pickRandomBgVideo() 随机设置；透明/加载失败时 body 渐变兜底 -->
 <video id="bgVideo" class="bg-video" autoplay muted loop playsinline aria-hidden="true" tabindex="-1"></video>
 <div id="bgVeil" class="bg-veil" aria-hidden="true"></div>
-<!-- 说明浮层与帮助按钮:独立于 render 重建的容器,实时刷新不会关掉/清空 -->
-<button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
-<button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
-<button id="closeRoomBtn" class="icon-btn hidden" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
-<button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
-<button id="aiTestBtn" class="icon-btn" title="打开AI托管信息窗" onclick="openAiTestModal()">🤖</button>
-<button id="aiPanelBtn" class="icon-btn" title="查看AI决策(理由/武将/模型,含非托管机器人)" onclick="openAiPanelModal()">🧠</button>
-<button id="chatBtn" class="icon-btn" title="聊天" onclick="toggleChatPanel()" data-unread="0">💬</button>
+<!-- CORE-130(issue #170):原来这里有7个 position:fixed 的圆形图标按钮,分两行(top:12/top:64)
+     悬浮压在游戏内容上,实测七个按钮全部与对手座位区矩形相交。现已整体挪进 #game 的
+     .panel.table 那一行(见下方 #gameToolbar)——那一行本来就有 93px 高(>44px 按钮)且横向
+     有空位,所以并入它纵向几乎零成本,而"独占一行"的做法要多付 25px。
+     【为什么大厅要单独留一个 ❓】按钮进了 #game 之后,大厅阶段(#game.hidden)会跟着一起
+     隐藏——对 🧠AI决策/📜完整日志/🤖AI托管 来说这是改善(大厅本来就没有对局数据可看),
+     但"规则说明"应该任何时候都能查,所以这里单独保留一个大厅专用的 #lobbyHelpBtn。
+     它和 #helpBtn 是两个独立元素(id 不能重复),共用 showHelp() 和 .icon-btn 样式;
+     CSS 用 :has(#game.hidden) 让它只在大厅出现,进对局后由 .panel.table 里那个接管。
+     🐛调试日志在大厅不再可见,是本次刻意接受的取舍(开发者工具,大厅没有对局可调试)。 -->
+<button id="lobbyHelpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
 <div id="myTurnBanner" class="my-turn-banner"></div>
 <div id="infoModal" class="hidden"></div>
 <div id="confirmModal" class="hidden"></div>
@@ -2443,6 +2453,18 @@
     <div class="panel table">
       <div class="phase-pill" id="phasePill">等待开始</div>
       <div class="deckinfo" id="deckInfo"></div>
+      <!-- CORE-130(issue #170):七个图标按钮的新家。放在 phase-pill/deckinfo 之后、banner 之前,
+           靠 margin-left:auto 推到该行右端,和左侧的阶段标签共用同一行——.panel.table 是
+           flex-wrap 容器,这一行本来就有富余横向空间,按钮并进来不新增行、纵向几乎零成本。 -->
+      <div id="gameToolbar">
+        <button id="closeRoomBtn" class="icon-btn hidden" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
+        <button id="aiPanelBtn" class="icon-btn" title="查看AI决策(理由/武将/模型,含非托管机器人)" onclick="openAiPanelModal()">🧠</button>
+        <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
+        <button id="aiTestBtn" class="icon-btn" title="打开AI托管信息窗" onclick="openAiTestModal()">🤖</button>
+        <button id="logBtn" class="icon-btn" title="查看完整日志" onclick="showLog()">📜</button>
+        <button id="helpBtn" class="icon-btn" title="规则 / 说明" onclick="showHelp()">?</button>
+        <button id="chatBtn" class="icon-btn" title="聊天" onclick="toggleChatPanel()" data-unread="0">💬</button>
+      </div>
       <div id="banner"></div>
       <div id="aiThinkingIndicator" class="hidden"></div>
       <div class="controls" id="controls"></div>
