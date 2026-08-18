@@ -465,12 +465,27 @@ function showDebugLog(){
     return;
   }
   showInfo('调试日志(房间 ' + escapeHtml(String(rid)) + ')', '<div class="dbglog-loading">加载中…</div>');
-  db.ref('debugLogs/' + rid).orderByKey().limitToFirst(50).get().then(function(snap){
-    // 拉取是异步的,期间用户可能已经手动关闭了弹窗——这时不要再往(可能已经被清空的)
-    // #infoModal 里塞内容,否则下一次打开无关的浮层(比如帮助面板)会突然被这次的结果覆盖。
+  // CORE-131(issue #171):记下"这一次是我打开的 #infoModal"这个事实。showInfo 刚刚把世代号
+  // +1,所以这里读到的就是本次打开对应的号。下面两个异步分支回填前都要拿它比对。
+  // infoModalGeneration 定义在 render.js,而本文件加载顺序在 render.js **之前**——所以只能
+  // 在函数被调用时(用户点击时,那时 render.js 早已加载完)查,不能在文件顶层查。
+  const myGen = (typeof infoModalGeneration === 'function') ? infoModalGeneration() : null;
+  // debugLogBodyIfStillMine:异步回填前的统一守卫。返回可写的 .info-body,或 null 表示放弃。
+  // 三层判断缺一不可:
+  //   ① 世代号没变 —— 容器还是我这次打开的那个(核心修复,原来缺的就是这层)
+  //   ② 弹窗还开着 —— 用户没手动关掉(原有防护,保留)
+  //   ③ .info-body 还在 —— DOM 结构完好
+  const debugLogBodyIfStillMine = function(){
+    if(myGen !== null && typeof infoModalGeneration === 'function'
+       && infoModalGeneration() !== myGen) return null; // 容器已易主(用户开了别的浮层)
     const m = document.getElementById('infoModal');
-    if(!m || m.classList.contains('hidden')) return;
-    const body = m.querySelector('.info-body');
+    if(!m || m.classList.contains('hidden')) return null;
+    return m.querySelector('.info-body') || null;
+  };
+  db.ref('debugLogs/' + rid).orderByKey().limitToFirst(50).get().then(function(snap){
+    // 拉取是异步的,期间用户可能已经关掉这个弹窗、甚至打开了别的浮层——两种情况都不能再往
+    // #infoModal 里塞内容,否则会把现在归别人的容器覆盖掉(见上面守卫的说明)。
+    const body = debugLogBodyIfStillMine();
     if(!body) return;
     if(!snap.exists()){
       body.innerHTML = '<div class="dbglog-empty">暂无调试日志记录(这是好事)</div>';
@@ -494,9 +509,8 @@ function showDebugLog(){
     // 排查时无从下手。现在 Console 留一条带原始 err 的 warn,页面显示简短错误 code,
     // 常见 code(目前只有 PERMISSION_DENIED)额外给一句排查提示。
     if(typeof console !== 'undefined') console.warn('读取调试日志失败:', err);
-    const m = document.getElementById('infoModal');
-    if(!m || m.classList.contains('hidden')) return;
-    const body = m.querySelector('.info-body');
+    // CORE-131:失败分支同样要过归属守卫——错误提示塞进别人的浮层,和成功内容塞进去一样糟。
+    const body = debugLogBodyIfStillMine();
     if(!body) return;
     const code = (err && err.code) ? String(err.code) : '未知错误';
     const hint = DEBUG_LOG_ERROR_CODE_HINTS[code];
