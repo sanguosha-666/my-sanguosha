@@ -2025,7 +2025,23 @@ function render(g){
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 
 // ===== 说明浮层(独立于 render;bodyHtml 需已是安全 HTML,单条说明请自行 escapeHtml) =====
+// ===== CORE-131(issue #171):#infoModal 的"归属世代号" =====
+// 几个浮层(帮助/日志/武将说明/装备说明/调试日志)共用同一个 #infoModal 容器,这本身没问题;
+// 问题出在**异步回填**:showDebugLog() 是先同步显示"加载中…"、再异步拉数据回填,如果这段
+// 时间里用户已经打开了别的浮层,晚到的回调会把内容写进现在归别人的容器里,把它顶掉。
+// 【为什么原来那层防护不够】debug-log.js 里本来就有 `if(m.classList.contains('hidden')) return`,
+// 注释也预见了这个风险——但它只挡住"弹窗已被关闭"这一种情况;用户关掉🐛又打开📜时,弹窗是
+// **可见**的,守卫直接放行,内容照样被覆盖(已实测复现)。要判断的不是"还开着吗",而是
+// "还是我这一次开的吗"。
+// 【机制】每次 showInfo/hideInfo 都把世代号 +1;异步发起方在同步阶段记下当时的世代号,
+// 回填前比对——不一致说明容器已经易主,直接放弃写入。这和项目里 render-table.js 的
+// lastShownEntrySeq、ai-bot.js 的 aiTestPendingRecord 是同一类"晚到的异步结果要先确认
+// 自己还是当前那一次"的写法。收敛在 showInfo/hideInfo 这一层,以后再有异步浮层直接复用,
+// 不需要每个调用点各写一遍。
+let infoModalGen = 0;
+function infoModalGeneration(){ return infoModalGen; }
 function showInfo(title, bodyHtml){
+  infoModalGen++;
   const m=document.getElementById('infoModal');
   m.innerHTML='<div class="info-panel"><button class="info-close icon-btn" aria-label="关闭">✕</button>'
     +'<h3>'+escapeHtml(title)+'</h3><div class="info-body">'+bodyHtml+'</div></div>';
@@ -2034,7 +2050,7 @@ function showInfo(title, bodyHtml){
   m.querySelector('.info-close').onclick=hideInfo;
   m.querySelector('.info-panel').onclick=(e)=>e.stopPropagation(); // 点面板本身不关闭
 }
-function hideInfo(){ const m=document.getElementById('infoModal'); m.classList.add('hidden'); m.innerHTML=''; logModalOpen=false; }
+function hideInfo(){ infoModalGen++; const m=document.getElementById('infoModal'); m.classList.add('hidden'); m.innerHTML=''; logModalOpen=false; }
 // 供座位卡内联触发(武将/装备,均公开信息);inline onclick 已 stopPropagation,不触发选目标
 // showGeneralInfo(id):势力信息直接查 getGeneral(id).faction,不经过 generalFaction(player)——
 // 这个函数的两个调用点(座位卡自己的"?"角标 / 化身行的"?")传入的 id 本身就已经是"该显示
