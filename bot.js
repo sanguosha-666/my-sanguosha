@@ -618,25 +618,41 @@ function botPredictCards(handCount){
 // let 而非 const:测试要能临时改写它来验证不变量断言的鉴别力(同 BOT_DECISION_WATCHDOG_MS
 // /AI_REPAIR_TIMEOUT_MS 的既定写法)。
 let BOT_PREDICT_WEIGHT = 40;
-// botPredictKind:把 botTargetScore 的 kind 参数归一化成预测项认识的语义类别。
-// 【为什么需要这一层】botTargetScore 的 kind 参数在现有调用点里有**两种互不相同的取值
-// 口径**,这是改动前就存在的不一致:
-//   ①语义类别:botBestTarget/pickBestCandidateSeat/断兵/方天等处传 'damage'/'steal';
-//   ②牌名:enumerateAllLegalOneStepActions(3处)和 botTryStartExtraSkills 的估值处
-//     直接把 action 透传进来,也就是 '杀'/'决斗'/'顺手牵羊'/'铁索连环' 这些牌名。
-// 后果是**既有的 `if(kind==='steal')` 那一行在②这类调用点从来没有生效过**(传进来的是
-// '顺手牵羊',不等于 'steal')。这是一个先于本次改动就存在的缺陷,**本次刻意不修**:
-// 修它会改变顺手/拆桥在出牌候选枚举里的既有评分,影响面远超本 issue 的范围,应该单独立项。
-// 这里只让**新增的预测项**两种口径都认,保证新功能在①②两类调用点都能生效,而既有那行
-// steal 修正**一个字节不动**(它的行为逐字保持原状,包括②路径下不生效这一点)。
-// 返回 null = 这个 kind 不适用预测项(如拆牌类/延时锦囊/铁索连环——它们的收益和"对方
-// 手上有没有闪/杀"无关),调用处不加任何分。
-function botPredictKind(kind){
-  if(kind==='damage' || kind==='duel') return kind;
+// ================= CORE-137:botTargetScore 的 kind 参数口径统一 =================
+// 【修的是什么缺陷】botTargetScore 的 kind 参数在调用点里存在**两种互不相通的取值口径**:
+//   ①语义标签:botBestTarget(内部算好的 kind)、pickBestCandidateSeat(调用方传入)、
+//     断兵、方天等处传 'damage'/'steal'/'duel';
+//   ②中文牌名:enumerateAllLegalOneStepActions(3处)和 botTryStartExtraSkills 的估值处
+//     直接把 action 透传进来,也就是 '杀'/'决斗'/'顺手牵羊'/'过河拆桥'/'铁索连环'。
+// 后果是函数末尾那行 `if(kind==='steal') score+=hand.length*4` **在②这类调用点从来没有
+// 生效过**(传进来的是 '顺手牵羊',不等于 'steal')——也就是说**顺手牵羊/过河拆桥在出牌
+// 阶段的候选枚举里,一直没吃到「手牌越多越值得拆」的 ×4 加成**,而通过 botBestTarget 走
+// 的同一张牌却吃到了,同一张牌在两条路径上评分口径不一致(确定性实测:5张手牌 vs 0张,
+// kind='steal' 分差 30.0、kind='顺手牵羊' 分差只有 10.0,差 20 分)。
+// 这是先于 CORE-135 就存在的缺陷,CORE-135 当时刻意隔离未修(影响面超出那个 issue 范围),
+// 现在按 issue #183 的方案 B 修复:**在归一化层统一,不去改那 4 处调用点**。
+//
+// 【为什么是两个函数而不是一个】botNormalizeTargetKind 回答"这个 kind 语义上是哪一类",
+// botPredictKind 回答"该套哪种概率预测"。两者不是同一个问题:steal 是一个**合法的语义
+// 类别**,但它**没有"能不能挡住"可言**(拆牌不会被闪掉),所以 botPredictKind 对 steal
+// 恒返回 null。把它们合成一个函数会让 "steal → null" 这个返回值同时背两种含义
+// ("不是合法类别" / "是合法类别但不适用预测"),以后必然被误读。
+// 返回 null = 不属于任何已建模的语义类别(乐不思蜀/兵粮寸断/铁索连环/火攻/借刀杀人等——
+// 它们的收益既不是"打中与否"也不是"拆牌量",不套任何 kind 修正)。
+function botNormalizeTargetKind(kind){
+  if(kind==='damage' || kind==='duel' || kind==='steal') return kind; // 口径①原样透传
   if(typeof kind!=='string' || !kind) return null;
+  // 口径②:中文牌名 → 语义标签
   if(typeof isShaName==='function' && isShaName(kind)) return 'damage'; // '杀'/'火杀'/'雷杀'
   if(kind==='决斗') return 'duel';
+  if(kind==='顺手牵羊' || kind==='过河拆桥') return 'steal';
   return null;
+}
+// botPredictKind:CORE-135 的预测项该套哪种概率。只有 damage(看对方有没有闪)和
+// duel(看对方有没有杀)两种;steal 是合法语义类别但不适用预测(拆牌不会被闪掉),返回 null。
+function botPredictKind(kind){
+  const k = botNormalizeTargetKind(kind);
+  return (k==='damage' || k==='duel') ? k : null;
 }
 
 function botTargetScore(g,seat,targetSeat,kind){
@@ -648,7 +664,8 @@ function botTargetScore(g,seat,targetSeat,kind){
   if(g.gameMode==='team'){
     // 组队模式没有身份局那套role/suspicion语义,不生搬硬套——保留和乱斗模式一样的
     // 默认打分风格(优先打体力低/手牌多的敌方目标),只是多了"排除同队"这一步(已在上面
-    // 处理)。kind==='steal'的额外加成在函数末尾统一处理,这里不用重复。
+    // 处理)。steal 的额外加成在函数末尾统一处理(CORE-137 起经 botNormalizeTargetKind
+    // 归一化,两种 kind 口径等价),这里不用重复。
     if(sameTeam(g,seat,targetSeat)) return -Infinity;
     score+=Math.random()*10;
   } else if(me.role==='zhong'){
@@ -693,9 +710,13 @@ function botTargetScore(g,seat,targetSeat,kind){
   } else {
     score+=Math.random()*10;
   }
-  if(kind==='steal') score+=(target.hand||[]).length*4;
-  // CORE-135:手牌数维度的「对方能不能挡住」预测,与上面 kind==='steal' 同层级的 kind
-  // 修正。**刻意放在所有身份/嫌疑分支之后**:前面那些分支里的 return -Infinity 是阵营
+  // CORE-137:kind 先过归一化,两种口径(语义标签 / 中文牌名)从这里开始等价。
+  // 改动前这里直接判 `kind==='steal'`,导致口径②(透传牌名)的调用点从未命中——
+  // 顺手牵羊/过河拆桥在出牌候选枚举里一直少算了这个 ×4 加成。
+  const normKind = botNormalizeTargetKind(kind);
+  if(normKind==='steal') score+=(target.hand||[]).length*4;
+  // CORE-135:手牌数维度的「对方能不能挡住」预测,与上面 steal 同层级的 kind 修正。
+  // **刻意放在所有身份/嫌疑分支之后**:前面那些分支里的 return -Infinity 是阵营
   // 安全硬边界,必须原样穿透到底——加法对 -Infinity 无效(-Infinity+40 仍是 -Infinity),
   // 数学上安全,测试里另有断言显式钉住这一点。
   const predKind = botPredictKind(kind);

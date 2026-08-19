@@ -148,8 +148,12 @@ const testCode = String.raw`
     if(botPredictKind('决斗') !== 'duel') throw new Error('决斗 应归一化成 duel');
   });
 
-  check('botPredictKind:与"有没有闪/杀"无关的牌一律 null(不加分)', function(){
-    ['顺手牵羊','过河拆桥','铁索连环','乐不思蜀','兵粮寸断','火攻','借刀杀人',null,undefined,'']
+  // CORE-137 起用例名做了修正:原文写的是"一律 null(**不加分**)",但顺手牵羊/过河拆桥
+  // 现在会经 botNormalizeTargetKind 归一成 'steal' 拿到 ×4 的拆牌加分——它们只是不适用
+  // **预测项**(拆牌不会被闪掉),不是"不加分"。断言本身(botPredictKind 返回 null)依然
+  // 完全正确,过期的只是括号里那句描述,若不改会误导以后读测试的人。
+  check('botPredictKind:不适用概率预测的 kind 一律 null(steal 类另有自己的加分)', function(){
+    ['顺手牵羊','过河拆桥','铁索连环','乐不思蜀','兵粮寸断','火攻','借刀杀人','steal',null,undefined,'']
       .forEach(function(k){
         if(botPredictKind(k) !== null) throw new Error(String(k)+' 应返回 null,实际 ' + botPredictKind(k));
       });
