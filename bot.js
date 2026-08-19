@@ -5117,13 +5117,25 @@ const BOT_WINDOW_MAX_STEPS = 8; // 强C循环步数上限(有密钥同窗多步�
 // 防 stub/异常环境把 runBotActionWindow 挂死。测试可用裸标识符赋值覆盖(缩小到几十毫秒
 // 加速超时路径——注意这是 let 不是 const,正是为了可覆盖)。
 let BOT_COMMIT_TIMEOUT_MS = 5000;
-function localFallbackPlayWindow(g, seat, candidates){
+// CORE-134:新增可选的第 4 个参数 out——纯留痕出口,函数把"这次为什么这么选"的依据
+// 写进 out.detail。**选择逻辑一个字节没动**(下面三行判断与改动前逐字一致),out 不传时
+// 行为与改动前完全相同(既有调用点/测试零变化)。之所以由本函数产出依据而不是让调用方
+// 事后反推:阈值 25 和"最高分非结束候选"这两个口径只有这里知道,在外面重算一遍等于把
+// 同一条规则写两份,以后改一处忘另一处就会给出错误的解释。
+function localFallbackPlayWindow(g, seat, candidates, out){
   let best = null;
   candidates.forEach(c=>{
     if(c.isEndPlay) return;
     if(best===null || (c.localHeuristicScore||0) > (best.localHeuristicScore||0)) best = c;
   });
-  if(best && (best.localHeuristicScore||0) > 25) return best;
+  if(best && (best.localHeuristicScore||0) > 25){
+    if(out) out.detail = '最高分候选 ' + (best.label||best.action||'?')
+      + ' 本地分' + (best.localHeuristicScore||0) + ' > 出牌阈值25,打出';
+    return best;
+  }
+  if(out) out.detail = best
+    ? ('最高分候选仅 ' + (best.localHeuristicScore||0) + ',未过出牌阈值25,结束出牌阶段')
+    : '没有任何非结束候选,结束出牌阶段';
   return candidates.find(c=>c.isEndPlay) || candidates[candidates.length-1];
 }
 function executePlayWindowChoiceAwait(g, seat, choice){
@@ -5180,7 +5192,18 @@ async function runBotActionWindow(g, seat){
     }
     let choice;
     if(idx===null){
-      choice = localFallbackPlayWindow(lastG, seat, candidates);
+      // CORE-134:out 只收集依据文本,不影响 choice(见 localFallbackPlayWindow 注释)。
+      const fbOut = {};
+      choice = localFallbackPlayWindow(lastG, seat, candidates, fbOut);
+      if(typeof recordBotLocalDecision==='function'){
+        recordBotLocalDecision(lastG, seat, {
+          decisionId: 'playWindow(第' + (steps+1) + '步)',
+          reason: aiReady ? 'ai_unavailable' : 'no_api_key',
+          candidates: candidates,
+          choice: choice,
+          detail: fbOut.detail
+        });
+      }
     } else {
       choice = candidates[idx];
     }
