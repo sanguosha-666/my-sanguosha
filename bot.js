@@ -886,8 +886,74 @@ function botSuspicionHint(g, targetSeat){
 }
 // isFirstTurn 参数保留仅为向后兼容(历史调用方可能传第三参),本函数不再依赖它:
 // 武将技能/描述是公开信息(座位卡上人人可见),任何回合都该提供给 AI。
-function buildBotVisibleState(g, seat, isFirstTurn=false){
+// ================= CORE-133:局势自适应的 prompt 上下文预算分档 =================
+// 【要解决什么】改动前所有决策点、所有局面共用同一份 prompt 预算:recentLog 恒 6 条、
+// 他人 generalDesc 恒截断 60 字、recentSuspicionEvents 恒 10 条、maxTokens 下限恒 160。
+// 一个"三人满血、场上什么都没发生"的平稳出牌决策,和一个"内奸在濒死链里判断要不要
+// 救主公"的决策,吃掉的预算完全一样——前者浪费,后者可能信息不够。
+//
+// 【为什么不是接 provider 的 reasoning_effort】外部项目 Cli-SanGuoSha-online 的
+// pickReasoningLevel 是映射到 API 的 reasoning_effort 档位的,我们**刻意不这么做**:
+// PROVIDER_ADAPTERS 里 cohere/cerebras 传的是 reasoning_effort:'none'(主动关闭
+// thinking),那是排查"reasoning 模型 thinking 默认开启 → JSON 被截断 / 预算爆掉"时
+// 的既有修复(见 ai-bot.js 对应注释)。把档位接到 reasoning_effort 上等于原地推翻那条
+// 修复。我们真正能调的旋钮是**上下文与输出预算**,不是 provider 的思考档位。
+//
+// 【分档判据】按本项目自己的局势模型,不照搬对方(对方在濒死时反而给非内奸降到 fast,
+// 那是为了压他们自己的决策耗时;我们的时间压力由 CORE-132 的预算与 30s 超时托管另行
+// 管理,不需要靠降档来省时间):
+//   - deep:濒死链进行中 / 身份局的内奸座位 / 自己 hp<=1
+//     这三类都是"决策空间最大、错一步直接输"的局面。内奸单列是因为本项目已经为它
+//     准备了最多的额外上下文(botNeiSituation 的局势摘要 + BOT_IDENTITY_GUIDANCE 里
+//     最长的那段三阶段引导),给的信息多、却用同样小的窗口去读,是不匹配的。
+//   - fast:局面平稳——无人阵亡、无人 hp<=1、非濒死链、非内奸。这种局面下历史日志
+//     的边际价值很低(什么都还没发生),砍掉一半 recentLog 基本不损失判断依据。
+//   - normal:其余(有人阵亡或有人残血,但不属于 deep)。
+//
+// 【零变化红线】normal 档的四个数值与改动前**逐字一致**;buildBotVisibleState 的 level
+// 参数默认就是 'normal',所以任何不显式传档位的调用点(含全部既有测试)输出一字不变。
+// 分档只作用于喂给 LLM 的 prompt,**绝不碰** enumerateAllLegalOneStepActions 的
+// AI_PLAY_CANDIDATE_LIMIT——那份候选列表同时被 localFallbackPlayWindow(无密钥兜底)
+// 消费,动它就等于改无密钥行为。
+const BOT_REASONING_BUDGET = {
+  // recentLog:buildBotKeyEvents 降噪后保留的关键事件条数
+  // otherGeneralDesc:他人武将描述的截断字数(自己恒全量,不受档位影响)
+  // suspicionEvents:recentSuspicionEvents 保留条数
+  // maxTokensFloor:callAiChooseIndex 里 maxTokens 的下限
+  fast:   { recentLog: 4,  otherGeneralDesc: 40, suspicionEvents: 6,  maxTokensFloor: 160 },
+  normal: { recentLog: 6,  otherGeneralDesc: 60, suspicionEvents: 10, maxTokensFloor: 160 },
+  deep:   { recentLog: 10, otherGeneralDesc: 60, suspicionEvents: 10, maxTokensFloor: 280 },
+};
+function botReasoningBudget(level){
+  return BOT_REASONING_BUDGET[level] || BOT_REASONING_BUDGET.normal;
+}
+// botReasoningLevel:纯函数,只读公开局势 + 该座位自己的身份(自己的身份对自己不是隐藏
+// 信息)。不写任何状态、不产生副作用,可以在任意决策点安全重复调用。
+function botReasoningLevel(g, seat){
+  if(!g || !Array.isArray(g.players)) return 'normal';
   const me = g.players[seat];
+  // ① 濒死链进行中:phase 或 pending.type 任一为 dying 都算(两处都判是因为濒死流程
+  // 期间 phase 恒为 'dying',但某些挂起-恢复路径下判 pending 更直接,两者取并集最稳)。
+  const dying = g.phase==='dying' || (g.pending && g.pending.type==='dying');
+  if(dying) return 'deep';
+  // ② 身份局的内奸座位:决策空间最复杂(既不能让主公过早阵亡、又要伺机反水),而且
+  // 本项目已经额外喂给它 neiSituation 摘要 + 最长的那段身份引导。
+  if(g.gameMode==='identity' && me && me.role==='nei') return 'deep';
+  // ③ 自己命悬一线:一步错就没有下一步了。
+  if(me && typeof me.hp==='number' && me.hp<=1) return 'deep';
+  // ④ 局面平稳:全员存活、无人残血。历史日志此时边际价值最低。
+  const calm = g.players.every(function(p){
+    return !p || (p.alive && typeof p.hp==='number' && p.hp>1);
+  });
+  if(calm) return 'fast';
+  return 'normal';
+}
+
+// CORE-133:level 是可选的第 4 个参数,缺省 'normal' = 改动前的逐字取值。只有 AI 决策
+// 入口会显式传档位;任何不传的调用点(含既有测试)输出完全不变。
+function buildBotVisibleState(g, seat, isFirstTurn=false, level='normal'){
+  const me = g.players[seat];
+  const budget = botReasoningBudget(level);
   
   // 计算下一个玩家（用于AI判断行动顺序）
   const calculateNextPlayer = () => {
@@ -908,7 +974,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     gameMode: g.gameMode || 'ffa',
     myTeam: Number.isInteger(me.team) ? me.team : null,
     round: g.roundNum || 1,
-    recentSuspicionEvents: (g.aiSuspicionEvents||[]).slice(-10).map(e=>({
+    recentSuspicionEvents: (g.aiSuspicionEvents||[]).slice(-budget.suspicionEvents).map(e=>({
       round:e.round, source:e.source, target:e.target, amount:e.amount, kind:e.kind
     })),
     phase: g.phase || '', // 当前游戏阶段
@@ -948,7 +1014,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
         team: Number.isInteger(p.team) ? p.team : null, // 队伍公开信息(组队模式);非team恒null
         general: p.general || null, // 武将本身是公开信息(座位卡对所有人可见),不是隐藏信息
         generalSkill: p.general && GENERALS && GENERALS[p.general] ? String(GENERALS[p.general].skill||'') : undefined, // 武将技能常开(公开信息)
-        generalDesc: (p.general && typeof GENERALS!=='undefined' && GENERALS[p.general]) ? String(GENERALS[p.general].desc||'').slice(0, i===seat ? 9999 : 60) : undefined, // 武将描述常开;自己全量,他人截断60字(token优化)
+        generalDesc: (p.general && typeof GENERALS!=='undefined' && GENERALS[p.general]) ? String(GENERALS[p.general].desc||'').slice(0, i===seat ? 9999 : budget.otherGeneralDesc) : undefined, // 武将描述常开;自己全量,他人按档位截断(CORE-133:normal 档仍是 60 字,与改动前一致)
         distance: i !== seat ? distance(g, seat, i) : 0, // 与自己的距离
         suspicionHint: botSuspicionHint(g, i), // 身份局限定,undefined 时 JSON 里不出现这个键
         // 特殊状态信息
@@ -965,7 +1031,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
     // 只保留最近 6 条关键事件(使用/打出/装备/伤害/阵亡/濒死/判定/无懈等),信息密度
     // 提升、token 减半。同窗多步连贯由 runBotActionWindow 的 lastActions 意图链承担,
     // 跨回合记忆由 aiSummary(原料同样是这份降噪后日志,质量反而更高)承担。
-    recentLog: buildBotKeyEvents(g),
+    recentLog: buildBotKeyEvents(g, budget.recentLog),
     // 自身回合内标志:只投影自己的(shaUsed 全局、jiangchiNoSlash 每人一份),不含他人私有状态
     myFlags: { shaUsed: !!g.shaUsed, jiangchiNoSlash: !!(me.jiangchiNoSlash) },
     // 牌堆剩余张数:公开信息(牌堆背面可见,张数人人知道)
@@ -979,7 +1045,9 @@ function buildBotVisibleState(g, seat, isFirstTurn=false){
 // 房间已创建/已添加机器人/游戏开始"等例行事件(手牌数/轮次可从局面推断,零决策价值),
 // 只保留最近 6 条关键事件。注意:过河拆桥/顺手牵羊拆掉具体装备的日志格式是
 // "X 弃置了 Y 的武器【…】"之类,不匹配"弃置了N张牌$"规则,不会被误滤。
-function buildBotKeyEvents(g){
+// CORE-133:limit 可选,缺省 6 = 改动前的固定值(既有调用点/测试零变化)。
+function buildBotKeyEvents(g, limit){
+  const keep = (typeof limit==='number' && limit>0) ? limit : 6;
   return (g.log||[]).filter(function(e){
     const t = (e && typeof e==='object') ? (e.text||'') : String(e==null?'':e);
     if(!t) return false;
@@ -991,7 +1059,7 @@ function buildBotKeyEvents(g){
     if(/已添加机器人/.test(t)) return false;
     if(/^游戏开始/.test(t)) return false;
     return true;
-  }).slice(-6).map(e => {
+  }).slice(-keep).map(e => {
     const t = (e && typeof e==='object') ? e.text : String(e==null?'':e);
     // CORE-101(issue #148):g.log 原文是`${p.name} ...`这样拼出来的,昵称原样嵌在文本
     // 里,交给LLM前必须做一次文本级替换(不是结构化字段,不能简单换key)。
@@ -3383,11 +3451,13 @@ function buildSummaryPrompt(g, seat){
 async function tryAiBotPlay(g, seat, options){
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
   const candidates = buildBotPlayCandidates(g, options);
-  const state = buildBotVisibleState(g, seat);
+  // CORE-133:出牌是四个 AI 决策入口之一,按局势分档取 prompt 预算(normal 档 = 改动前)。
+  const level = botReasoningLevel(g, seat);
+  const state = buildBotVisibleState(g, seat, false, level);
   // 候选列表→索引的AI询问统一走 callAiChooseIndex(密钥守卫/单候选短路/思考指示/
   // 解析/越界校验/超时兜底全部收敛在总线骨架里,和 botDecide 共用同一套基础设施)。
   const idx = await callAiChooseIndex({
-    g, seat,
+    g, seat, reasoningLevel: level,
     systemPrompt: buildBotPlaySystemPrompt(g, seat),
     userPrompt: buildBotPlayUserPrompt(state, candidates),
     candidates, maxTokens: 200,
@@ -3475,9 +3545,10 @@ async function tryAiBotBestTarget(g, seat, card, actionId){
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return null;
   const candidates = buildBotTargetCandidates(g, seat, card, actionId);
   if(!candidates.length) return null; // 理论上不会发生:调用方已经确认至少有一个合法目标
-  const state = buildBotVisibleState(g, seat);
+  const level = botReasoningLevel(g, seat); // CORE-133
+  const state = buildBotVisibleState(g, seat, false, level);
   const idx = await callAiChooseIndex({
-    g, seat,
+    g, seat, reasoningLevel: level,
     systemPrompt: buildBotTargetSystemPrompt(g, seat),
     userPrompt: buildBotTargetUserPrompt(state, card, actionId, candidates),
     candidates, maxTokens: 100,
@@ -5090,11 +5161,14 @@ async function runBotActionWindow(g, seat){
     candidates.forEach((c,i)=>{ c.index=i; });
     let idx = null;
     if(aiReady && candidates.length>1){
-      const state = buildBotVisibleState(lastG, seat);
+      // CORE-133:同窗多步的每一步各自分档——窗口中途可能有人被打到残血/濒死,
+      // 局势档位本来就该跟着变,不该沿用进入窗口时算的那一次。
+      const level = botReasoningLevel(lastG, seat);
+      const state = buildBotVisibleState(lastG, seat, false, level);
       state.windowStep = steps;
       state.lastActions = windowHistory.slice();
       idx = await callAiChooseIndex({
-        g: lastG, seat,
+        g: lastG, seat, reasoningLevel: level,
         systemPrompt: buildBotDefaultSystemPrompt()
           + '你处于同一出牌窗口的连续决策,每步只选一个完整合法动作(牌+目标已合并)。'
           + '你上一步执行后局面已经变化,请根据最新局面继续选择,直到选择结束出牌。',
