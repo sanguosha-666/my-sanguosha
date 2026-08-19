@@ -269,6 +269,21 @@ const testCode = String.raw`
     if(AI_DECISION_BUDGET_MS - AI_CALL_TIMEOUT_MS < AI_REPAIR_TIMEOUT_MS) throw new Error('首次跑满15s后应仍有预算做一次 repair');
   });
 
+  // ---- 6c. CORE-133 合并收尾:repair 与首次调用的 maxTokens 下限同口径 ----
+  await check('repair 的 maxTokens 下限与首次调用一致(deep 档下同为 280,不退回 160)', async function(){
+    resetBudget();
+    installCallAI([
+      { ok:true, text:'不可解析' },
+      { ok:true, text:'{"choice":0}' }
+    ]);
+    await callAiChooseIndex({ g:g, seat:0, candidates:candidates3, reasoningLevel:'deep' });
+    if(calls[0].opts.maxTokens !== 280) throw new Error('首次 deep 档应为 280,实际 ' + calls[0].opts.maxTokens);
+    if(calls[1].opts.maxTokens !== calls[0].opts.maxTokens)
+      throw new Error('repair 面对同一局面同一候选,maxTokens 必须与首次同口径;'
+        + '首次 ' + calls[0].opts.maxTokens + ' vs repair ' + calls[1].opts.maxTokens
+        + '(留 160 会让 deep 档"首次给够了、重试反而被截断")');
+  });
+
   // ---- 7. repair 沿用首次的模型 ----
   await check('repair 沿用首次实际发出请求的模型,不换模型', async function(){
     resetBudget();

@@ -323,6 +323,16 @@ function buildAiRepairUserPrompt(userPromptText, badText){
 // 保持单次调用零变化(那两种场景重试只会重复打同一个模型)。
 async function callAiChooseIndex(opts){
   const candidates = opts.candidates || [];
+  // CORE-133:局势档位。**必须声明在函数体最前面**——decisionRec 的 summary 和下方
+  // callAI 的 maxTokens 都要用它,const 有 TDZ,声明晚于任一使用点会直接抛
+  // "Cannot access 'reasoningLevel' before initialization",让每一次 AI 决策都崩。
+  // maxTokens 下限按档位取。opts.reasoningLevel 缺省时 botReasoningBudget
+  // 回退 normal 档(下限仍是 160),既有不传档位的调用点逐字不变。deep 档抬到 280 是因为
+  // 那些局面(濒死链/内奸/自己残血)的理由通常更长,160 容易把 {"choice":N,"reason":"…"}
+  // 截断成解析失败(=白白退化成本地兜底),不如一开始就给够。
+  const reasoningLevel = opts.reasoningLevel || 'normal';
+  const maxTokensFloor = (typeof botReasoningBudget==='function')
+    ? botReasoningBudget(reasoningLevel).maxTokensFloor : 160;
   // 【AI托管】检测当前座位是否处于托管模式:命中则该次询问要求 AI 附理由,
   // 并把解析出的理由存入模块级 aiTestLastReason(供信息窗 record 采集)。
   const autopilotHit = (typeof aiTestAutopilot!=='undefined') && aiTestAutopilot
@@ -357,7 +367,8 @@ async function callAiChooseIndex(opts){
   // 自动成立,不需要额外判断。
   const decisionRec = (typeof aiDecisionRecordStart==='function')
     ? aiDecisionRecordStart(g, seat, {
-        summary: opts.summary || ('决策(' + (g && g.phase) + ')'),
+        // CORE-133:把这次用的局势档位写进 summary,排查时一眼看出用的哪档预算。
+        summary: (opts.summary || ('决策(' + (g && g.phase) + ')')) + ' [' + reasoningLevel + ']',
         prompt: sysText + '\n\n' + userPromptText,
         isAutopilot: autopilotHit
       })
@@ -394,7 +405,7 @@ async function callAiChooseIndex(opts){
         // CORE-73:理由指令现在对全部决策生效,返回体从 {"choice":N} 变成
         // {"choice":N,"reason":"…"},80 token 容易把 JSON 截断成解析失败(=退本地兜底,
         // 决策质量下降)。给一个 160 的下限,调用方声明更大时仍取更大值。
-        maxTokens: Math.max(opts.maxTokens || 80, 160),
+        maxTokens: Math.max(opts.maxTokens || 80, maxTokensFloor),
         // 多模型轮换:同 updateAiSummary 的 callAI 调用点,见该处注释。
         model,
       });
@@ -497,7 +508,12 @@ async function callAiChooseIndex(opts){
         rr = await callAI(aiProvider, aiApiKey, {
           systemPrompt: sysText,
           userPrompt: buildAiRepairUserPrompt(userPromptText, result.text),
-          maxTokens: Math.max(opts.maxTokens || 80, 160),
+          // CORE-133 合并收尾:repair 的 maxTokens 下限与首次调用同口径(都用
+          // maxTokensFloor 而不是写死 160)。首次调用是 deep 档才需要 280 的输出上限,
+          // repair 面对的是**同一个局面、同一份候选**,理由长度需求完全一样——这里若
+          // 留 160,deep 档下就会出现"首次给够了、重试反而被截断"的荒谬情况,而 repair
+          // 本来就是为了救那次截断/解析失败,口径不一致会让它自己成为下一次失败的原因。
+          maxTokens: Math.max(opts.maxTokens || 80, maxTokensFloor),
           // 沿用首次实际发出请求的那个模型:这次失败的原因不是"这个模型不可用"(那是
           // !ok 那条路径,已经有换模型重试),换模型只会让"同一局面同一模型再试一次"
           // 这个前提不成立,也可能撞上另一个模型的冷却。
@@ -615,7 +631,10 @@ async function botDecide(decisionId, g, seat){
   let idx = null;
   const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
   if(aiReady && candidates.length>1){
-    const state = buildBotVisibleState(g, seat);
+    // CORE-133:botDecide 是 L1/L2/L3 全部结构化决策的共同入口,分档在这里接一次即可
+    // 覆盖绝大多数决策点(出牌/选目标/同窗多步另在 bot.js 各自入口接)。
+    const level = (typeof botReasoningLevel==='function') ? botReasoningLevel(g, seat) : 'normal';
+    const state = buildBotVisibleState(g, seat, false, level);
     if(typeof spec.extraState==='function'){
       Object.assign(state, spec.extraState(g, seat) || {});
     }
@@ -623,7 +642,7 @@ async function botDecide(decisionId, g, seat){
       ? spec.buildSystemPrompt(g, seat, { state, candidates })
       : buildBotDefaultSystemPrompt(g, seat);
     const userPrompt = buildBotDefaultUserPrompt(state, candidates);
-    idx = await callAiChooseIndex({ g, seat, systemPrompt, userPrompt, candidates, maxTokens: spec.maxTokens||80 });
+    idx = await callAiChooseIndex({ g, seat, reasoningLevel: level, systemPrompt, userPrompt, candidates, maxTokens: spec.maxTokens||80 });
   } else if(aiReady && candidates.length===1){
     idx = 0;
   }
