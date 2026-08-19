@@ -589,10 +589,13 @@ const AI_MODEL_OPTIONS = {
 };
 
 // ---------- 统一网络层 ----------
-// callAI(provider, apiKey, {systemPrompt, userPrompt, maxTokens, model}) ->
+// callAI(provider, apiKey, {systemPrompt, userPrompt, maxTokens, model, timeoutMs}) ->
 //   Promise<{ok:true, text, usage} | {ok:false, reason:'network'|'auth'|'timeout'|'parse'|'other', detail}>
 // usage(CORE-76)= {input,output,total} 的 token 用量,取不到时为 null。
 // fetch/超时竞速/错误归类只在这一处实现,adapter 本身完全不碰网络。
+// CORE-132:opts.timeoutMs 可选覆盖单次调用超时(不传 = AI_CALL_TIMEOUT_MS,全部既有
+// 调用点行为逐字不变)。加这个口子是为了 repair 重试——它必须用一个明显更短的超时才能
+// 塞进 30s 响应超时托管的预算里,而不能沿用给首次调用定的 15s。
 const AI_CALL_TIMEOUT_MS = 15000;
 
 // parseAiUsage:从 provider 原始响应里取 token 用量,归一化成 {input,output,total}。
@@ -647,7 +650,10 @@ function callAI(provider, apiKey, opts){
   }
   const hasAbort = typeof AbortController !== 'undefined';
   const controller = hasAbort ? new AbortController() : null;
-  const timeoutId = controller ? setTimeout(()=>controller.abort(), AI_CALL_TIMEOUT_MS) : null;
+  // CORE-132:调用方可用 opts.timeoutMs 覆盖;非正数/缺省一律回退 AI_CALL_TIMEOUT_MS。
+  const callTimeoutMs = (opts && typeof opts.timeoutMs==='number' && opts.timeoutMs > 0)
+    ? opts.timeoutMs : AI_CALL_TIMEOUT_MS;
+  const timeoutId = controller ? setTimeout(()=>controller.abort(), callTimeoutMs) : null;
   return fetch(req.url, {
     method: 'POST',
     headers: req.headers,
@@ -694,7 +700,7 @@ function callAI(provider, apiKey, opts){
   }, e=>{
     if(timeoutId) clearTimeout(timeoutId);
     if(e && e.name==='AbortError'){
-      return { ok:false, reason:'timeout', detail:'请求超时(超过 '+(AI_CALL_TIMEOUT_MS/1000)+' 秒)' };
+      return { ok:false, reason:'timeout', detail:'请求超时(超过 '+(callTimeoutMs/1000)+' 秒)' };
     }
     return { ok:false, reason:'network', detail:'网络请求失败: '+(e && e.message || String(e)) };
   });

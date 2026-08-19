@@ -277,6 +277,41 @@ function buildAutopilotUserPrompt(userPrompt){
   return s;
 }
 
+// ================= CORE-132:JSON 解析失败的一次 repair 重试 =================
+// 【为什么只对这一类失败重试】callAiChooseIndex 有两种失败:①!result.ok(网络/超时/限流/
+// 鉴权/HTTP错误)——局面之外的条件不满足,重发同一条 prompt 大概率还是同样的结果,而且
+// 轮换模式已经有"换下一个模型"这条既有重试路径覆盖它;②result.ok 但解析不出 choice 或
+// 索引越界——模型确实回话了、token 也已经花掉了,局面一个字没变,纯粹是没按格式说话。
+// 只有②值得原样再问一次并明确要求"只输出JSON",这也是外部项目 Cli-SanGuoSha-online
+// 的 buildRepairPrompt 在做的事(对比分析 A2 项)。
+//
+// 【超时预算怎么定】询问型 pending 由 RESPONSE_TIMEOUT_MS=30000 的超时托管兜底:超时会
+// 自动提交一个保守动作。如果 repair 把一次决策拖过 30s,超时托管会抢在 AI 决策之前提交,
+// 这次重试不但白费、还会让机器人的动作变成保守兜底,比不重试更差。所以:
+//   - AI_REPAIR_TIMEOUT_MS = 6000:repair 单次超时,远小于首次调用的 15s。repair 的
+//     prompt 和首次几乎一样长,模型的实际首字延迟不会因为是重试就变长,给 6s 是"够正常
+//     响应、但绝不拖预算"的取舍——超了就放弃重试走本地兜底,本来就是可接受的降级终点。
+//   - AI_DECISION_BUDGET_MS = 22000:一次决策(首次调用 + 可选 repair)的总预算。留出
+//     30000-22000=8000ms 给 tx 往返、渲染、以及 execute 自身的提交耗时,不把预算吃满。
+//   - 发起 repair 前必须满足 已耗时 + AI_REPAIR_TIMEOUT_MS <= AI_DECISION_BUDGET_MS。
+//     首次调用如果本身就跑满了 15s,22000-15000=7000 > 6000 仍然放得下一次 repair;
+//     轮换模式试过多个模型、已耗时超过 16s 时则不再重试(预算不足,直接兜底)。
+// 这两个值用 let 而不是 const,和 BOT_DECISION_WATCHDOG_MS/BOT_COMMIT_TIMEOUT_MS 同一
+// 既定写法——测试要能覆盖"预算不足时不发起 repair"这条分支,必须可改写。
+let AI_REPAIR_TIMEOUT_MS = 6000;
+let AI_DECISION_BUDGET_MS = 22000;
+// buildAiRepairUserPrompt:在原 userPrompt 之后追加修复指令。刻意保留原 userPrompt 全文
+// (局面/候选列表一字不改),只在末尾说明"上次那条回答无法解析"——模型需要原始局面才能
+// 重新做出同一个决策,只发一句"请重输JSON"而不带局面是没法回答的。
+function buildAiRepairUserPrompt(userPromptText, badText){
+  const snippet = String(badText==null?'':badText).replace(/\s+/g,' ').trim().slice(0, 120);
+  return userPromptText
+    + '\n\n【重要】你上一条回答无法被程序解析'
+    + (snippet ? '(收到的内容开头是:' + snippet + ')' : '')
+    + '。请基于上面完全相同的局面与候选列表重新作答,只输出一个 JSON 对象,不要输出任何'
+    + '其它文字、解释或代码块标记,且 choice 必须是候选列表里真实存在的下标数字。';
+}
+
 // callAiChooseIndex:一次"候选列表→索引"的AI询问,返回规范化后的合法下标或 null。
 // 守卫/超时/解析失败/越界全部收敛到这一处,与 tryAiBotPlay 同一套取舍:任何失败都
 // 返回 null 交给调用方回退本地逻辑,不阻塞、不抛异常。
@@ -446,10 +481,77 @@ async function callAiChooseIndex(opts){
     });
   }
   if(idx===null || idx<0 || idx>=candidates.length){
+    // CORE-132:解析失败/越界是"模型没按格式说话"而不是"模型没响应"——局面一个字没变,
+    // 值得用同一份局面 + 一句修复指令再问一次(至多一次)。预算不足时跳过,直接走原路。
+    const elapsed = Date.now() - callStartedAt;
+    const budgetLeft = AI_DECISION_BUDGET_MS - elapsed;
+    let repaired = null;      // repair 后解析出的合法下标(null=没成功/没重试)
+    let repairAttempted = false;
+    let repairReason = null;
+    let repairRaw = null;
+    if(budgetLeft >= AI_REPAIR_TIMEOUT_MS){
+      repairAttempted = true;
+      showAiThinkingIndicator(g, seat);
+      let rr;
+      try{
+        rr = await callAI(aiProvider, aiApiKey, {
+          systemPrompt: sysText,
+          userPrompt: buildAiRepairUserPrompt(userPromptText, result.text),
+          maxTokens: Math.max(opts.maxTokens || 80, 160),
+          // 沿用首次实际发出请求的那个模型:这次失败的原因不是"这个模型不可用"(那是
+          // !ok 那条路径,已经有换模型重试),换模型只会让"同一局面同一模型再试一次"
+          // 这个前提不成立,也可能撞上另一个模型的冷却。
+          model: attemptedModel,
+          // CORE-132:repair 专用短超时,保证总耗时留在 AI_DECISION_BUDGET_MS 以内。
+          timeoutMs: AI_REPAIR_TIMEOUT_MS,
+        });
+      }catch(e){
+        rr = { ok:false, reason:'other', detail:String(e) };
+      }finally{
+        hideAiThinkingIndicator();
+      }
+      if(rr && rr.ok){
+        repairRaw = rr.text || '';
+        const pr2 = parseBotPlayAiChoiceWithReason(rr.text);
+        if(pr2.idx!==null && pr2.idx>=0 && pr2.idx<candidates.length){
+          repaired = pr2.idx;
+          repairReason = pr2.reason;
+        }
+      } else {
+        repairRaw = '(repair调用失败:' + ((rr&&rr.reason)||'unknown') + ' - ' + ((rr&&rr.detail)||'') + ')';
+      }
+    }
+    if(repaired !== null){
+      // repair 成功:这次决策仍然是"AI 给出了合法选择",走和首次成功完全相同的收尾——
+      // 回填记录(标注是 repair 得到的)、挂 aiCurrentDecisionRecord 让 execute 能回写
+      // 提交结果、托管路径同步理由/选择。刻意不写 bot_decision_trace:这是一次**成功**的
+      // 决策,按 CORE-72 的既定原则(debugLogs 只记异常)不该进异常日志。
+      if(autopilotHit){ aiTestLastReason = repairReason; aiTestLastChoice = repaired; }
+      if(typeof fillAiDecisionRecord==='function'){
+        fillAiDecisionRecord(decisionRec, {
+          rawResponse: (result.text||'') + '\n\n[CORE-132 首次解析失败,repair重试后的返回]\n' + repairRaw,
+          choice: repaired,
+          reason: repairReason,
+          model: attemptedModel || null,
+          usage: (result && result.usage) || null
+        });
+      }
+      aiCurrentDecisionRecord = decisionRec;
+      return repaired;
+    }
     // CORE-109:AI 返回了 200,但解析失败或选了候选列表之外的下标——这次决策仍会回退
     // 本地启发式,但"模型说了没用的话"和"模型没响应"是两种不同的诊断信号,分开记。
+    // CORE-132:日志里明说 repair 是"试了仍失败"还是"预算不足没试",两者的排查方向不同。
     logBotDecisionTrace(g, seat, 'ai_response_unusable',
-      'AI返回200但解析失败或索引越界(候选数'+candidates.length+',解析结果='+idx+'),回退本地兜底');
+      'AI返回200但解析失败或索引越界(候选数'+candidates.length+',解析结果='+idx+'),'
+      + (repairAttempted ? 'repair重试后仍不可用' : ('预算不足未重试(已耗时'+elapsed+'ms,预算'+AI_DECISION_BUDGET_MS+'ms)'))
+      + ',回退本地兜底');
+    if(repairAttempted && typeof fillAiDecisionRecord==='function'){
+      fillAiDecisionRecord(decisionRec, {
+        rawResponse: (result.text||'') + '\n\n[CORE-132 repair重试后仍不可用]\n' + repairRaw,
+        model: attemptedModel || null
+      });
+    }
     // CORE-76:同上——退本地兜底,这条记录不该认领随后 botInvoke 的提交结果。
     aiCurrentDecisionRecord = null;
     if(autopilotHit){ aiTestLastReason = null; aiTestLastChoice = null; }
