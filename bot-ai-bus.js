@@ -496,6 +496,98 @@ function logBotDecisionTrace(g, seat, source, message){
   }catch(e){ /* 诊断日志本身出错不影响主决策流程 */ }
 }
 
+// ================= CORE-134:本地兜底决策的可读留痕 =================
+// 【要解决什么】走本地兜底(spec.localFallback / localFallbackPlayWindow)时完全不留痕:
+// 无密钥对局里机器人 100% 走本地兜底,于是 aiDecisionRecords 决策面板一条记录都没有,
+// debugLogs 里也只有异常。用户问"机器人这一步为什么这么走",只能去读代码反推
+// botCardPriority/botTargetScore/各注册项 localFallback 的正则,非常慢。外部项目
+// Cli-SanGuoSha-online 的 LocalAiEngine 每次决策都连同结果产出一句 insight,是这次
+// 要借鉴的点(对比分析 A5 项)。
+//
+// 【为什么不写 debugLogs】debug-log.js 顶部与 CORE-72 已经确立"debugLogs 只记异常"。
+// 本地兜底在无密钥对局里是**正常路径**、每一步都发生,写进去会把 js_error/timeout_stuck/
+// ai_call_failed 这些真正的排查信号整个淹掉——CORE-72 当初删掉 source=llm 的正常流水
+// 正是为了这个,不能原地复发。
+//
+// 【去处分两路,按"这次走本地是不是异常"分流】
+//   - 配了密钥却仍然走了本地兜底 = AI 路径这次失败了,是**值得在决策面板上看到**的信号
+//     (你打开面板本来就是想问"这次为什么没用 AI"),所以补一条 aiDecisionRecords 记录,
+//     和它前后的 AI 决策并排显示。这类记录天然稀少(AI 决策本身就不密集,其中失败的更少),
+//     不会把面板刷爆。
+//   - 没配密钥 = 本地兜底就是正常工作方式,只进下面这个**有界**环形缓冲 + console.debug,
+//     零 DOM 操作、零重排、内存有上限。
+//
+// 【纯新增保证】本段不参与任何选择逻辑:调用点都在 choice 已经确定之后,只读不写,
+// 内部整体 try/catch —— 留痕本身出错绝不能影响决策主流程。
+const BOT_LOCAL_INSIGHT_MAX = 60;
+// botLocalDecisionLog:最近 BOT_LOCAL_INSIGHT_MAX 条本地兜底决策的可读记录(环形)。
+// 纯客户端内存数组,不入 Firebase。调试时在控制台直接读它即可。
+let botLocalDecisionLog = [];
+function clearBotLocalDecisionLog(){ botLocalDecisionLog = []; }
+// botLocalChoiceLabel:把一个候选压成一句可读的短标签。候选的形状在各注册项之间不统一
+// (L1 controls 候选有 label;出牌候选有 label+action+target+localHeuristicScore;
+// seatPick 候选有 seat),所以按"能取到什么就用什么"的顺序退化,而不是假定某一种形状。
+function botLocalChoiceLabel(g, choice){
+  if(choice===null || choice===undefined) return '(不发动/无动作)';
+  if(typeof choice==='number') return '候选#'+choice;
+  const parts = [];
+  if(choice.label) parts.push(String(choice.label));
+  else if(choice.action) parts.push(String(choice.action));
+  if(parts.length===0 && Number.isInteger(choice.seat)){
+    parts.push('目标座位'+choice.seat
+      + ((typeof botAiName==='function' && g) ? '('+botAiName(g, choice.seat)+')' : ''));
+  }
+  if(typeof choice.localHeuristicScore==='number') parts.push('本地分'+choice.localHeuristicScore);
+  return parts.length ? parts.join(' ') : '(候选无可读标签)';
+}
+// recordBotLocalDecision:留痕唯一入口。ctx = {decisionId, reason, candidates, choice, detail}
+//   decisionId —— 哪个决策点(注册项 id / 'playWindow')
+//   reason     —— 为什么走本地('no_api_key' / 'ai_unavailable')
+//   detail     —— 该决策点自己能给出的具体依据(可选,如"最高分70>阈值25")
+function recordBotLocalDecision(g, seat, ctx){
+  try{
+    ctx = ctx || {};
+    const candidates = ctx.candidates || [];
+    const reasonText = ctx.reason==='no_api_key' ? '未配置AI密钥,本地兜底是常规路径'
+      : ctx.reason==='ai_unavailable' ? 'AI决策不可用(调用失败/解析失败/索引越界),回退本地兜底'
+      : String(ctx.reason||'本地兜底');
+    const insight = '[本地兜底] ' + (ctx.decisionId||'未知决策点')
+      + ' @' + ((g && g.phase) || '?')
+      + ((g && g.pending && g.pending.type) ? '/' + g.pending.type : '')
+      + ' — ' + reasonText
+      + ';候选' + candidates.length + '个'
+      + ',选中:' + botLocalChoiceLabel(g, ctx.choice)
+      + (ctx.detail ? ';依据:' + ctx.detail : '');
+    const entry = {
+      time: (typeof debugLogIsoTime==='function') ? debugLogIsoTime(Date.now())
+        : new Date().toTimeString().slice(0,8),
+      seat: Number.isInteger(seat) ? seat : null,
+      decisionId: ctx.decisionId || null,
+      phase: (g && g.phase) || null,
+      reason: ctx.reason || null,
+      insight: insight
+    };
+    botLocalDecisionLog.push(entry);
+    if(botLocalDecisionLog.length > BOT_LOCAL_INSIGHT_MAX){
+      botLocalDecisionLog = botLocalDecisionLog.slice(-BOT_LOCAL_INSIGHT_MAX);
+    }
+    if(typeof console!=='undefined' && console.debug) console.debug(insight);
+    // 配了密钥却走本地 = 异常信号,补一条决策面板记录(见上面的分流说明)。
+    const aiReady = typeof aiApiKey!=='undefined' && aiApiKey && aiProvider;
+    if(aiReady && typeof aiDecisionRecordStart==='function'){
+      const rec = aiDecisionRecordStart(g, seat, { summary: '本地兜底(' + (ctx.decisionId||'?') + ')' });
+      if(rec && typeof fillAiDecisionRecord==='function'){
+        fillAiDecisionRecord(rec, {
+          rawResponse: '(本次未使用AI:' + reasonText + ')',
+          reason: insight,
+          model: '本地兜底'
+        });
+      }
+    }
+    return insight;
+  }catch(e){ return null; } // 留痕出错绝不影响决策主流程
+}
+
 // botDecide:决策总线入口。匹配失败/无候选且无 onEmpty 时返回 false(调用方按
 // "无此决策点"处理);否则总是执行(spec.execute 负责真正落子)并返回 true。
 // 注意:即使返回 true,execute 内部也可能因服务端校验失败而静默不生效——那是
@@ -528,6 +620,13 @@ async function botDecide(decisionId, g, seat){
   let choice;
   if(idx===null){
     choice = spec.localFallback(g, seat, candidates);
+    // CORE-134:纯留痕,在 choice 已确定之后只读不写,不参与也不改变上面这次选择。
+    recordBotLocalDecision(g, seat, {
+      decisionId: decisionId,
+      reason: aiReady ? 'ai_unavailable' : 'no_api_key',
+      candidates: candidates,
+      choice: choice
+    });
   } else {
     choice = candidates[idx];
   }
