@@ -5312,6 +5312,10 @@ async function runBotActionWindow(g, seat){
   const windowHistory = [];
   while(steps < BOT_WINDOW_MAX_STEPS){
     if(!isBotActionWindow(lastG, seat)) break;
+    // CORE-138:记下"执行这一步之前"的状态指纹,提交回来后和新快照的指纹比对。
+    // 放在这里而不是循环外:每一轮都要拿当轮真正用来决策的那份快照(lastG)算,
+    // 不能沿用上一轮的值。
+    const stepStartKey = (typeof botStateKey==='function') ? botStateKey(lastG, seat) : null;
     const candidates = enumerateAllLegalOneStepActions(lastG, seat);
     if(!candidates.length) break;
     candidates.forEach((c,i)=>{ c.index=i; });
@@ -5359,13 +5363,42 @@ async function runBotActionWindow(g, seat){
     if(choice && (choice.isEndPlay || choice.action==='结束出牌阶段')) break;
     // 无密钥:执行一步即返回(与弱C逐字一致);有密钥:等提交回调,拿不到新快照就 break
     if(!aiReady) return;
-    if(!newG || newG===lastG){
+    // CORE-138:两道检查,职责不同,都要留着——
+    //   ①`!newG || newG===lastG` —— 提交回调**根本没来**(executePlayWindowChoiceAwait
+    //     等到 BOT_COMMIT_TIMEOUT_MS 超时后 resolve null)。`newG===lastG` 这半条是引用
+    //     比较,真实 Firebase 每次交付的都是 snapshot.val() 的全新对象,所以它实际只在
+    //     测试 stub 这类会回传同一引用的环境里才为真;保留不动(逐字未改)。
+    //   ②`stallDetected` —— 提交**来了、但状态一个字节没动**。这是引用比较抓不到的
+    //     情况:服务端守卫把动作原地拒绝成 no-op 时,tx 照常 commit 并交付一个语义完全
+    //     相同的**新对象**,①那条判断顺利放行,循环于是用一模一样的局面重新枚举、选中
+    //     同一个动作、再次被拒绝……正是 CLAUDE.md 防复发规则 26 记录的死循环模式。
+    //     今天靠 BOT_WINDOW_MAX_STEPS=8 兜底(最坏浪费 8 次 AI 调用),但那是粗筛不是检测。
+    // 用 botStateKey 做内容比较之所以准:它含 (g.log||[]).length,而本项目任何一次真实
+    // 生效的动作都会往 g.log 追加至少一条记录(出牌/装备/伤害/判定/摸弃牌全都写日志),
+    // 「日志长度没变」就是「这一步什么都没发生」的可靠信号;再叠加 phase/pending 各字段/
+    // hp/手牌数,误杀风险很低。
+    const stallDetected = !!(newG && newG!==lastG && stepStartKey!==null
+      && typeof botStateKey==='function' && botStateKey(newG, seat)===stepStartKey);
+    if(!newG || newG===lastG || stallDetected){
       // 【bot_decision_failed 第一批接入点】强C同窗多步循环里最容易判断"提交是否真的
       // 生效"的地方:executePlayWindowChoiceAwait 等不到 tx 的 onCommitted 回调(超时
       // BOT_COMMIT_TIMEOUT_MS后resolve null),意味着这次选择的动作(playCard/endPlay)
       // 执行了但没能成功提交——很可能是服务端守卫拒绝、或提交过程本身出了问题。其余
       // 决策分支(seatPick/botTwoStepA等)大多是fire-and-forget、没有现成的"提交后拿到
       // 新快照"信号,接入需要较大改动,先不做,留 TODO(见下方 runBotDecision 顶部注释)。
+      // CORE-138:stallDetected 也记一条(和 !newG 同一 kind,但 message 说明是哪一种),
+      // 两种都是"这次决策没能推进局面",都值得留痕。
+      if(stallDetected && typeof writeDebugLog==='function'){
+        writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_failed', {
+          phase: lastG.phase, pendingType: lastG.pending&&lastG.pending.type||null,
+          turn: lastG.turn, roundNum: lastG.roundNum, seat: seat,
+          message: '机器人在出牌窗口选择了动作('+(choice&&choice.action)+')且提交已回执,'
+            + '但局面状态一个字节没变(botStateKey 相同)——很可能被服务端守卫原地拒绝成'
+            + ' no-op,已提前结束本窗口避免原地打转(第'+steps+'步)',
+          pendingSnapshot: (function(){ try{ return lastG.pending && typeof sanitizePendingForLog==='function' ? sanitizePendingForLog(lastG.pending) : null; }catch(e){ return null; } })(),
+          playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(lastG) : null
+        });
+      }
       if(!newG && typeof writeDebugLog==='function'){
         writeDebugLog(typeof roomId!=='undefined'?roomId:null, 'bot_decision_failed', {
           phase: lastG.phase, pendingType: lastG.pending&&lastG.pending.type||null,
