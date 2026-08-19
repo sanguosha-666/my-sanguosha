@@ -531,6 +531,114 @@ function botNeiSituation(g, seat){
     lordSeat
   };
 }
+// ================= CORE-135:手牌数维度的「对方有没有闪/杀」概率预测 =================
+// 【要解决什么】botTargetScore 里手牌数只以 (target.hand||[]).length*2 的形式**加分**
+// (手牌多=更值得拆)。这对顺手/拆桥是对的,但**对出杀而言方向是反的**——手牌多恰恰
+// 意味着更可能有闪、更难打中。决斗同理:胜负几乎完全由双方杀的数量决定,却完全没建模。
+// 外部项目 Cli-SanGuoSha-online 的 LocalAiEngine.predictCards 做的就是这件事(对比分析
+// A1 项),这里是它的第一步——**只做手牌数这一个维度**。
+//
+// 【概率怎么来的:不拍脑袋,从真实牌堆推】对方的公式是 0.15+n*0.11 这种线性拍脑袋值
+// (n=8 时算出 1.03,被 clamp 硬截住,说明没从牌堆构成推导过)。我们直接用 buildDeck()
+// 的实测构成 + 超几何分布:
+//     P(n 张手牌中至少有一张 X) = 1 − C(N−K, n) / C(N, n)
+// 实测(2026-08,见 progress-log 对应条目):N=136,杀系(杀30+火杀5+雷杀9)K=44(32.4%),
+// 闪 K=15(11.0%)。**闪只有 15 张,比直觉稀有得多**,所以闪的概率曲线在整个手牌区间都
+// 有分辨力(n=12 才 0.65);杀太多,n=3 就到 0.59、n=8 之后每格只涨 0.017,基本饱和——
+// 这意味着 duel 维度实际只在 0~3 张这个低区间有分辨力,4 张以上一视同仁。这是牌堆构成
+// 的真实反映,不是缺陷,**刻意不为了"让它看起来有用"去人为拉大 duel 的系数**。
+//
+// 【为什么打表而不是运行时算】botTargetScore 在每次候选枚举里对每个目标都会调
+// (enumerateAllLegalOneStepActions 对每张牌×每个目标各一次),不能带组合数循环。
+// 表是 n=0..12 预计算的常量,超过 12 取末值。
+//
+// 【衰减系数 0.85 的定性:如实说明,不包装成精确校准】最初设计时给的三条衰减理由里,
+// "手牌里还混着装备/锦囊"那条**是错的**——超几何本来就是从整副 136 张里抽,装备锦囊
+// 已经算在分母里,不该再扣一次。剩下两条方向**相反**:闪会被消耗(压低) vs 玩家倾向
+// 留防御牌(抬高),净效果不确定。而且实测发现**衰减系数几乎不影响行为**:它是乘性的,
+// 主要作用是整体平移,而 argmax 比较里常数项会抵消;真正决定行为的是曲线的极差,那来自
+// 超几何形状本身(0.75/0.80/0.85 三档的极差分别 0.38/0.42/0.43,差别很小)。所以 0.85
+// 是一个**温和的保守余量**,不是推导或调参得到的精确修正。
+//
+// 【n=0 为什么是精确的 0 而不是套 0.05 下限】手牌数是**公开信息**,0 张手牌就是确定
+// 没有闪,不是"概率很低"。下限 0.05 的本意是"永远别 100% 确定",那个理由在 n=0 时不
+// 成立。下限只对 n>=1 生效(实际从不触发,n=1 的闪已经是 0.094)。
+//
+// 【边界:装备区效果不进这张表】本函数建模的是「**手里**有没有闪/杀」。八卦阵那种
+// "不用牌也能闪"的来源**不在建模范围内**——装备区是**公开信息**,那是已知事实而不是
+// 预测,混进来就是把两种性质不同的东西搅在一起。以后要处理八卦阵/技能类免伤,应该单独
+// 加一项(读 target.equips 直接判,不需要概率),**不要来调这张表**。
+const BOT_DODGE_TABLE = [0, 0.094, 0.178, 0.253, 0.32, 0.381, 0.434, 0.482, 0.525, 0.563, 0.597, 0.627, 0.654];
+const BOT_SLASH_TABLE = [0, 0.275, 0.462, 0.59, 0.676, 0.734, 0.773, 0.799, 0.816, 0.828, 0.836, 0.841, 0.844];
+// botPredictCards:只读手牌数这一个公开输入,返回 {slash, dodge} 两个概率。
+// 不读手牌内容、不读任何隐藏信息——手牌张数本来就是公开的(座位卡上人人可见)。
+function botPredictCards(handCount){
+  const n = (typeof handCount==='number' && handCount>0) ? Math.floor(handCount) : 0;
+  const i = Math.min(n, BOT_DODGE_TABLE.length-1);
+  return { slash: BOT_SLASH_TABLE[i], dodge: BOT_DODGE_TABLE[i] };
+}
+// BOT_PREDICT_WEIGHT = 40。**这个数字是怎么来的,如实说明,不要当成精确校准**:
+//
+// 【最初的推导是错的】设计阶段本来定的是 15(取"12~20 区间"的中值),依据是"要大于同阵营
+// 目标之间的基础分差、要远小于身份权重 180~240"。**这个推导漏了一项**:基础分公式里的
+// `(target.hand||[]).length*2` 本身就是手牌数的函数,而且方向和预测项**正好相反**——
+// 它表达"手牌多 = 威胁大/更有价值的目标,值得打",预测项表达"手牌多 = 更可能有闪,
+// 更难打中"。两者是同一个变量上的直接对冲,不是"新项 vs 背景噪音"。
+//
+// 【实测:15 完全无效】0张手牌 vs 8张手牌、其余条件完全相同的两个已知反贼:
+//   既有 +2n 给 8 张的优势 = +16.0;W=15 时预测项给 0 张的优势 = +7.9
+//   → 净结果仍是 8 张手牌的目标得分更高(203.1 vs 195.0),方向根本没翻过来。
+// 在 12~20 区间内这个功能对它自己的目标是**无效**的,只是把既有偏向削弱了一半。
+//
+// 【临界值(实测,非估算)】净效果 f(n) = 2n − dodge(n)·W:
+//   让 n=0 优于 n=8 :  W > 30.5
+//   让 n=0 优于 n=12:  W > 36.7
+//   全程严格单调递减:  W > 74.1(受最平缓的 n=12 段 Δ=0.027 支配)
+// 取 40 = 在 36.7 这条临界线上留一点余量,**本质是和 `+2n` 掰手腕的产物**,不是从牌局
+// 理论独立推导出来的"正确权重"。
+//
+// 【承认的局限】W=40 下 f(n) 在中段**并不单调**:f(0)=0 / f(4)=−4.8 / f(8)=−5.0 /
+// f(12)=−2.2 —— "空手牌明显优先"这条成立,但 n=4~12 之间基本持平、甚至 n=12 略优于 n=4。
+// 要做到全程单调需要 W>74,那个量级(摆幅 48)会开始盖过基础分里的血量判断(跨度约 60),
+// 得不偿失。当前取舍:保证最重要的那条比较(空手牌 vs 有手牌)正确,中段容忍不单调。
+//
+// 【安全性(这一层的推导没问题,仍然成立)】W=40 的最大摆幅 = dodge(12)*40 = 26.2,对身份
+// 权重(known==='fan' 给忠臣 +180、known==='zhu' 给反贼 +240)有 6.9 倍余量,数学上不可能
+// 翻转身份判断——「打主公」绝不该被「他可能有闪」翻盘。实测更宽:因为 `+2n` 在这个场景里
+// 也站在已知反贼那一边,**W 要大到 373 以上才翻得动身份判断**(W=200 都翻不动),测试里
+// 那条鉴别力验证因此用 400 而不是拍脑袋的 200——破坏值应该反映真实临界,不是猜测值。
+//
+// 【为什么不改 `+2n` 那一项(未来的独立 issue)】概念上更正确的修法是:`+2n` 表达的是
+// "目标价值"、预测项表达的是"命中概率",两者本该**相乘**而不是相加——相加正是这里标定
+// 别扭的根源。但 `+2n` 在基础分里、被全部 kind 共用,改它会影响所有 damage 路径
+// (断兵/方天/驱虎/候选枚举…),判断轴 A+B 全中,超出 CORE-135 的定位(A 组"可直接迁移
+// 思路的小改动")。**这次遇到的对冲问题本身就是那个 issue 存在意义的证据**,记在这里
+// 避免以后忘了当初为什么没选它。
+//
+// let 而非 const:测试要能临时改写它来验证不变量断言的鉴别力(同 BOT_DECISION_WATCHDOG_MS
+// /AI_REPAIR_TIMEOUT_MS 的既定写法)。
+let BOT_PREDICT_WEIGHT = 40;
+// botPredictKind:把 botTargetScore 的 kind 参数归一化成预测项认识的语义类别。
+// 【为什么需要这一层】botTargetScore 的 kind 参数在现有调用点里有**两种互不相同的取值
+// 口径**,这是改动前就存在的不一致:
+//   ①语义类别:botBestTarget/pickBestCandidateSeat/断兵/方天等处传 'damage'/'steal';
+//   ②牌名:enumerateAllLegalOneStepActions(3处)和 botTryStartExtraSkills 的估值处
+//     直接把 action 透传进来,也就是 '杀'/'决斗'/'顺手牵羊'/'铁索连环' 这些牌名。
+// 后果是**既有的 `if(kind==='steal')` 那一行在②这类调用点从来没有生效过**(传进来的是
+// '顺手牵羊',不等于 'steal')。这是一个先于本次改动就存在的缺陷,**本次刻意不修**:
+// 修它会改变顺手/拆桥在出牌候选枚举里的既有评分,影响面远超本 issue 的范围,应该单独立项。
+// 这里只让**新增的预测项**两种口径都认,保证新功能在①②两类调用点都能生效,而既有那行
+// steal 修正**一个字节不动**(它的行为逐字保持原状,包括②路径下不生效这一点)。
+// 返回 null = 这个 kind 不适用预测项(如拆牌类/延时锦囊/铁索连环——它们的收益和"对方
+// 手上有没有闪/杀"无关),调用处不加任何分。
+function botPredictKind(kind){
+  if(kind==='damage' || kind==='duel') return kind;
+  if(typeof kind!=='string' || !kind) return null;
+  if(typeof isShaName==='function' && isShaName(kind)) return 'damage'; // '杀'/'火杀'/'雷杀'
+  if(kind==='决斗') return 'duel';
+  return null;
+}
+
 function botTargetScore(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return -Infinity;
@@ -586,6 +694,18 @@ function botTargetScore(g,seat,targetSeat,kind){
     score+=Math.random()*10;
   }
   if(kind==='steal') score+=(target.hand||[]).length*4;
+  // CORE-135:手牌数维度的「对方能不能挡住」预测,与上面 kind==='steal' 同层级的 kind
+  // 修正。**刻意放在所有身份/嫌疑分支之后**:前面那些分支里的 return -Infinity 是阵营
+  // 安全硬边界,必须原样穿透到底——加法对 -Infinity 无效(-Infinity+40 仍是 -Infinity),
+  // 数学上安全,测试里另有断言显式钉住这一点。
+  const predKind = botPredictKind(kind);
+  if(predKind){
+    const pred = botPredictCards((target.hand||[]).length);
+    // damage(出杀等需要对方出闪抵消的效果):对方越可能没闪,越值得打。
+    if(predKind==='damage') score += (1 - pred.dodge) * BOT_PREDICT_WEIGHT;
+    // duel(决斗):胜负由双方杀的数量决定,对方越可能没杀,越值得决斗。
+    else if(predKind==='duel') score += (1 - pred.slash) * BOT_PREDICT_WEIGHT;
+  }
   return score;
 }
 function botBestTarget(g,seat,card,actionId){
@@ -594,7 +714,10 @@ function botBestTarget(g,seat,card,actionId){
   g.players.forEach((p,i)=>{
     if(!p||!p.alive||i===seat) return;
     if(spec&&spec.canTarget&&!spec.canTarget(g,me,card,i)) return;
-    const kind=(actionId==='顺手牵羊'||actionId==='过河拆桥')?'steal':'damage';
+    // CORE-135:kind 从两分支扩成三分支,决斗单列——它的胜负由双方【杀】的数量决定,
+    // 和"对方有没有闪"是完全不同的一个判断,不能继续混在 damage 里。
+    const kind=(actionId==='顺手牵羊'||actionId==='过河拆桥')?'steal'
+      :(actionId==='决斗')?'duel':'damage';
     const score=botTargetScore(g,seat,i,kind);
     if(score>bestScore){bestScore=score;best=i;}
   });
