@@ -63,7 +63,7 @@ const AI_MODELS_STORAGE_KEY = 'sgsAiModels';
 const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'];
 // 默认勾选(cerebras 直连:3 个模型全部勾选,round-robin + 429 冷却自动换下一个——
 // cerebras 免费层 RPM 5/分钟极易 429,多模型轮换分散请求,用户指定 2026-08-11 "像 groq 那样")。
-const DEFAULT_CEREBRAS_MODELS = ['zai-glm-4.7','gpt-oss-120b','gemma-4-31b'];
+const DEFAULT_CEREBRAS_MODELS = ['gpt-oss-120b','gemma-4-31b'];
 // 默认勾选(tri 三密钥直连:合并池,条目 id 带 `provider:模型ID` 前缀)。
 // 用户指定(2026-08-12):groq 部分参考 groq 单独调用的默认勾选 6 个、cerebras 全部 3 个、
 // cohere 默认 command-a-plus-05-2026。2026-08-20 用户要求去掉 cerebras:zai-glm-4.7——共 9 个。
