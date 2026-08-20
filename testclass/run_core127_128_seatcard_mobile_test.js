@@ -15,6 +15,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const readSource = file => fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
 
 const ROOT = path.join(__dirname, '..');
 let pass = 0, fail = 0;
@@ -23,8 +24,8 @@ function check(name, fn){
   catch(e){ console.log('  FAIL ' + name + ' - ' + (e && e.message || e)); fail++; }
 }
 
-const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-const renderJs = fs.readFileSync(path.join(ROOT, 'render.js'), 'utf8');
+const html = readSource(path.join(ROOT, 'index.html'));
+const renderJs = readSource(path.join(ROOT, 'render.js'));
 // 断言只看真正的 CSS 规则,不看注释散文——CORE-126 那次因为正则跨过注释误报过一次。
 const cssOnly = html.replace(/\/\*[\s\S]*?\*\//g, '');
 

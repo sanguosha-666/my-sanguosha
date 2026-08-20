@@ -18,6 +18,7 @@
  */
 const vm = require('vm');
 const fs = require('fs');
+const readSource = file => fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
 
 let pass = 0, fail = 0;
 function check(name, fn){
@@ -64,17 +65,17 @@ console.log('  CORE-122方向2: 平板"最近N次出牌"文字历史FIFO逻辑')
 console.log('='.repeat(60) + '\n');
 
 check('加载真实 escapeHtml/getPlayerDisplayLabel(从render.js截取)+ render-table.js', function(){
-  const renderSrc = fs.readFileSync('render.js', 'utf8');
+  const renderSrc = readSource('render.js');
   const escapeHtmlMatch = renderSrc.match(/function escapeHtml\(s\)\{[\s\S]*?\}\n/);
   const labelFnMatch = renderSrc.match(/function getPlayerDisplayLabel\(g, p\)\{[\s\S]*?\n\}\n/);
   if(!escapeHtmlMatch) throw new Error('未能从render.js截取到escapeHtml定义,源码结构是否变了');
   if(!labelFnMatch) throw new Error('未能从render.js截取到getPlayerDisplayLabel定义,源码结构是否变了');
   // getGeneral依赖data.js的GENERALS表——真实加载data.js,不重新实现武将表
-  const dataSrc = fs.readFileSync('data.js', 'utf8');
+  const dataSrc = readSource('data.js');
   vm.runInContext(dataSrc, sandbox, { filename: 'data.js' });
   vm.runInContext(escapeHtmlMatch[0], sandbox, { filename: 'render.js(escapeHtml)' });
   vm.runInContext(labelFnMatch[0], sandbox, { filename: 'render.js(getPlayerDisplayLabel)' });
-  const tableSrc = fs.readFileSync('render-table.js', 'utf8');
+  const tableSrc = readSource('render-table.js');
   vm.runInContext(tableSrc, sandbox, { filename: 'render-table.js' });
   if(typeof sandbox.pushRecentPlayHistory !== 'function') throw new Error('pushRecentPlayHistory未定义,加载失败');
 });

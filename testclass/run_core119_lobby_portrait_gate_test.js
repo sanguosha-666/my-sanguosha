@@ -10,6 +10,7 @@
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
+const readSource = file => fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
 
 const ROOT = path.join(__dirname, '..');
 let pass = 0, fail = 0;
@@ -18,7 +19,7 @@ function check(name, fn){
   catch(e){ console.log('  FAIL ' + name + ' - ' + (e && e.message || e)); fail++; }
 }
 
-const src = fs.readFileSync(path.join(ROOT, 'render.js'), 'utf8');
+const src = readSource(path.join(ROOT, 'render.js'));
 const seg = src.match(/function isPortrait\(\)\{[\s\S]*?\nfunction checkLandscapeGate\(\)\{[\s\S]*?\n\}/);
 if(!seg) { console.log('  FAIL 未能从 render.js 定位到遮罩判定代码段(函数被重命名/重构了?)'); process.exit(1); }
 
@@ -124,14 +125,14 @@ check('极端环境:#game 元素不存在时,手机竖屏仍按旧行为拦截(�
 // 单测判定函数本身测不出"切class的那一刻遮罩没有被重新求值"这类接线遗漏——
 // shouldShowLandscapeGate()本身逻辑正确,不代表实际调用链路正确接上了它。
 check('room-lifecycle.js: enterGame() 应显式调用 checkLandscapeGate()(否则进入对局时遮罩不会重新求值)', function(){
-  const rlSrc = fs.readFileSync(path.join(ROOT, 'room-lifecycle.js'), 'utf8');
+  const rlSrc = readSource(path.join(ROOT, 'room-lifecycle.js'));
   const fnMatch = rlSrc.match(/function enterGame\(\)\{[\s\S]*?\n\}\n/);
   if(!fnMatch) throw new Error('未能在room-lifecycle.js里定位到enterGame()函数');
   if(!/checkLandscapeGate\(\)/.test(fnMatch[0]))
     throw new Error('enterGame()函数体内未找到checkLandscapeGate()调用');
 });
 check('room-lifecycle.js: backToLobby() 应显式调用 checkLandscapeGate()(否则离开对局时遮罩不会重新求值)', function(){
-  const rlSrc = fs.readFileSync(path.join(ROOT, 'room-lifecycle.js'), 'utf8');
+  const rlSrc = readSource(path.join(ROOT, 'room-lifecycle.js'));
   const fnMatch = rlSrc.match(/function backToLobby\(\)\{[\s\S]*?\n\}\n/);
   if(!fnMatch) throw new Error('未能在room-lifecycle.js里定位到backToLobby()函数');
   if(!/checkLandscapeGate\(\)/.test(fnMatch[0]))

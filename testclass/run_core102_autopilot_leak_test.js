@@ -21,6 +21,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const vm = require('vm');
+const readSource = file => fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
 
 console.log('\n== CORE-102:强制关闭房间未清理AI托管状态,跨房间继承旧座位 ==\n');
 let passed = 0, failed = 0;
@@ -46,7 +47,7 @@ function mkAutopilotContext(overrides){
     updateAiTestStatus: function(){},
   }, overrides || {});
   vm.createContext(ctx);
-  const source = fs.readFileSync('ai-bot.js', 'utf8');
+  const source = readSource('ai-bot.js');
   const s1 = source.indexOf('function startAiTestAutopilot(){');
   const s2 = source.indexOf('function aiTestAutopilotContextValid(){');
   const end2 = source.indexOf('\n}', s2) + 2;
@@ -103,7 +104,7 @@ check('aiTestAutopilotContextValid:active=false时恒为false', ()=>{
 
 // ---- backToLobby():应在active时调用stopAiTestAutopilot ----
 check('backToLobby:托管active时应调用stopAiTestAutopilot(覆盖强制关房+被动收到房间删除两条路径)', ()=>{
-  const source = fs.readFileSync('room-lifecycle.js', 'utf8');
+  const source = readSource('room-lifecycle.js');
   const start = source.indexOf('function backToLobby(){');
   assert.ok(start >= 0, '应能定位 backToLobby');
   const fn = source.slice(start);
@@ -131,7 +132,7 @@ check('backToLobby:托管active时应调用stopAiTestAutopilot(覆盖强制关�
 });
 
 check('backToLobby:托管未active时不应调用stopAiTestAutopilot(避免无意义的Firebase写入)', ()=>{
-  const source = fs.readFileSync('room-lifecycle.js', 'utf8');
+  const source = readSource('room-lifecycle.js');
   const start = source.indexOf('function backToLobby(){');
   const fn = source.slice(start);
 
@@ -164,12 +165,12 @@ check('端到端:isAutopilotSeat在roomId漂移+backToLobby清理后,不应继�
     document: { getElementById: () => null },
   };
   vm.createContext(context);
-  const aiBotSrc = fs.readFileSync('ai-bot.js', 'utf8');
+  const aiBotSrc = readSource('ai-bot.js');
   const s1 = aiBotSrc.indexOf('let aiTestAutopilot');
   const s2 = aiBotSrc.indexOf('function aiTestAutopilotContextValid(){');
   const end2 = aiBotSrc.indexOf('\n}', s2) + 2;
   vm.runInContext(aiBotSrc.slice(s1, end2), context, { filename: 'ai-bot-slice.js' });
-  const botSrc = fs.readFileSync('bot.js', 'utf8');
+  const botSrc = readSource('bot.js');
   const b1 = botSrc.indexOf('function isAutopilotSeat(seat){');
   const b2 = botSrc.indexOf('\n}', b1) + 2;
   vm.runInContext(botSrc.slice(b1, b2), context, { filename: 'bot-slice.js' });
@@ -193,7 +194,7 @@ check('端到端:isAutopilotSeat在roomId漂移+backToLobby清理后,不应继�
 
 // ---- 破坏性验证:还原成旧版backToLobby(没有stopAiTestAutopilot那段),证明上面的断言有鉴别力 ----
 check('破坏性验证:还原成旧版backToLobby(不清理托管),托管状态确实会原样残留(证明断言有鉴别力)', ()=>{
-  const source = fs.readFileSync('room-lifecycle.js', 'utf8');
+  const source = readSource('room-lifecycle.js');
   const start = source.indexOf('function backToLobby(){');
   let fn = source.slice(start);
   // 手动还原成修复前的旧版本:删掉新增的stopAiTestAutopilot那一段
