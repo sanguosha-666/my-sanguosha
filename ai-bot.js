@@ -598,28 +598,42 @@ const modelListCache = {};
 function resolveAiBaseModelsUrl(customBaseUrl){
   let u = String(customBaseUrl||'').trim().replace(/\/+$/, '');
   if(!u) return '';
-  if(u.indexOf('/chat/completions')!==-1) return u.replace(/\/chat\/completions.*$/, '/v1/models');
-  if(u.indexOf('/v1/messages')!==-1) return u.replace(/\/v1\/messages.*$/, '/v1/models?limit=1000');
-  if(u.indexOf('/v1/models')!==-1) return u;
+  // 已含完整路径时只替换末段,禁止 /v1/chat/completions → /v1/v1/models
+  if(u.indexOf('/chat/completions')!==-1) return u.replace(/\/chat\/completions.*$/, '/models');
+  if(u.indexOf('/v1/messages')!==-1) return u.replace(/\/v1\/messages.*$/, '/v1/models');
+  if(u.indexOf('/v1/models')!==-1) return u.replace(/\/v1\/models.*$/, '/v1/models');
   if(/\/v1$/.test(u)) return u + '/models';
   return u + '/v1/models';
 }
 function resolveAiBaseChatUrl(customBaseUrl){
   let u = String(customBaseUrl||'').trim().replace(/\/+$/, '');
   if(!u) return '';
-  if(u.indexOf('/chat/completions')!==-1) return u.replace(/\/chat\/completions.*$/, '/v1/chat/completions');
+  if(u.indexOf('/chat/completions')!==-1) return u.replace(/\/chat\/completions.*$/, '/chat/completions');
   if(u.indexOf('/v1/models')!==-1) return u.replace(/\/v1\/models.*$/, '/v1/chat/completions');
   if(u.indexOf('/v1/messages')!==-1) return u.replace(/\/v1\/messages.*$/, '/v1/chat/completions');
   if(/\/v1$/.test(u)) return u + '/chat/completions';
-  if(u.indexOf('/v1')!==-1) return u; // 已含 /v1 但非上述,视为完整 endpoint 直接用
   return u + '/v1/chat/completions';
 }
+function parseCustomModelsPayload(json){
+  if(!json) return null;
+  let arr = null;
+  if(Array.isArray(json)) arr = json;
+  else if(Array.isArray(json.data)) arr = json.data;
+  else if(Array.isArray(json.models)) arr = json.models;
+  if(!arr) return null;
+  const models = arr.map(function(m){
+    if(typeof m==='string') return { id: m, label: m };
+    const id = (m && (m.id || m.name)) || '';
+    return { id: id, label: (m && (m.name || m.id)) || id };
+  }).filter(function(x){ return !!x.id; });
+  return models.length ? models : null;
+}
 // fetchCustomModels:用自定义 BaseURL 直连拉取模型列表(不写 modelListCache)。
-// headers 若 aiApiKey 非空则 Authorization: Bearer + key，否则空对象；GET 拉取，解析
-// data[].id（OpenAI 兼容），失败返回 null 由调用方回退到静态表。
+// 返回 {models, error, url}：成功 models 非空、error 空串；失败 models=[] 且 error 含原因。
+// headers 若 apiKey 非空则 Authorization: Bearer + key，否则空对象。
 function fetchCustomModels(customBaseUrl, apiKey){
   const url = resolveAiBaseModelsUrl(customBaseUrl);
-  if(!url) return Promise.resolve(null);
+  if(!url) return Promise.resolve({ models: [], error: 'BaseURL 为空', url: '' });
   const headers = {};
   const trimmedKey = String(apiKey||'').trim();
   if(trimmedKey) headers['authorization'] = 'Bearer ' + trimmedKey;
@@ -628,15 +642,20 @@ function fetchCustomModels(customBaseUrl, apiKey){
   const timeoutId = controller ? setTimeout(function(){ controller.abort(); }, AI_CALL_TIMEOUT_MS) : null;
   return fetch(url, { method:'GET', headers: headers, signal: controller ? controller.signal : undefined }).then(function(res){
     if(timeoutId) clearTimeout(timeoutId);
-    if(!res.ok) return null;
+    if(!res.ok){
+      return res.text().then(function(t){
+        return { models: [], error: 'HTTP '+res.status+' '+(t||'').slice(0,120), url: url };
+      }, function(){ return { models: [], error: 'HTTP '+res.status, url: url }; });
+    }
     return res.json().then(function(json){
-      if(!json || !Array.isArray(json.data)) return null;
-      const models = json.data.map(function(m){ return { id: (m && m.id)||'', label: (m && m.id)||'' }; }).filter(function(x){ return !!x.id; });
-      return models.length ? models : null;
-    }, function(){ return null; });
-  }, function(){
+      const models = parseCustomModelsPayload(json);
+      if(models && models.length) return { models: models, error: '', url: url };
+      return { models: [], error: '响应无模型列表(需要 data[] 或 models[])', url: url };
+    }, function(){ return { models: [], error: '响应不是合法JSON', url: url }; });
+  }, function(e){
     if(timeoutId) clearTimeout(timeoutId);
-    return null;
+    const msg = (e && e.name==='AbortError') ? '超时' : ('网络/CORS失败: '+(e && e.message || String(e)));
+    return { models: [], error: msg, url: url };
   });
 }
 
@@ -980,12 +999,16 @@ function showAiKeyModal(onDone){
       }
       const capturedBase = _customTrimmed;
       statusNote.textContent = '加载模型列表…';
-      fetchCustomModels(capturedBase, aiApiKey).then(function(list){
+      fetchCustomModels(capturedBase, aiApiKey).then(function(result){
         if((aiBaseUrl||'').trim() !== capturedBase) return;
+        const list = result && result.models;
         if(list && list.length){
           applyCustomList(list, false);
         } else {
-          applyCustomList(AI_MODEL_OPTIONS.groq || [], true);
+          const err = (result && result.error) || '未知错误';
+          const tried = (result && result.url) || '';
+          applyCustomList([], true);
+          statusNote.textContent = '拉取失败: '+err+(tried ? '  URL: '+tried : '')+'。可点下方「自定义」手动输入模型ID。';
         }
       });
       return;
