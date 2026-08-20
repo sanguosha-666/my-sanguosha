@@ -7,22 +7,9 @@
 // 怎么发起一次AI调用"这三件事先做成独立、可单测的模块,接入机器人决策是后续阶段
 // 的范围。
 //
-// 【确认方案:Claude直连 + OpenRouter/Groq覆盖其它模型,不加后端】
-// Claude(api.anthropic.com)官方支持浏览器直连(anthropic-dangerous-direct-browser-
-// access 请求头,是 Anthropic 自己文档化的"自带密钥的客户端应用"场景);OpenAI 的
-// api.openai.com 不支持浏览器直连 CORS,要接 GPT 必须经服务器代理——这个项目是纯静态
-// 多文件、无构建流程、无后端(见 CLAUDE.md),不引入服务器。所以"GPT/其它模型"这个槽位
-// 统一走 OpenRouter(和 OpenAI 的 Chat Completions 格式兼容、且支持浏览器直连
-// CORS)中转,不是直接调用 OpenAI 官方接口——UI 上必须如实标注"OpenRouter(GPT/多模型)"
-// 而不是让用户误以为在直接用自己的 OpenAI 密钥。持有 OpenAI 密钥的用户需要另外去
-// OpenRouter 申请一把密钥,这是这个方案已知、已确认接受的代价。
-//
-// 【Groq 正式加入为第三个 provider,2026-07-30】Groq(api.groq.com,OpenAI 兼容格式)
-// 已经用真实网络请求验证过支持浏览器直连 CORS——不是查文档推断,是真的用一把真实密钥
-// 通过本文件里现在这套 callAI/adapter 机制发起过一次请求,收到 {ok:true,text:'OK'} 的
-// 真实响应,验证脚本本身没有落进代码库(不是这几行 adapter 代码,只是证明了"能不能连
-// 上"这件事)。以后不需要再重新怀疑 Groq 是否可行——如果连接失败,先怀疑密钥本身或
-// Groq 那边的策略变化,不要重新去查"Groq 是否支持浏览器直连"这个已经验证过的问题。
+// 【Provider 范围(精简后)】仅保留 groq / cohere / cerebras / tri 四项。
+// Groq(api.groq.com,OpenAI 兼容格式)已用真实网络请求验证过支持浏览器直连 CORS;
+// Cohere/Cerebras 同为 OpenAI 兼容直连;tri 为三密钥合并模式(cohere/groq/cerebras)。
 //
 // 【密钥安全设计,务必遵守】密钥只存在 sessionStorage(本标签页内存级持久化,刷新/
 // 关闭标签页即清空)+ 本文件的模块级变量里,绝不写入 g/Firebase 共享状态、绝不用
@@ -53,7 +40,7 @@ const AI_MODEL_STORAGE_KEY = 'sgsAiModel';
 // 恢复一次(应对"同一标签页内因为JS错误等原因整页刷新"这类场景——标签页本身没关闭,
 // sessionStorage 依然在),之后由弹窗/状态按钮的事件处理器持续保持同步、并写回 storage。
 let aiApiKey = '';
-let aiProvider = null; // 'claude' | 'openrouter' | 'groq' | null(尚未识别/尚未选择)
+let aiProvider = null; // 'groq' | 'cohere' | 'cerebras' | 'tri' | null(尚未识别/尚未选择)
 // 这个会话内是否已经明确回应过密钥询问(填了密钥,或点了"跳过")——true 时
 // handleAddBotClick 不会再自动弹窗,但常驻的"AI机器人设置"按钮始终不受这个影响。
 let aiPromptDismissed = false;
@@ -72,21 +59,6 @@ const AI_MODELS_STORAGE_KEY = 'sgsAiModels';
 // gpt-oss-20b/gpt-oss-safeguard-20b/qwen3.6-27b,其中 gpt-oss-20b 与 safeguard-20b
 // 是本次新加的,groq/compound 是路由系统保留作默认)。
 const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'];
-// 默认勾选(hf:用户已在 HF 设置页给 groq/cohere/cerebras 各配了 custom key,id 自带
-// :provider 后缀——选谁 HF 就路由到谁、服务端自动换 custom key,provider 直接计费,
-// 不消耗 HF credits)。用户指定(2026-08-11):groq 全部 4 个 + cerebras 全部 3 个 +
-// cohere command-a-reasoning-08-2025(用户原想用 command-a-plus-05-2026,但该模型
-// 未注册到 HF,实测 /api/partners/cohere/models 无此映射,换成已注册的 reasoning 版)。
-const DEFAULT_HF_MODELS = [
-  'openai/gpt-oss-120b:groq',
-  'openai/gpt-oss-20b:groq',
-  'meta-llama/Llama-3.3-70B-Instruct:groq',
-  'openai/gpt-oss-safeguard-20b:groq',
-  'openai/gpt-oss-120b:cerebras',
-  'google/gemma-4-31B-it:cerebras',
-  'zai-org/GLM-4.7:cerebras',
-  'CohereLabs/command-a-reasoning-08-2025:cohere',
-];
 // 默认勾选(cerebras 直连:3 个模型全部勾选,round-robin + 429 冷却自动换下一个——
 // cerebras 免费层 RPM 5/分钟极易 429,多模型轮换分散请求,用户指定 2026-08-11 "像 groq 那样")。
 const DEFAULT_CEREBRAS_MODELS = ['zai-glm-4.7','gpt-oss-120b','gemma-4-31b'];
@@ -117,46 +89,36 @@ function parseGroqRetrySeconds(text){
   const sec = parseInt(m[1],10) * 60 + (m[2] ? Math.round(parseFloat(m[2])) : 0);
   return (Number.isFinite(sec) && sec>0) ? sec : null;
 }
-// HF_PROVIDER_PRIORITY:用户指定的 hf 轮换优先级(2026-08-11)——优先使用 cerebras,
-// 其次 groq,再次 cohere。resolveAiModel 对 hf 按这个顺序扫描选中池,冷却中的 provider
-// 自动跳过(降级到下一优先级);同 provider 内按勾选顺序取第一个未冷却的。
-// 优先级数值越小越优先,未列出的 provider(理论上 hf 池不会出现)排最后。
+// HF_PROVIDER_PRIORITY:tri 轮换优先级(2026-08-11)——优先使用 cerebras,其次 groq,再次 cohere。
+// resolveAiModel 对 tri 按这个顺序扫描选中池,冷却中的 provider 自动跳过(降级到下一优先级)。
+// 优先级数值越小越优先,未列出的 provider 排最后。常量名保留 HF_PROVIDER_PRIORITY 供 tri 复用。
 const HF_PROVIDER_PRIORITY = { cerebras: 0, groq: 1, cohere: 2 };
-function hfProviderOf(modelId){
-  // 从 HF 模型条目 id 提取 provider:格式 {HF模型ID}:{provider}(如 openai/gpt-oss-120b:cerebras)。
-  const idx = String(modelId||'').lastIndexOf(':');
-  return idx>=0 ? String(modelId).slice(idx+1) : '';
-}
 function triProviderOf(modelId){
   // 从 tri 合并池条目 id 提取 provider:格式 {provider}:{模型ID}(如 cerebras:zai-glm-4.7,
   // groq:llama-3.3-70b-versatile)。取第一个冒号前段——模型名本身可能含冒号但前缀一定在最前。
   const idx = String(modelId||'').indexOf(':');
   return idx>=0 ? String(modelId).slice(0,idx) : '';
 }
-// resolveAiModel:轮换选模型。非groq/hf/cerebras/tri/无多选/手动单选 → aiApiModel||undefined(零变化)。
+// resolveAiModel:轮换选模型。非groq/cerebras/tri/无多选/手动单选 → aiApiModel||undefined(零变化)。
 // groq 与 cerebras 走同一套 round-robin:groq 是"免费层各模型独立配额池"均匀分散绕过
 // TPD/TPM 墙,cerebras 是"3 个模型(RPM 5/分钟 太容易 429)轮换 + 429 冷却自动换下一个"
-// (用户指定 2026-08-11,像 groq 那样)。hf 与 tri 走同一套 provider 优先级扫描:hf 是
-// "用户在 HF 设置页给 groq/cohere/cerebras 各配了 custom key"、tri 是"三密钥直连",
-// 两者都按用户指定优先级(cerebras>groq>cohere)固定顺序扫描,冷却降级。
+// (用户指定 2026-08-11,像 groq 那样)。tri 走 provider 优先级扫描(cerebras>groq>cohere)。
 function resolveAiModel(provider){
-  if(provider!=='groq' && provider!=='hf' && provider!=='cerebras' && provider!=='tri') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
+  if(provider!=='groq' && provider!=='cerebras' && provider!=='tri') return (typeof aiApiModel==='string' && aiApiModel) ? aiApiModel : undefined;
   if(typeof aiApiModel==='string' && aiApiModel) return aiApiModel;   // 手动单选优先
   const list = (Array.isArray(aiApiModels) && aiApiModels.length) ? aiApiModels : null;
   if(!list) return undefined;
   const now = Date.now();
-  if(provider==='hf' || provider==='tri'){
+  if(provider==='tri'){
     // provider 优先级策略:按 HF_PROVIDER_PRIORITY 顺序扫描,每次从头选最高优先级的未冷却模型。
     // 不记 round-robin 指针——"优先使用 cerebras"要求可用时永远选它,而不是轮流。
-    // hf 条目 id 格式 {HF模型ID}:{provider}(provider 在后),tri 条目 {provider}:{模型ID}
-    // (provider 在前)——prefixOf 统一取前缀段(hf 的 provider 段在后,单独处理)。
     const order = Object.keys(HF_PROVIDER_PRIORITY).sort(function(a,b){ return HF_PROVIDER_PRIORITY[a]-HF_PROVIDER_PRIORITY[b]; });
     for(let pi=0; pi<order.length; pi++){
       const prov = order[pi];
       for(let i=0;i<list.length;i++){
         const model = list[i];
-        const modelProv = (provider==='tri') ? triProviderOf(model) : hfProviderOf(model);
-        if(modelProv !== prov) continue;                              // 只要当前优先级的
+        const modelProv = triProviderOf(model);
+        if(modelProv !== prov) continue;
         if(_modelCooldowns[model] && _modelCooldowns[model] > now) continue; // 冷却中跳过
         return model;
       }
@@ -199,15 +161,10 @@ let aiTestAutopilotDisconnectRef = null;
       aiApiModels = rawModels ? JSON.parse(rawModels) : [];
       if(!Array.isArray(aiApiModels)) aiApiModels = [];
     }catch(e){ aiApiModels = []; }
-    // 【多模型轮换】groq 密钥下若用户从未配置过多选,默认勾选 DEFAULT_GROQ_MODELS;
-    // hf 密钥下默认勾选 DEFAULT_HF_MODELS;cerebras 密钥下默认勾选 DEFAULT_CEREBRAS_MODELS;
-    // tri 三密钥下默认勾选 DEFAULT_TRI_MODELS(合并池 10 个)。
+    // 【多模型轮换】groq/cerebras/tri 密钥下若用户从未配置过多选,默认勾选对应 DEFAULT_*。
     // 都只在内存生效、不写 sessionStorage——默认值随列表改动自动跟进,见 renderModelPicker。
     if(aiProvider==='groq' && aiApiModels.length===0){
       aiApiModels = DEFAULT_GROQ_MODELS.slice();
-    }
-    if(aiProvider==='hf' && aiApiModels.length===0){
-      aiApiModels = DEFAULT_HF_MODELS.slice();
     }
     if(aiProvider==='cerebras' && aiApiModels.length===0){
       aiApiModels = DEFAULT_CEREBRAS_MODELS.slice();
@@ -239,28 +196,21 @@ function persistAiState(){
 }
 
 // ---------- 密钥格式识别(纯函数) ----------
-// Claude 密钥固定 sk-ant- 前缀;OpenRouter 固定 sk-or-;Groq 固定 gsk_;HF 固定 hf_;
-// Cohere 固定 co-(Trial key);Cerebras 固定 csk-(2026-08-11 用户确认,此前调研猜的
-// cerebras- 前缀一并保留兼容)。各家前缀互不冲突,不需要考虑优先级顺序。
+// Groq 固定 gsk_;Cohere 固定 co-(Trial key);Cerebras 固定 csk-/cerebras-。
 // 【tri 模式(2026-08-12)】用户把 groq/cohere/cerebras 三个密钥按固定顺序用斜杠拼在
 // 一个输入框里:`cohere密钥/groq密钥/cerebras密钥`。能拆成三段且每段非空的字符串
 // 识别为 'tri'。⚠️ 必须先于单密钥前缀判断——三段里的第一段以 co- 开头,如果不先判
 // tri,`/^co-/` 会把整串误判成 cohere。
-// 空字符串返回 null(没填密钥不算任何 provider);其余识别不出的密钥一律 fallback 到
-// cohere(2026-08-11 用户要求——"其他未被识别的密钥则分配到cohere",所以正常情况
-// 不再返回 null)。
+// 空字符串返回 null;其余识别不出的密钥一律 fallback 到 cohere。
 function detectAiProvider(key){
   const k = (key||'').trim();
   if(!k) return null;
   if(k.split('/').length===3 && k.split('/').every(function(s){ return s.trim().length>0; })) return 'tri';
-  if(/^sk-ant-/.test(k)) return 'claude';
-  if(/^sk-or-/.test(k)) return 'openrouter';
   if(/^gsk_/.test(k)) return 'groq';
-  if(/^hf_/.test(k)) return 'hf';
   if(/^co-/i.test(k)) return 'cohere';
   if(/^csk-/.test(k)) return 'cerebras';
   if(/^cerebras-/.test(k)) return 'cerebras';
-  return 'cohere'; // 未识别 → 默认分配到 cohere(用户要求)
+  return 'cohere';
 }
 
 // ---------- Provider 适配层 ----------
@@ -269,67 +219,8 @@ function detectAiProvider(key){
 // 收在下面的 callAI() 里,不在每个 adapter 里重复实现——以后新增 provider 只需要在
 // 这里加一项,不需要碰 callAI。
 const PROVIDER_ADAPTERS = {
-  claude: {
-    label: 'Claude',
-    defaultModel: 'claude-haiku-4-5-20251001',
-    endpoint: 'https://api.anthropic.com/v1/messages',
-    buildRequest(apiKey, opts){
-      const body = {
-        model: opts.model || this.defaultModel,
-        max_tokens: opts.maxTokens || 512,
-        messages: [{ role:'user', content: opts.userPrompt }],
-      };
-      if(opts.systemPrompt) body.system = opts.systemPrompt;
-      return {
-        url: this.endpoint,
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          // 【必需】没有这个头,api.anthropic.com 会直接拒绝浏览器发起的跨域请求——
-          // 这是 Anthropic 自己文档化的、专门为"用户自带密钥的客户端应用"场景开的口子。
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify(body),
-      };
-    },
-    parseResponse(json){
-      const block = json && Array.isArray(json.content) && json.content[0];
-      if(!block || typeof block.text !== 'string') throw new Error('未识别的 Claude 响应结构');
-      return block.text;
-    },
-  },
-  openrouter: {
-    label: 'OpenRouter(GPT/多模型)',
-    defaultModel: 'openai/gpt-4o-mini',
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    buildRequest(apiKey, opts){
-      const messages = [];
-      if(opts.systemPrompt) messages.push({ role:'system', content: opts.systemPrompt });
-      messages.push({ role:'user', content: opts.userPrompt });
-      return {
-        url: this.endpoint,
-        headers: {
-          'content-type': 'application/json',
-          'authorization': 'Bearer '+apiKey,
-        },
-        body: JSON.stringify({
-          model: opts.model || this.defaultModel,
-          max_tokens: opts.maxTokens || 512,
-          messages,
-        }),
-      };
-    },
-    parseResponse(json){
-      const msg = json && Array.isArray(json.choices) && json.choices[0] && json.choices[0].message;
-      if(!msg || typeof msg.content !== 'string') throw new Error('未识别的 OpenRouter 响应结构');
-      return msg.content;
-    },
-  },
   groq: {
-    // Groq(api.groq.com)是 OpenAI 兼容格式,adapter 结构和 openrouter 逐字一致(仅
-    // endpoint/默认模型不同)——已用真实网络请求验证过支持浏览器直连 CORS,见文件头部
-    // 【Groq 正式加入为第三个 provider】那段说明,不是没测过就先加进来。
+    // Groq(api.groq.com)是 OpenAI 兼容格式,已用真实网络请求验证过支持浏览器直连 CORS。
     label: 'Groq(极速推理)',
     defaultModel: 'groq/compound',
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
@@ -353,42 +244,6 @@ const PROVIDER_ADAPTERS = {
     parseResponse(json){
       const msg = json && Array.isArray(json.choices) && json.choices[0] && json.choices[0].message;
       if(!msg || typeof msg.content !== 'string') throw new Error('未识别的 Groq 响应结构');
-      return msg.content;
-    },
-  },
-  hf: {
-    // Hugging Face Inference Providers(router.huggingface.co):统一路由入口,一把 HF
-    // token 覆盖 groq/cohere/cerebras/novita/together 等多家推理商。OpenAI 兼容格式,
-    // 已实测(2026-08-11)支持浏览器直连 CORS(access-control-allow-origin: *),不需要
-    // 像 Anthropic 那样的特殊 header。模型 ID 格式是 `{HF规范模型ID}:{provider}` 后缀,
-    // 不是 `provider/模型名` 前缀(后者 404)——例如 openai/gpt-oss-120b:groq 走 groq、
-    // :cerebras 走 cerebras、CohereLabs/c4ai-command-a-03-2025:cohere 走 cohere;
-    // 不加后缀默认 :fastest(auto,同模型多 provider 时按健康状态自动 failover)。
-    // 密钥:HF fine-grained token,创建时勾选 "Make calls to Inference Providers"
-    // (inference.serverless.write),前缀 hf_。
-    label: 'HF 推理路由(Groq/Cohere/Cerebras)',
-    defaultModel: 'openai/gpt-oss-120b',
-    endpoint: 'https://router.huggingface.co/v1/chat/completions',
-    buildRequest(apiKey, opts){
-      const messages = [];
-      if(opts.systemPrompt) messages.push({ role:'system', content: opts.systemPrompt });
-      messages.push({ role:'user', content: opts.userPrompt });
-      return {
-        url: this.endpoint,
-        headers: {
-          'content-type': 'application/json',
-          'authorization': 'Bearer '+apiKey,
-        },
-        body: JSON.stringify({
-          model: opts.model || this.defaultModel,
-          max_tokens: opts.maxTokens || 512,
-          messages,
-        }),
-      };
-    },
-    parseResponse(json){
-      const msg = json && Array.isArray(json.choices) && json.choices[0] && json.choices[0].message;
-      if(!msg || typeof msg.content !== 'string') throw new Error('未识别的 HF 响应结构');
       return msg.content;
     },
   },
@@ -504,32 +359,11 @@ const PROVIDER_ADAPTERS = {
 };
 
 // ---------- 模型选择候选表 ----------
-// 【每家的候选列表都是真实核实过的,不是凭旧印象假设——2026-08-01 用 WebSearch/
-// WebFetch 分别核实】Claude:官方模型表(见 CLAUDE.md「当前模型」);OpenRouter:直接
-// 请求了公开的 https://openrouter.ai/api/v1/models 这个不需要鉴权的模型清单接口,
-// 逐个确认了下面这几个 id 字符串在当次抓取里确实存在、且价格字段真实(不是猜的);
-// Groq:WebFetch 了 console.groq.com/docs/models.md,逐条对照生产模型表。每家列表
-// 第一项都固定等于 PROVIDER_ADAPTERS 对应 buildRequest 里硬编码的默认值——这样
-// aiApiModel 为空(用户没手动选)时,下拉框视觉上预选的就是"当前实际生效"的那一项,
-// 不会出现"UI显示的默认选项"和"实际调用的模型"对不上的情况。
-// 【自定义(__custom__)选项存在的原因】OpenRouter 这类聚合平台的可选模型有300+个、
-// 且随时可能上新/下架,这里只给3~5个有代表性的常见选项(任务要求,不需要穷举全部)——
-// 真正的自由度靠这个特殊值实现:选中后展示一个文本框,允许用户输入任何自己核实过
-// 有效的精确模型ID,不受这份候选表的限制。三家 provider 统一提供这个选项,不只是
-// OpenRouter 独有(以防 Anthropic/Groq 在这份表更新前就发布了新档位)。
+// 每家列表第一项固定等于 PROVIDER_ADAPTERS 对应 buildRequest 的默认值——aiApiModel
+// 为空时下拉框视觉预选即实际生效项。
+// 【自定义(__custom__)】选中后展示文本框,允许输入任意精确模型ID。
 const AI_MODEL_CUSTOM_VALUE = '__custom__';
 const AI_MODEL_OPTIONS = {
-  claude: [
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5(默认·最快最省)' },
-    { id: 'claude-sonnet-5', label: 'Sonnet 5(更聪明·成本更高)' },
-    { id: 'claude-opus-5', label: 'Opus 5(最强·最贵最慢)' },
-  ],
-  openrouter: [
-    { id: 'openai/gpt-4o-mini', label: 'GPT-4o mini(默认)' },
-    { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite(更快更省)' },
-    { id: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2(性价比均衡)' },
-    { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B(开源)' },
-  ],
   groq: [
     { id: 'groq/compound', label: 'Groq Compound(默认)' },
     { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B(更强)' },
@@ -539,23 +373,9 @@ const AI_MODEL_OPTIONS = {
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B(更快)' },
     { id: 'openai/gpt-oss-safeguard-20b', label: 'GPT-OSS Safeguard 20B' },
   ],
-  hf: [
-    // HF 模型 ID 格式: {HF规范模型ID}:{provider} 后缀(不是 provider 前缀!)。以下
-    // 条目是 2026-08-11 从 https://router.huggingface.co/v1/models 实测快照里挑的
-    // status=live 的真实模型,覆盖 groq/cohere/cerebras 三家。第一项=adapter 默认
-    // openai/gpt-oss-120b(不加后缀=:fastest auto,同模型多 provider 自动 failover)。
-    { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B(默认·auto多商路由)' },
-    { id: 'openai/gpt-oss-120b:groq', label: 'GPT-OSS 120B·Groq' },
-    { id: 'openai/gpt-oss-120b:cerebras', label: 'GPT-OSS 120B·Cerebras' },
-    { id: 'meta-llama/Llama-3.3-70B-Instruct:groq', label: 'Llama 3.3 70B·Groq' },
-    { id: 'CohereLabs/c4ai-command-a-03-2025:cohere', label: 'Command A·Cohere' },
-    { id: 'CohereLabs/c4ai-command-r7b-12-2024:cohere', label: 'Command R7B·Cohere' },
-    { id: 'google/gemma-4-31B-it:cerebras', label: 'Gemma 4 31B·Cerebras' },
-    { id: 'zai-org/GLM-4.7:cerebras', label: 'GLM-4.7·Cerebras' },
-  ],
   cohere: [
     // Cohere 直连(吃 Trial 免费额度)。模型名是 Cohere 自家 ID(chat 端点认这个),
-    // 不是 HF 的 CohereLabs/* 前缀。已从官方 models 文档核实(2026-08-11),列活跃
+    // 不是 CohereLabs/* 前缀。已从官方 models 文档核实(2026-08-11),列活跃
     // (live)模型;弃用别名(command-r/command-r-plus 无版本号等)不列。
     { id: 'command-a-plus-05-2026', label: 'Command A Plus(最新·最强)' },
     { id: 'command-a-03-2025', label: 'Command A(默认)' },
@@ -599,8 +419,8 @@ const AI_MODEL_OPTIONS = {
 const AI_CALL_TIMEOUT_MS = 15000;
 
 // parseAiUsage:从 provider 原始响应里取 token 用量,归一化成 {input,output,total}。
-// 覆盖两种命名:OpenAI 兼容家族(openrouter/groq/hf/cohere/cerebras)的
-// prompt_tokens/completion_tokens/total_tokens,与 Claude 的 input_tokens/output_tokens。
+// 覆盖两种命名:OpenAI 兼容家族(groq/cohere/cerebras)的
+// prompt_tokens/completion_tokens/total_tokens,与可能存在的 input_tokens/output_tokens。
 // 任何取不到/结构不符的情况一律返回 null(调用方按"这次没有用量数据"处理,不报错)。
 function parseAiUsage(json){
   try{
@@ -666,12 +486,11 @@ function callAI(provider, apiKey, opts){
     }
     if(!res.ok){
       return res.text().then(t=>{
-        if((provider==='groq'||provider==='hf'||provider==='cerebras'||provider==='cohere') && opts && typeof opts.model==='string' && (res.status===429 || res.status===413)){
+        if((provider==='groq'||provider==='cerebras'||provider==='cohere') && opts && typeof opts.model==='string' && (res.status===429 || res.status===413)){
           // 429=限流(解析 retry_after);413=请求过大——该模型不适合当前输入规模,
           // 冷却 300s 固定值(解析不到 retry_after),两种都写 _modelCooldowns 让轮换跳过。
-          // groq/hf/cerebras/cohere 都接:groq 是免费层独立池、hf 是 custom key 路由、
-          // cerebras/cohere 在 tri 模式下也在轮换池里——429/413 都要让轮换知道
-          // "这个模型暂时不可用"。tri 分发后 model 是去前缀的,冷却 key 必须用
+          // groq/cerebras/cohere 都接:429/413 都要让轮换知道"这个模型暂时不可用"。
+          // tri 分发后 model 是去前缀的,冷却 key 必须用
           // _triFullModel(带前缀),否则 resolveAiModel('tri') 匹配不上。
           const coolKey = (opts._triFullModel && typeof opts._triFullModel==='string') ? opts._triFullModel : opts.model;
           const is413 = res.status===413;
@@ -712,72 +531,18 @@ function callAI(provider, apiKey, opts){
 // JSON 结构不符 / 超时一律 resolve null,由 renderModelPicker 回退到静态表
 // AI_MODEL_OPTIONS(那张候选表保留作离线兜底,见其顶部注释)。
 const AI_DEFAULT_MODEL = {
-  // 单一来源=PROVIDER_ADAPTERS[x].defaultModel:默认档位只在各 adapter 的 defaultModel
-  // 字段里维护(buildRequest 的 opts.model || this.defaultModel 同源读取),这里派生,
-  // 不再双处写死;动态列表里匹配该项的模型追加「(默认)」,aiApiModel 为空时视觉预选它。
-  // 测试用例钉死了三个 id,改 adapter 的 defaultModel 记得同步改测试。
-  claude: PROVIDER_ADAPTERS.claude.defaultModel,
-  openrouter: PROVIDER_ADAPTERS.openrouter.defaultModel,
   groq: PROVIDER_ADAPTERS.groq.defaultModel,
-  hf: PROVIDER_ADAPTERS.hf.defaultModel,
   cohere: PROVIDER_ADAPTERS.cohere.defaultModel,
   cerebras: PROVIDER_ADAPTERS.cerebras.defaultModel,
   tri: PROVIDER_ADAPTERS.tri.defaultModel,
 };
-// HF_PROVIDER_LABEL:HF router 的 provider 字符串(小写) → 显示名。只在 HF 模型列表
-// 展开(entriesOf)里用,展示"提供商名：模型名"。目前只展示用户配置了 custom key 的
-// groq/cohere/cerebras 三家;以后要加 provider 在这里补一行。
+// HF_PROVIDER_LABEL:tri 合并池标签用(保留供 fetchTriModels 复用)。
 const HF_PROVIDER_LABEL = { groq:'Groq', cohere:'Cohere', cerebras:'Cerebras' };
 const MODEL_LIST_API = {
-  claude: {
-    url: 'https://api.anthropic.com/v1/models?limit=1000',
-    headers(apiKey){ return {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      // 与 messages 端点同规则:没有这个头浏览器直连会被拒,见 PROVIDER_ADAPTERS.claude
-      'anthropic-dangerous-direct-browser-access': 'true',
-    }; },
-    labelOf(m){ return (m && (m.display_name || m.id)) || ''; },
-  },
-  openrouter: {
-    url: 'https://openrouter.ai/api/v1/models', // 公开接口,不需要鉴权头
-    headers(){ return {}; },
-    labelOf(m){ return (m && (m.name || m.id)) || ''; },
-  },
   groq: {
     url: 'https://api.groq.com/openai/v1/models',
     headers(apiKey){ return { 'authorization': 'Bearer ' + apiKey }; },
     labelOf(m){ return (m && m.id) || ''; },
-  },
-  hf: {
-    // HF /v1/models 是公开接口(不需要鉴权头,实测 2026-08-11 返回全量列表,
-    // 每项带 id/providers[].status)。返回的 id 是 HF 规范模型 ID(如 openai/gpt-oss-120b),
-    // 不带 provider 后缀——轮换需要精确到"哪个 provider 跑这个模型",用 entriesOf 展开:
-    // 同一个模型被多家服务(如 openai/gpt-oss-120b 同时有 groq/cerebras/novita...)时
-    // 生成多条 {id: 'HF模型ID:provider', label: '提供商名：模型名'},并只保留用户
-    // 关心的 groq/cohere/cerebras 三家 status=live 的条目(其余 provider 一律丢弃,
-    // 避免列表被 novita/together 等一堆用不到的服务刷屏)。
-    url: 'https://router.huggingface.co/v1/models?limit=1000',
-    headers(){ return {}; },
-    labelOf(m){ return (m && m.id) || ''; },
-    // 只有 hf 用 entriesOf:响应结构是 {data:[{id, providers:[{provider,status}]}]},
-    // 一个模型可能多家服务,展开成按 provider 拆开的条目;claude/openrouter/groq 的
-    // 响应是平铺数组没有这个字段,自然走默认 labelOf 路径。
-    entriesOf(json){
-      const out = [];
-      const want = { groq:1, cohere:1, cerebras:1 };
-      (json && Array.isArray(json.data) ? json.data : []).forEach(function(m){
-        const id = (m && m.id) || '';
-        if(!id) return;
-        (m.providers || []).forEach(function(p){
-          if(!want[p.provider]) return;                    // 只保留三家
-          if(p.status !== 'live') return;                  // 只保留可用
-          const provLabel = HF_PROVIDER_LABEL[p.provider] || p.provider;
-          out.push({ id: id + ':' + p.provider, label: provLabel + '：' + id });
-        });
-      });
-      return out;
-    },
   },
   cohere: {
     // Cohere 模型列表(2026-08-11 排查修复):原来用 /compatibility/v1/models 且不带
@@ -864,11 +629,10 @@ function fetchProviderModels(provider, apiKey){
     if(!res.ok) return null;
     return res.json().then(function(json){
       if(!json) return null;
-      // 默认要求 OpenAI 平铺结构 data[];有 entriesOf 的 provider(如 hf/cohere)用
+      // 默认要求 OpenAI 平铺结构 data[];有 entriesOf 的 provider(如 cohere)用
       // 自定义解析,可接受其它结构(cohere 原生格式是 models[],没有 data 数组)。
       if(!Array.isArray(json.data) && typeof spec.entriesOf!=='function') return null;
-      // hf 用 entriesOf 展开(同一模型多家 provider 拆成多条);cohere 用它解析原生
-      // models[] 结构;其余 provider 走默认 labelOf 平铺(OpenAI 格式 data[])。
+      // cohere 用 entriesOf 解析原生 models[] 结构;其余 provider 走默认 labelOf 平铺(OpenAI 格式 data[])。
       const models = (typeof spec.entriesOf==='function')
         ? spec.entriesOf(json)
         : json.data.map(function(m){
@@ -943,7 +707,7 @@ function renderModelListInto(modelWrap, list, opts){
         listWrap.appendChild(b);
       });
     } else {
-      // 单选模式(claude/openrouter):既有逻辑一字不变
+      // 单选模式:既有逻辑一字不变
       const effectiveSel = curSel || defaultValueId;
       shown.forEach(function(m){
         const b = document.createElement('button');
@@ -1016,7 +780,7 @@ function showAiKeyModal(onDone){
   const input = document.createElement('input');
   input.type = 'password';
   input.id = 'aiKeyInput';
-  input.placeholder = '粘贴 Claude / OpenRouter / Groq 密钥,留空则机器人使用本地规则';
+  input.placeholder = '粘贴 Groq / Cohere / Cerebras 密钥或 tri 三密钥(cohere/groq/cerebras),留空则机器人使用本地规则';
   input.autocomplete = 'off';
   input.value = aiApiKey;
   wrap.appendChild(input);
@@ -1050,22 +814,6 @@ function showAiKeyModal(onDone){
   saveBtn.textContent = '确定';
   btnRow.appendChild(saveBtn);
 
-  // 清除AI记忆按钮:主动清除入口(替代已移除的页面刷新警告)——只清记忆(本局 AI 自
-  // 维护摘要),密钥/模型选择等配置不清;点击后弹窗不关闭,就地替换成"已清除"提示。
-  const clearBtn = document.createElement('button');
-  clearBtn.className = 'ghost';
-  clearBtn.id = 'aiMemoryClearBtn';
-  clearBtn.textContent = '清除AI记忆';
-  clearBtn.onclick = function(){
-    aiSummaryReset();          // 清空本局 AI 自维护摘要
-    // 【未来扩展】若叠加了会话历史窗口(aiSessionHistory),同样在此清空
-    const note = document.createElement('div');
-    note.className = 'ai-key-warn';
-    note.textContent = '已清除本局AI记忆。';
-    clearBtn.replaceWith(note); // 就地替换成提示,不关闭弹窗
-  };
-  btnRow.appendChild(clearBtn);
-
   wrap.appendChild(btnRow);
 
   function updateSaveBtnState(){
@@ -1088,15 +836,13 @@ function showAiKeyModal(onDone){
     modelWrap.innerHTML = '';
     if(!aiProvider) return;
     const provider = aiProvider;
-    // 【多模型轮换】groq 密钥下默认勾选免费层模型、hf 密钥下默认勾选三家 custom key
-    // 模型、cerebras 密钥下默认勾选全部 3 个模型、tri 三密钥下默认勾选合并池 10 个
+    // 【多模型轮换】groq/cerebras/tri 密钥下默认勾选对应 DEFAULT_* 模型
     // (用户从未配置过多选时自动填入,只在内存生效、不写 sessionStorage——默认值随
-    // DEFAULT_GROQ_MODELS/DEFAULT_HF_MODELS/DEFAULT_CEREBRAS_MODELS/DEFAULT_TRI_MODELS
-    // 改动自动跟进;用户主动勾选/取消勾选时由 onPick → persistAiState 持久化真实选择)。
+    // DEFAULT_GROQ_MODELS/DEFAULT_CEREBRAS_MODELS/DEFAULT_TRI_MODELS 改动自动跟进;
+    // 用户主动勾选/取消勾选时由 onPick → persistAiState 持久化真实选择)。
     // 用户全部取消勾选后 aiApiModels 为空,下次进设置会恢复默认勾选——想彻底不用轮换
     // 可用自定义入口写手动单选(aiApiModel,优先级高于多选,见 resolveAiModel)。
     const defaultModels = (provider==='groq') ? DEFAULT_GROQ_MODELS
-      : (provider==='hf') ? DEFAULT_HF_MODELS
       : (provider==='cerebras') ? DEFAULT_CEREBRAS_MODELS
       : (provider==='tri') ? DEFAULT_TRI_MODELS : null;
     if(defaultModels && (!Array.isArray(aiApiModels) || aiApiModels.length===0)){
@@ -1114,7 +860,7 @@ function showAiKeyModal(onDone){
     statusNote.style.cssText = 'margin-top:4px;';
     modelWrap.appendChild(statusNote);
 
-    const isRotating = (provider==='groq' || provider==='hf' || provider==='cerebras' || provider==='tri');
+    const isRotating = (provider==='groq' || provider==='cerebras' || provider==='tri');
     function applyList(list, fromFallback){
       statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型')
         + (isRotating ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入;自定义输入会退出轮换(点勾选恢复)' : '');
@@ -1232,9 +978,7 @@ function showAiKeyModal(onDone){
       }
       // provider 真的发生了变化(不是同一个 provider 重复识别)才清空已选模型——避免
       // 把上一个 provider 的模型ID带进新 provider(两者的候选表/合法值域互不相通)。
-      // aiApiModel 是手动单选、aiApiModels 是多选轮换池:groq 换 hf 时 groq 默认勾选的
-      // 那几个模型(无 :provider 后缀)如果残留,会直接进 hf 的轮换池变成无效请求
-      // (HF 只认带 :后缀的 id),所以两个都要清。
+      // aiApiModel 是手动单选、aiApiModels 是多选轮换池:切换 provider 时两个都要清。
       if(prevProvider!==aiProvider){
         aiApiModel = '';
         aiApiModels = [];

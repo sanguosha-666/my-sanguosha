@@ -607,6 +607,7 @@ function newGame(){
   // 抛异常崩溃整局。修法照抄同一函数里已有的 aiSummaryReset 那行(backToLobby 里也有
   // 一份同款调用),不是新发明的模式。
   if(typeof resetBotTwoStep==='function') resetBotTwoStep();
+  if(typeof aiSummaryReset==='function') aiSummaryReset();
   // CORE-115:身份猜测标记(玩家自己对某座位身份的猜测)存在 localStorage,按房间号+
   // 座位号做key、不入g/不经过Firebase——上一局的标记对新一局没有参考价值(不同局身份
   // 不同),这里清空。和上面 resetBotTwoStep 同一个写法:render.js 里定义的函数,

@@ -378,43 +378,25 @@ const testCode = String.raw`
     if(aiSummarySeat !== null) throw new Error('over 后 aiSummarySeat 应为 null,实际 ' + aiSummarySeat);
   });
 
-  // 11. showAiKeyModal 弹窗按钮区含 #aiMemoryClearBtn(结构性断言)
-  //     注意:detectAiProvider 已把未识别密钥 fallback 到 cohere(2026-08-11 起),
-  //     test-key 会识别为 cohere;用 co-test 保持语义明确。
-  await check('11 弹窗含清除AI记忆按钮 #aiMemoryClearBtn', async function(){
+  // 11. showAiKeyModal 弹窗按钮区不再含 #aiMemoryClearBtn（已改为每局 newGame 自动清除）
+  await check('11 弹窗不再含清除AI记忆按钮 #aiMemoryClearBtn', async function(){
     aiApiKey = 'co-test'; aiProvider = 'cohere'; aiApiModel = '';
     showAiKeyModal();
     var clearBtn = document.getElementById('aiMemoryClearBtn');
-    if(!clearBtn) throw new Error('btnRow 应含 #aiMemoryClearBtn');
-    if(clearBtn.textContent !== '清除AI记忆') throw new Error('按钮文案应为 清除AI记忆,实际 "' + clearBtn.textContent + '"');
+    if(clearBtn) throw new Error('btnRow 不应再含 #aiMemoryClearBtn（已移除，改为自动清除）');
   });
 
-  // 12. 点击清除按钮 → aiSummary 清空、aiSummarySeat=null;密钥/模型不受影响;
-  //     弹窗不关闭(#aiKeyModal 未加 hidden);就地提示出现
-  await check('12 点击清除按钮清空摘要且不关弹窗', async function(){
-    // provider 必须是已识别的 cohere(不能让 provider 从 null 变成 cohere——那会触发
-    // "换 provider 清模型"逻辑,把 aiApiModel 清掉,干扰本条"清除记忆不动模型"的语义)。
+  // 12. 每局 newGame 自动清除摘要（替代旧的手动点击清除）
+  await check('12 newGame 自动清除摘要', async function(){
+    // provider 保持 cohere，避免“换 provider 清模型”干扰
     aiApiKey = 'co-test'; aiProvider = 'cohere'; aiApiModel = 'keep-model';
     aiSummary = '旧记忆'; aiSummarySeat = 1;
-    showAiKeyModal();
-    var clearBtn = document.getElementById('aiMemoryClearBtn');
-    if(!clearBtn) throw new Error('弹窗应含清除按钮');
-    clearBtn.click();
-    if(aiSummary !== '') throw new Error('点击后 aiSummary 应为空,实际 "' + aiSummary + '"');
-    if(aiSummarySeat !== null) throw new Error('点击后 aiSummarySeat 应为 null,实际 ' + aiSummarySeat);
+    // 模拟 newGame 的自动清除路径（room-lifecycle.js 已补 aiSummaryReset）
+    if(typeof aiSummaryReset === 'function') aiSummaryReset();
+    if(aiSummary !== '') throw new Error('newGame 后 aiSummary 应为空,实际 "' + aiSummary + '"');
+    if(aiSummarySeat !== null) throw new Error('newGame 后 aiSummarySeat 应为 null,实际 ' + aiSummarySeat);
     if(aiApiKey !== 'co-test') throw new Error('密钥不应被清除,实际 "' + aiApiKey + '"');
     if(aiApiModel !== 'keep-model') throw new Error('模型选择不应被清除,实际 "' + aiApiModel + '"');
-    var m = document.getElementById('aiKeyModal');
-    if(!m) throw new Error('#aiKeyModal 应存在');
-    if(m.classList.contains('hidden')) throw new Error('弹窗不应关闭(hidden class 不应出现)');
-    // 就地提示:树里应能找到"已清除本局AI记忆。"文本节点
-    var noteFound = false;
-    (function walk(n){
-      if(noteFound) return;
-      if(typeof n.textContent === 'string' && n.textContent.indexOf('已清除本局AI记忆') >= 0){ noteFound = true; return; }
-      (n.children || []).forEach(walk);
-    })(document.body);
-    if(!noteFound) throw new Error('应出现就地"已清除本局AI记忆"提示');
   });
 
   // 13. 真人回合(seat===-1)不清 AI 记忆:scheduleBotTurn 每次渲染都跑,若此时

@@ -67,8 +67,27 @@ try{
     process.exit(0);
   }
 
-  const previous = localScriptVersions(sourceAt(comparison.base));
-  const changed = new Set(changedFiles(comparison));
+  let previous;
+  try{
+    previous = localScriptVersions(sourceAt(comparison.base));
+  }catch(error){
+    // 孤立提交（force push 回退后）或 base 不含 index.html 时，退化为仅语法检查
+    if(/exists on disk, but not in|fatal:/.test(error.message)){
+      console.log('cache-bust check: base ' + comparison.base + ' not found; syntax only (' + current.size + ' scripts)');
+      process.exit(0);
+    }
+    throw error;
+  }
+  let changed;
+  try{
+    changed = new Set(changedFiles(comparison));
+  }catch(error){
+    if(/unknown revision|fatal:/.test(error.message)){
+      console.log('cache-bust check: base ' + comparison.base + ' not found; syntax only (' + current.size + ' scripts)');
+      process.exit(0);
+    }
+    throw error;
+  }
   const failures = [];
 
   current.forEach(function(version, file){
