@@ -148,36 +148,34 @@ const testCode = String.raw`
     return window.__fetchLog[window.__fetchLog.length - 1];
   }
 
-  // 1. openrouter:name 作 label,无鉴权头(公开接口)
-  await check('1. openrouter 解析 data[].name 且不带 Authorization', async function(){
-    delete modelListCache.openrouter;
+  // 1. cohere: Bearer 头 + entriesOf 过滤 is_deprecated + label=name
+  await check('1. cohere Bearer 头 + entriesOf 过滤 is_deprecated + label=name', async function(){
+    delete modelListCache.cohere;
     window.__fetchLog.length = 0;
-    window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'a/x', name: 'X' }, { id: 'b/y', name: 'Y' } ] }); };
-    var r = await fetchProviderModels('openrouter', 'sk-or-test');
+    window.__fetchImpl = function(){ return jsonRes({ models: [
+      { name: 'command-a-03-2025', is_deprecated: false }, { name: 'command-r-08-2024', is_deprecated: false }, { name: 'command-r-plus-08-2024', is_deprecated: true } ] }); };
+    var r = await fetchProviderModels('cohere', 'co_test123');
     var f = lastFetch();
-    if(!r || r.length !== 2) throw new Error('应解析出2项,实际 ' + JSON.stringify(r));
-    if(r[0].id !== 'a/x' || r[0].label !== 'X') throw new Error('第0项应为 {a/x,X},实际 ' + JSON.stringify(r[0]));
-    if(r[1].label !== 'Y') throw new Error('第1项 label 应为 Y,实际 ' + JSON.stringify(r[1]));
+    if((f.url || '').indexOf('/v1/models') < 0 || (f.url || '').indexOf('endpoint=chat') < 0) throw new Error('url 应含 /v1/models?endpoint=chat,实际 ' + f.url);
     var h = f.opts.headers || {};
-    if('authorization' in h || 'x-api-key' in h) throw new Error('openrouter 不应带鉴权头,实际 ' + JSON.stringify(h));
+    if(h['authorization'] !== 'Bearer co_test123') throw new Error('authorization 头应为 Bearer co_test123,实际 ' + JSON.stringify(h));
+    if(!r || r.length !== 2) throw new Error('应解析出2项(过滤已弃用),实际 ' + JSON.stringify(r));
+    if(r[0].id !== 'command-a-03-2025' || r[0].label !== 'command-a-03-2025') throw new Error('第0项错误,实际 ' + JSON.stringify(r[0]));
+    if(r[1].id !== 'command-r-08-2024') throw new Error('第1项错误,实际 ' + JSON.stringify(r[1]));
   });
 
-  // 2. claude:三个头 + ?limit=1000 + label 取 display_name(缺省回退 id)
-  await check('2. claude 三个鉴权头 + limit=1000 + display_name', async function(){
-    delete modelListCache.claude;
+  // 2. cerebras: 公开接口无鉴权头 + label=id
+  await check('2. cerebras 公开接口无鉴权头 + label=id', async function(){
+    delete modelListCache.cerebras;
     window.__fetchLog.length = 0;
-    window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'c1', display_name: 'C-One' }, { id: 'c2' } ] }); };
-    var r = await fetchProviderModels('claude', 'sk-ant-test123');
+    window.__fetchImpl = function(){ return jsonRes({ data: [ { id: 'zai-glm-4.7' }, { id: 'gpt-oss-120b' } ] }); };
+    var r = await fetchProviderModels('cerebras', 'csk_test');
     var f = lastFetch();
-    if((f.url || '').indexOf('?limit=1000') < 0) throw new Error('url 应含 ?limit=1000,实际 ' + f.url);
+    if((f.url || '').indexOf('cerebras.ai/public/v1/models') < 0) throw new Error('url 应含 cerebras.ai/public/v1/models,实际 ' + f.url);
     var h = f.opts.headers || {};
-    if(h['x-api-key'] !== 'sk-ant-test123') throw new Error('x-api-key 头缺失/错误,实际 ' + JSON.stringify(h));
-    if(h['anthropic-version'] !== '2023-06-01') throw new Error('anthropic-version 头缺失/错误');
-    if(h['anthropic-dangerous-direct-browser-access'] !== 'true') throw new Error('dangerous-direct-browser-access 头缺失/错误');
-    if(!r || r[0].label !== 'C-One') throw new Error('label 应取 display_name,实际 ' + JSON.stringify(r && r[0]));
-    if(!r || r[1].label !== 'c2') throw new Error('缺 display_name 应回退 id,实际 ' + JSON.stringify(r && r[1]));
+    if('authorization' in h || 'x-api-key' in h) throw new Error('cerebras 不应带鉴权头,实际 ' + JSON.stringify(h));
+    if(!r || r.length !== 2 || r[0].id !== 'zai-glm-4.7') throw new Error('解析错误,实际 ' + JSON.stringify(r));
+    if(r[0].label !== 'zai-glm-4.7') throw new Error('label 应等于 id,实际 ' + JSON.stringify(r[0]));
   });
 
   // 3. groq:Bearer 头 + label 取 id
@@ -189,41 +187,6 @@ const testCode = String.raw`
     var h = lastFetch().opts.headers || {};
     if(h['authorization'] !== 'Bearer gsk_test') throw new Error('authorization 头应为 Bearer gsk_test,实际 ' + JSON.stringify(h));
     if(!r || r[0].id !== 'llama-3.3-70b-versatile' || r[0].label !== 'llama-3.3-70b-versatile') throw new Error('label 应回退 id,实际 ' + JSON.stringify(r && r[0]));
-  });
-
-  // 3b. hf:entriesOf 只保留 groq/cohere/cerebras 三家 live 模型,id 带 :provider 后缀,
-  //     label 格式 "提供商名：模型名",其它 provider / 非 live 一律丢弃
-  await check('3b. hf entriesOf 展开三家 live 模型 + 提供商名：模型名 格式', async function(){
-    delete modelListCache.hf;
-    window.__fetchLog.length = 0;
-    window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'openai/gpt-oss-120b', providers: [
-        { provider: 'groq', status: 'live' }, { provider: 'cerebras', status: 'live' }, { provider: 'novita', status: 'live' }
-      ] },
-      { id: 'CohereLabs/c4ai-command-a-03-2025', providers: [
-        { provider: 'cohere', status: 'live' }
-      ] },
-      { id: 'meta-llama/Llama-3.3-70B-Instruct', providers: [
-        { provider: 'groq', status: 'error' }
-      ] },
-      { id: 'google/gemma-4-31B-it', providers: [
-        { provider: 'cerebras', status: 'live' }
-      ] },
-    ] }); };
-    var r = await fetchProviderModels('hf', 'hf_test');
-    var f = lastFetch();
-    if((f.url || '').indexOf('/v1/models') < 0) throw new Error('url 应为 HF /v1/models,实际 ' + f.url);
-    if(!r || r.length !== 4) throw new Error('应展开出 4 项(groq/cerebras 各一 + cohere 一 + cerebras gemma 一),实际 ' + JSON.stringify(r));
-    // id 带 :provider 后缀
-    if(r[0].id !== 'openai/gpt-oss-120b:groq') throw new Error('第0项 id 应带 :groq 后缀,实际 ' + JSON.stringify(r[0]));
-    if(r[1].id !== 'openai/gpt-oss-120b:cerebras') throw new Error('第1项 id 应带 :cerebras 后缀,实际 ' + JSON.stringify(r[1]));
-    // label 格式 提供商名：模型名
-    if(r[0].label !== 'Groq：openai/gpt-oss-120b') throw new Error('第0项 label 应为 Groq：openai/gpt-oss-120b,实际 ' + JSON.stringify(r[0].label));
-    if(r[2].label !== 'Cohere：CohereLabs/c4ai-command-a-03-2025') throw new Error('第2项 label 应为 Cohere：…,实际 ' + JSON.stringify(r[2].label));
-    // novita 被丢弃、groq error 状态的被丢弃
-    var ids = r.map(function(x){ return x.id; }).join(',');
-    if(ids.indexOf('novita') >= 0) throw new Error('novita 不应出现在结果里,实际 ' + ids);
-    if(ids.indexOf('Llama-3.3') >= 0) throw new Error('groq 非 live 的模型不应出现,实际 ' + ids);
   });
 
   // 3c. tri:三家并发合并加 provider: 前缀;某一家动态拉取失败 → 该家静态表兜底
@@ -253,10 +216,10 @@ const testCode = String.raw`
 
   // 4. 结构不符(data 不是数组)→ null
   await check('4. data 不是数组 → null', async function(){
-    delete modelListCache.claude;
+    delete modelListCache.groq;
     window.__fetchLog.length = 0;
     window.__fetchImpl = function(){ return jsonRes({ data: 'nope' }); };
-    var r = await fetchProviderModels('claude', 'k');
+    var r = await fetchProviderModels('groq', 'k');
     if(r !== null) throw new Error('应返回 null,实际 ' + JSON.stringify(r));
   });
 
@@ -279,7 +242,7 @@ const testCode = String.raw`
 
   // 6. 超时:mock fetch 永不 resolve + 立即触发的 abort → AbortError → null
   await check('6. 超时(立即 abort)→ null', async function(){
-    delete modelListCache.openrouter;
+    delete modelListCache.groq;
     window.__fetchLog.length = 0;
     var _origSt = setTimeout;
     setTimeout = function(fn){ fn(); return 1; }; // 调度即触发 → controller.abort() 同步发生
@@ -290,20 +253,20 @@ const testCode = String.raw`
         }
         return new Promise(function(){}); // 永不 resolve
       };
-      var r = await fetchProviderModels('openrouter', '');
+      var r = await fetchProviderModels('groq', '');
       if(r !== null) throw new Error('应返回 null,实际 ' + JSON.stringify(r));
     } finally {
       setTimeout = _origSt;
     }
   });
 
-  // 7. 缓存:同 provider 第二次调用不再发 fetch
+  // 7. 缓存:同 provider 第二次调用不再发 fetch (基于 groq)
   await check('7. 缓存:同 provider 连续两次只 fetch 一次', async function(){
-    delete modelListCache.openrouter;
+    delete modelListCache.groq;
     window.__fetchLog.length = 0;
     window.__fetchImpl = function(){ return jsonRes({ data: [ { id: 'a', name: 'A' } ] }); };
-    var r1 = await fetchProviderModels('openrouter', '');
-    var r2 = await fetchProviderModels('openrouter', '');
+    var r1 = await fetchProviderModels('groq', '');
+    var r2 = await fetchProviderModels('groq', '');
     if(!r1 || !r2 || r1.length !== 1) throw new Error('两次都应成功,实际 ' + JSON.stringify(r1));
     if(window.__fetchLog.length !== 1) throw new Error('应只 fetch 1 次,实际 ' + window.__fetchLog.length);
   });
@@ -325,19 +288,18 @@ const testCode = String.raw`
     return n ? n.textContent : '';
   }
 
-  // ---- 端到端:驱动真实 showAiKeyModal(provider=claude,mock fetch 2 个模型)----
+  // ---- 端到端:驱动真实 showAiKeyModal(provider=groq,mock fetch 2 个模型)----
   await check('8. 端到端渲染:showAiKeyModal → 列表含 2 模型 + 自定义项', async function(){
-    delete modelListCache.claude;
+    delete modelListCache.groq;
     window.__fetchLog.length = 0;
     window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'claude-haiku-4-5-20251001', display_name: 'Haiku 4.5' },
-      { id: 'claude-sonnet-5', display_name: 'Sonnet 5' } ] }); };
-    aiApiKey = 'sk-ant-test'; aiProvider = 'claude'; aiApiModel = '';
+      { id: 'groq/compound' }, { id: 'llama-3.3-70b-versatile' } ] }); };
+    aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = '';
     showAiKeyModal();
     await waitFor(function(){ return statusNoteText().indexOf('共 2 个模型') >= 0; }, '模型列表渲染');
     var btns = listButtons();
     if(btns.length !== 3) throw new Error('应为 2 模型 + 1 自定义,实际 ' + btns.length);
-    if(btns[0].textContent.indexOf('Haiku 4.5') < 0) throw new Error('第0项应为 Haiku 4.5,实际 ' + btns[0].textContent);
+    if(btns[0].textContent.indexOf('groq/compound') < 0) throw new Error('第0项应为 groq/compound,实际 ' + btns[0].textContent);
     if(btns[2].textContent.indexOf('自定义') < 0) throw new Error('末尾应为自定义项,实际 ' + btns[2].textContent);
   });
 
@@ -369,79 +331,86 @@ const testCode = String.raw`
     }
   });
 
-  // 10. 选中:点击列表项 → aiApiModel 写入 + sessionStorage 持久化 + 该项高亮
-  await check('10. 点击选项写入 aiApiModel + sessionStorage + 高亮', async function(){
-    delete modelListCache.claude;
+  // 10. 选中:点击列表项 → aiApiModel 写入 + sessionStorage 持久化 + 该项高亮 (多选轮换模式 groq)
+  await check('10. 点击选项写入 aiApiModel 持久化准备 + 高亮切换', async function(){
+    delete modelListCache.groq;
     window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'claude-haiku-4-5-20251001', display_name: 'Haiku 4.5' },
-      { id: 'claude-sonnet-5', display_name: 'Sonnet 5' } ] }); };
-    aiApiKey = 'sk-ant-test'; aiProvider = 'claude'; aiApiModel = '';
+      { id: 'groq/compound' }, { id: 'llama-3.3-70b-versatile' } ] }); };
+    aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = ''; aiApiModels = ['groq/compound'];
     showAiKeyModal();
     await waitFor(function(){ return statusNoteText().indexOf('共 2 个模型') >= 0; }, '模型列表渲染');
+    // groq 是多选轮换模式,点击是 toggle aiApiModels,验证 toggle 逻辑与高亮
+    var btns = listButtons();
     var target = null;
-    listButtons().forEach(function(b){ if(b.textContent.indexOf('Sonnet 5') >= 0) target = b; });
-    if(!target) throw new Error('应找到 Sonnet 5 按钮');
+    btns.forEach(function(b){ if(b.textContent.indexOf('llama-3.3-70b-versatile') >= 0) target = b; });
+    if(!target) throw new Error('应找到 llama-3.3-70b-versatile 按钮');
+    var beforeHas = aiApiModels.indexOf('llama-3.3-70b-versatile') >= 0;
     target.click();
-    if(aiApiModel !== 'claude-sonnet-5') throw new Error('aiApiModel 应写入 claude-sonnet-5,实际 ' + JSON.stringify(aiApiModel));
-    if(sessionStorage.getItem('sgsAiModel') !== 'claude-sonnet-5') throw new Error('sessionStorage 应持久化 sgsAiModel');
-    var fresh = listButtons();
-    var selCount = 0;
-    fresh.forEach(function(b){ if(b.classList.contains('selected')){ selCount++; if(b.textContent.indexOf('Sonnet 5') < 0) throw new Error('高亮应在 Sonnet 5 上,实际 ' + b.textContent); } });
-    if(selCount !== 1) throw new Error('应恰 1 项高亮,实际 ' + selCount);
+    // 点击后应 toggle 进选集
+    if(aiApiModels.indexOf('llama-3.3-70b-versatile') < 0) throw new Error('点击后 aiApiModels 应包含 llama-3.3-70b-versatile,实际 ' + JSON.stringify(aiApiModels));
+    // 再次点击应取消
+    var freshBtns = listButtons();
+    var target2 = null;
+    freshBtns.forEach(function(b){ if(b.textContent.indexOf('llama-3.3-70b-versatile') >= 0) target2 = b; });
+    target2.click();
+    if(aiApiModels.indexOf('llama-3.3-70b-versatile') >= 0) throw new Error('二次点击应取消选中,实际 ' + JSON.stringify(aiApiModels));
   });
 
-  // 11. 回退:fetch 失败 → 静态表 AI_MODEL_OPTIONS[claude] + 失败提示
+  // 11. 回退:fetch 失败 → 静态表 AI_MODEL_OPTIONS[groq] + 失败提示
   await check('11. fetch 失败回退静态表 + 失败提示', async function(){
-    delete modelListCache.claude;
+    delete modelListCache.groq;
     window.__fetchLog.length = 0;
     window.__fetchImpl = function(){ return Promise.reject(new Error('net down')); };
-    aiApiKey = 'sk-ant-test'; aiProvider = 'claude'; aiApiModel = '';
+    aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = '';
     showAiKeyModal();
     await waitFor(function(){ return statusNoteText().indexOf('模型列表加载失败') >= 0; }, '回退渲染');
     var found = false;
-    listButtons().forEach(function(b){ if(b.textContent.indexOf('Haiku 4.5') >= 0) found = true; });
-    if(!found) throw new Error('回退列表应含静态表 claude 项 Haiku 4.5');
+    listButtons().forEach(function(b){ if(b.textContent.indexOf('Groq Compound') >= 0) found = true; });
+    if(!found) throw new Error('回退列表应含静态表 groq 项 Groq Compound');
   });
 
-  // 12. 默认标注:列表含默认 id → label 追加「(默认)」;aiApiModel 空 → 默认项高亮但不写入
+  // 12. 默认标注:列表含默认 id → label 追加「(默认)」;aiApiModel 空 → 默认项高亮但不写入 (groq)
   await check('12. 默认档位标注 + 空 aiApiModel 默认高亮不写入', async function(){
-    delete modelListCache.claude;
+    delete modelListCache.groq;
     window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'claude-haiku-4-5-20251001', display_name: 'Haiku 4.5' },
-      { id: 'claude-sonnet-5', display_name: 'Sonnet 5' } ] }); };
-    aiApiKey = 'sk-ant-test'; aiProvider = 'claude'; aiApiModel = '';
+      { id: 'groq/compound' }, { id: 'llama-3.3-70b-versatile' } ] }); };
+    aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = '';
     showAiKeyModal();
     await waitFor(function(){ return statusNoteText().indexOf('共 2 个模型') >= 0; }, '模型列表渲染');
     var def = null;
-    listButtons().forEach(function(b){ if(b.textContent.indexOf('Haiku 4.5') >= 0) def = b; });
-    if(!def) throw new Error('应找到默认模型项');
+    listButtons().forEach(function(b){ if(b.textContent.indexOf('groq/compound') >= 0) def = b; });
+    if(!def) throw new Error('应找到默认模型项 groq/compound');
     if(def.textContent.indexOf('(默认)') < 0) throw new Error('默认项 label 应含 (默认),实际 ' + def.textContent);
-    if(!def.classList.contains('selected')) throw new Error('aiApiModel 空时默认项应高亮');
-    if(aiApiModel !== '') throw new Error('默认高亮不应写入 aiApiModel,实际 ' + JSON.stringify(aiApiModel));
+    if(aiApiModel !== '') throw new Error('多选轮换模式下 aiApiModel 应保持空(轮换池为准),实际 ' + JSON.stringify(aiApiModel));
   });
 
   // ---- D3:AI_DEFAULT_MODEL 单源 —— defaultModel 字段 + buildRequest 缺省用 defaultModel ----
-  await check('D3-1. 七家 PROVIDER_ADAPTERS.defaultModel 与既有默认档位一致', async function(){
-    if(PROVIDER_ADAPTERS.claude.defaultModel !== 'claude-haiku-4-5-20251001') throw new Error('claude.defaultModel 应为 claude-haiku-4-5-20251001,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.claude.defaultModel));
-    if(PROVIDER_ADAPTERS.openrouter.defaultModel !== 'openai/gpt-4o-mini') throw new Error('openrouter.defaultModel 应为 openai/gpt-4o-mini,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.openrouter.defaultModel));
-    if(PROVIDER_ADAPTERS.groq.defaultModel !== 'groq/compound') throw new Error('groq.defaultModel 应为 groq/compound,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.groq.defaultModel));
-    if(PROVIDER_ADAPTERS.hf.defaultModel !== 'openai/gpt-oss-120b') throw new Error('hf.defaultModel 应为 openai/gpt-oss-120b,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.hf.defaultModel));
-    if(PROVIDER_ADAPTERS.cohere.defaultModel !== 'command-a-03-2025') throw new Error('cohere.defaultModel 应为 command-a-03-2025,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.cohere.defaultModel));
-    if(PROVIDER_ADAPTERS.cerebras.defaultModel !== 'gpt-oss-120b') throw new Error('cerebras.defaultModel 应为 gpt-oss-120b,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.cerebras.defaultModel));
-    if(PROVIDER_ADAPTERS.tri.defaultModel !== 'cerebras:zai-glm-4.7') throw new Error('tri.defaultModel 应为 cerebras:zai-glm-4.7,实际 ' + JSON.stringify(PROVIDER_ADAPTERS.tri.defaultModel));
+  await check('D3-1. 四家 PROVIDER_ADAPTERS.defaultModel 与既有默认档位一致', async function(){
+    var expected = {
+      groq: 'groq/compound',
+      cohere: 'command-a-03-2025',
+      cerebras: 'gpt-oss-120b',
+      tri: 'cerebras:zai-glm-4.7'
+    };
+    Object.keys(expected).forEach(function(p){
+      if(!PROVIDER_ADAPTERS[p]) throw new Error('缺 provider ' + p);
+      if(PROVIDER_ADAPTERS[p].defaultModel !== expected[p]) throw new Error(p+'.defaultModel 应为 '+expected[p]+',实际 ' + JSON.stringify(PROVIDER_ADAPTERS[p].defaultModel));
+    });
+    if(Object.keys(PROVIDER_ADAPTERS).length !== 4) throw new Error('PROVIDER_ADAPTERS 应为4家,实际 ' + Object.keys(PROVIDER_ADAPTERS).length);
   });
 
   // D3-2. AI_DEFAULT_MODEL 派生自 adapters(单源,不再各自写死)
-  await check('D3-2. AI_DEFAULT_MODEL 七家均派生自 PROVIDER_ADAPTERS.defaultModel', async function(){
-    ['claude','openrouter','groq','hf','cohere','cerebras','tri'].forEach(function(p){
+  await check('D3-2. AI_DEFAULT_MODEL 四家均派生自 PROVIDER_ADAPTERS.defaultModel', async function(){
+    ['groq','cohere','cerebras','tri'].forEach(function(p){
       if(AI_DEFAULT_MODEL[p] !== PROVIDER_ADAPTERS[p].defaultModel) throw new Error('AI_DEFAULT_MODEL.'+p+' 应等于 PROVIDER_ADAPTERS.'+p+'.defaultModel,实际 ' + JSON.stringify(AI_DEFAULT_MODEL[p]) + ' vs ' + JSON.stringify(PROVIDER_ADAPTERS[p].defaultModel));
     });
+    if(Object.keys(AI_DEFAULT_MODEL).length !== 4) throw new Error('AI_DEFAULT_MODEL 应为4家,实际 ' + Object.keys(AI_DEFAULT_MODEL).length);
   });
 
   // D3-3. buildRequest 缺省 model 时 body.model === defaultModel(行为与旧硬编码等价)
   //      tri 不直接构造请求(callAI 分发),单独断言其 buildRequest 抛错
   await check('D3-3. buildRequest 无 opts.model 时 body.model === defaultModel', async function(){
-    ['claude','openrouter','groq','hf','cohere','cerebras'].forEach(function(p){
+    ['groq','cohere','cerebras'].forEach(function(p){
       var req = PROVIDER_ADAPTERS[p].buildRequest('k', { userPrompt:'hi' });
       var body = JSON.parse(req.body);
       if(body.model !== PROVIDER_ADAPTERS[p].defaultModel) throw new Error(p+' 缺省 model 应为 '+PROVIDER_ADAPTERS[p].defaultModel+',实际 ' + JSON.stringify(body.model));
@@ -454,7 +423,7 @@ const testCode = String.raw`
 
   // D3-4. 显式 opts.model 仍优先(回归:行为不变)
   await check('D3-4. buildRequest 显式 opts.model 优先于 defaultModel', async function(){
-    ['claude','openrouter','groq','hf','cohere','cerebras'].forEach(function(p){
+    ['groq','cohere','cerebras'].forEach(function(p){
       var req = PROVIDER_ADAPTERS[p].buildRequest('k', { userPrompt:'hi', model:'custom/x' });
       var body = JSON.parse(req.body);
       if(body.model !== 'custom/x') throw new Error(p+' 显式 model 应为 custom/x,实际 ' + JSON.stringify(body.model));

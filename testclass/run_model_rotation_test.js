@@ -1,5 +1,5 @@
 // run_model_rotation_test.js —— 多模型轮换回归套件
-// 用法: node run_model_rotation_test.js
+// 用法: node testclass/run_model_rotation_test.js
 const vm = require('vm');
 const fs = require('fs');
 let fetchCalls = [];
@@ -28,16 +28,6 @@ async function check(name, fn){
     const d = vm.runInContext('DEFAULT_GROQ_MODELS', sandbox);
     if(!d || d.length!==6) throw new Error('应6个,实际 '+(d&&d.length));
     ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'].forEach(function(m){
-      if(d.indexOf(m)<0) throw new Error('缺 '+m);
-    });
-  });
-  // 0b. hf 默认勾选:groq 全部4个 + cerebras 全部3个 + cohere reasoning 1个(共8个)
-  await check('默认勾选: hf groq全部+cerebras全部+cohere reasoning', function(){
-    const d = vm.runInContext('DEFAULT_HF_MODELS', sandbox);
-    if(!d || d.length!==8) throw new Error('应8个,实际 '+(d&&d.length));
-    ['openai/gpt-oss-120b:groq','openai/gpt-oss-20b:groq','meta-llama/Llama-3.3-70B-Instruct:groq','openai/gpt-oss-safeguard-20b:groq',
-     'openai/gpt-oss-120b:cerebras','google/gemma-4-31B-it:cerebras','zai-org/GLM-4.7:cerebras',
-     'CohereLabs/command-a-reasoning-08-2025:cohere'].forEach(function(m){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
@@ -95,36 +85,10 @@ async function check(name, fn){
     const r3 = vm.runInContext('resolveAiModel', sandbox)('tri');
     if(r3!=='') throw new Error('全冷却应返回空串哨兵,实际 '+JSON.stringify(r3));
   });
-  // 0c. resolveAiModel: hf 走 provider 优先级(cerebras>groq>cohere),每次从头选最高优先级
-  await check('resolveAiModel: hf 优先cerebras再groq再cohere', function(){
-    vm.runInContext('aiProvider="hf"; aiApiModel=""; aiApiModels=["openai/gpt-oss-120b:groq","CohereLabs/c4ai-command-a-03-2025:cohere","openai/gpt-oss-120b:cerebras"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
-    const r1 = vm.runInContext('resolveAiModel', sandbox)('hf');
-    const r2 = vm.runInContext('resolveAiModel', sandbox)('hf');
-    const r3 = vm.runInContext('resolveAiModel', sandbox)('hf');
-    // 无冷却时三次都应选 cerebras(优先级最高),不是 round-robin 轮流
-    if(r1!=='openai/gpt-oss-120b:cerebras' || r2!=='openai/gpt-oss-120b:cerebras' || r3!=='openai/gpt-oss-120b:cerebras')
-      throw new Error('hf无冷却应恒选cerebras,实际 '+r1+'/'+r2+'/'+r3);
-  });
-  // 0d. hf 优先级冷却降级:cerebras 冷却中 → groq;再冷却 → cohere;全冷却 → 空串哨兵
-  await check('resolveAiModel: hf 冷却自动降级到下一优先级', function(){
-    vm.runInContext('aiProvider="hf"; aiApiModel=""; aiApiModels=["openai/gpt-oss-120b:groq","CohereLabs/c4ai-command-a-03-2025:cohere","openai/gpt-oss-120b:cerebras"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
-    // cerebras 冷却中 → 应选 groq
-    vm.runInContext('_modelCooldowns={"openai/gpt-oss-120b:cerebras": Date.now()+99999};', sandbox);
-    const r1 = vm.runInContext('resolveAiModel', sandbox)('hf');
-    if(r1!=='openai/gpt-oss-120b:groq') throw new Error('cerebras冷却应降级groq,实际 '+r1);
-    // cerebras+groq 都冷却中 → 应选 cohere
-    vm.runInContext('_modelCooldowns={"openai/gpt-oss-120b:cerebras": Date.now()+99999,"openai/gpt-oss-120b:groq": Date.now()+99999};', sandbox);
-    const r2 = vm.runInContext('resolveAiModel', sandbox)('hf');
-    if(r2!=='CohereLabs/c4ai-command-a-03-2025:cohere') throw new Error('cerebras+groq冷却应降级cohere,实际 '+r2);
-    // 三家全冷却 → 空串哨兵
-    vm.runInContext('_modelCooldowns={"openai/gpt-oss-120b:cerebras": Date.now()+99999,"openai/gpt-oss-120b:groq": Date.now()+99999,"CohereLabs/c4ai-command-a-03-2025:cohere": Date.now()+99999};', sandbox);
-    const r3 = vm.runInContext('resolveAiModel', sandbox)('hf');
-    if(r3!=='') throw new Error('全冷却应返回空串哨兵,实际 '+JSON.stringify(r3));
-  });
-  // 1. resolveAiModel: 非 groq 返回 undefined(零变化)
-  await check('resolveAiModel: 非groq返回undefined', function(){
-    vm.runInContext('aiProvider="claude"; aiApiModel=""; aiApiModels=[];', sandbox);
-    const r = vm.runInContext('resolveAiModel', sandbox)('claude');
+  // 1. resolveAiModel: 非 groq/cerebras/tri 返回 undefined(零变化) —— 用 cohere 验证
+  await check('resolveAiModel: 非groq/cerebras/tri返回undefined', function(){
+    vm.runInContext('aiProvider="cohere"; aiApiModel=""; aiApiModels=[];', sandbox);
+    const r = vm.runInContext('resolveAiModel', sandbox)('cohere');
     if(r!==undefined) throw new Error('应undefined,实际 '+r);
   });
   // 2. resolveAiModel: 手动单选优先(aiApiModel 非空不轮换)
