@@ -103,6 +103,110 @@ const BOT_DECISIONS = Object.create(null);
 // 记录摘要对应的回合节点,留给后续调度逻辑(如"每轮更新一次")判断是否该更新,
 // 本任务只定义状态不消费。
 let aiSummary = '';
+// ================= CORE-140:分层记忆(tactical / doctrine) =================
+// 【要解决什么】改动前 aiSummary 是**整体覆写**的单条 ≤200 字文本,而 buildSummaryPrompt
+// 要求模型在同一份里同时记两类性质完全不同的东西:①跨回合持久认知(第3轮推断出"座位2和
+// 座位5是一伙",第12轮依然成立)②当前回合打算(每回合都该刷新)。挤在一起整体覆写的结果是
+// **后期的战术噪声会把前期辛苦得出的身份推断冲掉**——而那恰恰是最难重新获得的信息
+// (日志会滚掉,g.aiRebelSuspicion 只存数值、存不下推理过程)。
+//
+// 【两层的边界】
+//   aiTactical  ≤80 字 —— 下一步打算(首选目标/留哪些牌/主要防范点),每次**覆写**
+//   aiDoctrine ≤120 字 —— 跨回合结论(身份推断的**理由**/阵营判断/资源纪律),**增量合并**
+// 合计 200 字,与改动前持平——分层是为了给认知层腾出结构化空间,不借机撑大总上下文。
+//
+// 【与 aiRebelSuspicion 互补不重复】那个是数值嫌疑度,答"谁更可疑";doctrine 存**理由**,
+// 答"为什么可疑"。后者数字表达不了,且一旦丢失再也推不回来。
+//
+// 【范围】只做这两层。刻意不做外部项目 Cli-SanGuoSha-online 的 lessons 滚动队列与
+// lastExecution 执行回看,也不新增独立的复盘 LLM 调用——仍是每回合原有的那一次
+// updateAiSummary,从同一次返回里同时拿两层。
+let aiTactical = '';
+let aiDoctrine = '';
+const AI_TACTICAL_MAX = 80;
+const AI_DOCTRINE_MAX = 120;
+// 解析失败回退路径沿用改动前的整体截断长度(见 updateAiSummary 里的说明)。
+const AI_SUMMARY_FALLBACK_MAX = 500;
+// AI_DOCTRINE_NOOP:模型表示"这次没有新认知"的各种说法。**刻意不依赖单一魔法字符串**——
+// 外部项目那边是 `updateText === "不变"` 精确匹配,模型输出"无变化"/"没有变化"/"不变。"
+// 任意一种都会被当成真的更新塞进 doctrine,几轮就把配额占满。这里以**空串**为主信号,
+// 外加这个同义集合(比对前先去掉所有标点与空白)。
+const AI_DOCTRINE_NOOP = new Set(['不变','无','无更新','无变化','没有变化','没有','暂无','n/a','na','none','null']);
+function aiDoctrineIsNoop(text){
+  const t = String(text==null?'':text).replace(/[\s。.,，、;；:：!！?？"'"''()（）]/g, '').toLowerCase();
+  return !t || AI_DOCTRINE_NOOP.has(t);
+}
+// mergeAiDoctrine:确定性增量合并。纯函数,不读写任何模块状态,可单测。
+// 【新信息前置的理由】合并后超上限时从**尾部**裁剪,于是最新结论永远不会被裁掉,
+// 旧认知随时间自然衰减——这是外部项目 mergeDoctrine 的思路,确实对,沿用。
+// 【已知局限:错误推断也会活得更久 —— 主动接受的取舍,不是 bug】
+//   改动前(整体覆写):错误推断会随时间**自然消失**(下一轮重写时模型不再提它就没了),
+//                     整体覆写自带"自动遗忘"。
+//   分层后(增量合并):错误推断和正确推断**一样会持续存活**,只能靠"新信息前置+旧信息
+//                     从尾部被挤掉"慢慢衰减,不会立刻消失。
+// 仍然接受的理由:错误推断**不触碰 CORE-89/90 那套阵营硬过滤**
+// (botTargetRelationAllowed / botTargetPolicyAllows 是布尔硬边界,完全不读摘要),
+// 最多让倾向判断变差,不会造成"忠臣杀主公"这类硬错误;而正确推断的留存价值明显更高。
+// **如果以后有人观察到"机器人固执地认定某人是反贼很多轮",那是这条设计决策的结果,
+// 不是新 bug** —— 详见 issue #189 的「已知局限」一节。
+function mergeAiDoctrine(oldDoctrine, update){
+  const oldText = String(oldDoctrine==null?'':oldDoctrine).trim();
+  const upText = String(update==null?'':update).trim();
+  // ①无更新:空串或同义集合命中 → 原样保留旧认知
+  if(aiDoctrineIsNoop(upText)) return oldText.slice(0, AI_DOCTRINE_MAX);
+  if(!oldText) return upText.slice(0, AI_DOCTRINE_MAX);
+  // ③相邻去重:和旧认知的**首个片段**(即上一次合并进来的那条)高度重复就跳过。
+  // 外部项目只在 lessons 做了去重、doctrine 没做——连续几个回合模型说同一句
+  // "座位2可疑",会把 120 字配额塞满同一件事。
+  const firstSeg = oldText.split('；')[0].trim();
+  if(firstSeg && aiDoctrineSimilar(firstSeg, upText)) return oldText.slice(0, AI_DOCTRINE_MAX);
+  return (upText + '；' + oldText).slice(0, AI_DOCTRINE_MAX);
+}
+// aiDoctrineSimilar:相邻去重的判定。刻意保持"朴素但可预测"——完全相同,或一方是另一方
+// 的前缀/子串(去标点后)即视为重复。不引入编辑距离/相似度阈值那类需要调参、且行为难以
+// 用断言钉死的东西:这里宁可漏判(多留一条重复)也不要误判(把一条真的新认知吃掉)。
+function aiDoctrineSimilar(a, b){
+  const norm = t => String(t==null?'':t).replace(/[\s。.,，、;；:：!！?？]/g, '');
+  const x = norm(a), y = norm(b);
+  if(!x || !y) return false;
+  if(x === y) return true;
+  return x.length >= 6 && y.length >= 6 && (x.indexOf(y) >= 0 || y.indexOf(x) >= 0);
+}
+// composeAiSummary:把两层组装成真正注入 prompt 的那段文本。
+// 【刻意的规则】doctrine 为空时,注入文本就是 tactical 本身、**不加任何标签前缀** ——
+// 于是"还没积累出认知"的阶段(以及全部解析失败的回退场景)与改动前**逐字相同**,
+// callAiChooseIndex 的注入点因此完全不需要改。
+function composeAiSummary(tactical, doctrine){
+  const t = String(tactical==null?'':tactical).trim();
+  const d = String(doctrine==null?'':doctrine).trim();
+  if(!d) return t;
+  if(!t) return '【局势认知】' + d;
+  return '【局势认知】' + d + '\n【当前战术】' + t;
+}
+// parseAiSummaryLayers:从模型返回里取两层。返回 null = 解析不出新格式,调用方据此走
+// **改动前的整体覆写回退路径**(最坏情况 = 今天的行为,不存在比现状更差的可能)。
+function parseAiSummaryLayers(text){
+  const raw = String(text==null?'':text).trim();
+  if(!raw) return null;
+  let obj = null;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fenced && fenced[1] ? fenced[1].trim() : raw;
+  try{ obj = JSON.parse(body); }
+  catch(e){
+    const m = body.match(/\{[\s\S]*\}/);
+    if(m){ try{ obj = JSON.parse(m[0]); }catch(e2){ obj = null; } }
+  }
+  if(!obj || typeof obj!=='object' || Array.isArray(obj)) return null;
+  const hasT = typeof obj.tactical === 'string';
+  const hasD = typeof obj.doctrineUpdate === 'string';
+  // 两个字段一个都没有 = 这不是我们要的那种 JSON(比如决策用的 {"choice":N}),
+  // 按解析失败处理走回退,不要把无关 JSON 当成摘要。
+  if(!hasT && !hasD) return null;
+  return {
+    tactical: hasT ? obj.tactical.trim() : '',
+    doctrineUpdate: hasD ? obj.doctrineUpdate.trim() : ''
+  };
+}
 let aiSummarySeat = null;
 let aiSummaryRound = 0;
 let aiSummaryTurn = -1;
@@ -127,6 +231,8 @@ let aiTestLastCall = null;
 function aiSummaryReset(){
   aiSummaryByBot = Object.create(null);
   aiSummary = '';
+  aiTactical = '';   // CORE-140
+  aiDoctrine = '';   // CORE-140
   aiSummarySeat = null;
   aiSummaryRound = 0;
   aiSummaryTurn = -1;
@@ -140,6 +246,9 @@ function saveActiveAiSummary(){
   if(aiSummaryKey===null) return;
   aiSummaryByBot[aiSummaryKey] = {
     text: aiSummary,
+    // CORE-140:两层随 cid 分仓一起存取(分仓机制本身不变)
+    tactical: aiTactical,
+    doctrine: aiDoctrine,
     seat: aiSummarySeat,
     round: aiSummaryRound,
     turn: aiSummaryTurn
@@ -151,6 +260,10 @@ function selectAiSummary(g, seat){
   saveActiveAiSummary();
   const saved = aiSummaryByBot[key];
   aiSummary = saved ? saved.text : '';
+  // CORE-140:两层同步切换。saved 里没有这两个字段(理论上不会发生,防御性)时回退空串,
+  // 此时 aiSummary 仍是旧的整体文本,注入行为与改动前一致。
+  aiTactical = (saved && typeof saved.tactical==='string') ? saved.tactical : '';
+  aiDoctrine = (saved && typeof saved.doctrine==='string') ? saved.doctrine : '';
   aiSummarySeat = seat;
   aiSummaryRound = saved ? saved.round : 0;
   aiSummaryTurn = saved ? saved.turn : -1;
@@ -208,12 +321,30 @@ async function updateAiSummary(g, seat){
   if(!result || !result.ok) return;
   const text = (result.text || '').trim();
   if(text){
-    const saved = aiSummaryByBot[requestKey] || { text:'', seat, round:g.roundNum||0, turn:g.turn };
-    saved.text = text.slice(0, 500);
+    const saved = aiSummaryByBot[requestKey] || { text:'', tactical:'', doctrine:'', seat, round:g.roundNum||0, turn:g.turn };
+    // CORE-140:优先按两层 JSON 解析;解析不出来就走**改动前的整体覆写回退路径**。
+    // 这条回退是本次改动"最坏情况 = 今天的行为"这个保证的落脚点:模型返回任何不是
+    // {tactical,doctrineUpdate} 形状的东西(纯文本/无关JSON/空),行为与改动前逐字相同,
+    // 包括 slice(0,500) 这个截断长度。测试有专门的断言钉住这条不变量,不是假设它成立。
+    const layers = (typeof parseAiSummaryLayers==='function') ? parseAiSummaryLayers(text) : null;
+    if(layers){
+      saved.tactical = String(layers.tactical||'').slice(0, AI_TACTICAL_MAX);
+      saved.doctrine = mergeAiDoctrine(saved.doctrine || '', layers.doctrineUpdate);
+      saved.text = composeAiSummary(saved.tactical, saved.doctrine);
+    } else {
+      // 回退路径:与改动前逐字一致(整体覆写 + 500 字截断)。两层字段同步跟进——
+      // tactical 承接这段整体文本、doctrine 保持原样(这次没有可信的认知更新可合并),
+      // 这样即使后续某次又解析成功,两层的状态也是自洽的、不会出现 aiSummary 与
+      // tactical/doctrine 对不上的中间态。
+      saved.text = text.slice(0, AI_SUMMARY_FALLBACK_MAX);
+      saved.tactical = saved.text;
+    }
     saved.seat = seat;
     aiSummaryByBot[requestKey] = saved;
     if(aiSummaryKey===requestKey){
       aiSummary = saved.text;
+      aiTactical = saved.tactical || '';
+      aiDoctrine = saved.doctrine || '';
       aiSummarySeat = seat;
     }
   }
