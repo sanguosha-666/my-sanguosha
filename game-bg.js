@@ -212,6 +212,56 @@ if(typeof window !== 'undefined'){
 }
 
 // ============ 角色死亡特效 ============
+// 每名角色死亡时，复制其座位上的武将立绘：先短暂停留并显出裂纹，再切成九块向外碎裂。
+// 这是纯 DOM 视觉层；找不到座位/立绘（例如旧存档首次渲染）时静默跳过，不影响游戏。
+var DEATH_SHARDS = [
+  {clip:'polygon(0 0,34% 0,29% 36%,0 31%)',       x:-20,y:-22,r:-13},
+  {clip:'polygon(34% 0,68% 0,61% 34%,29% 36%)',   x:  1,y:-30,r:  6},
+  {clip:'polygon(68% 0,100% 0,100% 34%,61% 34%)', x: 22,y:-20,r: 15},
+  {clip:'polygon(0 31%,29% 36%,35% 69%,0 64%)',   x:-28,y: -2,r:-18},
+  {clip:'polygon(29% 36%,61% 34%,66% 67%,35% 69%)',x: 2,y:  3,r: -5},
+  {clip:'polygon(61% 34%,100% 34%,100% 67%,66% 67%)',x:29,y:1,r:19},
+  {clip:'polygon(0 64%,35% 69%,31% 100%,0 100%)', x:-23,y: 27,r:-15},
+  {clip:'polygon(35% 69%,66% 67%,70% 100%,31% 100%)',x:0,y:34,r:8},
+  {clip:'polygon(66% 67%,100% 67%,100% 100%,70% 100%)',x:24,y:25,r:17}
+];
+
+function triggerDeathPortraitFx(seat){
+  if(typeof document === 'undefined' || !document.body) return false;
+  var card = document.querySelector('.seat[data-seat="'+seat+'"]');
+  var art = card && card.querySelector('.seat-art');
+  if(!card || !art || !art.querySelector('.avatar')) return false;
+  var rect = card.getBoundingClientRect();
+  if(!rect || rect.width < 2 || rect.height < 2) return false;
+
+  var fx = document.createElement('div');
+  fx.className = 'death-shatter-fx';
+  fx.setAttribute('aria-hidden','true');
+  fx.style.left = rect.left+'px'; fx.style.top = rect.top+'px';
+  fx.style.width = rect.width+'px'; fx.style.height = rect.height+'px';
+
+  var flash = art.cloneNode(true);
+  flash.className += ' death-shatter-base';
+  fx.appendChild(flash);
+  DEATH_SHARDS.forEach(function(spec, index){
+    var shard = document.createElement('div');
+    shard.className = 'death-shatter-shard';
+    shard.style.clipPath = spec.clip;
+    shard.style.setProperty('--shard-x',spec.x+'px');
+    shard.style.setProperty('--shard-y',spec.y+'px');
+    shard.style.setProperty('--shard-r',spec.r+'deg');
+    shard.style.setProperty('--shard-delay',(index%3)*22+'ms');
+    shard.appendChild(art.cloneNode(true));
+    fx.appendChild(shard);
+  });
+  var cracks = document.createElement('div');
+  cracks.className = 'death-shatter-cracks';
+  fx.appendChild(cracks);
+  document.body.appendChild(fx);
+  setTimeout(function(){ if(fx.parentNode) fx.parentNode.removeChild(fx); }, 1150);
+  return true;
+}
+
 // 他人死亡不再播放任何特效(原全屏血雾已删除);
 // 自己死亡时在网页背景全屏播放随机一段死亡动画视频,播放完毕自动恢复原背景。
 // 新增动画文件:命名 death-N.mp4 放入 assets/video/,并在本数组追加文件名。

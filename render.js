@@ -1327,7 +1327,7 @@ function singleTargetCanTarget(g, selSpec, sourcePlayer, selCard, targetSeat){
 
 // 死亡特效触发基线：记录上一帧各座位 alive 状态。纯前端视觉,不读游戏逻辑。
 var lastAliveSnapshot = null;
-// 检测角色死亡(alive true→false),触发 game-bg.js 的血滴/血雾特效。
+// 检测角色死亡(alive true→false),触发纯前端死亡视觉效果。
 // 仅 g.started 时对比;大厅/未开局(机器人增删)重置基线,不误触发。
 function checkDeaths(g){
   if(!g || !g.started || !Array.isArray(g.players)){
@@ -1340,6 +1340,11 @@ function checkDeaths(g){
   if(!prev || prev.length !== alive.length) return; // 首次/人数变化不触发
   for(let i=0;i<alive.length;i++){
     if(prev[i] === true && alive[i] === false){
+      // render 尚未清空旧座位 DOM，此时可以从存活态卡片取得完整武将立绘并制作碎裂覆层。
+      // 失败只跳过动画，绝不能阻断死亡状态的正常渲染。
+      if(typeof triggerDeathPortraitFx==='function'){
+        try{ triggerDeathPortraitFx(i); }catch(err){ console.warn('死亡碎裂动画失败:', err); }
+      }
       if(typeof triggerDeathFx==='function'){
         triggerDeathFx(i === mySeat ? 'self' : 'other');
       }

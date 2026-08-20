@@ -313,6 +313,29 @@
   }
   .seat.active{border-color:var(--jade);box-shadow:0 0 0 2px var(--jade) inset;} /* 当前行动者:绿色高亮 */
   .seat.dead{opacity:.45;filter:grayscale(.6);}
+  /* CORE-111:死亡瞬间将武将立绘复制到 fixed 覆层，裂纹闪现后九块碎片向外散落。
+     pointer-events:none 保证动画不会挡住任何游戏操作；reduced-motion 下仅短暂淡出。 */
+  .death-shatter-fx{position:fixed;z-index:1200;overflow:visible;pointer-events:none;border-radius:10px;
+    animation:deathShatterGlow 1.05s ease-out both;}
+  .death-shatter-fx .seat-art{position:absolute;inset:0;border-radius:10px;overflow:hidden;}
+  .death-shatter-fx .seat-art .avatar{width:100%;height:100%;object-fit:cover;object-position:center top;display:block;}
+  .death-shatter-fx .avatar-placeholder{display:none!important;}
+  .death-shatter-base{animation:deathShatterBase .48s ease-out both;}
+  .death-shatter-shard{position:absolute;inset:0;overflow:hidden;border-radius:10px;
+    animation:deathShardFly .78s cubic-bezier(.2,.7,.25,1) var(--shard-delay) both;}
+  .death-shatter-cracks{position:absolute;inset:-1px;border-radius:10px;
+    background:
+      linear-gradient(31deg,transparent 48.8%,rgba(255,255,255,.95) 49.5%,rgba(170,220,255,.8) 50.2%,transparent 51%) 47% 43%/88% 2px no-repeat,
+      linear-gradient(112deg,transparent 48.8%,rgba(255,255,255,.9) 49.5%,rgba(150,205,245,.75) 50.2%,transparent 51%) 51% 48%/2px 92% no-repeat,
+      linear-gradient(154deg,transparent 48.8%,rgba(255,255,255,.85) 49.5%,rgba(145,200,240,.7) 50.2%,transparent 51%) 50% 49%/92% 2px no-repeat;
+    filter:drop-shadow(0 0 3px #d9f3ff);animation:deathCracks .54s ease-out both;}
+  @keyframes deathShatterBase{0%,27%{opacity:1;filter:brightness(1)}55%{filter:brightness(1.8)}100%{opacity:0;filter:brightness(.8)}}
+  @keyframes deathCracks{0%,14%{opacity:0;transform:scale(.25)}35%,64%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.05)}}
+  @keyframes deathShardFly{0%,38%{opacity:0;transform:translate(0,0) rotate(0) scale(1)}39%{opacity:1}100%{opacity:0;transform:translate(var(--shard-x),var(--shard-y)) rotate(var(--shard-r)) scale(.94)}}
+  @keyframes deathShatterGlow{0%,34%{filter:none}48%{filter:drop-shadow(0 0 12px rgba(210,240,255,.9))}100%{filter:none}}
+  @media (prefers-reduced-motion:reduce){
+    .death-shatter-shard,.death-shatter-cracks{display:none}.death-shatter-fx{animation:deathShatterBase .35s ease-out both}
+  }
   /* 曹植【酒诗】等翻面:faceup===false 时 render.js 加 .flipped */
   .seat.flipped{filter:brightness(.72) saturate(.75);box-shadow:0 0 0 2px #6b5b4d inset;}
   .seat.flipped::after{content:'翻面';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:5;font-size:12px;font-weight:700;color:#f2efe6;background:rgba(0,0,0,.55);padding:2px 8px;border-radius:4px;pointer-events:none;}
