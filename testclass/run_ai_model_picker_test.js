@@ -331,29 +331,55 @@ const testCode = String.raw`
     }
   });
 
-  // 10. 选中:点击列表项 → aiApiModel 写入 + sessionStorage 持久化 + 该项高亮 (多选轮换模式 groq)
-  await check('10. 点击选项写入 aiApiModel 持久化准备 + 高亮切换', async function(){
+  // 10. 勾选只改画面草稿,不写实际调用池(点确定才提交)
+  await check('10. 点击选项不写入调用池,点确定才提交', async function(){
     delete modelListCache.groq;
     window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'groq/compound' }, { id: 'llama-3.3-70b-versatile' } ] }); };
+      { id: 'groq/compound' }, { id: 'openai/gpt-oss-20b' } ] }); };
     aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = ''; aiApiModels = ['groq/compound'];
     showAiKeyModal();
     await waitFor(function(){ return statusNoteText().indexOf('共 2 个模型') >= 0; }, '模型列表渲染');
-    // groq 是多选轮换模式,点击是 toggle aiApiModels,验证 toggle 逻辑与高亮
     var btns = listButtons();
     var target = null;
-    btns.forEach(function(b){ if(b.textContent.indexOf('llama-3.3-70b-versatile') >= 0) target = b; });
-    if(!target) throw new Error('应找到 llama-3.3-70b-versatile 按钮');
-    var beforeHas = aiApiModels.indexOf('llama-3.3-70b-versatile') >= 0;
+    btns.forEach(function(b){ if(b.textContent.indexOf('openai/gpt-oss-20b') >= 0) target = b; });
+    if(!target) throw new Error('应找到 openai/gpt-oss-20b 按钮');
     target.click();
-    // 点击后应 toggle 进选集
-    if(aiApiModels.indexOf('llama-3.3-70b-versatile') < 0) throw new Error('点击后 aiApiModels 应包含 llama-3.3-70b-versatile,实际 ' + JSON.stringify(aiApiModels));
-    // 再次点击应取消
-    var freshBtns = listButtons();
-    var target2 = null;
-    freshBtns.forEach(function(b){ if(b.textContent.indexOf('llama-3.3-70b-versatile') >= 0) target2 = b; });
-    target2.click();
-    if(aiApiModels.indexOf('llama-3.3-70b-versatile') >= 0) throw new Error('二次点击应取消选中,实际 ' + JSON.stringify(aiApiModels));
+    if(aiApiModels.indexOf('openai/gpt-oss-20b') >= 0) throw new Error('未点确定前调用池不应含 openai/gpt-oss-20b,实际 ' + JSON.stringify(aiApiModels));
+    if(aiApiModels.indexOf('groq/compound') < 0) throw new Error('未点确定前旧池应保留 groq/compound');
+    var saveBtn = document.getElementById('aiKeySaveBtn');
+    if(!saveBtn) throw new Error('应有确定按钮');
+    saveBtn.click();
+    if(aiApiModels.indexOf('openai/gpt-oss-20b') < 0) throw new Error('点确定后调用池应含 openai/gpt-oss-20b,实际 ' + JSON.stringify(aiApiModels));
+    if(aiApiModels.indexOf('groq/compound') < 0) throw new Error('点确定后应保留画面上仍勾着的 groq/compound,实际 ' + JSON.stringify(aiApiModels));
+  });
+
+  await check('10b. 确定时剔除画面上没有的死模型', async function(){
+    delete modelListCache.groq;
+    window.__fetchImpl = function(){ return jsonRes({ data: [
+      { id: 'groq/compound' }, { id: 'openai/gpt-oss-20b' } ] }); };
+    aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = '';
+    aiApiModels = ['groq/compound','dead-model-gone'];
+    showAiKeyModal();
+    await waitFor(function(){ return statusNoteText().indexOf('共 2 个模型') >= 0; }, '模型列表渲染');
+    var saveBtn = document.getElementById('aiKeySaveBtn');
+    saveBtn.click();
+    if(aiApiModels.indexOf('dead-model-gone') >= 0) throw new Error('确定后应剔除不在画面上的 dead-model-gone,实际 ' + JSON.stringify(aiApiModels));
+    if(aiApiModels.indexOf('groq/compound') < 0) throw new Error('确定后应保留画面勾选的 groq/compound,实际 ' + JSON.stringify(aiApiModels));
+  });
+
+  await check('10c. 跳过丢弃草稿,调用池不变', async function(){
+    delete modelListCache.groq;
+    window.__fetchImpl = function(){ return jsonRes({ data: [
+      { id: 'groq/compound' }, { id: 'openai/gpt-oss-20b' } ] }); };
+    aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = ''; aiApiModels = ['groq/compound'];
+    showAiKeyModal();
+    await waitFor(function(){ return statusNoteText().indexOf('共 2 个模型') >= 0; }, '模型列表渲染');
+    var target = null;
+    listButtons().forEach(function(b){ if(b.textContent.indexOf('openai/gpt-oss-20b') >= 0) target = b; });
+    target.click();
+    var skipBtn = document.getElementById('aiKeySkipBtn');
+    skipBtn.click();
+    if(aiApiModels.indexOf('openai/gpt-oss-20b') >= 0) throw new Error('跳过后草稿不应写入调用池,实际 ' + JSON.stringify(aiApiModels));
   });
 
   // 11. 回退:fetch 失败 → 静态表 AI_MODEL_OPTIONS[groq] + 失败提示

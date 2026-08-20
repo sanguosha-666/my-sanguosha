@@ -60,9 +60,12 @@ const AI_MODELS_STORAGE_KEY = 'sgsAiModels';
 // 20B 以上体积的模型——实测 groq 生产表 20B+ 共 5 个:gpt-oss-120b/llama-3.3-70b/
 // gpt-oss-20b/gpt-oss-safeguard-20b/qwen3.6-27b,其中 gpt-oss-20b 与 safeguard-20b
 // 是本次新加的,groq/compound 是路由系统保留作默认)。
-const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'];
+// 2026-08-20 核查:llama-3.3-70b-versatile/llama-3.1-8b-instant 已于 2026-08-16 下线(Groq
+// 官方 deprecations 页),移除;新增 groq/compound-mini(官方 models 页在产)。
+const DEFAULT_GROQ_MODELS = ['groq/compound','groq/compound-mini','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'];
 // 默认勾选(cerebras 直连:3 个模型全部勾选,round-robin + 429 冷却自动换下一个——
 // cerebras 免费层 RPM 5/分钟极易 429,多模型轮换分散请求,用户指定 2026-08-11 "像 groq 那样")。
+// 2026-08-20 实测 /public/v1/models:zai-glm-4.7 已下架,公开列表仅剩 2 个模型。
 const DEFAULT_CEREBRAS_MODELS = ['gpt-oss-120b','gemma-4-31b'];
 // 默认勾选(tri 三密钥直连:合并池,条目 id 带 `provider:模型ID` 前缀)。
 // 用户指定(2026-08-12):groq 部分参考 groq 单独调用的默认勾选 6 个、cerebras 全部 3 个、
@@ -72,7 +75,7 @@ const DEFAULT_TRI_MODELS = [
   'cerebras:gpt-oss-120b',
   'cerebras:gemma-4-31b',
   'groq:groq/compound',
-  'groq:llama-3.3-70b-versatile',
+  'groq:groq/compound-mini',
   'groq:openai/gpt-oss-120b',
   'groq:qwen/qwen3.6-27b',
   'groq:openai/gpt-oss-20b',
@@ -372,9 +375,8 @@ const AI_MODEL_CUSTOM_VALUE = '__custom__';
 const AI_MODEL_OPTIONS = {
   groq: [
     { id: 'groq/compound', label: 'Groq Compound(默认)' },
-    { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B(更强)' },
+    { id: 'groq/compound-mini', label: 'Groq Compound Mini(更快更省)' },
     { id: 'qwen/qwen3.6-27b', label: 'Qwen 3.6 27B(开源)' },
-    { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B(更快更省)' },
     { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B(更强)' },
     { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B(更快)' },
     { id: 'openai/gpt-oss-safeguard-20b', label: 'GPT-OSS Safeguard 20B' },
@@ -393,9 +395,8 @@ const AI_MODEL_OPTIONS = {
     { id: 'command-r-08-2024', label: 'Command R' },
   ],
   cerebras: [
-    // Cerebras 直连。模型名实测自 /public/v1/models(2026-08-11)。
+    // Cerebras 直连。模型名实测自 /public/v1/models(2026-08-20 复核:仅 2 个,zai-glm-4.7 已下架)。
     { id: 'gpt-oss-120b', label: 'GPT-OSS 120B(默认)' },
-    { id: 'zai-glm-4.7', label: 'GLM-4.7' },
     { id: 'gemma-4-31b', label: 'Gemma 4 31B' },
   ],
   tri: [
@@ -405,7 +406,7 @@ const AI_MODEL_OPTIONS = {
     { id: 'cerebras:gpt-oss-120b', label: 'Cerebras: GPT-OSS 120B(默认)' },
     { id: 'cerebras:gemma-4-31b', label: 'Cerebras: Gemma 4 31B' },
     { id: 'groq:groq/compound', label: 'Groq: Compound(路由)' },
-    { id: 'groq:llama-3.3-70b-versatile', label: 'Groq: Llama 3.3 70B' },
+    { id: 'groq:groq/compound-mini', label: 'Groq: Compound Mini' },
     { id: 'groq:openai/gpt-oss-120b', label: 'Groq: GPT-OSS 120B' },
     { id: 'groq:qwen/qwen3.6-27b', label: 'Groq: Qwen 3.6 27B' },
     { id: 'cohere:command-a-plus-05-2026', label: 'Cohere: Command A Plus' },
@@ -911,6 +912,10 @@ function showAiKeyModal(onDone){
 
   wrap.appendChild(btnRow);
 
+  let pendingApiModel = typeof aiApiModel==='string' ? aiApiModel : '';
+  let pendingApiModels = Array.isArray(aiApiModels) ? aiApiModels.slice() : [];
+  let liveModelIds = null;
+
   function updateSaveBtnState(){
     // 已经填了字符、但还没解析出 provider(既没被自动识别、也没手动选择)时禁用
     // "确定"——防止"有密钥但不知道发给谁用"这种半成品状态被当作已配置好而结束弹窗。
@@ -946,10 +951,11 @@ function showAiKeyModal(onDone){
       statusNote.className = 'ai-key-warn';
       statusNote.style.cssText = 'margin-top:4px;';
       modelWrap.appendChild(statusNote);
-      const isRotatingCustom = Array.isArray(aiApiModels) && aiApiModels.length>0;
+      const isRotatingCustom = Array.isArray(pendingApiModels) && pendingApiModels.length>0;
       function applyCustomList(list, fromFallback){
+        liveModelIds = (list||[]).map(function(m){ return m.id; });
         statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型');
-        const isCustom = !!aiApiModel && !list.some(function(m){ return m.id === aiApiModel; });
+        const isCustom = !!pendingApiModel && !list.some(function(m){ return m.id === pendingApiModel; });
         const customInput = document.createElement('input');
         customInput.type = 'text';
         customInput.id = 'aiModelCustomInput';
@@ -957,36 +963,34 @@ function showAiKeyModal(onDone){
         customInput.autocomplete = 'off';
         customInput.style.marginLeft = '8px';
         customInput.style.display = isCustom ? 'inline-block' : 'none';
-        customInput.value = isCustom ? aiApiModel : '';
+        customInput.value = isCustom ? pendingApiModel : '';
         function commitCustomModel(){
-          aiApiModel = customInput.value.trim();
-          persistAiState();
+          pendingApiModel = customInput.value.trim();
         }
         customInput.addEventListener('input', commitCustomModel);
         customInput.addEventListener('blur', commitCustomModel);
         renderModelListInto(modelWrap, list, {
-          selectedId: aiApiModel,
-          selectedIds: isRotatingCustom ? aiApiModels : undefined,
+          selectedId: pendingApiModel,
+          selectedIds: isRotatingCustom ? pendingApiModels : undefined,
           multi: isRotatingCustom,
           defaultValueId: null,
           onPick: function(id, checked){
             if(id === AI_MODEL_CUSTOM_VALUE){
               customInput.style.display = 'inline-block';
-              aiApiModel = customInput.value.trim();
+              pendingApiModel = customInput.value.trim();
             } else if(isRotatingCustom){
-              aiApiModel = '';
-              const arr = Array.isArray(aiApiModels) ? aiApiModels.slice() : [];
+              pendingApiModel = '';
+              const arr = Array.isArray(pendingApiModels) ? pendingApiModels.slice() : [];
               const i = arr.indexOf(id);
               if(checked){ if(i<0) arr.push(id); } else { if(i>=0) arr.splice(i,1); }
-              aiApiModels = arr;
+              pendingApiModels = arr;
               customInput.style.display = 'none';
               customInput.value = '';
             } else {
               customInput.style.display = 'none';
               customInput.value = '';
-              aiApiModel = id;
+              pendingApiModel = id;
             }
-            persistAiState();
           },
         });
         modelWrap.appendChild(customInput);
@@ -1018,14 +1022,14 @@ function showAiKeyModal(onDone){
     // 【多模型轮换】groq/cerebras/tri 密钥下默认勾选对应 DEFAULT_* 模型
     // (用户从未配置过多选时自动填入,只在内存生效、不写 sessionStorage——默认值随
     // DEFAULT_GROQ_MODELS/DEFAULT_CEREBRAS_MODELS/DEFAULT_TRI_MODELS 改动自动跟进;
-    // 用户主动勾选/取消勾选时由 onPick → persistAiState 持久化真实选择)。
-    // 用户全部取消勾选后 aiApiModels 为空,下次进设置会恢复默认勾选——想彻底不用轮换
+    // 用户主动勾选/取消勾选时只改 pending,点确定才写入调用池)。
+    // 用户全部取消勾选后 pending 为空,下次进设置会恢复默认勾选——想彻底不用轮换
     // 可用自定义入口写手动单选(aiApiModel,优先级高于多选,见 resolveAiModel)。
     const defaultModels = (provider==='groq') ? DEFAULT_GROQ_MODELS
       : (provider==='cerebras') ? DEFAULT_CEREBRAS_MODELS
       : (provider==='tri') ? DEFAULT_TRI_MODELS : null;
-    if(defaultModels && (!Array.isArray(aiApiModels) || aiApiModels.length===0)){
-      aiApiModels = defaultModels.slice();
+    if(defaultModels && (!Array.isArray(pendingApiModels) || pendingApiModels.length===0)){
+      pendingApiModels = defaultModels.slice();
     }
 
     const label = document.createElement('label');
@@ -1041,10 +1045,10 @@ function showAiKeyModal(onDone){
 
     const isRotating = (provider==='groq' || provider==='cerebras' || provider==='tri');
     function applyList(list, fromFallback){
+      liveModelIds = (list||[]).map(function(m){ return m.id; });
       statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型')
         + (isRotating ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入;自定义输入会退出轮换(点勾选恢复)' : '');
-      // 自定义遗留(aiApiModel 非空且不在列表)→ 显示文本框并预填
-      const isCustom = !!aiApiModel && !list.some(function(m){ return m.id === aiApiModel; });
+      const isCustom = !!pendingApiModel && !list.some(function(m){ return m.id === pendingApiModel; });
       const customInput = document.createElement('input');
       customInput.type = 'text';
       customInput.id = 'aiModelCustomInput';
@@ -1052,41 +1056,34 @@ function showAiKeyModal(onDone){
       customInput.autocomplete = 'off';
       customInput.style.marginLeft = '8px';
       customInput.style.display = isCustom ? 'inline-block' : 'none';
-      customInput.value = isCustom ? aiApiModel : '';
+      customInput.value = isCustom ? pendingApiModel : '';
       function commitCustomModel(){
-        aiApiModel = customInput.value.trim();
-        persistAiState();
+        pendingApiModel = customInput.value.trim();
       }
       customInput.addEventListener('input', commitCustomModel);
       customInput.addEventListener('blur', commitCustomModel);
-      // 先渲染搜索框+列表;自定义文本框跟在列表末尾的"自定义"按钮下方,超时提示垫底
       renderModelListInto(modelWrap, list, {
-        selectedId: aiApiModel,
-        selectedIds: isRotating ? aiApiModels : undefined,
+        selectedId: pendingApiModel,
+        selectedIds: isRotating ? pendingApiModels : undefined,
         multi: isRotating,
         defaultValueId: AI_DEFAULT_MODEL[provider] || null,
         onPick: function(id, checked){
           if(id === AI_MODEL_CUSTOM_VALUE){
             customInput.style.display = 'inline-block';
-            aiApiModel = customInput.value.trim(); // 可能是空字符串,commitCustomModel 会在用户真正输入后覆盖
+            pendingApiModel = customInput.value.trim();
           } else if(isRotating){
-            // 多选 toggle:维护 aiApiModels(轮换池),并同时清空 aiApiModel——用户点勾选
-            // 的意图就是回到轮换模式,否则自定义输入残留的 aiApiModel 会让 resolveAiModel
-            // 手动单选优先,轮换静默失效(checked=本次点击后的选中态,由 renderModelListInto
-            // 计算)。
-            aiApiModel = '';
-            const arr = Array.isArray(aiApiModels) ? aiApiModels.slice() : [];
+            pendingApiModel = '';
+            const arr = Array.isArray(pendingApiModels) ? pendingApiModels.slice() : [];
             const i = arr.indexOf(id);
             if(checked){ if(i<0) arr.push(id); } else { if(i>=0) arr.splice(i,1); }
-            aiApiModels = arr;
+            pendingApiModels = arr;
             customInput.style.display = 'none';
             customInput.value = '';
           } else {
             customInput.style.display = 'none';
             customInput.value = '';
-            aiApiModel = id;
+            pendingApiModel = id;
           }
-          persistAiState();
         },
       });
       modelWrap.appendChild(customInput);
@@ -1178,8 +1175,9 @@ function showAiKeyModal(onDone){
       // 把上一个 provider 的模型ID带进新 provider(两者的候选表/合法值域互不相通)。
       // aiApiModel 是手动单选、aiApiModels 是多选轮换池:切换 provider 时两个都要清。
       if(prevProvider!==aiProvider){
-        aiApiModel = '';
-        aiApiModels = [];
+        pendingApiModel = '';
+        pendingApiModels = [];
+        liveModelIds = null;
       }
     }
     renderModelPicker();
@@ -1234,11 +1232,28 @@ function showAiKeyModal(onDone){
   }
   skipBtn.onclick = doSkip;
 
+  function commitVisibleModels(){
+    // 列表未加载完:不覆盖调用池,避免空列表把已有配置清掉
+    if(!liveModelIds || !liveModelIds.length) return;
+    const customEl = document.getElementById('aiModelCustomInput');
+    const customShown = !!(customEl && customEl.style && customEl.style.display !== 'none');
+    const customVal = customShown ? String(customEl.value||'').trim() : '';
+    if(customVal){
+      aiApiModel = customVal;
+    } else {
+      aiApiModel = (pendingApiModel && pendingApiModel !== AI_MODEL_CUSTOM_VALUE) ? pendingApiModel : '';
+      aiApiModels = (Array.isArray(pendingApiModels) ? pendingApiModels : []).filter(function(id){
+        return liveModelIds.indexOf(id) >= 0;
+      });
+    }
+  }
+
   saveBtn.onclick = ()=>{
-    if(!aiApiKey){
-      // 没填任何内容就点"确定",效果上等同于跳过——同样要标记为已回应过,否则这个
-      // 会话内每次点"添加机器人"都会重新弹出这个空表单,达不到"以后不再询问"的效果。
+    if(!aiApiKey && !((aiBaseUrl||'').trim() && /^https?:\/\//.test((aiBaseUrl||'').trim()))){
       aiPromptDismissed = true;
+      persistAiState();
+    } else {
+      commitVisibleModels();
       persistAiState();
     }
     finish();
