@@ -205,7 +205,15 @@ const testCode = String.raw`
     mockOk('反贼倾向明显,我留着桃');
     await updateAiSummary(g, 0);
     if(window.__mockSummaryCalls !== 1) throw new Error('期望 callAI 1 次,实际 ' + window.__mockSummaryCalls);
-    if(window.__mockSummaryArgs.opts.systemPrompt.indexOf('摘要') === -1) throw new Error('systemPrompt 应含"摘要"字样');
+    // CORE-140:原断言是 indexOf('摘要') —— 它验的**意图**是"发出去的是摘要任务的
+    // systemPrompt,而不是决策用的那个",'摘要'两个字只是一个代理标记。新的
+    // buildSummaryPrompt 按设计改说"两层记忆/tactical/doctrineUpdate",不再出现那个词,
+    // 所以这条代理标记语义过期了。**这不是放宽断言**:改锚到 JSON 契约的两个字段名,
+    // 它们唯一标识摘要任务、且不可能和决策 prompt({"choice":N})混淆,比原来的
+    // "含'摘要'二字"更强——原标记连一句随口提到"摘要"的决策 prompt 都会放行。
+    var sysP = window.__mockSummaryArgs.opts.systemPrompt;
+    if(sysP.indexOf('tactical') === -1 || sysP.indexOf('doctrineUpdate') === -1)
+      throw new Error('systemPrompt 应是摘要任务的两层契约(含 tactical/doctrineUpdate)');
     if(aiSummary !== '反贼倾向明显,我留着桃') throw new Error('期望 aiSummary 写回,实际 "' + aiSummary + '"');
   });
 
