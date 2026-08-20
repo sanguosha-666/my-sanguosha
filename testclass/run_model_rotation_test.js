@@ -23,66 +23,69 @@ async function check(name, fn){
   catch(e){ console.log('  FAIL '+name+' - '+(e&&e.message||e)); fail++; }
 }
 (async function(){
-  // 0. 默认勾选列表(既有4条 + 全部20B+模型,用户确认)
-  await check('默认勾选: groq 6模型(既有4条+全部20B+)', function(){
+  // 0. 默认勾选列表(2026-08-20 核查:llama-3.3-70b-versatile 已下线移除,补 groq/compound-mini)
+  await check('默认勾选: groq 6模型(无已下线llama,含compound-mini)', function(){
     const d = vm.runInContext('DEFAULT_GROQ_MODELS', sandbox);
     if(!d || d.length!==6) throw new Error('应6个,实际 '+(d&&d.length));
-    ['groq/compound','llama-3.3-70b-versatile','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'].forEach(function(m){
+    if(d.indexOf('llama-3.3-70b-versatile')>=0) throw new Error('不应再含已下线的 llama-3.3-70b-versatile');
+    ['groq/compound','groq/compound-mini','openai/gpt-oss-120b','qwen/qwen3.6-27b','openai/gpt-oss-20b','openai/gpt-oss-safeguard-20b'].forEach(function(m){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
-  // 0b2. cerebras 默认勾选:3 个模型全部(round-robin 轮换,用户指定像 groq 那样)
-  await check('默认勾选: cerebras 3模型全部', function(){
+  // 0b2. cerebras 默认勾选:2 个模型全部(2026-08-20 实测 zai-glm-4.7 已下架)
+  await check('默认勾选: cerebras 2模型全部(无zai-glm-4.7)', function(){
     const d = vm.runInContext('DEFAULT_CEREBRAS_MODELS', sandbox);
-    if(!d || d.length!==3) throw new Error('应3个,实际 '+(d&&d.length));
-    ['zai-glm-4.7','gpt-oss-120b','gemma-4-31b'].forEach(function(m){
+    if(!d || d.length!==2) throw new Error('应2个,实际 '+(d&&d.length));
+    if(d.indexOf('zai-glm-4.7')>=0) throw new Error('不应再含已下架的 zai-glm-4.7');
+    ['gpt-oss-120b','gemma-4-31b'].forEach(function(m){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
   // 0c2. resolveAiModel: cerebras 走 round-robin(和 groq 同一套)
   await check('resolveAiModel: cerebras 多选轮换顺序(round-robin)', function(){
-    vm.runInContext('aiProvider="cerebras"; aiApiModel=""; aiApiModels=["zai-glm-4.7","gpt-oss-120b","gemma-4-31b"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
+    vm.runInContext('aiProvider="cerebras"; aiApiModel=""; aiApiModels=["gpt-oss-120b","gemma-4-31b"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
     const r1 = vm.runInContext('resolveAiModel', sandbox)('cerebras');
     const r2 = vm.runInContext('resolveAiModel', sandbox)('cerebras');
     const r3 = vm.runInContext('resolveAiModel', sandbox)('cerebras');
-    if(r1!=='zai-glm-4.7' || r2!=='gpt-oss-120b' || r3!=='gemma-4-31b')
+    if(r1!=='gpt-oss-120b' || r2!=='gemma-4-31b' || r3!=='gpt-oss-120b')
       throw new Error('cerebras轮换顺序错: '+r1+'/'+r2+'/'+r3);
   });
   // 0c3. resolveAiModel: cerebras 冷却跳过 → round-robin 指针到下一个
   await check('resolveAiModel: cerebras 冷却中模型跳过', function(){
-    vm.runInContext('aiProvider="cerebras"; aiApiModel=""; aiApiModels=["zai-glm-4.7","gpt-oss-120b","gemma-4-31b"]; _modelRotateIdx=0; _modelCooldowns={"zai-glm-4.7": Date.now()+99999};', sandbox);
+    vm.runInContext('aiProvider="cerebras"; aiApiModel=""; aiApiModels=["gpt-oss-120b","gemma-4-31b"]; _modelRotateIdx=0; _modelCooldowns={"gpt-oss-120b": Date.now()+99999};', sandbox);
     const r = vm.runInContext('resolveAiModel', sandbox)('cerebras');
-    if(r!=='gpt-oss-120b') throw new Error('冷却中的zai-glm-4.7应跳过选gpt-oss-120b,实际 '+r);
+    if(r!=='gemma-4-31b') throw new Error('冷却中的gpt-oss-120b应跳过选gemma-4-31b,实际 '+r);
   });
   // 0e. tri 默认勾选:合并池 9 个(groq参考单独6 + cerebras 2个(去掉zai-glm-4.7,2026-08-20用户指定) + cohere command-a-plus)
   await check('默认勾选: tri 合并池9个(无zai-glm-4.7)', function(){
     const d = vm.runInContext('DEFAULT_TRI_MODELS', sandbox);
     if(!d || d.length!==9) throw new Error('应9个,实际 '+(d&&d.length));
     if(d.indexOf('cerebras:zai-glm-4.7')>=0) throw new Error('不应再含 cerebras:zai-glm-4.7');
+    if(d.indexOf('groq:llama-3.3-70b-versatile')>=0) throw new Error('不应再含已下线的 groq:llama-3.3-70b-versatile');
     ['cerebras:gpt-oss-120b','cerebras:gemma-4-31b',
-     'groq:groq/compound','groq:llama-3.3-70b-versatile','groq:openai/gpt-oss-120b','groq:qwen/qwen3.6-27b','groq:openai/gpt-oss-20b','groq:openai/gpt-oss-safeguard-20b',
+     'groq:groq/compound','groq:groq/compound-mini','groq:openai/gpt-oss-120b','groq:qwen/qwen3.6-27b','groq:openai/gpt-oss-20b','groq:openai/gpt-oss-safeguard-20b',
      'cohere:command-a-plus-05-2026'].forEach(function(m){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);
     });
   });
   // 0e2. resolveAiModel: tri 走 provider 优先级(cerebras>groq>cohere),每次从头选最高
   await check('resolveAiModel: tri 优先cerebras再groq再cohere', function(){
-    vm.runInContext('aiProvider="tri"; aiApiModel=""; aiApiModels=["cohere:command-a-plus-05-2026","groq:llama-3.3-70b-versatile","cerebras:zai-glm-4.7"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
+    vm.runInContext('aiProvider="tri"; aiApiModel=""; aiApiModels=["cohere:command-a-plus-05-2026","groq:openai/gpt-oss-120b","cerebras:gpt-oss-120b"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
     const r1 = vm.runInContext('resolveAiModel', sandbox)('tri');
     const r2 = vm.runInContext('resolveAiModel', sandbox)('tri');
-    if(r1!=='cerebras:zai-glm-4.7' || r2!=='cerebras:zai-glm-4.7')
+    if(r1!=='cerebras:gpt-oss-120b' || r2!=='cerebras:gpt-oss-120b')
       throw new Error('tri无冷却应恒选cerebras,实际 '+r1+'/'+r2);
   });
   // 0e3. tri 冷却降级:cerebras 冷却 → groq;cerebras+groq 冷却 → cohere;全冷却 → 空串
   await check('resolveAiModel: tri 冷却自动降级到下一优先级', function(){
-    vm.runInContext('aiProvider="tri"; aiApiModel=""; aiApiModels=["cohere:command-a-plus-05-2026","groq:llama-3.3-70b-versatile","cerebras:zai-glm-4.7"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
-    vm.runInContext('_modelCooldowns={"cerebras:zai-glm-4.7": Date.now()+99999};', sandbox);
+    vm.runInContext('aiProvider="tri"; aiApiModel=""; aiApiModels=["cohere:command-a-plus-05-2026","groq:openai/gpt-oss-120b","cerebras:gpt-oss-120b"]; _modelRotateIdx=0; _modelCooldowns={};', sandbox);
+    vm.runInContext('_modelCooldowns={"cerebras:gpt-oss-120b": Date.now()+99999};', sandbox);
     const r1 = vm.runInContext('resolveAiModel', sandbox)('tri');
-    if(r1!=='groq:llama-3.3-70b-versatile') throw new Error('cerebras冷却应降级groq,实际 '+r1);
-    vm.runInContext('_modelCooldowns={"cerebras:zai-glm-4.7": Date.now()+99999,"groq:llama-3.3-70b-versatile": Date.now()+99999};', sandbox);
+    if(r1!=='groq:openai/gpt-oss-120b') throw new Error('cerebras冷却应降级groq,实际 '+r1);
+    vm.runInContext('_modelCooldowns={"cerebras:gpt-oss-120b": Date.now()+99999,"groq:openai/gpt-oss-120b": Date.now()+99999};', sandbox);
     const r2 = vm.runInContext('resolveAiModel', sandbox)('tri');
     if(r2!=='cohere:command-a-plus-05-2026') throw new Error('cerebras+groq冷却应降级cohere,实际 '+r2);
-    vm.runInContext('_modelCooldowns={"cerebras:zai-glm-4.7": Date.now()+99999,"groq:llama-3.3-70b-versatile": Date.now()+99999,"cohere:command-a-plus-05-2026": Date.now()+99999};', sandbox);
+    vm.runInContext('_modelCooldowns={"cerebras:gpt-oss-120b": Date.now()+99999,"groq:openai/gpt-oss-120b": Date.now()+99999,"cohere:command-a-plus-05-2026": Date.now()+99999};', sandbox);
     const r3 = vm.runInContext('resolveAiModel', sandbox)('tri');
     if(r3!=='') throw new Error('全冷却应返回空串哨兵,实际 '+JSON.stringify(r3));
   });
@@ -94,9 +97,9 @@ async function check(name, fn){
   });
   // 2. resolveAiModel: 手动单选优先(aiApiModel 非空不轮换)
   await check('resolveAiModel: 手动单选优先', function(){
-    vm.runInContext('aiProvider="groq"; aiApiModel="llama-3.3-70b-versatile"; aiApiModels=["groq/compound","openai/gpt-oss-120b"];', sandbox);
+    vm.runInContext('aiProvider="groq"; aiApiModel="openai/gpt-oss-20b"; aiApiModels=["groq/compound","openai/gpt-oss-120b"];', sandbox);
     const r = vm.runInContext('resolveAiModel', sandbox)('groq');
-    if(r!=='llama-3.3-70b-versatile') throw new Error('应手动单选,实际 '+r);
+    if(r!=='openai/gpt-oss-20b') throw new Error('应手动单选,实际 '+r);
   });
   // 3. resolveAiModel: 多选轮换顺序 round-robin
   await check('resolveAiModel: 多选轮换顺序', function(){
