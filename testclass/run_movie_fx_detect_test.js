@@ -167,7 +167,7 @@ check('内奸胜 → gameOver 全员输,左慈主公输 zuociLose=true', ()=>{
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'nei');
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'lose',zhong:'lose',zuociLose:true}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'lose',zhong:'lose',nei:'win',zuociLose:true}}));
 });
 
 check('主公与忠臣胜 → 反贼输,左慈反贼输 zuociLose=true', ()=>{
@@ -177,7 +177,7 @@ check('主公与忠臣胜 → 反贼输,左慈反贼输 zuociLose=true', ()=>{
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'lord');
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'win',zhong:'win',zuociLose:true}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'win',zhong:'win',nei:'lose',zuociLose:true}}));
 });
 
 check('反贼胜 → 反贼 win,左慈反贼赢 zuociLose=false', ()=>{
@@ -187,7 +187,7 @@ check('反贼胜 → 反贼 win,左慈反贼赢 zuociLose=false', ()=>{
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'fan');
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'win',lord:'lose',zhong:'lose',zuociLose:false}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false}}));
 });
 
 check('无胜者(none) → 全员输,左慈输 zuociLose=true', ()=>{
@@ -197,7 +197,7 @@ check('无胜者(none) → 全员输,左慈输 zuociLose=true', ()=>{
   const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'none');
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'lose',zhong:'lose',zuociLose:true}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'lose',zhong:'lose',nei:'lose',zuociLose:true}}));
 });
 
 console.log('\n== 防御层：normalize ==\n');
@@ -335,9 +335,11 @@ check('gameOver：左慈玩家且左慈输→zuociLose(最优先,覆盖阵营动
   assert.strictEqual(S(fire({seq:3,kind:'gameOver',seat:null,result:res2}, 0, [{alive:true,role:'fan',general:'zuoci'}])), S(['fanWin']));
 });
 
-check('gameOver：内奸无专属动画不播', function(){
-  const res={fan:'lose',lord:'lose',zhong:'lose',zuociLose:false};
-  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:res}, 0, [{alive:true,role:'nei'}])), S([]), '内奸不应触发');
+check('gameOver：内奸胜→neiWin / 内奸输不播', function(){
+  const win={fan:'lose',lord:'lose',zhong:'lose',nei:'win',zuociLose:false};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:win}, 0, [{alive:true,role:'nei'}])), S(['neiWin']));
+  const lose={fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false};
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose}, 0, [{alive:true,role:'nei'}])), S([]), '内奸输不应触发');
 });
 
 check('seq 未变不重复触发', function(){

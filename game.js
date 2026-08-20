@@ -3915,10 +3915,11 @@ function checkWin(g){
     const fanRes  = winSide==='fan'  ? 'win' : 'lose';
     const lordRes = winSide==='lord' ? 'win' : 'lose';
     const zhongRes= winSide==='lord' ? 'win' : 'lose';
-    const roleResOf = (role)=> role==='fan' ? fanRes : role==='zhu' ? lordRes : role==='zhong' ? zhongRes : (winSide==='nei' ? 'win' : 'lose');
+    const neiRes  = winSide==='nei'  ? 'win' : 'lose';
+    const roleResOf = (role)=> role==='fan' ? fanRes : role==='zhu' ? lordRes : role==='zhong' ? zhongRes : role==='nei' ? neiRes : (winSide==='nei' ? 'win' : 'lose');
     let zuociLose = false;
     g.players.forEach(pp=>{ if(pp && pp.general==='zuoci' && roleResOf(pp.role)==='lose') zuociLose=true; });
-    markMovieFx(g, 'gameOver', null, { fan:fanRes, lord:lordRes, zhong:zhongRes, zuociLose });
+    markMovieFx(g, 'gameOver', null, { fan:fanRes, lord:lordRes, zhong:zhongRes, nei:neiRes, zuociLose });
     return true;
   }
   if(aliveCount(g)<=1){

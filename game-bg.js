@@ -319,7 +319,8 @@ var MOVIE_VIDEOS = {
   fanLose:    ['assets/video/fanze-lost.mp4'], // 结算反贼输 → 反贼玩家
   fanWin:     ['assets/video/fanzei-win.mp4'], // 结算反贼胜 → 反贼玩家
   lordLose:   ['assets/video/zhuzhong-lost.mp4'], // 结算主公输 → 主公玩家
-  zhongLose:  ['assets/video/han.mp4']      // 结算忠臣输 → 忠臣玩家
+  zhongLose:  ['assets/video/han.mp4'],     // 结算忠臣输 → 忠臣玩家
+  neiWin:     ['assets/video/neijian-win.mp4'] // 结算内奸胜 → 内奸玩家
 };
 
 function triggerMovieFx(kind){

@@ -687,7 +687,7 @@ function maybePlayLightningFx(g){
 //   yujiKill  :于吉杀人 → 于吉以外且仍存活的玩家播 yuji0
 //   zuociDeath:左慈死 → 仅杀死左慈的玩家播 zuoci0
 //   gameOver  :胜负结算 → 按身份分派(左慈输播 zuoci1 / 反贼输 fanze-lost / 反贼胜
-//              fanzei-win / 主公输 zhuzhong-lost / 忠臣输 han)
+//              fanzei-win / 主公输 zhuzhong-lost / 忠臣输 han / 内奸胜 neijian-win)
 // 哨兵模式与 maybePlayLightningFx 同款。
 let lastMovieFxSeq = undefined;
 function movieVideoKeyForMe(g, evt){
@@ -704,7 +704,8 @@ function movieVideoKeyForMe(g, evt){
       if(me && me.role==='fan') return r.fan==='win' ? 'fanWin' : (r.fan==='lose' ? 'fanLose' : null);
       if(me && me.role==='zhu') return r.lord==='lose' ? 'lordLose' : null;
       if(me && me.role==='zhong') return r.zhong==='lose' ? 'zhongLose' : null;
-      return null; // 内奸等无专属动画
+      if(me && me.role==='nei') return r.nei==='win' ? 'neiWin' : null;
+      return null;
     }
   }
   return null;
