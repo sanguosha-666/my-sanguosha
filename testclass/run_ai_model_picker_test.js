@@ -390,7 +390,7 @@ const testCode = String.raw`
       groq: 'groq/compound',
       cohere: 'command-a-03-2025',
       cerebras: 'gpt-oss-120b',
-      tri: 'cerebras:zai-glm-4.7'
+      tri: 'cerebras:gpt-oss-120b'
     };
     Object.keys(expected).forEach(function(p){
       if(!PROVIDER_ADAPTERS[p]) throw new Error('缺 provider ' + p);

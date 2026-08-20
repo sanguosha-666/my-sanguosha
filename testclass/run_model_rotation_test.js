@@ -54,11 +54,12 @@ async function check(name, fn){
     const r = vm.runInContext('resolveAiModel', sandbox)('cerebras');
     if(r!=='gpt-oss-120b') throw new Error('冷却中的zai-glm-4.7应跳过选gpt-oss-120b,实际 '+r);
   });
-  // 0e. tri 默认勾选:合并池 10 个(groq参考单独6 + cerebras全部3 + cohere command-a-plus)
-  await check('默认勾选: tri 合并池10个', function(){
+  // 0e. tri 默认勾选:合并池 9 个(groq参考单独6 + cerebras 2个(去掉zai-glm-4.7,2026-08-20用户指定) + cohere command-a-plus)
+  await check('默认勾选: tri 合并池9个(无zai-glm-4.7)', function(){
     const d = vm.runInContext('DEFAULT_TRI_MODELS', sandbox);
-    if(!d || d.length!==10) throw new Error('应10个,实际 '+(d&&d.length));
-    ['cerebras:zai-glm-4.7','cerebras:gpt-oss-120b','cerebras:gemma-4-31b',
+    if(!d || d.length!==9) throw new Error('应9个,实际 '+(d&&d.length));
+    if(d.indexOf('cerebras:zai-glm-4.7')>=0) throw new Error('不应再含 cerebras:zai-glm-4.7');
+    ['cerebras:gpt-oss-120b','cerebras:gemma-4-31b',
      'groq:groq/compound','groq:llama-3.3-70b-versatile','groq:openai/gpt-oss-120b','groq:qwen/qwen3.6-27b','groq:openai/gpt-oss-20b','groq:openai/gpt-oss-safeguard-20b',
      'cohere:command-a-plus-05-2026'].forEach(function(m){
       if(d.indexOf(m)<0) throw new Error('缺 '+m);

@@ -66,9 +66,9 @@ const DEFAULT_GROQ_MODELS = ['groq/compound','llama-3.3-70b-versatile','openai/g
 const DEFAULT_CEREBRAS_MODELS = ['zai-glm-4.7','gpt-oss-120b','gemma-4-31b'];
 // 默认勾选(tri 三密钥直连:合并池,条目 id 带 `provider:模型ID` 前缀)。
 // 用户指定(2026-08-12):groq 部分参考 groq 单独调用的默认勾选 6 个、cerebras 全部 3 个、
-// cohere 默认 command-a-plus-05-2026——共 10 个。轮换按 provider 优先级(cerebras>groq>cohere)。
+// cohere 默认 command-a-plus-05-2026。2026-08-20 用户要求去掉 cerebras:zai-glm-4.7——共 9 个。
+// 轮换按 provider 优先级(cerebras>groq>cohere)。
 const DEFAULT_TRI_MODELS = [
-  'cerebras:zai-glm-4.7',
   'cerebras:gpt-oss-120b',
   'cerebras:gemma-4-31b',
   'groq:groq/compound',
@@ -353,7 +353,7 @@ const PROVIDER_ADAPTERS = {
     // parseResponse/reasoning_effort 全部逻辑。这里只提供 label/defaultModel 给 UI,
     // buildRequest 永远到不了(callAI 分发在前)。
     label: 'Tri 三密钥(Groq/Cohere/Cerebras)',
-    defaultModel: 'cerebras:zai-glm-4.7',
+    defaultModel: 'cerebras:gpt-oss-120b',
     endpoint: null, // callAI 分发,无独立端点
     buildRequest(apiKey, opts){
       throw new Error('tri 不直接构造请求——必须经 callAI 分发');
@@ -400,9 +400,9 @@ const AI_MODEL_OPTIONS = {
   ],
   tri: [
     // tri 三密钥直连:合并池,条目 id 带 `provider:模型ID` 前缀(轮换按 provider 优先级,
-    // callAI 分发到对应直连端点)。首项=adapter 默认 cerebras:zai-glm-4.7。
-    { id: 'cerebras:zai-glm-4.7', label: 'Cerebras: GLM-4.7(默认)' },
-    { id: 'cerebras:gpt-oss-120b', label: 'Cerebras: GPT-OSS 120B' },
+    // callAI 分发到对应直连端点)。首项=adapter 默认 cerebras:gpt-oss-120b
+    // (2026-08-20 用户要求去掉 cerebras:zai-glm-4.7)。
+    { id: 'cerebras:gpt-oss-120b', label: 'Cerebras: GPT-OSS 120B(默认)' },
     { id: 'cerebras:gemma-4-31b', label: 'Cerebras: Gemma 4 31B' },
     { id: 'groq:groq/compound', label: 'Groq: Compound(路由)' },
     { id: 'groq:llama-3.3-70b-versatile', label: 'Groq: Llama 3.3 70B' },
