@@ -35,12 +35,14 @@ const AI_KEY_STORAGE_KEY = 'sgsAiKey';
 const AI_PROVIDER_STORAGE_KEY = 'sgsAiProvider';
 const AI_PROMPT_DISMISSED_STORAGE_KEY = 'sgsAiPromptDismissed';
 const AI_MODEL_STORAGE_KEY = 'sgsAiModel';
+const AI_BASEURL_STORAGE_KEY = 'sgsAiBaseUrl';
 
 // 模块级变量,和 game.js 顶部 myClientId 同一处理方式:加载时尝试从 sessionStorage
 // 恢复一次(应对"同一标签页内因为JS错误等原因整页刷新"这类场景——标签页本身没关闭,
 // sessionStorage 依然在),之后由弹窗/状态按钮的事件处理器持续保持同步、并写回 storage。
 let aiApiKey = '';
 let aiProvider = null; // 'groq' | 'cohere' | 'cerebras' | 'tri' | null(尚未识别/尚未选择)
+let aiBaseUrl = '';
 // 这个会话内是否已经明确回应过密钥询问(填了密钥,或点了"跳过")——true 时
 // handleAddBotClick 不会再自动弹窗,但常驻的"AI机器人设置"按钮始终不受这个影响。
 let aiPromptDismissed = false;
@@ -161,6 +163,7 @@ let aiTestAutopilotDisconnectRef = null;
       aiApiModels = rawModels ? JSON.parse(rawModels) : [];
       if(!Array.isArray(aiApiModels)) aiApiModels = [];
     }catch(e){ aiApiModels = []; }
+    try{ aiBaseUrl = (sessionStorage.getItem(AI_BASEURL_STORAGE_KEY) || '').trim(); }catch(e2){ aiBaseUrl=''; }
     // 【多模型轮换】groq/cerebras/tri 密钥下若用户从未配置过多选,默认勾选对应 DEFAULT_*。
     // 都只在内存生效、不写 sessionStorage——默认值随列表改动自动跟进,见 renderModelPicker。
     if(aiProvider==='groq' && aiApiModels.length===0){
@@ -176,7 +179,7 @@ let aiTestAutopilotDisconnectRef = null;
     // 隐私模式等场景下 sessionStorage 可能整体不可用——静默回退到空值,不影响
     // 本次会话内内存里正常使用,只是刷新后无法恢复(每次刷新都会重新弹一次询问框,
     // 这是这种环境下唯一的合理退化,不算 bug)。
-    aiApiKey = ''; aiProvider = null; aiPromptDismissed = false; aiApiModel = ''; aiApiModels = [];
+    aiApiKey = ''; aiProvider = null; aiPromptDismissed = false; aiApiModel = ''; aiApiModels = []; aiBaseUrl='';
   }
 })();
 
@@ -192,6 +195,9 @@ function persistAiState(){
     else sessionStorage.removeItem(AI_MODEL_STORAGE_KEY);
     if(Array.isArray(aiApiModels) && aiApiModels.length) sessionStorage.setItem(AI_MODELS_STORAGE_KEY, JSON.stringify(aiApiModels));
     else sessionStorage.removeItem(AI_MODELS_STORAGE_KEY);
+    const trimmedBase = (aiBaseUrl||'').trim();
+    if(trimmedBase) sessionStorage.setItem(AI_BASEURL_STORAGE_KEY, trimmedBase);
+    else sessionStorage.removeItem(AI_BASEURL_STORAGE_KEY);
   }catch(e){ /* 同上,静默忽略 */ }
 }
 
@@ -437,6 +443,13 @@ function parseAiUsage(json){
 }
 
 function callAI(provider, apiKey, opts){
+  // 【自定义 BaseURL 直连】有填（trim 后非空且以 http(s):// 开头）时跳过密钥匹配，直连 OpenAI 兼容路径
+  const _customActive = typeof aiBaseUrl!=='undefined' && aiBaseUrl && /^https?:\/\//.test(String(aiBaseUrl).trim());
+  let _customChatUrl = null;
+  if(_customActive){
+    _customChatUrl = resolveAiBaseChatUrl(aiBaseUrl);
+    if(!provider || provider==='custom' || !PROVIDER_ADAPTERS[provider]) provider = 'groq';
+  }
   // 【tri 模式分发(2026-08-12)】provider==='tri' 时 apiKey 是三段斜杠密钥
   // (cohere/groq/cerebras 固定顺序),opts.model 是 'provider:模型ID' 前缀格式
   // (如 cerebras:zai-glm-4.7 / groq:llama-3.3-70b-versatile)——在这里拆解成实际的
@@ -465,6 +478,7 @@ function callAI(provider, apiKey, opts){
   let req;
   try{
     req = adapter.buildRequest(apiKey, opts||{});
+    if(_customChatUrl) req.url = _customChatUrl;
   }catch(e){
     return Promise.resolve({ ok:false, reason:'other', detail:'构造请求失败: '+e.message });
   }
@@ -576,6 +590,55 @@ const MODEL_LIST_API = {
 // OpenRouter 无鉴权、Claude/Groq 的密钥在会话内基本不变——刻意不按密钥区分缓存
 // (保持简单,换密钥不重拉,任务说明已确认接受)。
 const modelListCache = {};
+
+// ---------- 自定义 BaseURL 派生(纯函数) ----------
+// resolveAiBaseModelsUrl:把用户填的任意 BaseURL 派生为 OpenAI 兼容的 models 列表 URL。
+// 派生规则(去尾斜杠后):含 /chat/completions → 替换为 /v1/models;含 /v1/messages → 替换为
+// /v1/models?limit=1000;含 /v1/models 直接用;否则若以 /v1 结尾 + /models,否则 + /v1/models。
+function resolveAiBaseModelsUrl(customBaseUrl){
+  let u = String(customBaseUrl||'').trim().replace(/\/+$/, '');
+  if(!u) return '';
+  if(u.indexOf('/chat/completions')!==-1) return u.replace(/\/chat\/completions.*$/, '/v1/models');
+  if(u.indexOf('/v1/messages')!==-1) return u.replace(/\/v1\/messages.*$/, '/v1/models?limit=1000');
+  if(u.indexOf('/v1/models')!==-1) return u;
+  if(/\/v1$/.test(u)) return u + '/models';
+  return u + '/v1/models';
+}
+function resolveAiBaseChatUrl(customBaseUrl){
+  let u = String(customBaseUrl||'').trim().replace(/\/+$/, '');
+  if(!u) return '';
+  if(u.indexOf('/chat/completions')!==-1) return u.replace(/\/chat\/completions.*$/, '/v1/chat/completions');
+  if(u.indexOf('/v1/models')!==-1) return u.replace(/\/v1\/models.*$/, '/v1/chat/completions');
+  if(u.indexOf('/v1/messages')!==-1) return u.replace(/\/v1\/messages.*$/, '/v1/chat/completions');
+  if(/\/v1$/.test(u)) return u + '/chat/completions';
+  if(u.indexOf('/v1')!==-1) return u; // 已含 /v1 但非上述,视为完整 endpoint 直接用
+  return u + '/v1/chat/completions';
+}
+// fetchCustomModels:用自定义 BaseURL 直连拉取模型列表(不写 modelListCache)。
+// headers 若 aiApiKey 非空则 Authorization: Bearer + key，否则空对象；GET 拉取，解析
+// data[].id（OpenAI 兼容），失败返回 null 由调用方回退到静态表。
+function fetchCustomModels(customBaseUrl, apiKey){
+  const url = resolveAiBaseModelsUrl(customBaseUrl);
+  if(!url) return Promise.resolve(null);
+  const headers = {};
+  const trimmedKey = String(apiKey||'').trim();
+  if(trimmedKey) headers['authorization'] = 'Bearer ' + trimmedKey;
+  const hasAbort = typeof AbortController !== 'undefined';
+  const controller = hasAbort ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(function(){ controller.abort(); }, AI_CALL_TIMEOUT_MS) : null;
+  return fetch(url, { method:'GET', headers: headers, signal: controller ? controller.signal : undefined }).then(function(res){
+    if(timeoutId) clearTimeout(timeoutId);
+    if(!res.ok) return null;
+    return res.json().then(function(json){
+      if(!json || !Array.isArray(json.data)) return null;
+      const models = json.data.map(function(m){ return { id: (m && m.id)||'', label: (m && m.id)||'' }; }).filter(function(x){ return !!x.id; });
+      return models.length ? models : null;
+    }, function(){ return null; });
+  }, function(){
+    if(timeoutId) clearTimeout(timeoutId);
+    return null;
+  });
+}
 
 // fetchProviderModels(provider, apiKey) -> Promise<Array<{id,label}> | null>
 // null = 失败(不抛异常,与 callAI 同约定)。超时复用 AI_CALL_TIMEOUT_MS 的 15s
@@ -785,6 +848,19 @@ function showAiKeyModal(onDone){
   input.value = aiApiKey;
   wrap.appendChild(input);
 
+  const baseUrlLabel = document.createElement('label');
+  baseUrlLabel.textContent = '自定义 BaseURL（可选）';
+  wrap.appendChild(baseUrlLabel);
+
+  const baseUrlInput = document.createElement('input');
+  baseUrlInput.type = 'text';
+  baseUrlInput.id = 'aiBaseUrlInput';
+  baseUrlInput.autocomplete = 'off';
+  baseUrlInput.placeholder = '如 https://api.openai.com/v1 或 https://xxx/v1/chat/completions，填后跳过密钥匹配直连拉取模型';
+  baseUrlInput.style.cssText = 'width:100%;margin:4px 0 8px;';
+  baseUrlInput.value = aiBaseUrl;
+  wrap.appendChild(baseUrlInput);
+
   const statusLine = document.createElement('div');
   statusLine.className = 'ai-key-status';
   wrap.appendChild(statusLine);
@@ -821,6 +897,11 @@ function showAiKeyModal(onDone){
     // "确定"——防止"有密钥但不知道发给谁用"这种半成品状态被当作已配置好而结束弹窗。
     // 空字段时"确定"必须保持可点(效果上等同于跳过,见下面的 onclick),不能被这条
     // 规则误伤——判断条件因此是 aiApiKey && !aiProvider,而不是简单的 !aiProvider。
+    const _customOk = (aiBaseUrl||'').trim() && /^https?:\/\//.test((aiBaseUrl||'').trim());
+    if(_customOk){
+      saveBtn.disabled = false;
+      return;
+    }
     saveBtn.disabled = !!(aiApiKey && !aiProvider);
   }
 
@@ -834,6 +915,81 @@ function showAiKeyModal(onDone){
   // (搜索框+过滤按钮+自定义项),这里只负责数据源选择和状态行。
   function renderModelPicker(){
     modelWrap.innerHTML = '';
+    const _customTrimmed = (aiBaseUrl||'').trim();
+    const _customActive = _customTrimmed && /^https?:\/\//.test(_customTrimmed);
+    if(_customActive){
+      const label = document.createElement('label');
+      label.textContent = '模型';
+      label.style.cssText = 'margin-top:8px;';
+      modelWrap.appendChild(label);
+      const statusNote = document.createElement('div');
+      statusNote.id = 'aiModelStatusNote';
+      statusNote.className = 'ai-key-warn';
+      statusNote.style.cssText = 'margin-top:4px;';
+      modelWrap.appendChild(statusNote);
+      const isRotatingCustom = Array.isArray(aiApiModels) && aiApiModels.length>0;
+      function applyCustomList(list, fromFallback){
+        statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型');
+        const isCustom = !!aiApiModel && !list.some(function(m){ return m.id === aiApiModel; });
+        const customInput = document.createElement('input');
+        customInput.type = 'text';
+        customInput.id = 'aiModelCustomInput';
+        customInput.placeholder = '精确的模型ID,例如 openai/gpt-5.4-mini';
+        customInput.autocomplete = 'off';
+        customInput.style.marginLeft = '8px';
+        customInput.style.display = isCustom ? 'inline-block' : 'none';
+        customInput.value = isCustom ? aiApiModel : '';
+        function commitCustomModel(){
+          aiApiModel = customInput.value.trim();
+          persistAiState();
+        }
+        customInput.addEventListener('input', commitCustomModel);
+        customInput.addEventListener('blur', commitCustomModel);
+        renderModelListInto(modelWrap, list, {
+          selectedId: aiApiModel,
+          selectedIds: isRotatingCustom ? aiApiModels : undefined,
+          multi: isRotatingCustom,
+          defaultValueId: null,
+          onPick: function(id, checked){
+            if(id === AI_MODEL_CUSTOM_VALUE){
+              customInput.style.display = 'inline-block';
+              aiApiModel = customInput.value.trim();
+            } else if(isRotatingCustom){
+              aiApiModel = '';
+              const arr = Array.isArray(aiApiModels) ? aiApiModels.slice() : [];
+              const i = arr.indexOf(id);
+              if(checked){ if(i<0) arr.push(id); } else { if(i>=0) arr.splice(i,1); }
+              aiApiModels = arr;
+              customInput.style.display = 'none';
+              customInput.value = '';
+            } else {
+              customInput.style.display = 'none';
+              customInput.value = '';
+              aiApiModel = id;
+            }
+            persistAiState();
+          },
+        });
+        modelWrap.appendChild(customInput);
+        const modelNote = document.createElement('div');
+        modelNote.className = 'ai-key-warn';
+        modelNote.style.cssText = 'margin-top:4px;';
+        modelNote.textContent = '更强的模型通常更贵、单次决策也可能更慢——如果响应超过'
+          +(AI_CALL_TIMEOUT_MS/1000)+'秒会自动回退到本地机器人规则,不会卡住游戏。';
+        modelWrap.appendChild(modelNote);
+      }
+      const capturedBase = _customTrimmed;
+      statusNote.textContent = '加载模型列表…';
+      fetchCustomModels(capturedBase, aiApiKey).then(function(list){
+        if((aiBaseUrl||'').trim() !== capturedBase) return;
+        if(list && list.length){
+          applyCustomList(list, false);
+        } else {
+          applyCustomList(AI_MODEL_OPTIONS.groq || [], true);
+        }
+      });
+      return;
+    }
     if(!aiProvider) return;
     const provider = aiProvider;
     // 【多模型轮换】groq/cerebras/tri 密钥下默认勾选对应 DEFAULT_* 模型
@@ -940,6 +1096,25 @@ function showAiKeyModal(onDone){
 
   function updateStatusLine(){
     statusLine.innerHTML = '';
+    const _customTrimmed = (aiBaseUrl||'').trim();
+    const _customActive = _customTrimmed && /^https?:\/\//.test(_customTrimmed);
+    if(_customActive){
+      statusLine.appendChild(document.createTextNode('已使用自定义 BaseURL，直连拉取模型'));
+      const clearBtn = document.createElement('button');
+      clearBtn.type = 'button';
+      clearBtn.textContent = '清除';
+      clearBtn.style.cssText = 'margin-left:8px;font-size:12px;';
+      clearBtn.onclick = function(){
+        aiBaseUrl = '';
+        if(typeof baseUrlInput!=='undefined' && baseUrlInput) baseUrlInput.value = '';
+        persistAiState();
+        updateStatusLine();
+      };
+      statusLine.appendChild(clearBtn);
+      renderModelPicker();
+      updateSaveBtnState();
+      return;
+    }
     if(!aiApiKey){
       statusLine.textContent = '未填写密钥,机器人将使用本地规则(不产生任何费用)。';
       // 密钥清空时,provider 已经在 commitKey 里被清过了(见其注释);这里连带清空
@@ -1008,6 +1183,13 @@ function showAiKeyModal(onDone){
   // 更准确的实现。blur 是第二层兜底,和 input 是同一份保存逻辑,重复调用无副作用。
   input.addEventListener('input', commitKey);
   input.addEventListener('blur', commitKey);
+  function commitBaseUrl(){
+    aiBaseUrl = (baseUrlInput.value||'').trim();
+    persistAiState();
+    updateStatusLine();
+  }
+  baseUrlInput.addEventListener('input', commitBaseUrl);
+  baseUrlInput.addEventListener('blur', commitBaseUrl);
 
   function finish(){
     m.classList.add('hidden');
