@@ -18,6 +18,10 @@
 
 项目通过传统 `<script>` 标签按顺序加载，各文件共享全局作用域；新增脚本时必须同步更新 `index.html` 和相关测试的加载清单。
 
+## 部署
+
+上线（GitHub Pages）、自建静态托管、Firebase 配置、cache-bust 与「push 了但线上没变」的排查，见 [docs/deploy.md](docs/deploy.md)。
+
 ## 测试
 
 安装 Node.js 后，在项目根目录运行：
