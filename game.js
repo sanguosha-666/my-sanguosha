@@ -144,7 +144,9 @@ function normalize(g){
   // 过场动画事件(武将死亡/胜负结算剧情点):旧存档可能没有这个字段,回退 null。kind 必须是
   // 字符串,seat 为事件主体座位(可为 null),result(仅 gameOver 用)若存在须为普通对象。
   if(g.lastMovieFx===undefined) g.lastMovieFx=null;
-  else if(g.lastMovieFx!==null && (!Number.isInteger(g.lastMovieFx.seq) || typeof g.lastMovieFx.kind!=='string' || (g.lastMovieFx.seat!==null && !Number.isInteger(g.lastMovieFx.seat)) || (g.lastMovieFx.result!==undefined && (g.lastMovieFx.result===null || typeof g.lastMovieFx.result!=='object' || Array.isArray(g.lastMovieFx.result))))) g.lastMovieFx=null;
+  else if(g.lastMovieFx!==null && (!Number.isInteger(g.lastMovieFx.seq) || typeof g.lastMovieFx.kind!=='string' || (g.lastMovieFx.seat!=null && !Number.isInteger(g.lastMovieFx.seat)) || (g.lastMovieFx.result!==undefined && (g.lastMovieFx.result===null || typeof g.lastMovieFx.result!=='object' || Array.isArray(g.lastMovieFx.result))))) g.lastMovieFx=null;
+  // Firebase RTDB 丢 null 键：gameOver 的 seat:null 读回是缺键。缺席/undefined 回填 null，不当非法。
+  if(g.lastMovieFx && g.lastMovieFx.seat==null) g.lastMovieFx.seat=null;
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
   // 每一项的 targets 字段防御(原来只在单独的 g.tableCard.targets 上做,现在 g.tableCard 已经
   // 消灭、统一到 g.exchangeCards,防御要作用于数组里的每一项)。这条是纯粹的"数据形状防御"

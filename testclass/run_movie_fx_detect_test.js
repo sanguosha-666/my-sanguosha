@@ -234,6 +234,19 @@ check('合法 lastMovieFx(含 result)不被 normalize 清掉', ()=>{
   assert.strictEqual(S(g.lastMovieFx), S({seq:3, kind:'gameOver', seat:null, result:{fan:'lose',lord:'win',zhong:'win',zuociLose:false}}));
 });
 
+check('Firebase 丢 seat:null 后仍保留 gameOver（缺 seat 键视为 null）', ()=>{
+  const s = freshGameSandbox();
+  const g = mkGame(s);
+  // RTDB 不存 null：写入 {seq,kind:'gameOver',seat:null,result} 读回没有 seat 键
+  g.lastMovieFx = { seq:1, kind:'gameOver', result:{fan:'win',lord:'lose',zhong:'lose',zuociLose:false} };
+  R(s, 'normalize')(g);
+  assert.ok(g.lastMovieFx, '缺 seat 不应整条清掉');
+  assert.strictEqual(g.lastMovieFx.kind, 'gameOver');
+  assert.strictEqual(g.lastMovieFx.seq, 1);
+  assert.strictEqual(g.lastMovieFx.seat, null, '缺席 seat 应回填 null');
+  assert.strictEqual(g.lastMovieFx.result.fan, 'win');
+});
+
 // ============ 前端层沙箱 ============
 console.log('\n== 前端层：render.js 哨兵 + 分派 ==\n');
 

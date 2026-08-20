@@ -2451,14 +2451,8 @@
   <div id="game" class="hidden">
     <!-- 游戏内飘牌 Canvas：z-index:0 垫底，pointer-events:none 不拦截交互 -->
     <canvas id="gameBgCanvas" aria-hidden="true"></canvas>
-    <!-- 死亡动画视频：自己死亡时全屏播放随机一段(见 game-bg.js DEATH_VIDEOS)，
-         不设 loop 属性,播放完毕由 game-bg.js 隐藏并恢复原背景 -->
     <video id="deathFxVideo" class="bg-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
-    <!-- 闪电判定动画视频：任意角色闪电判定出结果时全屏播放(未劈中 flash0 / 劈中 flash1，
-         见 game-bg.js LIGHTNING_VIDEOS)，不设 loop 属性,播放完毕由 game-bg.js 隐藏并恢复原背景 -->
     <video id="lightningFxVideo" class="bg-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
-    <!-- 过场动画视频：武将死亡/胜负结算剧情点按 kind 播放(于吉/左慈/内奸胜，见 game-bg.js
-         MOVIE_VIDEOS 与 render.js maybePlayMovieFx)，不设 loop 属性,播放完毕由 game-bg.js 隐藏 -->
     <video id="movieFxVideo" class="bg-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
     <!-- #oppTopRow 只在宽屏桌面布局(.desktop-layout)下才会被使用(装zone==='top'的座位卡),
          窄屏下永远是空的、没有任何CSS属性的占位元素(不挂.opp-row这类会带来无条件基础样式
@@ -2527,7 +2521,7 @@
 <script src="skills/skill-registry.js?v=3"></script>
 <script src="debug-log.js?v=400"></script>
 <script src="room-lifecycle.js?v=409"></script>
-<script src="game.js?v=434"></script>
+<script src="game.js?v=435"></script>
 <script src="sha/sha-resolution.js?v=406"></script>
 <script src="weapons.js?v=399"></script>
 <script src="skills.js?v=409"></script>
@@ -2541,6 +2535,6 @@
 <script src="render-hand.js?v=394"></script>
 <script src="render-controls.js?v=421"></script>
 <script src="render-log.js?v=398"></script>
-<script src="game-bg.js?v=7"></script>
+<script src="game-bg.js?v=8"></script>
 </body>
 </html>

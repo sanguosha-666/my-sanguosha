@@ -41,11 +41,23 @@ function resumeBgVideo(){
   pickRandomBgVideo();
 }
 
-// 取消大厅视频静音。autoplay 策略要求视频必须 muted 才能无手势自动播放,
-// 因此初始静音,用户首次交互(点击/触摸/按键)后恢复声音,并移除监听只生效一次。
+// 取消视频静音。autoplay 策略要求 muted 才能无手势自动播放,
+// 因此初始静音,用户首次交互后恢复声音(大厅背景 + 死亡/闪电/过场),并移除监听只生效一次。
+var FX_VIDEO_IDS = ['bgVideo','deathFxVideo','lightningFxVideo','movieFxVideo'];
+var fxAudioUnlocked = false;
+function unlockFxAudio(){
+  fxAudioUnlocked = true;
+  if(typeof document === 'undefined') return;
+  FX_VIDEO_IDS.forEach(function(id){
+    var el = document.getElementById(id);
+    if(el && 'muted' in el) el.muted = false;
+  });
+}
+function applyFxAudio(v){
+  if(v && fxAudioUnlocked) v.muted = false;
+}
 function unmuteBgVideo(){
-  var v = document.getElementById('bgVideo');
-  if(v && 'muted' in v && v.muted) v.muted = false;
+  unlockFxAudio();
   if(typeof document.removeEventListener === 'function'){
     document.removeEventListener('click', unmuteBgVideo);
     document.removeEventListener('touchstart', unmuteBgVideo);
@@ -286,6 +298,7 @@ function triggerLightningFx(hit){
   var list = LIGHTNING_VIDEOS[hit ? 'true' : 'false'];
   var v = document.getElementById('lightningFxVideo');
   if(!v || !list || !list.length) return;
+  applyFxAudio(v);
   v.src = list[Math.floor(Math.random() * list.length)];
   v.style.visibility = 'visible';
   if(typeof v.load === 'function') v.load();
@@ -314,6 +327,7 @@ function triggerMovieFx(kind){
   var list = MOVIE_VIDEOS[kind];
   var v = document.getElementById('movieFxVideo');
   if(!v || !list || !list.length) return;
+  applyFxAudio(v);
   v.src = list[Math.floor(Math.random() * list.length)];
   v.style.visibility = 'visible';
   if(typeof v.load === 'function') v.load();
@@ -328,6 +342,7 @@ function triggerDeathFx(kind){
   // 动画走 DOM 视频层而非飘牌 canvas,故不再要求 bgRunning/bgCtx 就绪
   var v = document.getElementById('deathFxVideo');
   if(!v || !DEATH_VIDEOS.length) return;
+  applyFxAudio(v);
   v.src = DEATH_VIDEOS[Math.floor(Math.random() * DEATH_VIDEOS.length)];
   v.style.visibility = 'visible';
   if(typeof v.load === 'function') v.load();
