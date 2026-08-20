@@ -2,7 +2,7 @@
 
 | 路径 | 用途 |
 |------|------|
-| `deploy.md` | 部署说明（GitHub Pages / 静态托管 / Firebase / cache-bust） |
+| `deploy.md` | 部署手册（给执行代理逐步完成安装/上线） |
 | `design/` | 武将设计稿（`*_design.md`） |
 | `../CLAUDE.md` | 项目协作守则（根目录，agent 必读，核心架构约定/改动原则） |
 | `progress-log-*.md` | 历史改动记录（2026-08-01 从 `CLAUDE.md` 拆分出来，按时间顺序分段，需要时 grep 关键词查，不用通读；新增记录只追加进当前最新分段，见 `CLAUDE.md` 开头的防复发规则） |

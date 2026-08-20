@@ -20,7 +20,7 @@
 
 ## 部署
 
-上线（GitHub Pages）、自建静态托管、Firebase 配置、cache-bust 与「push 了但线上没变」的排查，见 [docs/deploy.md](docs/deploy.md)。
+把 [docs/deploy.md](docs/deploy.md) 整份交给执行代理即可按其逐步完成：Firebase 配置、本机双浏览器进房验收、GitHub Pages 上线、cache-bust 与排障。人类只需在浏览器登录并点击控制台。
 
 ## 测试
 
