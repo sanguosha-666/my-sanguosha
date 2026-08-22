@@ -225,3 +225,18 @@
 
   **判断轴**：只换素材 + 给 `<img>` 加一个属性，不触碰机器人决策链与 `pending` 流转，轴 A/B 均未命中；实际仍跑了全量 **135/135** 通过。**cache-bust**：`render.js` v435→436、`render-table.js` v395→396、`render-hand.js` v394→395、`render-controls.js` v421→422。**未做真机实测**：解码成本正比于像素数，-61%/-64% 的降幅是确定的，但具体省多少电需真机确认。
 
+
+- **CORE-145(issue #198):响应超时检测的 1s 定时器改为按需启停**：手机/平板耗电分析四项里**影响最小的一项**，也是改动最小的一项。**问题**：`startAutoRespondTimer()` 启动的 `setInterval` **一旦启动就永不停止**（全文没有任何 `clearInterval`），游戏结束后、回到大厅后仍然每秒醒来。**如实说明影响量级**：单次 tick 的实际开销很低——无 pending 时 `maybeAutoRespondTimeout` 首行判断直接返回、`refreshCountdownSpans` 拿到空 NodeList；真正的代价是 1Hz 常驻唤醒妨碍 JS 引擎进入深度空闲，**比 CORE-141 的全屏 Canvas 每帧重绘小一个数量级以上**。单独做收益有限，价值在于顺手清掉一个资源泄漏式写法。
+
+  **为什么可以安全地停（这是本次唯一需要论证的点）**：超时托管（`RESPONSE_TIMEOUT_MS=30000` 的自动保守提交）是防挂机卡死的关键机制，停掉的前提必须是「一旦出现询问型 pending 就能及时重新启动」。这一点由**既有结构天然保证**：`render()` 由 `gameRef.on('value')` 驱动，**任何** pending 的创建都来自一次 tx 状态变更 → 必然触发本端 render → 必然走到 `startAutoRespondTimer()`；而 render 里 `currentG = g` 就在调用它的**前一行**，所以读到的一定是最新快照，不会拿旧状态误判。这条顺序依赖已在 `render.js` 的注释里写明（「**必须在 `currentG = g` 之后调用**」）。
+
+  **实现**：`startAutoRespondTimer()` 从「只负责启动」升级成**生命周期入口**——`autoRespondTimerNeeded()` 判定当前该不该跑（口径与 `maybeAutoRespondTimeout`/`renderResponseCountdown` 的前置判断**逐字一致**：`pending` 存在且 `askedAt` 是数字 = 已被 `setResponseAskedAt` 打过戳，避免出现「检测器停了但那两个函数其实还有事要做」），需要就起、不需要就 `stopAutoRespondTimer()`。**单实例不变量的维护方式变了**：改动前靠 `__autoRespondTimerStarted` 这个**单向**布尔保证「只启动一次」，现在可停可启、单向标志不够用，改成持有 `__autoRespondTimerId`（`null` = 未运行）；所有启停都必须经过这两个函数，测试有断言钉住「反复调用不会起多个实例」和「多轮启停后不泄漏」。停机时顺带调一次 `refreshCountdownSpans()` 清掉可能残留的「⏱ Ns 后自动…」文案（复用同一条路径，不另写清理逻辑）。
+
+  **tick 里的自我停机兜底与一个刻意的「不停」**：tick 末尾加了 `if(!autoRespondTimerNeeded()) stopAutoRespondTimer()`，防「本端因为某种原因没再收到 render」时定时器永远转下去（回到改动前的行为）。但**刚提交完保守动作的那一拍刻意不停**——tx 是异步的，`maybeAutoRespondTimeout` 提交后 `currentG` 还是旧快照、仍然 `need`，要等 tx 回执触发 render 或后续某拍才真正停；**如果因为「刚提交过」就提前停掉，提交失败时就没人继续兜底了**。测试里对这条有专门断言。
+
+  **测试**：新增 `testclass/run_core145_timer_lifecycle_test.js`（14 条），覆盖无 pending/`currentG=null` 不启动、有询问型 pending 启动且周期 1000ms、pending 消失即停并清理文案、★单实例不变量（连调 20 次仍只 1 个）、★停掉后再出现 pending 能重新启动（超时托管不被破坏）、10 轮启停循环后无泄漏、`askedAt` 未打戳不算、`autoRespondTimerNeeded` 四种输入的口径、tick 里仍调 `maybeAutoRespondTimeout`+`refreshCountdownSpans`、自我停机兜底、★提交后不立刻自停，外加**破坏性验证**（让 `autoRespondTimerNeeded` 恒 true = 回到永不停止，确认停机断言确实会红）。
+
+  **既有测试核对**：`run_ai_timeout_test.js`（23 条）**零改动通过**——它是直接单步调 `maybeAutoRespondTimeout` 验证保守动作的，文件头注释就写着「vm 测试沙箱没有 `setInterval`/不需要启动，直接调 `maybeAutoRespondTimeout` 单步验证」，因此完全不依赖定时器本身，本次改动结构上碰不到它。全项目 `grep` 确认没有任何测试引用 `__autoRespondTimerStarted`。
+
+  **判断轴 B 命中**（触碰询问型 pending 的超时托管机制）→ 按规则 29 跑了全量 **136/136** + **soak 两轮**（60局7人 + 120局7人）：均为「正常结束 全部 / 卡死0 / 步数超限0 / 异常崩溃0 / 阵营违规0」。**cache-bust**：`bot-ai-bus.js` v410→412、`render.js` v436→437。
+
