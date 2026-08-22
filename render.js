@@ -1067,7 +1067,7 @@ function renderSeatCard(g, seat, isSelf){
   const isZuociWithHuashen = p.general==='zuoci' && p.huashenGeneral;
   const avatarGen = isZuociWithHuashen ? (getGeneral(p.huashenGeneral) || gen) : gen;
   const avatarImg = avatarReady
-    ? '<img class="avatar" src="'+generalAvatarSrc(avatarGen.id)+'" onerror="avatarError(this)" alt="">'
+    ? '<img class="avatar" src="'+generalAvatarSrc(avatarGen.id)+'" decoding="async" onerror="avatarError(this)" alt="">'
     : '';
   const avatarPlaceholder = '<div class="avatar-placeholder"'+(avatarReady?' style="display:none"':'')+'>'+escapeHtml(genLabel)+'</div>';
   // 武将名竖排(writing-mode:vertical-rl + text-orientation:upright,见CSS)。固定字号,
