@@ -325,6 +325,31 @@ const testCode = String.raw`
     if(aiSummary !== '座位0正常生成的新摘要') throw new Error('无竟态场景应正常写入,实际 "' + aiSummary + '"');
   });
 
+  await check('R3 同机器人竟态:A2先返回后,A1迟到不得覆盖最新两层记忆', async function(){
+    var resolvers = [];
+    var originalCallAI = callAI;
+    callAI = function(){
+      return new Promise(function(resolve){ resolvers.push(resolve); });
+    };
+    try{
+      aiSummaryReset();
+      selectAiSummary(g, 0);
+      var p1 = updateAiSummary(g, 0);
+      var p2 = updateAiSummary(g, 0);
+      if(resolvers.length !== 2) throw new Error('应并发发出2次摘要请求,实际 ' + resolvers.length);
+      resolvers[1]({ ok:true, text:'{"tactical":"新战术","doctrineUpdate":"新认知"}' });
+      await p2;
+      if(aiTactical !== '新战术' || aiDoctrine.indexOf('新认知') === -1)
+        throw new Error('A2 应先写入最新两层记忆');
+      resolvers[0]({ ok:true, text:'{"tactical":"旧战术","doctrineUpdate":"旧认知"}' });
+      await p1;
+      if(aiTactical !== '新战术') throw new Error('A1 迟到后覆盖了新 tactical: ' + aiTactical);
+      if(aiDoctrine.indexOf('旧认知') !== -1) throw new Error('A1 迟到后错误合并了旧 doctrineUpdate');
+    } finally {
+      callAI = originalCallAI;
+    }
+  });
+
   // ---- S2:scheduleBotTurn 回合检测 / over 清空 / 清除按钮 ----
 
   // 9. scheduleBotTurn:回合号变化时 updateAiSummary 被调(spy);

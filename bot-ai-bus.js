@@ -212,6 +212,9 @@ let aiSummaryRound = 0;
 let aiSummaryTurn = -1;
 let aiSummaryKey = null;
 let aiSummaryByBot = Object.create(null);
+// CORE-142:同一机器人可连续发出多次 fire-and-forget 摘要请求。按机器人分仓记录
+// 最新请求序号，防止先发后到的旧响应覆盖较新 tactical/doctrine。
+let aiSummaryRequestSeqByBot = Object.create(null);
 // aiTestLastReason:AI托管模式(AI托管按钮)下,最近一次托管命中的 AI 询问里解析出的
 // 中文选择理由。模块级变量,供信息窗 record 采集(aiTestDecisionHook)。未托管时恒为
 // null——callAiChooseIndex 在未托管路径会把 reason 恒写 null,与未托管行为零变化。
@@ -230,6 +233,8 @@ let aiTestLastChoice = null;
 let aiTestLastCall = null;
 function aiSummaryReset(){
   aiSummaryByBot = Object.create(null);
+  // 同时让重置前仍在途的响应全部失效，避免离房/新局后旧响应重新写回记忆。
+  aiSummaryRequestSeqByBot = Object.create(null);
   aiSummary = '';
   aiTactical = '';   // CORE-140
   aiDoctrine = '';   // CORE-140
@@ -289,6 +294,8 @@ async function updateAiSummary(g, seat){
   if(typeof aiApiKey==='undefined' || !aiApiKey || !aiProvider) return;
   selectAiSummary(g, seat);
   const requestKey = aiSummaryKey;
+  const requestSeq = (aiSummaryRequestSeqByBot[requestKey] || 0) + 1;
+  aiSummaryRequestSeqByBot[requestKey] = requestSeq;
   const state = buildBotVisibleState(g, seat);
   const oldSummary = aiSummary ? ('旧摘要:\n'+aiSummary+'\n\n') : '';
   const userPrompt = oldSummary
@@ -321,6 +328,9 @@ async function updateAiSummary(g, seat){
   if(!result || !result.ok) return;
   const text = (result.text || '').trim();
   if(text){
+    // 同机器人已有更新请求在本次之后发出：本响应对应的局面已经过期，完整丢弃。
+    // 必须放在读取 saved 之前，避免旧 doctrineUpdate 被合并进最新桶。
+    if(aiSummaryRequestSeqByBot[requestKey] !== requestSeq) return;
     const saved = aiSummaryByBot[requestKey] || { text:'', tactical:'', doctrine:'', seat, round:g.roundNum||0, turn:g.turn };
     // CORE-140:优先按两层 JSON 解析;解析不出来就走**改动前的整体覆写回退路径**。
     // 这条回退是本次改动"最坏情况 = 今天的行为"这个保证的落脚点:模型返回任何不是

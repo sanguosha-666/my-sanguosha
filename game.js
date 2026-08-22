@@ -1292,7 +1292,10 @@ function finishGuidu(g, judgedSeat, replaceCard, resume) {
     // 鬼才/鬼道自己的改判,resume 已经自带完整信息,不能覆盖)。
     const result=finishDelayCard(g, resume.seat, DELAY_TRICKS[resume.trickName], replaceCard, resume.card);
     if(result==='pending'){
-      if(g.pending.type==='dying' || g.pending.type==='yijiAsk' || (g.pending.resume&&g.pending.resume.type==='afterDamageEffects')) setInterruptedDamageResume(g,{type:'delay',seat:resume.seat});
+      // 落英已改为确定正收益自动发动：finishDelayCard 仍以 'pending' 表示“本层不要
+      // 再次续接”，但落英会在内部直接续接并保持 g.pending=null。这里只能在确有
+      // 新挂起时补 resume，不能把 'pending' 返回值等同于 pending 对象必然存在。
+      if(g.pending && (g.pending.type==='dying' || g.pending.type==='yijiAsk' || (g.pending.resume&&g.pending.resume.type==='afterDamageEffects'))) setInterruptedDamageResume(g,{type:'delay',seat:resume.seat});
       return g;
     }
     continueDelayResolution(g, resume.seat);
@@ -1421,7 +1424,8 @@ function finishGuicai(g, finalCard){
       // 是 undefined,g.players[undefined] 直接抛异常(真实 bug:鬼才替换了延时锦囊的判定牌、
       // 替换后结果致命时才会走到这条分支,此前测试没覆盖到这个组合)。若新挂起是鬼才(嵌套鬼才
       // 改判),它的 resume 已经自带完整信息,绝不能覆盖。
-      if(g.pending.type==='dying' || g.pending.type==='yijiAsk' || (g.pending.resume&&g.pending.resume.type==='afterDamageEffects')) setInterruptedDamageResume(g,{type:'delay',seat:resume.seat});
+      // 同上：自动落英会自己续接判定流程，此时 result==='pending' 但 g.pending 为 null。
+      if(g.pending && (g.pending.type==='dying' || g.pending.type==='yijiAsk' || (g.pending.resume&&g.pending.resume.type==='afterDamageEffects'))) setInterruptedDamageResume(g,{type:'delay',seat:resume.seat});
       return;
     }
     continueDelayResolution(g, resume.seat);

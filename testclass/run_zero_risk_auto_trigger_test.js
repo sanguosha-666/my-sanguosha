@@ -113,6 +113,24 @@ check('落英拾取(甄姬):判定/弃牌产生梅花牌后直接拾取,不再�
   if(g.discard.length!==0) throw new Error('拾取的牌应从弃牌堆移除');
 });
 
+// CORE-139:延时锦囊经鬼才改判后，梅花判定牌触发自动落英。落英会在内部直接续接
+// 判定流程并保持 pending=null；finishGuicai 不得再把返回的 'pending' 当成对象读取.type。
+check('CORE-139:鬼才改判延时锦囊触发自动落英时不得读取null pending.type', function(){
+  const judged={name:'判定者',hp:4,maxHp:4,hand:[],equips:eq(),delays:[],alive:true};
+  const caozhi={name:'曹植',general:'caozhi',hp:3,maxHp:3,hand:[],equips:eq(),delays:[],alive:true,caps:{luoying:true}};
+  const finalCard=card('judge-club','杀','♣');
+  const delayCard=card('delay-lebu','乐不思蜀','♥');
+  const g={players:[judged,caozhi],deck:[],discard:[finalCard],log:[],phase:'guicai',turn:0,roundNum:1,gameMode:'ffa',pending:{
+    type:'guicai',seat:0,asking:1,judgeCard:finalCard,
+    resume:{kind:'delayJudge',seat:0,trickName:'乐不思蜀',card:delayCard}
+  }};
+  sandbox.__g=g;
+  run('finishGuicai(__g,__g.pending.judgeCard)');
+  if(g.pending!==null) throw new Error('自动落英续接后不应残留pending,实际 '+JSON.stringify(g.pending));
+  if(g.players[1].hand.length!==1 || g.players[1].hand[0].id!=='judge-club') throw new Error('曹植应获得梅花判定牌');
+  if(g.phase!=='draw') throw new Error('延时锦囊判定应只续接一次并进入摸牌阶段,实际phase='+g.phase);
+});
+
 // ---- 8. 洛神判定(甄姬):回合开始自动循环判定,黑色继续、红色结束,不再逐轮询问 ----
 check('洛神判定(甄姬):黑色应自动继续判定(不逐轮询问),红色应结束并进入摸牌阶段', function(){
   const zhenji={name:'甄姬',general:'zhenji',hp:3,maxHp:3,hand:[],equips:eq(),delays:[],alive:true,caps:{luoshen:true},faceup:true};
