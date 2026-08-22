@@ -1128,7 +1128,16 @@ function renderSeatCard(g, seat, isSelf){
     const prefix = EQUIP_SLOT_ABBR[s];
     if(!c) return isSelf ? '<div class="erow empty-slot"><b>'+prefix+'</b> —</div>' : '';
     const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
-    return '<div class="erow filled'+wideNameCls+'" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
+    // CORE-146:装备名额外带一份"2字简称"(data-s)。手机横屏下座位卡只有 70~90px 宽,
+    // 完整装备名("青龙偃月刀"/"雌雄双股剑")靠 text-overflow:ellipsis 会被截成"武 ♠5…"
+    // 这种零信息量的状态。简称由 CSS 在窄断点里用 ::before content:attr(data-s) 取用——
+    // **断点判断留在 CSS 里**(和 .wide-name 那条不同:那条是 render.js 读 isDesktopLayout(),
+    // 这里刻意不再新增一处 JS 侧断点判断,避免 JS/CSS 两套口径又多一处要同步的地方)。
+    // 取前 2 字而不是维护一张简称表:实测覆盖全部现有装备都能辨认(青龙偃月刀→青龙、
+    // 诸葛连弩→诸葛、八卦阵→八卦、仁王盾→仁王、白银狮子→白银、爪黄飞电→爪黄),
+    // 且以后新增装备零维护成本。≤2 字的名字(的卢/赤兔/绝影/大宛/紫骍)原样。
+    const shortName = escapeHtml(String(c.name).slice(0, 2));
+    return '<div class="erow filled'+wideNameCls+'" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+'<span class="enm" data-s="'+shortName+'">'+escapeHtml(c.name)+'</span></div>';
   }).join('') : '';
   // 装备条(文字列本身)只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块。
   const equipBar = equipRows ? '<div class="seat-equip-bar">'+equipRows+'</div>' : '';
