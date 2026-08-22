@@ -10,10 +10,49 @@ var BG_VIDEOS = [
   'assets/video/bg-3.mp4'
 ];
 
+// ============ CORE-144(issue #197):手机端不播大厅背景视频 ============
+// 【为什么】<video id="bgVideo" autoplay muted loop> 里的 bg-1/2/3.mp4 各 5~6MB,loop
+// 无限循环。视频硬件解码是持续性功耗负载,而大厅是"等朋友进房"的场景,可能停留好几分钟,
+// 期间用户往往只是盯着屏幕等——纯装饰性的动态背景在这里性价比最低。而且每次进大厅
+// pickRandomBgVideo() 都会随机换一个重新加载,手机上还额外吃 5~6MB 移动流量。
+//
+// 【范围:只砍手机,平板/桌面维持现状】和 CORE-141(#194)同一取舍与同一判定函数
+// (isPhoneLayout,定义在本文件下方;函数声明会提升,这里调用时机没问题)。**不要只按宽度
+// 判定**——本项目强制引导手机横屏,视口约 844x390,宽度正好落在平板断点(641~1199px)内,
+// 只看宽度会把手机横屏误判成平板,详见 isPhoneLayout 处的完整说明与 CLAUDE.md 规则22。
+//
+// 【手机端的效果】不设置 v.src(**连下载都不发生**,这是省流量的关键——只 pause 不设 src
+// 仍会把整个文件拉下来)、不播放,并隐藏视频与遮罩层,回到 body 本来的渐变默认背景——
+// 和进房时 pauseBgVideo() 的视觉落点完全一致,不是一个新的空白状态。
+//
+// 【刻意不碰音轨解锁】unmuteBgVideo/unlockFxAudio 一个字节不动:它除了大厅视频,还负责
+// 解锁死亡/闪电/过场三条全屏特效的音轨(FX_VIDEO_IDS 包含 bgVideo 但不止它),手机端
+// 不播大厅视频**不等于**可以跳过那套解锁,否则手机上所有特效都会变成哑的。
+function shouldPlayLobbyVideo(){
+  return !(typeof isPhoneLayout === 'function' && isPhoneLayout());
+}
+// hideLobbyVideo:把大厅视频与遮罩收起来,回到 body 默认渐变背景。
+// 视觉落点与 pauseBgVideo 一致;区别是这里还会在 src 已存在时一并释放(removeAttribute
+// + load(),同 hideFxVideo 的既有做法),避免已经下载的那份继续占内存。
+function hideLobbyVideo(v){
+  if(!v) return;
+  if(typeof v.pause === 'function') v.pause();
+  v.style.visibility = 'hidden';
+  // 只在确实设过 src 时才释放:没设过就调 load() 会在部分浏览器里报无源警告。
+  if(v.getAttribute && v.getAttribute('src')){
+    if(typeof v.removeAttribute === 'function') v.removeAttribute('src');
+    if(typeof v.load === 'function') v.load();
+  }
+  var veil = document.getElementById('bgVeil');
+  if(veil) veil.style.visibility = 'hidden';
+}
+
 // 回大厅时随机选一个视频并尝试播放（muted+playsinline 保证自动播放策略通过）
 function pickRandomBgVideo(){
   var v = document.getElementById('bgVideo');
   if(!v) return;
+  // CORE-144:手机端直接收起,不设 src、不下载、不播放。
+  if(!shouldPlayLobbyVideo()){ hideLobbyVideo(v); return; }
   v.style.visibility = 'visible'; // 恢复可见(进房时被隐藏,避免停帧像卡住)
   v.src = BG_VIDEOS[Math.floor(Math.random() * BG_VIDEOS.length)];
   if(typeof v.load === 'function') v.load();
@@ -36,6 +75,9 @@ function pauseBgVideo(){
 
 // 回大厅恢复：显示遮罩、随机换一个视频继续播
 function resumeBgVideo(){
+  // CORE-144:手机端不放遮罩(遮罩是用来压暗视频的,没有视频时它只会把默认渐变背景
+  // 再压暗一层),直接交给 pickRandomBgVideo 走收起分支。
+  if(!shouldPlayLobbyVideo()){ pickRandomBgVideo(); return; }
   var veil = document.getElementById('bgVeil');
   if(veil) veil.style.visibility = 'visible';
   pickRandomBgVideo();
