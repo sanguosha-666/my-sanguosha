@@ -1356,8 +1356,10 @@ function checkDeaths(g){
 // ---------- render ----------
 function render(g){
   currentG = g; // 供确认弹窗的取消回调异步刷新界面用(回调触发时早已不在 render 的调用栈里)
-  // A1 响应超时托管:确保 1s 检测器已启动(任意客户端;提交幂等,谁先到谁生效)。
-  // startAutoRespondTimer 内部有全局标志位,反复 render 只会启动一次。
+  // A1 响应超时托管:同步 1s 检测器的启停(任意客户端;提交幂等,谁先到谁生效)。
+  // CORE-145 起它是"按需启停"的生命周期入口而不只是"启动":有询问型 pending 才运行,
+  // 没有就停掉。内部持有 timer id 保证幂等,反复 render 不会起多个实例。
+  // **必须在 currentG = g 之后调用**——它读 currentG 判断当前该不该运行。
   if(typeof startAutoRespondTimer==='function') startAutoRespondTimer();
   if(!g){
     // room was deleted by someone (or doesn't exist) while we're in-game -> return to lobby

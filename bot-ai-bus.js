@@ -1007,18 +1007,63 @@ function refreshCountdownSpans(){
     spans[i].textContent = cd || '';
   }
 }
-// startAutoRespondTimer: 启动 1s 检测器。任意客户端都可启动(提交幂等);用标志位保证
-// 全局只启动一个实例。render() 每次渲染时调用它确保已启动(浏览器环境);vm 测试沙箱
-// 没有 setInterval/不需要启动,直接调 maybeAutoRespondTimeout 单步验证。
-let __autoRespondTimerStarted = false;
+// startAutoRespondTimer: 1s 检测器的**生命周期入口**。任意客户端都可启动(提交幂等)。
+// render() 每次渲染时调用它(浏览器环境);vm 测试沙箱没有 setInterval/不需要启动,
+// 直接调 maybeAutoRespondTimeout 单步验证。
+//
+// ============ CORE-145(issue #198):按需启停,不再永不停止 ============
+// 【改动前的问题】这个 setInterval 一旦启动就**永不停止**(全文没有任何 clearInterval):
+// 游戏结束后、回到大厅后仍然每秒醒来。单次 tick 的实际开销确实很低——无 pending 时
+// maybeAutoRespondTimeout 首行 `if(!g.pending || typeof g.pending.askedAt!=='number')`
+// 直接返回、refreshCountdownSpans 拿到空 NodeList——但 1Hz 常驻唤醒会妨碍 JS 引擎进入
+// 深度空闲状态,在移动端有一定影响(这是耗电分析四项里最小的一项,比 CORE-141 的全屏
+// Canvas 每帧重绘小一个数量级以上;单独做收益有限,价值在于顺手清掉一个资源泄漏式写法)。
+//
+// 【为什么可以安全地停】超时托管本身(RESPONSE_TIMEOUT_MS=30000 的自动保守提交)是防挂机
+// 卡死的关键机制,停掉的前提必须是"一旦出现询问型 pending 就能及时重新启动"。这一点由
+// 既有结构天然保证:render() 由 gameRef.on('value') 驱动,**任何** pending 的创建都来自
+// 一次 tx 状态变更 → 必然触发本端 render → 必然走到这里。而 render 里 `currentG = g`
+// 就在调用本函数的前一行,所以这里读到的一定是最新快照,不会拿旧状态误判。
+//
+// 【单实例不变量】改动前靠 __autoRespondTimerStarted 这个**单向**布尔保证"只启动一次";
+// 现在可停可启,单向标志不够用了,改成持有 timer id(null = 未运行)。所有启停都必须经过
+// 这里和 stopAutoRespondTimer,不要在别处直接 setInterval/clearInterval——测试有断言钉住
+// "反复调用不会起多个实例"。
+let __autoRespondTimerId = null;
+// autoRespondTimerNeeded: 当前是否需要 1s 检测器。口径与 maybeAutoRespondTimeout /
+// renderResponseCountdown 的前置判断**逐字一致**(都要求 pending 存在且 askedAt 是数字
+// = 已被 setResponseAskedAt 打过戳),避免出现"检测器停了但那两个函数其实还有事要做"。
+function autoRespondTimerNeeded(){
+  const g = (typeof currentG!=='undefined') ? currentG : null;
+  return !!(g && g.pending && typeof g.pending.askedAt === 'number');
+}
+function stopAutoRespondTimer(){
+  if(__autoRespondTimerId!==null && typeof clearInterval!=='undefined'){
+    clearInterval(__autoRespondTimerId);
+  }
+  __autoRespondTimerId = null;
+  // 停机时刷一次:把可能残留的"⏱ Ns 后自动…"文案清掉(询问已结束,倒计时不该定格在画面上)。
+  // refreshCountdownSpans 在没有倒计时可显示时写的就是空串,这里复用同一条路径,不另写清理。
+  refreshCountdownSpans();
+}
 function startAutoRespondTimer(){
-  if(__autoRespondTimerStarted) return;
   if(typeof setInterval==='undefined') return;
-  __autoRespondTimerStarted = true;
-  setInterval(function(){
-    if(typeof currentG!=='undefined' && currentG){
-      maybeAutoRespondTimeout(currentG);
-      refreshCountdownSpans();
-    }
-  }, 1000);
+  const need = autoRespondTimerNeeded();
+  if(need){
+    if(__autoRespondTimerId!==null) return; // 已在运行:幂等,不重复起
+    __autoRespondTimerId = setInterval(function(){
+      if(typeof currentG!=='undefined' && currentG){
+        maybeAutoRespondTimeout(currentG);
+        refreshCountdownSpans();
+      }
+      // 自我停机兜底:正常情况下询问结束会触发 render → 走上面的 !need 分支停掉;
+      // 这一条是防"本端因为某种原因没再收到 render"时定时器永远转下去(回到改动前的
+      // 行为)。注意提交是异步的(tx 往返),刚 maybeAutoRespondTimeout 提交完这一拍
+      // currentG 还是旧快照、仍然 need,会在随后某一拍或 render 时才真正停——这是对的,
+      // 不能因为"刚提交过"就提前停掉,否则提交失败时就没人继续兜底了。
+      if(!autoRespondTimerNeeded()) stopAutoRespondTimer();
+    }, 1000);
+    return;
+  }
+  if(__autoRespondTimerId!==null) stopAutoRespondTimer();
 }
