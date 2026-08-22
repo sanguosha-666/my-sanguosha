@@ -193,3 +193,18 @@
 
   **判断轴**：`game-bg.js` 是纯视觉层、不读游戏状态、不进 `tx`、不触碰机器人决策链与 `pending` 流转，轴 A/B 均未命中，按规则 29 只需最小相关测试集；实际仍跑了全量 **133/133** 通过。**cache-bust**：`game-bg.js` v10→11。
 
+
+- **CORE-144(issue #197):手机端不播大厅背景视频（平板/桌面维持现状）**：同一次手机/平板耗电分析的第四项，紧接 CORE-141 之后做，两者共用同一套设备判定。**问题**：`<video id="bgVideo" autoplay muted loop>` 里的 `bg-1/2/3.mp4` 各 **5~6MB**、`loop` 无限循环。视频硬件解码是持续性功耗负载，而大厅正是「等朋友进房」的场景，可能停留好几分钟、期间用户往往只是盯着屏幕等——纯装饰性的动态背景在这里性价比最低；而且每次进大厅 `pickRandomBgVideo()` 都会随机换一个重新加载，手机上还额外吃 5~6MB 移动流量。
+
+  **范围与判定**：只砍手机，平板/桌面维持现状——和 CORE-141 同一取舍，**直接复用 CORE-141 已经落地并测过的 `isPhoneLayout()`**（`(max-width:640px)` ∪ `(max-height:460px) and (orientation:landscape)`，与 `index.html` CSS 断点逐字同源），不新造第二套判定。新增的 `shouldPlayLobbyVideo()` 只是它的一层语义包装。`isPhoneLayout` 定义在文件下方而 `pickRandomBgVideo` 在上方，函数声明提升保证调用时机没问题（文件末尾那次「加载即执行」的 `pickRandomBgVideo()` 更是在全部定义之后）。
+
+  **手机端的具体效果**：**不设置 `v.src`** —— 这是省流量的关键，只 `pause` 而不管 `src` 的话浏览器仍会把整个文件拉下来；不播放；并隐藏视频与遮罩层，回到 `body` 本来的渐变默认背景——**和进房时 `pauseBgVideo()` 的视觉落点完全一致**，不是一个新的空白状态。新增的 `hideLobbyVideo()` 还会在 `src` 已存在时一并释放（`removeAttribute('src')` + `load()`，沿用 `hideFxVideo` 的既有做法），覆盖「先按平板加载过、后来跨断点变成手机」这种情况，避免已下载的那份继续占内存；**只在确实设过 `src` 时才调 `load()`**，否则部分浏览器会报无源警告。
+
+  **`resumeBgVideo` 里遮罩的处理**：手机端不显示 `#bgVeil`。遮罩（`.bg-veil` 的深色渐变）本来是用来压暗视频、保证前景文字可读的，没有视频时它只会把默认渐变背景再无谓压暗一层。
+
+  **刻意一个字节都没碰的两处**：①**`unmuteBgVideo`/`unlockFxAudio` 音轨解锁**——它除了大厅视频，还负责解锁死亡/闪电/过场三条全屏特效的音轨（`FX_VIDEO_IDS` 包含 `bgVideo` 但不止它），**手机端不播大厅视频不等于可以跳过那套解锁**，否则手机上所有特效都会变哑；测试里有专门断言（首次交互后三条特效视频必须都 `muted===false`）。②**`pauseBgVideo`**——它对所有设备行为一致，不需要也不应该引入设备判定，测试里用源码断言钉住它没被塞进 `shouldPlayLobbyVideo`/`isPhoneLayout`。
+
+  **测试**：新增 `testclass/run_core144_lobby_video_test.js`（17 条），覆盖手机横屏/竖屏不设 `src`、不 `play`、视频与遮罩都收起；平板/桌面逐字维持现状（设 `src` + `load` + `play` + 视频可见）；小平板 800×600（高度 >460）不被手机横屏那条误命中；进房/回大厅往返（平板正常恢复、手机反复往返 5 次仍不播不下载）；★音轨解锁不被破坏；`applyFxAudio` 仍生效；已设过 `src` 时会被释放、从未设过时不调 `load()`；`pauseBgVideo` 源码未被触碰；外加**破坏性验证**（让 `shouldPlayLobbyVideo` 恒 true = 关掉本次限制，确认手机端确实会加载 `bg-N.mp4` 并播放 = 改动前行为）。既有 `run_fx_video_audio_test.js`(3/3)、`run_death_fx_detect_test.js`(8/8)、`run_core141_phone_bg_test.js`(26/26) **全部零改动通过**。
+
+  **判断轴**：纯视觉层，不读游戏状态、不进 `tx`、不触碰机器人决策链与 `pending` 流转，轴 A/B 均未命中；实际仍跑了全量 **134/134** 通过。**cache-bust**：`game-bg.js` v11→12。**未做真机实测**：验证全部来自可控视口的 vm 沙箱（是否设 `src`/是否 `play`/可见性/音轨解锁），省电与省流量的方向是确定的（手机端从「5~6MB 下载 + 持续硬件解码」变成「零下载零解码」），但具体幅度需真机确认。
+
