@@ -169,17 +169,92 @@ function bgTick(ts){
   }
 }
 
+// ============ CORE-141(issue #194):手机端不跑飘牌动画 ============
+// 【为什么】bgTick 是全屏 Canvas 的 rAF 循环,整局游戏期间持续运行:画布按 DPR 放大
+// (手机横屏 844x390 @DPR3 → 2532x1170 ≈ 296 万像素),每帧全量 clearRect,再画最多 18 张
+// 卡、每张都要重设 ctx.font 并 fillText(canvas 文字是 2D 上下文最贵的操作之一)。它是纯
+// 装饰(本文件开头就写着"纯视觉层:不读游戏状态"),却是手机端最大的单项持续耗电源。
+// 平板/桌面维持现状不变——只砍手机。
+//
+// 【设备判定为什么不能只看宽度 —— 这是这次改动最容易做错的地方】
+// 本项目强制引导手机横屏游玩(render.js 的 checkLandscapeGate/isPortrait),所以手机的
+// 实际游玩形态是横屏、视口约 844x390 —— **宽度 844px 正好落在平板断点
+// (min-width:641px) and (max-width:1199px) 区间内**。只按宽度判定的话,手机横屏会被当成
+// 平板,这次改动对真实使用场景等于完全没生效。CLAUDE.md 规则22 与 CORE-122/CORE-126 都
+// 记录过"按宽度分档把手机横屏误当平板"这个已经踩过多次的坑。
+//
+// 所以这里**逐字复用 index.html 里既有的两条手机断点**,不新造判定口径:
+//   @media (max-width:640px)                                   竖屏/窄屏
+//   @media (max-height:460px) and (orientation:landscape)      手机横屏矮视口
+// 两者取并集 = 手机。测试里有断言把这两条查询串和 index.html 的 CSS 断点对账,
+// 防止以后改了 CSS 而这里不同步。
+var BG_PHONE_MEDIA_QUERIES = [
+  '(max-width:640px)',
+  '(max-height:460px) and (orientation:landscape)'
+];
+function isPhoneLayout(){
+  if(typeof window === 'undefined') return false;
+  if(typeof window.matchMedia === 'function'){
+    for(var i = 0; i < BG_PHONE_MEDIA_QUERIES.length; i++){
+      if(window.matchMedia(BG_PHONE_MEDIA_QUERIES[i]).matches) return true;
+    }
+    return false;
+  }
+  // 旧浏览器/测试环境没有 matchMedia:退回等价的宽高比较(和上面两条断点同口径)。
+  // 安全方向选"不判成手机"——宁可多跑动画(维持改动前行为),也不要在判定不可靠时
+  // 把平板/桌面的既有效果误砍掉。
+  var w = window.innerWidth, h = window.innerHeight;
+  if(!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return false;
+  return w <= 640 || (h <= 460 && w > h);
+}
+// bgShouldAnimate:飘牌该不该跑。把三个条件收敛到一处,避免散落在 start/visibilitychange/
+// resize 三个地方各判一次导致口径分叉。
+//   bgRunning       —— 在对局中(进房 startGameBg 置真,回大厅 stopGameBg 置假)
+//   !isPhoneLayout()—— 非手机(本次新增的唯一一条限制)
+//   !document.hidden—— 页面可见(改动前就有的切后台暂停,逐字保留)
+function bgShouldAnimate(){
+  if(!bgRunning) return false;
+  if(isPhoneLayout()) return false;
+  if(typeof document !== 'undefined' && document.hidden) return false;
+  return true;
+}
+// applyBgAnimationPolicy:按 bgShouldAnimate() 的结论启停 rAF,幂等(重复调用不会起多个
+// 循环、也不会重复取消)。start/visibilitychange/resize 三处统一走它。
+function applyBgAnimationPolicy(){
+  if(bgShouldAnimate()){
+    if(!bgRafId){
+      // 起循环前先确保画布已按当前视口/DPR 分配好(手机端此前刻意没分配,见下方说明;
+      // 桌面窗口跨断点变宽时也要在这里补上)。sizeBgCanvas 幂等,重复调用无副作用。
+      sizeBgCanvas();
+      bgLastTs = 0;
+      bgRafId = requestAnimationFrame(bgTick);
+    }
+    return;
+  }
+  if(bgRafId){ cancelAnimationFrame(bgRafId); bgRafId = 0; }
+  // 停下来时把画面擦干净,避免最后一帧的飘牌定格在屏幕上(手机端进房即停、以及桌面窗口
+  // 被拉窄跨过 640px 断点这两种情况都会走到这里)。fallingCards 不清空:切后台暂停时
+  // 保留粒子状态是改动前的既有行为,回来能接着飘,不因为这次重构改掉。
+  if(bgCtx && bgCanvas) bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+}
+
 // 启动飘牌（进房时调用）
 function startGameBg(){
   bgCanvas = document.getElementById('gameBgCanvas');
   if(!bgCanvas || typeof bgCanvas.getContext !== 'function') return;
   bgCtx = bgCanvas.getContext('2d');
   if(!bgCtx) return;
-  sizeBgCanvas();
   bgRunning = true;
   bgLastTs = 0;
   if(bgRafId) cancelAnimationFrame(bgRafId);
-  bgRafId = requestAnimationFrame(bgTick);
+  // CORE-141:改动前这里是无条件 sizeBgCanvas() + requestAnimationFrame(bgTick),
+  // 现在两件事都交给统一策略。
+  // 【为什么连 sizeBgCanvas 也要挪进策略里】它会把画布 backing store 按 DPR 放大分配:
+  // 手机横屏 844x390 @DPR3 → 2532x1170 ≈ 296 万像素 ≈ 11.8MB。手机端既然不画,这块内存
+  // 就不该占——在正要优化的那类设备上白占 11.8MB 还会加剧 GC 压力。不分配时画布保持
+  // 默认的 300x150,几乎不占内存;真要开始画时 applyBgAnimationPolicy 会先补上 sizeBgCanvas()。
+  // 非手机 + 页面可见的落点与改动前逐字一致(照样先 size 再立刻起一帧)。
+  applyBgAnimationPolicy();
 }
 
 // 停止并清空（回大厅时调用）
@@ -209,18 +284,26 @@ function sizeBgCanvas(){
 }
 
 // 页面隐藏暂停、恢复继续；窗口尺寸变化重适配
+// CORE-141:两处都改走 applyBgAnimationPolicy——语义与改动前一致(隐藏则停、可见且在对局
+// 中则续),只是多叠了一条"手机不跑"。
 if(typeof document !== 'undefined'){
-  document.addEventListener('visibilitychange', function(){
-    if(document.hidden){
-      if(bgRafId){ cancelAnimationFrame(bgRafId); bgRafId = 0; }
-    }else if(bgRunning && !bgRafId){
-      bgLastTs = 0;
-      bgRafId = requestAnimationFrame(bgTick);
-    }
-  });
+  document.addEventListener('visibilitychange', applyBgAnimationPolicy);
 }
 if(typeof window !== 'undefined'){
-  window.addEventListener('resize', sizeBgCanvas);
+  // CORE-141:resize/orientationchange 时除了重算画布尺寸,还要重新评估该不该跑——
+  // 桌面窗口拉宽拉窄会跨过 640px 断点,手机横竖屏切换会在两条手机断点之间移动。
+  // orientationchange 单独监听:部分移动浏览器旋转时 resize 触发时机不可靠(render.js
+  // 的 checkLandscapeGate 也是 resize + orientationchange 两个都听,同一惯例)。
+  // 只在真的会画时才重算画布尺寸(手机端不分配,理由见 startGameBg 里的说明);
+  // applyBgAnimationPolicy 内部在需要起循环时会自己补 sizeBgCanvas()。
+  window.addEventListener('resize', function(){
+    if(bgShouldAnimate()) sizeBgCanvas();
+    applyBgAnimationPolicy();
+  });
+  window.addEventListener('orientationchange', function(){
+    if(bgShouldAnimate()) sizeBgCanvas();
+    applyBgAnimationPolicy();
+  });
 }
 
 // ============ 角色死亡特效 ============

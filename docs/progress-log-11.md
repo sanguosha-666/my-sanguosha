@@ -178,3 +178,18 @@
 
   全量套件 **130/130** 通过。**cache-bust**：`bot-ai-bus.js` v409→410、`bot.js` v427→428。
 
+
+- **CORE-141(issue #194):手机端不跑全屏 Canvas 飘牌动画（平板/桌面维持现状）**：来源是一次手机/平板端耗电分析（分析基线 commit `b0affea`），这是分析中定位到的**最大单项持续耗电源**。**问题**：`game-bg.js` 的 `bgTick` 是全屏 Canvas 的 `requestAnimationFrame` 循环，**整局游戏期间无条件持续运行**（`room-lifecycle.js:90` 进房 `startGameBg()` 启动，只有 `backToLobby` 的 `stopGameBg()` 才停）——画布是 `#gameBgCanvas{position:fixed;inset:0}` 全视口且按 DPR 放大（手机横屏 844×390 @DPR3 → 2532×1170 ≈ 296 万像素），每帧全量 `clearRect`（60fps 下约 1.78 亿像素/秒，高刷屏翻倍），再画最多 18 张卡、每张都要 `save/translate/rotate` + 圆角路径 `fill`/`stroke` + **重设 `ctx.font`（尺寸随机，触发字体重新解析）** + `fillText`（canvas 文字是 2D 上下文最贵的操作之一）。而它是**纯装饰**——文件开头自己写着「纯视觉层：不读游戏状态」。已有的 `visibilitychange` 暂停是对的（切后台不耗电），所以耗的全是**正盯着屏幕玩**的时间，正好是用户反馈的场景。
+
+  **设备判定：这次改动最容易做错的地方**。本项目**强制引导手机横屏游玩**（`render.js` 的 `checkLandscapeGate`/`isPortrait`），所以手机的实际游玩形态是横屏、视口约 844×390——**宽度 844px 正好落在平板断点 `(min-width:641px) and (max-width:1199px)` 区间内**。若只按宽度判定，手机横屏会被当成平板，这次改动对真实使用场景**等于完全没生效**。CLAUDE.md 规则 22 与 CORE-122/CORE-126 都记录过「按宽度分档把手机横屏误当平板」这个已踩过多次的坑。因此新增的 `BG_PHONE_MEDIA_QUERIES` **逐字复用 `index.html` 里既有的两条手机断点**（`(max-width:640px)` 竖屏/窄屏、`(max-height:460px) and (orientation:landscape)` 横屏矮视口）取并集，不新造口径；`isPhoneLayout()` 优先 `matchMedia`，无 `matchMedia` 的环境退回等价宽高比较，且**兜底方向刻意选「不判成手机」**——判定不可靠时宁可维持改动前行为多跑动画，也不要误砍平板/桌面的既有效果。测试里有一条断言把这两条查询串**和 `index.html` 的 CSS 断点逐字对账**，防止以后改了 CSS 而 JS 侧不同步。
+
+  **实现结构**：把「该不该跑」的三个条件收敛到 `bgShouldAnimate()`（`bgRunning` 在对局中 / `!isPhoneLayout()` 非手机 / `!document.hidden` 页面可见），再由幂等的 `applyBgAnimationPolicy()` 统一启停；`startGameBg`/`visibilitychange`/`resize`/`orientationchange` 四处全部改走它，避免判定散落各处导致口径分叉。`visibilitychange` 的语义与改动前一致（隐藏则停、可见且在对局中则续），只是多叠了一条「手机不跑」。新增 `orientationchange` 监听：部分移动浏览器旋转时 `resize` 触发时机不可靠，`render.js` 的 `checkLandscapeGate` 也是两个都听，沿用同一惯例。
+
+  **顺带省下的内存**：`sizeBgCanvas()` 会把画布 backing store 按 DPR 放大分配（手机横屏 ≈ **11.8MB**）。手机端既然不画，这块内存就不该占——在正要优化的那类设备上白占 11.8MB 还会加剧 GC 压力。所以把 `sizeBgCanvas()` 也从 `startGameBg` 挪进策略里：不画时画布保持默认 300×150（几乎不占内存），真要开始画时 `applyBgAnimationPolicy` 会先补上。`resize`/`orientationchange` 里也只在 `bgShouldAnimate()` 为真时才重算尺寸，手机端反复旋转不会分配。
+
+  **刻意保留不动的两处**：①`fallingCards` 在停下来时**不清空**——切后台暂停时保留粒子状态是改动前的既有行为，回来能接着飘，不因为这次重构改掉（只有 `stopGameBg` 回大厅时才清）；②`stopGameBg` 除了停 rAF 还负责回大厅时清理残留的全屏特效视频（`deathFxVideo`/`lightningFxVideo`/`movieFxVideo` 的 `hideFxVideo`），**手机端不启动飘牌 ≠ 可以跳过这段清理**，测试里专门有一条断言钉住这一点。
+
+  **测试**：新增 `testclass/run_core141_phone_bg_test.js`（26 条），覆盖设备判定 8 种视口（含 ★手机横屏 844×390 这个宽度落在平板区间的关键场景、iPhone SE 横屏 667×375、小平板 800×600 高度 >460 不被横屏那条误命中）、无 `matchMedia` 兜底分支与 `matchMedia` 分支结论一致、**JS 判定与 `index.html` CSS 断点对账**、手机端不起 rAF 且不分配画布、平板/桌面逐字维持现状（起 rAF + 按 DPR 分配 2048×1536 / 1400×900）、切后台暂停与回前台恢复的既有行为不被破坏、手机端回前台也不恢复（手机限制优先于可见性）、回大厅后不恢复、桌面窗口拉窄跨断点停 rAF 并清屏、拉回桌面重新起 rAF 并补分配画布、`orientationchange` 同样触发重评估、手机端反复旋转不分配画布、`applyBgAnimationPolicy` 幂等、★手机端 `stopGameBg` 仍清理特效视频、粒子清空，外加**破坏性验证**（让 `isPhoneLayout` 恒 false = 关掉本次限制，确认手机端确实会起 rAF 并分配 2532×1170 ≈ 11.8MB 画布 = 改动前行为）。既有的 `run_fx_video_audio_test.js`(3/3)、`run_death_fx_detect_test.js`(8/8) **零改动通过**；全项目扫描确认只有新测试引用 `startGameBg`/`stopGameBg`/`bgTick`/`sizeBgCanvas`。
+
+  **判断轴**：`game-bg.js` 是纯视觉层、不读游戏状态、不进 `tx`、不触碰机器人决策链与 `pending` 流转，轴 A/B 均未命中，按规则 29 只需最小相关测试集；实际仍跑了全量 **133/133** 通过。**cache-bust**：`game-bg.js` v10→11。
+
