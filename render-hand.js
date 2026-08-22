@@ -127,7 +127,7 @@ function renderHand(g){
     // 只保留左上角一个角标,右下角(.corner.br)已删除——单个角标已经能完整传达花色点数
     // 信息,不需要两处重复。
     const imgSrc = cardImageSrc(card.name);
-    const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
+    const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" decoding="async" onerror="cardImgError(this)" alt="">' : '';
     const cornerText = cardFace(card)||'';
     const mountRole = mountRoleText(card);
     // 标题栏字号用 fitFontSize 实测自适应(取代早期"按牌名字数分档手动猜大小"的做法,

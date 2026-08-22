@@ -10,7 +10,7 @@
 function tableCardFaceHtml(card){
   if(!card) return '';
   const imgSrc = cardImageSrc(card.name);
-  const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" onerror="cardImgError(this)" alt="">' : '';
+  const imgTag = imgSrc ? '<img class="card-art" src="'+imgSrc+'" decoding="async" onerror="cardImgError(this)" alt="">' : '';
   const cornerText = cardFace(card)||'';
   const mountRole = mountRoleText(card);
   return '<div class="card '+(imgSrc?'':'no-art')+' table-card-mini">'

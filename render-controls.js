@@ -1280,7 +1280,7 @@ function renderPickGeneral(g, c, opts){
       const factionChip = factionKey ? '<span class="inline-faction faction-'+factionKey+'">'+FACTION_LABEL[factionKey]+'</span>' : '';
       card.innerHTML =
         '<div class="avatar-box">'
-          +'<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" onerror="avatarError(this)" alt="">'
+          +'<img class="avatar" src="'+generalAvatarSrc(gen.id)+'" decoding="async" onerror="avatarError(this)" alt="">'
           +'<div class="avatar-placeholder" style="display:none">'+escapeHtml(gen.name)+'</div>'
         +'</div>'
         +'<div class="general-pick-info">'
