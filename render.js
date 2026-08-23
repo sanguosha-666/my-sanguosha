@@ -1128,7 +1128,16 @@ function renderSeatCard(g, seat, isSelf){
     const prefix = EQUIP_SLOT_ABBR[s];
     if(!c) return isSelf ? '<div class="erow empty-slot"><b>'+prefix+'</b> —</div>' : '';
     const eDesc = (getEquip(c.name) && getEquip(c.name).desc) || '';
-    return '<div class="erow filled'+wideNameCls+'" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+escapeHtml(c.name)+'</div>';
+    // CORE-146:装备名额外带一份"2字简称"(data-s)。手机横屏下座位卡只有 70~90px 宽,
+    // 完整装备名("青龙偃月刀"/"雌雄双股剑")靠 text-overflow:ellipsis 会被截成"武 ♠5…"
+    // 这种零信息量的状态。简称由 CSS 在窄断点里用 ::before content:attr(data-s) 取用——
+    // **断点判断留在 CSS 里**(和 .wide-name 那条不同:那条是 render.js 读 isDesktopLayout(),
+    // 这里刻意不再新增一处 JS 侧断点判断,避免 JS/CSS 两套口径又多一处要同步的地方)。
+    // 取前 2 字而不是维护一张简称表:实测覆盖全部现有装备都能辨认(青龙偃月刀→青龙、
+    // 诸葛连弩→诸葛、八卦阵→八卦、仁王盾→仁王、白银狮子→白银、爪黄飞电→爪黄),
+    // 且以后新增装备零维护成本。≤2 字的名字(的卢/赤兔/绝影/大宛/紫骍)原样。
+    const shortName = escapeHtml(String(c.name).slice(0, 2));
+    return '<div class="erow filled'+wideNameCls+'" title="'+escapeHtml(eDesc)+'" onclick="event.stopPropagation();showEquipInfo(\''+c.name+'\')"><b>'+prefix+'</b> '+seatEquipFace(c)+'<span class="enm" data-s="'+shortName+'">'+escapeHtml(c.name)+'</span></div>';
   }).join('') : '';
   // 装备条(文字列本身)只在真的有内容时才渲染——对手一件装备都没有时不渲染这一块。
   const equipBar = equipRows ? '<div class="seat-equip-bar">'+equipRows+'</div>' : '';
@@ -1972,6 +1981,18 @@ function render(g){
     if(zones && zones[i]==='top' && oppTopRowEl) oppTopRowEl.appendChild(oppDOM);
     else oppRowEl.appendChild(oppDOM);
   });
+  // CORE-146:把"这一行里实际有几张对手卡"暴露成 CSS 变量 --opp-n。
+  // 手机横屏断点用它反推座位卡的高度上限(见 index.html 里 .seat 的 min() 那条):
+  // 卡片是"设 height、靠 aspect-ratio:3/4 反推 width",所以一行要放得下几张卡这件事
+  // 必须回过头来限制高度。**不能在 CSS 里写死张数**——SEATS=9 意味着对手数是 1~8 的
+  // 变量:写死最坏情况(8)会让 3 人局的卡片在窄屏上被无谓压小,写死 7 又会让 9 人局横向
+  // 溢出。这里取 oppRow 的实际子节点数,人数怎么变都对得上。
+  // 下限夹到 1:2 人局只有 1 个对手,且 calc 里它当除数,不能为 0。
+  // 【注意:多数情况下这个值不会改变卡片尺寸,这是正常的】CSS 那边是
+  // min(屏高预算, 本项),宽视口上本项算出来始终比屏高预算大,min() 取的是屏高那一项——
+  // 所以 844/932 上 2~9 人局的卡片尺寸完全相同。只有窄屏+人多(实测 667x375 的 7、8 对手)
+  // 时本项才会更小并接管。详见 index.html 里 .seat 那条 min() 的完整实测数据。
+  oppRowEl.style.setProperty('--opp-n', String(Math.max(1, oppRowEl.children.length)));
   // 中央出牌区:和音效共用同一批 markCardSound 调用点、同一个 seq 序列。调用点必须放在
   // 座位卡片(.seat)全部重新创建完毕之后——曾经放在 render() 更靠前的位置(座位重绘之前),
   // 结果是这一次 render() 里先给旧的座位元素加上高亮 class,紧接着座位重绘又把这些旧元素

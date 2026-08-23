@@ -2350,6 +2350,138 @@
     .hand .card{flex:0 0 auto;}
   }
 
+  /* ============================================================================
+     CORE-146:手机横屏(触屏)对局布局修复
+     ----------------------------------------------------------------------------
+     【实测出的问题,844x390 / 667x375 各量过一遍】
+       ① 座位卡只有 73x98 → 落进最小的 @container (max-width:85px) 档,势力标 6px、
+          武将名/血量 7px、装备条 7px —— 远低于"最小可读 10px"的目标。
+       ② 装备条 4 行是 "武 ♠5 青龙偃月刀" 这种结构,73px 宽里只放得下 "武 ♠5…",
+          装备名被 text-overflow:ellipsis 吃光,完全零信息量。
+       ③ 像素级扫描:累计空白 130px = 屏高 33%(y108~139 座位↔出牌区 31px、
+          y205~246 出牌区内部 30px、y362~390 底部 28px)。
+     【为什么放在这里(而不是并进上面那两个横屏块)】按 CLAUDE.md 规则19,同特异性下
+     **后写的赢**。平板块 @media(min-width:641px) and (max-width:1199px) 在 2172 行,
+     而手机横屏 844x390 的宽度正好落在它的区间里 —— 写在它前面的规则会被它盖掉。
+     这一整块必须留在平板块之后。
+     【为什么带 pointer:coarse】保证只作用于真实触屏设备。桌面浏览器即使把窗口拉成
+     又宽又矮(会命中 max-height 条件),pointer:fine 也不会匹配,桌面端零影响 ——
+     这是"只改横屏移动端、不动桌面端"这条约束的技术落点。 */
+  @media (max-height:520px) and (orientation:landscape) and (pointer:coarse){
+
+    /* ---- ① 功能圆钮缩小到 68%(44px → 30px) ----
+       44px 是 CORE-118 为触控目标定的最小尺寸,但在 390px 高的屏幕上它单独占掉 11%
+       的屏高,并把 .panel.table 整体撑到 107px。30px 仍在可点范围(六个钮横向排列、
+       彼此有 gap,不是密集列表),换来 14px 纵向空间还给座位卡。 */
+    #gameToolbar .icon-btn{width:30px;height:30px;font-size:15px;}
+    #gameToolbar #helpBtn{font-size:16px;}
+
+    /* ---- ② 压缩出牌区内部空白 ---- */
+    .controls button{padding:4px 8px;font-size:10px;}
+    .banner{padding:2px 5px;margin:0;}
+
+    /* ---- ③ 把省出来的纵向空间还给座位卡 ----
+       这一步同时解决了字号问题的根因:座位卡从 73px 宽长到 87~99px,**直接跨过
+       @container (max-width:85px) 那一档**(那一档把势力标压到 6px、武将名/血量压到
+       7px),字号自动升一级,再叠加下面 ④ 的显式覆盖才达到 ≥9px。
+       【尺寸必须同时受"屏高"和"可用横向宽度"两个约束,取较小者】
+       座位卡在这个断点是"设 height、靠 aspect-ratio:3/4 反推 width",所以高度同时决定了
+       宽度,而 8 人局要在一行里放下 7 张对手卡。
+       - 只按 dvh 定:844x390 上合适的值(34dvh)拿到 667x375 上会让 7 张卡横向放不下,
+         实测把页高从 375 撑到 392 —— 这是一次真实的回归(已通过下面的 min() 修掉)。
+       - 只按 vw 定:又会浪费 390px 高机型的纵向空间。
+       所以取 min():前一项是屏高预算,后一项是"这一行的卡 + 间距塞进视口宽"反推出的
+       高度上限(÷0.75 = aspect-ratio 3/4 的倒数)。
+       **张数用 --opp-n 动态取,不写死**:SEATS=9 意味着对手数是 1~8 的变量——写死最坏
+       情况(8)会让 3 人局的卡片在窄屏上被无谓压小,写死 7 又会让 9 人局横向溢出(实测
+       9 人局在 844/667/932 三个尺寸上都溢出 7px)。--opp-n 由 render.js 在装配完 #oppRow
+       后按实际子节点数写上(见那处注释),fallback 7 只在变量还没写上的极早期渲染里兜底。
+       【24px 和 4px 这两个常量必须和下面 .wrap / .opp-row 的实际取值对齐】
+       = .wrap 左右 padding(8+8) + .opp-row 左右 padding(4+4) + 每张卡之间 4px 的 gap
+       (按 n 个 gap 算,比实际的 n-1 个多留一格,是刻意的保守余量)。**正因为要对齐,
+       下面才必须把 .wrap 和 .opp-row 的 padding/gap 也在本块里钉死**——手机横屏 844/932
+       的宽度落在平板断点 (min-width:641px)~(max-width:1199px) 里,平板块会把它们改成
+       12px/7px,常量就对不上了(这正是 9 人局那次溢出的直接原因)。
+       实测(改后):8人局 844→100px宽、667→87px、932→110px;9人局 844→98px、667→76px、
+       932→110px,全部不溢出。 */
+    .wrap{padding:4px 8px;}
+    .opp-row{padding:2px 4px;gap:4px;}
+    /* 【33dvh 是实测上界,不是随手取的】少人局(2/3/5人)时横向约束很宽松、完全由 dvh 项
+       决定卡片大小,这时最紧的是 667x375 这类矮视口:34dvh 在 375px 高上算出 128px 卡,
+       页面总高 378 > 375(实测溢出 3px);33dvh 算出 124px,总高 374 刚好收住。
+
+       【为什么多数人数档下卡片尺寸完全一样 —— 这是设计,不是 --opp-n 失效】
+       实测两项各自的取值(逐档量出来的,不是推算):
+         844x390   dvh项 128.7 | 横向项 1088→541→268→150.8→131.3(1~8 对手)  → 横向项**始终**更大,dvh 全程生效
+         667x375   dvh项 123.8 | 横向项  852→423→209→117.1→101.8            → 7、8 对手时横向项接管
+         932x430   dvh项 141.9 | 横向项 1205→600→297→167.6→146.0            → 横向项始终更大,dvh 全程生效
+       所以 2/3/5/8 人局在 844 与 932 上尺寸完全相同(97x129 / 106x142)是**正确结果**:
+       dvh 是"一屏装得下"的高度预算上限,横向项只是"这么多张卡塞不塞得进一行"的额外封顶,
+       只在窄屏+人多时才会更小并接管。横向项随 n 严格单调下降、完全吻合
+       (W-24-4n)/n/0.75,说明 --opp-n 每一档都真的参与了计算。
+       testclass/run_core146_equip_short_name_test.js 之外,tools/verify_mobile_landscape.js
+       与人数矩阵验证里都断言了 "--opp-n 与实际张数一致",真失效时会立刻变红。 */
+    .seat{height:min(clamp(70px, 33dvh, 150px),
+                     calc((100vw - 24px - var(--opp-n, 7) * 4px) / var(--opp-n, 7) / 0.75));}
+    /* "我"的卡不受"一行放几张"的横向约束(只有一张),所以只按屏高定。31dvh 是实测出的
+       上界:33dvh 会让 667x375 的页高涨到 381 > 375(又一次溢出),31dvh 在 375 上算出
+       116px、390 上 121px,两者都刚好收在视口内。 */
+    .seat.me{height:clamp(74px, 31dvh, 146px);}
+    /* 手牌卡跟着 .seat.me 一起放大:两者同在 .bottom-row 里,如果手牌停在原来的 60x86,
+       被更高的"我"的卡撑起来的这一行就会在手牌下方空出一截。 */
+    .hand .card{width:66px;height:94px;--badge:16px;}
+    /* 中央出牌区:min-height 只是"没牌时的占位下限",真的有人出牌时 flex 会自然撑开,
+       所以这里可以压得很小。**不要用 :not(:has(...)) 去做条件收缩** —— 实测没生效:
+       #tableStrip 里除了 #tableCard 还常驻一个 #discardReveal(position:absolute 不占
+       布局高度,但 :has 会把它算成"有子元素"),条件永远为假。直接压 min-height 更简单
+       也更可靠。 */
+    .table-strip{min-height:12px;padding:1px 4px;}
+    .table-card{min-height:10px;}
+    /* 出牌区内部的行间距(banner ↔ 结束出牌 之间实测还有 10px+14px 两段空白) */
+    .panel.table{gap:0 6px;}
+    #controls{margin-top:0;}
+
+    /* ---- ④ 字号下限 ≥9px ----
+       必须写在 @container 分档(760~812 行)之后才压得住 —— @container 本身不增加
+       specificity(规则19 里记过这个坑),靠的纯粹是源码顺序。 */
+    .seat-gen-name{font-size:9px;letter-spacing:0;}
+    .seat-hp-col{font-size:9px;padding:1px 2px;}
+    .seat-equip-bar{font-size:9px;line-height:1.2;}
+    .seat .seat-info-badge{width:12px;height:12px;font-size:9px;}
+    .seat-order-badge{width:12px;height:12px;font-size:9px;}
+    .deckinfo{font-size:9px;}
+    .phase-pill{font-size:9px;}
+
+    /* ---- ⑤ 势力标:加粗单字(而不是纯色块) ----
+       【为什么最终选"字"而不是"色块"】第一版做的是纯色块(font-size:0),但用
+       Brettel/Viénot 线性RGB法模拟三类色觉障碍后实测**不可用**:
+         正常色觉  最小色差 ΔE=29.0  ✅
+         红色盲    蜀(#b1361e) ↔ 群(#7d5f2a)  ΔE=4.9   ❌ 完全不可分
+         绿色盲    魏(#3a5f8a) ↔ 晋(#5a3a7a)  ΔE=6.0   ❌ 完全不可分
+         蓝色盲    魏 ↔ 吴                    ΔE=15.4  ⚠ 勉强
+       五个势力色里有两对在红/绿色盲下几乎重合,只靠颜色等于对这部分玩家丢失信息。
+       改回单字并加粗:**颜色降级为辅助**(色觉正常的人仍靠颜色快速扫读),字才是主标识。
+       字号 9px + font-weight:800,色块放大到 12px 容纳它 —— 这不是"靠缩字号硬塞",
+       是先把座位卡整体做大(见 ③)腾出的空间。
+       白字在五个底色上的对比度(CSS 注释里既有的实测值)分别是 6.60/6.15/4.75/5.93/9.05,
+       全部 ≥4.5 的 WCAG AA 线。 */
+    .seat-faction{width:12px;height:12px;font-size:9px;font-weight:800;}
+
+    /* ---- ⑥ 装备条:显示 2 字简称,不再出现"武 ♠5…"这种截断 ----
+       三件事一起做才有效:
+         a) 隐藏花色点数(.efd) —— 它占掉近 1/3 行宽,而对手装备的花色点数属于次要信息
+            (真要查,装备行本身就是可点的 .erow.filled → showEquipInfo 弹完整说明);
+         b) 用 ::before content:attr(data-s) 取 render.js 附带的 2 字简称,原文字
+            font-size:0 收起(不能 display:none —— 那样 data-s 的 ::before 也一起没了);
+         c) text-overflow 从 ellipsis 改回 clip,并保持 nowrap:简称加槽位首字一共 3 个
+            字符,9px 下约 27px,在 91px 卡片的装备条(约 60px)里绰绰有余,不会再触发截断。
+       结果从 "武 ♠5…" 变成 "武 青龙",装备是什么一眼可读。 */
+    .seat-equip-bar .erow{text-overflow:clip;}
+    .seat-equip-bar .erow .efd{display:none;}
+    .seat-equip-bar .erow .enm{font-size:0;}
+    .seat-equip-bar .erow .enm::before{content:attr(data-s);font-size:9px;}
+  }
+
   /* ===== 背景视觉层（大厅视频 + 游戏内飘牌 Canvas） ===== */
   .bg-video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none;background:transparent;}
   .bg-veil{position:fixed;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg, rgba(26,23,20,.40) 0%, rgba(26,23,20,.62) 100%);}
@@ -2529,7 +2661,7 @@
 <script src="bot-ai-bus.js?v=412"></script>
 <script src="bot.js?v=428"></script>
 <script src="ai-bot.js?v=411"></script>
-<script src="render.js?v=437"></script>
+<script src="render.js?v=440"></script>
 <script src="render-table.js?v=396"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=395"></script>
