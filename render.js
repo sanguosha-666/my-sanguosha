@@ -1981,6 +1981,14 @@ function render(g){
     if(zones && zones[i]==='top' && oppTopRowEl) oppTopRowEl.appendChild(oppDOM);
     else oppRowEl.appendChild(oppDOM);
   });
+  // CORE-146:把"这一行里实际有几张对手卡"暴露成 CSS 变量 --opp-n。
+  // 手机横屏断点用它反推座位卡的高度上限(见 index.html 里 .seat 的 min() 那条):
+  // 卡片是"设 height、靠 aspect-ratio:3/4 反推 width",所以一行要放得下几张卡这件事
+  // 必须回过头来限制高度。**不能在 CSS 里写死张数**——SEATS=9 意味着对手数是 1~8 的
+  // 变量:写死最坏情况(8)会让 3 人局的卡片在窄屏上被无谓压小,写死 7 又会让 9 人局横向
+  // 溢出。这里取 oppRow 的实际子节点数,人数怎么变都对得上。
+  // 下限夹到 1:2 人局只有 1 个对手,且 calc 里它当除数,不能为 0。
+  oppRowEl.style.setProperty('--opp-n', String(Math.max(1, oppRowEl.children.length)));
   // 中央出牌区:和音效共用同一批 markCardSound 调用点、同一个 seq 序列。调用点必须放在
   // 座位卡片(.seat)全部重新创建完毕之后——曾经放在 render() 更靠前的位置(座位重绘之前),
   // 结果是这一次 render() 里先给旧的座位元素加上高亮 class,紧接着座位重绘又把这些旧元素
