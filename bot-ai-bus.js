@@ -912,7 +912,14 @@ async function botDecide(decisionId, g, seat){
 function renderResponseCountdown(g){
   if(!g || !g.pending || typeof g.pending.askedAt !== 'number') return null;
   const remain = Math.ceil((g.pending.askedAt + RESPONSE_TIMEOUT_MS - Date.now()) / 1000);
-  return '⏱ ' + Math.max(remain, 0) + 's 后自动…';
+  // CORE-146:原文案是"⏱ Ns 后自动…"——那个省略号是**写死在文案里的**,不是布局截断
+  // (实测 .banner 的 whiteSpace:normal / overflow:visible / clipped:false,横幅是满宽的、
+  // 放得下)。但"自动…"确实没说清会替你做什么,玩家看到只知道有事要发生、不知道是什么。
+  // 改成"自动替你决定":这个说法对所有阶段都准确(超时托管的语义就是替你提交一个保守
+  // 动作),比省略号信息量高,且不会说错。
+  // **要显示具体动作**(如"自动不出闪"/"自动弃两张牌")需要给 STAGE_TABLE 的每个
+  // timeoutAction 补一条可读标签——那是几十个阶段逐个登记的独立工作,不在本次范围。
+  return '⏱ ' + Math.max(remain, 0) + 's 后自动替你决定';
 }
 // autoRespondAction: 保守动作表(spec §2.2 逐条)。返回"该阶段超时该提交的动作闭包",
 // 非保守表阶段返回 null(只计时不自动提交)。闭包体内引用响应函数标识符是运行时查找,

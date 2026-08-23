@@ -8,7 +8,7 @@
  * 2. 未超时 -> 不提交(spy 不被调)
  * 3. 阶段已变(服务端 pending 已清) -> 提交被拒无副作用(真实响应函数走 tx,守卫拦截)
  * 4. normalize 对无 askedAt 的响应型 pending 补戳
- * 5. renderResponseCountdown 输出 "⏱ Ns 后自动…"
+ * 5. renderResponseCountdown 输出 "⏱ Ns 后自动替你决定"
  * 6. 无密钥路径不受影响(超时托管不触发任何 AI 调用)
  *
  * 已知 vm 坑:game.js 的 let mySeat/gameRef 是脚本作用域绑定,沙箱属性赋值无效,必须用
@@ -190,15 +190,18 @@ const testCode = String.raw`
     if(g4b.pending.askedAt !== 12345) throw new Error('askedAt 应保持 12345,实际 ' + g4b.pending.askedAt);
   });
 
-  // 5. 倒计时文案:renderResponseCountdown 输出 "⏱ Ns 后自动…"
+  // 5. 倒计时文案:renderResponseCountdown 输出 "⏱ Ns 后自动替你决定"
+  //    (CORE-146:原文案末尾是省略号,那是**写死在文案里的**、不是布局截断——实测横幅
+  //     whiteSpace:normal / overflow:visible / clipped:false,一行放得下。省略号只是没说清
+  //     会替你做什么,所以补全成"替你决定"。)
   var g5 = mkG({
     phase: 'wuxie',
     pending: { type: 'wuxie', from: 0, to: 0, exclude: 0, depth: 0, asking: 1, askedAt: Date.now() - 5000 }
   });
   var cd = renderResponseCountdown(g5);
-  await check('renderResponseCountdown 输出 "⏱ Ns 后自动…"', function(){
+  await check('renderResponseCountdown 输出 "⏱ Ns 后自动替你决定"', function(){
     if(typeof cd !== 'string') throw new Error('应返回字符串,实际 ' + cd);
-    if(!/⏱ \d+s 后自动…/.test(cd)) throw new Error('文案格式不符: ' + cd);
+    if(!/⏱ \d+s 后自动替你决定/.test(cd)) throw new Error('文案格式不符: ' + cd);
     var n = parseInt(cd.match(/⏱ (\d+)s/)[1], 10);
     if(n < 24 || n > 26) throw new Error('剩余秒数应约 25(askedAt=now-5s),实际 ' + n);
   });
