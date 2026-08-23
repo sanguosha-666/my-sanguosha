@@ -2464,8 +2464,27 @@
        字号 9px + font-weight:800,色块放大到 12px 容纳它 —— 这不是"靠缩字号硬塞",
        是先把座位卡整体做大(见 ③)腾出的空间。
        白字在五个底色上的对比度(CSS 注释里既有的实测值)分别是 6.60/6.15/4.75/5.93/9.05,
-       全部 ≥4.5 的 WCAG AA 线。 */
-    .seat-faction{width:12px;height:12px;font-size:9px;font-weight:800;}
+       全部 ≥4.5 的 WCAG AA 线。
+       【描边:单向投影,不是 .hi-count 那套四向描边 —— 实测选出来的】
+       本来打算直接复用 .seat-hand-icon .hi-count 的手法(4 向 1px 黑描边 + 两层 2px 辉光),
+       6 倍放大渲染出来一看是**负优化**:9px 汉字的笔画间隙本身只有 1px 上下,四向 1px
+       黑描边把间隙全填死,"魏/群/蜀"这种 10 画以上的字整个糊成黑块。
+       量化(逐字截图统计"底色仍可见的像素占比",越高说明势力色没被描边压黑):
+         A 无描边          72.1%
+         E 单向投影        63.6%   ← 采用
+         F 发光+单向       57.0%
+         C 仅外发光        55.8%
+         D 细描边 .5px     50.2%
+         B .hi-count 同款  38.3%   ← 势力色被吃掉近 2/3
+       B 把势力色可见度从 72% 打到 38%,色块近一半变黑 —— 这不只是"看着糊",而是直接
+       毁掉色觉正常玩家赖以快速扫读的颜色线索(色觉障碍玩家靠的是字,见上面 ⑤ 的说明,
+       两边都要照顾)。
+       **为什么 .hi-count 那套在它自己的场景里没问题**:它渲染的是 1~2 位阿拉伯数字,
+       笔画稀疏、间隙远大于 1px,且叠在立绘上(背景不可控,必须靠重描边压出对比);
+       势力标是纯色块背景、白字对比度已 ≥4.5,只需要轻微增强边界即可。
+       E 单向投影只在字的下方投一层,不包围字形、不填充笔画间隙。 */
+    .seat-faction{width:12px;height:12px;font-size:9px;font-weight:800;
+      text-shadow:0 1px 1px rgba(0,0,0,.85);}
 
     /* ---- ⑥ 装备条:显示 2 字简称,不再出现"武 ♠5…"这种截断 ----
        三件事一起做才有效:
@@ -2661,7 +2680,7 @@
 <script src="bot-ai-bus.js?v=412"></script>
 <script src="bot.js?v=428"></script>
 <script src="ai-bot.js?v=411"></script>
-<script src="render.js?v=440"></script>
+<script src="render.js?v=441"></script>
 <script src="render-table.js?v=396"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=395"></script>
