@@ -19,3 +19,7 @@ Desktop.ini
 
 # 会话进度文件(不入库)
 TASKS.md
+
+# 跑 Playwright/sharp 时会在项目根建一条指向 scratchpad 的 node_modules 软链,
+# 那些包只装在 scratchpad、不是本项目的依赖(本项目无构建流程、无 package.json)。
+node_modules
