@@ -80,6 +80,16 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
         docH:document.documentElement.scrollHeight, vh:innerHeight, vw:innerWidth,
         seatN:seats.length, seatW:sr?Math.round(sr.width):0, seatH:sr?Math.round(sr.height):0,
         minF, minEl, clip, eq, hOver,
+        // 【体力的表达形式】手机横屏把体力从"竖排红心"换成了 data-hp 的"当前/上限"数字。
+        // 那是 CSS 断点内的事,但 data-hp 属性是 render.js 无条件输出的 —— 必须钉住
+        // 桌面/平板**没有被顺带改变**:心的 div 仍然可见,且没有任何规则把 ::before 显示出来。
+        hp: (()=>{ const c=s0?s0.querySelector('.seat-hp-col'):null; if(!c) return null;
+          const kids=[...c.children];
+          const bf=getComputedStyle(c,'::before').content;
+          return { attr: c.getAttribute('data-hp'),
+                   hearts: kids.filter(e=>getComputedStyle(e).display!=='none').length,
+                   heartTxt: kids.map(e=>e.textContent).join(''),
+                   before: (bf&&bf!=='none'&&bf!=='normal') ? bf.replace(/"/g,'') : '' }; })(),
         facSize: facR?Math.round(facR.width)+'x'+Math.round(facR.height):'-',
         facBg: fac?getComputedStyle(fac).backgroundColor:'-',
         btn: btn?Math.round(btn.getBoundingClientRect().width):0,
@@ -94,6 +104,19 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
     // 允许页面纵向滚动**(index.html 平板块注释:".log-panel 在文档流里,不像手机横屏那样
     // 必须一屏装完")。改动前实测平板同样溢出 364px/4px,数值与改动后完全一致 —— 对平板
     // 套用"不得溢出"是错的口径,那条断言会永远红,和永远绿一样没有价值(CLAUDE.md 规则20)。
+    if(m.hp){
+      if(vp.phone){
+        (m.hp.hearts===0 && /^\d+\/\d+$/.test(m.hp.before))
+          ? P('手机横屏:体力显示为"'+m.hp.before+'"数字(心已隐藏)')
+          : F('手机横屏:体力表达异常 hearts='+m.hp.hearts+' before="'+m.hp.before+'"');
+      } else {
+        // 桌面/平板必须**原样**保留竖排红心。data-hp 属性可以在(它只是数据),但不能有任何
+        // 规则读它、也不能有规则隐藏心 —— 否则就是手机横屏的改动漏到了桌面端。
+        (m.hp.hearts>0 && m.hp.before==='')
+          ? P('桌面/平板:体力仍是竖排红心 '+m.hp.hearts+' 颗("'+m.hp.heartTxt+'"),未被 data-hp 改动波及')
+          : F('桌面/平板:体力表达被改变! hearts='+m.hp.hearts+' before="'+m.hp.before+'"');
+      }
+    }
     if(vp.phone || vp.desktop){
       m.docH<=m.vh+1 ? P('无纵向溢出 ('+m.docH+'/'+m.vh+')') : F('纵向溢出 '+(m.docH-m.vh)+'px ('+m.docH+'/'+m.vh+')');
     } else {
