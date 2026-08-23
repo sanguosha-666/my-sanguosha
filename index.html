@@ -2409,7 +2409,18 @@
     /* 【33dvh 是实测上界,不是随手取的】少人局(2/3/5人)时横向约束很宽松、完全由 dvh 项
        决定卡片大小,这时最紧的是 667x375 这类矮视口:34dvh 在 375px 高上算出 128px 卡,
        页面总高 378 > 375(实测溢出 3px);33dvh 算出 124px,总高 374 刚好收住。
-       8~9 人局反而不受这条限制——那时横向项(≈102~116px)比 dvh 项更小,min() 取的是它。 */
+
+       【为什么多数人数档下卡片尺寸完全一样 —— 这是设计,不是 --opp-n 失效】
+       实测两项各自的取值(逐档量出来的,不是推算):
+         844x390   dvh项 128.7 | 横向项 1088→541→268→150.8→131.3(1~8 对手)  → 横向项**始终**更大,dvh 全程生效
+         667x375   dvh项 123.8 | 横向项  852→423→209→117.1→101.8            → 7、8 对手时横向项接管
+         932x430   dvh项 141.9 | 横向项 1205→600→297→167.6→146.0            → 横向项始终更大,dvh 全程生效
+       所以 2/3/5/8 人局在 844 与 932 上尺寸完全相同(97x129 / 106x142)是**正确结果**:
+       dvh 是"一屏装得下"的高度预算上限,横向项只是"这么多张卡塞不塞得进一行"的额外封顶,
+       只在窄屏+人多时才会更小并接管。横向项随 n 严格单调下降、完全吻合
+       (W-24-4n)/n/0.75,说明 --opp-n 每一档都真的参与了计算。
+       testclass/run_core146_equip_short_name_test.js 之外,tools/verify_mobile_landscape.js
+       与人数矩阵验证里都断言了 "--opp-n 与实际张数一致",真失效时会立刻变红。 */
     .seat{height:min(clamp(70px, 33dvh, 150px),
                      calc((100vw - 24px - var(--opp-n, 7) * 4px) / var(--opp-n, 7) / 0.75));}
     /* "我"的卡不受"一行放几张"的横向约束(只有一张),所以只按屏高定。31dvh 是实测出的
@@ -2650,7 +2661,7 @@
 <script src="bot-ai-bus.js?v=412"></script>
 <script src="bot.js?v=428"></script>
 <script src="ai-bot.js?v=411"></script>
-<script src="render.js?v=439"></script>
+<script src="render.js?v=440"></script>
 <script src="render-table.js?v=396"></script>
 <script src="render-discard.js?v=395"></script>
 <script src="render-hand.js?v=395"></script>

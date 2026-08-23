@@ -119,6 +119,46 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
     console.log('');
     await ctx.close();
   }
+
+  // ============================================================================
+  // 【--opp-n 真的在参与计算吗】用户在 review 时问过:2/5/8 人局的卡片尺寸完全相同,
+  // 是不是 --opp-n 在少人局失效了?答案是"没失效,只是被屏高预算盖住了"——
+  // .seat 的高度是 min(屏高预算, 横向约束),宽视口上横向约束算出来始终更大。
+  // 光看最终尺寸区分不出"横向项正常但没生效"和"横向项算错/失效",所以这里**直接量
+  // 两项各自的计算值**:横向项必须随对手数严格单调下降,且吻合 (W-24-4n)/n/0.75。
+  // 真失效(比如 --opp-n 没写上、fallback 恒为 7)时,这条会立刻变红。
+  // ============================================================================
+  console.log('\n■ --opp-n 有效性(直接量 min() 的两项)');
+  {
+    const ctx=await b.newContext({viewport:{width:667,height:375},hasTouch:true,isMobile:true,deviceScaleFactor:1});
+    const p=await ctx.newPage();
+    await p.goto('file://'+path.join(ROOT,'index.html')); await p.waitForTimeout(200);
+    await p.evaluate(`document.getElementById('lobby').classList.add('hidden');document.getElementById('game').classList.remove('hidden');`);
+    const terms=[];
+    for(const N of [2,3,5,8,9]){
+      await p.evaluate(mkSetup(N)); await p.waitForTimeout(200);
+      const t=await p.evaluate(()=>{
+        const row=document.getElementById('oppRow');
+        const n=+row.style.getPropertyValue('--opp-n');
+        const probe=document.createElement('div');
+        probe.style.position='absolute'; probe.style.visibility='hidden';
+        row.appendChild(probe);
+        probe.style.height='calc((100vw - 24px - '+n+' * 4px) / '+n+' / 0.75)';
+        const hTerm=parseFloat(getComputedStyle(probe).height);
+        probe.remove();
+        return {n,hTerm,vw:innerWidth};
+      });
+      terms.push(t);
+    }
+    let mono=true;
+    for(let i=1;i<terms.length;i++) if(!(terms[i].hTerm < terms[i-1].hTerm)) mono=false;
+    mono ? P('横向项随对手数严格单调下降: '+terms.map(t=>t.n+'→'+t.hTerm.toFixed(0)).join(' '))
+         : F('横向项没有随对手数下降,--opp-n 很可能没生效: '+JSON.stringify(terms));
+    const bad=terms.filter(t=>Math.abs(t.hTerm-((t.vw-24-t.n*4)/t.n/0.75))>1);
+    bad.length===0 ? P('横向项数值吻合 (W-24-4n)/n/0.75')
+                   : F('横向项与公式不符: '+JSON.stringify(bad));
+    await ctx.close();
+  }
   await b.close();
   console.log('\n结果: '+pass+' 通过, '+fail+' 失败');
   if(fail) process.exit(1);
