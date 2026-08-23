@@ -121,6 +121,112 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
   }
 
   // ============================================================================
+  // 【座位卡逐元素体检:对手卡 + "我"的卡都要过】
+  // 上一轮的教训:这个文件只量了 #oppRow .seat,从没量过 #meSeat —— 于是 .seat.me 那批
+  // 特异性 (0,2,0) 的桌面尺寸覆盖把手机横屏的字号/尺寸规则全盖回去了,漏了整整一轮
+  // (回合标签压住玩家名、武将名撞进装备槽、体力心被视口裁掉)。CLAUDE.md 规则18 说的
+  // "验证样本要挑最刁钻的"——这里最刁钻的样本不是某个数值,而是**另一类卡片**。
+  // 断言:无元素重叠 / 最小字号 ≥9px / 装备名无截断 / 卡片未被视口裁切。
+  // ============================================================================
+  const inspectSeat = `(sel => {
+    const s = document.querySelector(sel);
+    if(!s) return {err:'找不到 '+sel};
+    const sr = s.getBoundingClientRect();
+    const items = [];
+    s.querySelectorAll('*').forEach(e => {
+      if(e.children.length) return;                 // 只看叶子节点
+      const cs = getComputedStyle(e);
+      if(cs.display==='none' || cs.visibility==='hidden' || cs.opacity==='0') return;
+      const bf = getComputedStyle(e,'::before').content;
+      const txt = e.textContent.trim();
+      const hasBefore = bf && bf!=='none' && bf!=='normal';
+      if(!txt && !hasBefore) return;
+      const r = e.getBoundingClientRect();
+      if(r.width<1 || r.height<1) return;           // 被折叠的(如 font-size:0 的原文字)不算
+      let f = parseFloat(cs.fontSize);
+      if(f === 0 && hasBefore) f = parseFloat(getComputedStyle(e,'::before').fontSize);
+      items.push({
+        c: (typeof e.className==='string' ? e.className : '').split(' ')[0] || e.tagName,
+        txt: (txt || bf.replace(/"/g,'')).slice(0,10),
+        f, t:r.top, b:r.bottom, l:r.left, rt:r.right,
+        clip: e.scrollWidth > e.clientWidth+1 || e.scrollHeight > e.clientHeight+1,
+        isEquipName: e.classList.contains('enm')
+      });
+    });
+    // 两两求交集。容差 2px:相邻行的 line-box 常有 1~2px 的名义交叠,字形本身并不相碰。
+    const TOL = 2;
+    const overlaps = [];
+    for(let i=0;i<items.length;i++) for(let j=i+1;j<items.length;j++){
+      const A=items[i], B=items[j];
+      const x = Math.min(A.rt,B.rt) - Math.max(A.l,B.l);
+      const y = Math.min(A.b,B.b) - Math.max(A.t,B.t);
+      if(x>TOL && y>TOL) overlaps.push({a:A.c+'("'+A.txt+'")', b:B.c+'("'+B.txt+'")',
+        w:Math.round(x), h:Math.round(y)});
+    }
+    const minF = items.reduce((m,i)=>Math.min(m,i.f), 99);
+    const minEl = (items.find(i=>i.f===minF)||{});
+    return {
+      rect:{t:Math.round(sr.top),b:Math.round(sr.bottom),l:Math.round(sr.left),r:Math.round(sr.right),
+            w:Math.round(sr.width),h:Math.round(sr.height)},
+      vw:innerWidth, vh:innerHeight,
+      overlaps, minF, minEl:minEl.c+':'+minEl.txt,
+      clippedEquip: items.filter(i=>i.isEquipName && i.clip).map(i=>i.txt),
+      clippedAny: items.filter(i=>i.clip).map(i=>i.c+':'+i.txt)
+    };
+  })`;
+
+  console.log('\n■ 座位卡逐元素体检矩阵(5种人数 x 3种横屏视口, 我=左慈带化身)');
+  // 【为什么是矩阵而不是单点】上一轮这块只跑了 844x390 / 8人局一个样本,结果"我"的座位卡
+  // 从头到尾没被断言覆盖过(用 .seat-X 写的覆盖特异性 0,1,0 压不住基础样式里 .seat.me .seat-X
+  // 的 0,2,0,整张卡一直停在桌面尺寸),漏了很久都没被发现。人数决定卡片宽度(--opp-n)、
+  // 视口高度决定卡片高度(dvh),两个维度各自都会改变布局,必须交叉跑。
+  const COUNTS=[2,4,6,8,9];               // 2=开局门槛下限, 9=SEATS 上限
+  const SEAT_VPS=[[844,390],[667,375],[932,430]];  // 667x375 是已知最矮的横屏样本
+  for(const [vw,vh] of SEAT_VPS) for(const n of COUNTS){
+    const tag='('+vw+'x'+vh+', '+n+'人局)';
+    const ctx=await b.newContext({viewport:{width:vw,height:vh},hasTouch:true,isMobile:true,deviceScaleFactor:1});
+    const p=await ctx.newPage();
+    await p.goto('file://'+path.join(ROOT,'index.html')); await p.waitForTimeout(200);
+    await p.evaluate(`document.getElementById('lobby').classList.add('hidden');document.getElementById('game').classList.remove('hidden');`);
+    // "我"用左慈(有化身行)、身份局(有身份猜测标记)、轮到我(有 .active/回合标签);
+    // 对手一律用颜良文丑——4 字是全表最长武将名,竖排最容易撞到下面的体力/装备。
+    await p.evaluate(mkSetup(n).replace("general:'yanliangwenchou'","general: i===0?'zuoci':'yanliangwenchou', huashenGeneral: i===0?'guanyu':null"));
+    await p.evaluate(`document.querySelectorAll('.my-turn-banner').forEach(e=>e.classList.remove('show'));`);
+    await p.waitForTimeout(400);
+    for(const [label, sel] of [['对手卡','#oppRow .seat'], ['我的卡','#meSeat .seat']]){
+      const m = await p.evaluate(inspectSeat+'("'+sel+'")');
+      if(m.err){ F(label+tag+': '+m.err); continue; }
+      m.overlaps.length===0
+        ? P(label+tag+' 无元素重叠')
+        : F(label+tag+' 有 '+m.overlaps.length+' 处元素重叠: '
+            + m.overlaps.map(o=>o.a+'↔'+o.b+'('+o.w+'x'+o.h+'px)').join(' '));
+      m.minF>=9 ? P(label+tag+' 最小字号 '+m.minF+'px ≥9px')
+                : F(label+tag+' 最小字号 '+m.minF+'px <9px ('+m.minEl+')');
+      m.clippedEquip.length===0 ? P(label+tag+' 装备名无截断')
+                                : F(label+tag+' 装备名被截断: '+m.clippedEquip.join(','));
+      (m.rect.t>=0 && m.rect.b<=m.vh && m.rect.l>=0 && m.rect.r<=m.vw)
+        ? P(label+tag+' 卡片完整在视口内 ('+m.rect.w+'x'+m.rect.h+')')
+        : F(label+tag+' 卡片被视口裁切: '+JSON.stringify(m.rect)+' 视口 '+m.vw+'x'+m.vh);
+    }
+    if(vw===844 && n===8){   // 这两条和人数/视口无关,在代表性样本上各查一次即可
+      const turnTag = await p.evaluate(()=>{
+        const t=document.querySelector('#meSeat .seat .tag.turn');
+        return t ? getComputedStyle(t).display : 'absent';
+      });
+      (turnTag==='none'||turnTag==='absent')
+        ? P('"回合"文字标签已隐藏(改由 .seat.active 的绿色边框表达)')
+        : F('"回合"文字标签仍显示(display:'+turnTag+'),会压住玩家名');
+      const myGen = await p.evaluate(()=>{
+        const e=document.getElementById('myGeneral');
+        return e ? getComputedStyle(e).display : 'absent';
+      });
+      (myGen==='none'||myGen==='absent') ? P('"你的武将：…"重复行已隐藏')
+                                         : F('"你的武将：…"行仍占位(display:'+myGen+')');
+    }
+    await ctx.close();
+  }
+
+  // ============================================================================
   // 【--opp-n 真的在参与计算吗】用户在 review 时问过:2/5/8 人局的卡片尺寸完全相同,
   // 是不是 --opp-n 在少人局失效了?答案是"没失效,只是被屏高预算盖住了"——
   // .seat 的高度是 min(屏高预算, 横向约束),宽视口上横向约束算出来始终更大。

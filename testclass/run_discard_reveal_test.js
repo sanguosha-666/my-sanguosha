@@ -57,6 +57,11 @@ assert.ok(gameSource.slice(gameSource.indexOf('function discardCards('), gameSou
 assert.ok(skillSource.includes("markDiscardReveal(g, mySeat, moved);"), '制衡技能弃牌必须产生显式弃置事件');
 assert.ok(weaponSource.includes('markDiscardReveal(g, from, discardedHands);'), '贯石斧技能弃牌必须产生显式弃置事件');
 assert.ok(gameSource.slice(gameSource.indexOf('function applyIdentityKillReward('), gameSource.indexOf('// 决斗中')).includes('markDiscardReveal'), '主公误杀忠臣的弃置惩罚必须产生显式弃置事件');
-assert.ok(indexSource.includes('render-discard.js?v=395'), '弃牌展示脚本必须更新缓存版本');
+{ // 这条断言原来写死成 ?v=395,于是往后任何一次 cache-bust 都会让它变红——它真正要守的
+  // 是"render-discard.js 带了版本号、且不低于引入弃牌展示时的那一版",不是"恰好等于 395"。
+  const m = /render-discard\.js\?v=(\d+)/.exec(indexSource);
+  assert.ok(m, '弃牌展示脚本必须带 ?v= 缓存版本');
+  assert.ok(Number(m[1]) >= 395, '弃牌展示脚本的缓存版本不得回退到 395 以下(实际 '+m[1]+')');
+}
 
 console.log('discard reveal explicit events: 17/17 passed');

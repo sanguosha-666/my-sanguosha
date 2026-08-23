@@ -1100,7 +1100,12 @@ function renderSeatCard(g, seat, isSelf){
     //   hp=5/maxHp=4(理论超上限) -> shown=4 -> 4实心+0空心(旧写法这里会画5个实心)
     const shownHp = Math.min(Math.max(0, p.hp), p.maxHp);
     const filled = shownHp, empty = Math.max(0, p.maxHp - shownHp);
-    heartsHtml = '<div class="seat-hp-col">'
+    // CORE-146:额外带一个 data-hp="当前/上限" 的紧凑写法。手机横屏的小卡(≈91~97px 宽、
+    // 121~129px 高)上竖排心放不下——最大 maxHp=6,竖排要 66px 高,会一路撞到左下角的手牌数
+    // 图标;横排 6 颗心又约 48px 宽,会撞 x=32 起的装备槽标签。所以那个断点下改用这个数字
+    // 写法(CSS ::before 读这个属性、隐藏下面的心 div),信息等价而只占 1 行。桌面/平板不受
+    // 影响,仍然渲染心——这个属性在那些断点上没有任何规则读它。
+    heartsHtml = '<div class="seat-hp-col" data-hp="'+shownHp+'/'+p.maxHp+'">'
       + '❤'.repeat(filled).split('').map(c=>'<div>'+c+'</div>').join('')
       + '♡'.repeat(empty).split('').map(c=>'<div class="empty">'+c+'</div>').join('')
       + '</div>';

@@ -2464,8 +2464,106 @@
        字号 9px + font-weight:800,色块放大到 12px 容纳它 —— 这不是"靠缩字号硬塞",
        是先把座位卡整体做大(见 ③)腾出的空间。
        白字在五个底色上的对比度(CSS 注释里既有的实测值)分别是 6.60/6.15/4.75/5.93/9.05,
-       全部 ≥4.5 的 WCAG AA 线。 */
-    .seat-faction{width:12px;height:12px;font-size:9px;font-weight:800;}
+       全部 ≥4.5 的 WCAG AA 线。
+       【描边:单向投影,不是 .hi-count 那套四向描边 —— 实测选出来的】
+       本来打算直接复用 .seat-hand-icon .hi-count 的手法(4 向 1px 黑描边 + 两层 2px 辉光),
+       6 倍放大渲染出来一看是**负优化**:9px 汉字的笔画间隙本身只有 1px 上下,四向 1px
+       黑描边把间隙全填死,"魏/群/蜀"这种 10 画以上的字整个糊成黑块。
+       量化(逐字截图统计"底色仍可见的像素占比",越高说明势力色没被描边压黑):
+         A 无描边          72.1%
+         E 单向投影        63.6%   ← 采用
+         F 发光+单向       57.0%
+         C 仅外发光        55.8%
+         D 细描边 .5px     50.2%
+         B .hi-count 同款  38.3%   ← 势力色被吃掉近 2/3
+       B 把势力色可见度从 72% 打到 38%,色块近一半变黑 —— 这不只是"看着糊",而是直接
+       毁掉色觉正常玩家赖以快速扫读的颜色线索(色觉障碍玩家靠的是字,见上面 ⑤ 的说明,
+       两边都要照顾)。
+       **为什么 .hi-count 那套在它自己的场景里没问题**:它渲染的是 1~2 位阿拉伯数字,
+       笔画稀疏、间隙远大于 1px,且叠在立绘上(背景不可控,必须靠重描边压出对比);
+       势力标是纯色块背景、白字对比度已 ≥4.5,只需要轻微增强边界即可。
+       E 单向投影只在字的下方投一层,不包围字形、不填充笔画间隙。 */
+    .seat-faction{width:12px;height:12px;font-size:9px;font-weight:800;
+      text-shadow:0 1px 1px rgba(0,0,0,.85);}
+
+    /* ---- ⑥b 体力改用"当前/上限"数字,解掉左下角重叠 ----
+       【实测出的重叠,对手卡和"我"的卡都有】左侧 .seat-left 是一条绝对定位的竖列
+       (势力标 → 竖排武将名 → 体力心),右下 .seat-equip-row 里有手牌数图标,两者**横向落在
+       同一条窄带上**(体力心 x≈13~28、手牌图标 x≈12~28)。卡片只有 121px 高时竖列会一路
+       延伸到 y≈325、图标从 y≈314 起,必然相撞(实测对手卡 8x4px+9x10px、"我"的卡 9x10px)。
+       【为什么改体力而不是挪图标】先试过把手牌图标 position:absolute 挪到右侧,结果是**假修复**:
+       .seat-bottom 自己就是 position:absolute 的定位上下文,图标不是相对 .seat 而是相对
+       .seat-bottom 定位,直接被推到卡片外面(实测 hi-count 落在 y=361~380,而卡底是 368),
+       重叠消失只是因为它飞出了卡。CSS 没法跨过 .seat-bottom 这层定位上下文。
+       【为什么不压缩心的排列】三种都算过:①横排——武将最大 maxHp=6,6 颗心约 48px 宽,
+       会撞 x=32 起的装备槽标签;②2 列 wrap——高度只能减到 22px,而体力列起点到手牌图标之间
+       只有约 16px 余量,仍然重叠;③只显示实心——血满时颗数不变,没解决最坏情况。
+       【最终做法】这个断点下体力改成"当前/上限"数字(render.js 已额外输出 data-hp),
+       1 行 11px,比竖排 6 心的 66px 省 4 倍纵向空间,信息完全等价。桌面/平板仍渲染心,
+       那些断点上没有任何规则读 data-hp。 */
+    /* 身份猜测标记(🔖):基础规则是 top:58% + clamp(18px,16cqw,30px)。最窄的一档
+       (667x375 / 9人局,卡片只有 67x90)上 cqw 项算出来才 10.7px、被 clamp 下限顶回 18px,
+       而 58% 居中后它的下沿落到 y≈61,装备条顶只在 y≈43——必然压住装备条(矩阵实测:
+       🔖↔"武"4x13px、🔖↔"防"4x6px)。缩到 14px 并上移到 38%,让它落在立绘中部、
+       在最矮的一档也留在装备条上方。 */
+    .seat-identity-mark{width:14px;height:14px;font-size:9px;top:38%;}
+    .seat-hp-col{flex-direction:row;gap:0;padding:1px 3px;line-height:1.1;}
+    .seat-hp-col > div{display:none;}
+    .seat-hp-col::before{content:attr(data-hp);font-size:9px;font-weight:800;letter-spacing:0;}
+
+    /* ---- ⑦ "我"的座位卡:把上面这些覆盖等价套一遍 ----
+       【为什么上一轮完全漏掉了它 —— 特异性,不是忘了写】
+       `.seat.me .seat-title` 这类规则的特异性是 (0,2,0),而上面 ④⑤ 写的 `.seat-title`
+       只有 (0,1,0)。**同一份声明在源码里排在后面也赢不了更高的特异性**,所以那一整轮
+       字号/尺寸覆盖对"我"的卡一个都没生效——实测它的标题仍是 13px、势力标 18px/13px,
+       正是 735~743 行那批为 180~260px 宽的桌面卡设计的数值,套在手机横屏 91px 宽的卡上
+       就成了:回合标签压住玩家名、武将名竖排撞进装备槽、4 颗体力心溢出卡片底部被视口裁掉。
+       （这也是上一轮验证的盲区:tools/verify_mobile_landscape.js 只量了 #oppRow .seat,
+       从没量过 #meSeat —— CLAUDE.md 规则18「验证样本要挑最刁钻的」的又一次现场复现。
+       本轮已把"我"的卡纳入断言,含元素重叠检测。）
+       【为什么不直接复用对手卡的规则】"我"的卡内部布局和对手卡不同(竖排装备槽、更靠
+       下的信息列起点、额外的化身行/托管横幅),不能只把 `.seat.me` 那批规则删掉了事——
+       删了会退回 `.seat` 基础规则,那批基础值同样是按大卡设计的。这里逐条按"我"的卡在
+       91px 宽下的实际需要重新给值,数值向对手卡看齐但位置偏移按它自己的布局算。 */
+    .seat.me .seat-title{font-size:10px;padding:2px 5px;}
+    .seat.me .seat-left{top:19px;left:4px;gap:1px;}
+    .seat.me .seat-faction{width:12px;height:12px;font-size:9px;font-weight:800;
+      text-shadow:0 1px 1px rgba(0,0,0,.85);}
+    .seat.me .seat-gen-name{font-size:9px;letter-spacing:0;}
+    /* 体力心:桌面档 14px 时 4 颗心(含空心)加起来约 64px,在 121px 高的卡上从 top:28px
+       起排会直接冲出卡底(实测最后一颗落在 y378~394、视口只有 390 → 被裁)。9px 配合
+       上面 top:19px 的起点,4 颗心收在卡内。 */
+    .seat.me .seat-hp-col{font-size:9px;padding:1px 2px;}
+    .seat.me .seat-identity{top:19px;right:4px;width:13px;height:13px;}
+    .seat.me .seat-info-badge{top:35px;right:4px;width:12px;height:12px;font-size:9px;}
+    .seat.me .seat-order-badge{right:4px;bottom:4px;width:12px;height:12px;font-size:9px;}
+    .seat.me .seat-bottom{right:18px;} /* 4(right偏移)+12(角标)+2(间隙),和上面那条对齐 */
+    /* 身份猜测标记(🔖)在桌面档是 clamp(22px,14cqw,34px) → 91px 卡上仍取到 22px 下限,
+       正好压在装备条第一行"武 青龙"上面。缩到 14px 并让它不再吃掉装备条的横向空间。 */
+    .seat.me .seat-identity-mark{width:14px;height:14px;font-size:9px;}
+    .seat.me .seat-huashen-line{font-size:9px;padding:1px 3px;margin:0 2px 1px;}
+    .seat.me .seat-delays .dchip{font-size:9px;padding:1px 3px;}
+    .seat.me .seat-buqu-row .bchip{font-size:9px;padding:1px 3px;}
+    /* 托管横幅在桌面档是 29px/27px 的大字,91px 宽的卡上会整个盖住牌面 */
+    .seat.me .seat-autopilot-badge{left:6%;right:6%;padding:3px 4px;column-gap:3px;}
+    .seat.me .seat-autopilot-robot{font-size:13px;}
+    .seat.me .seat-autopilot-lazy{font-size:10px;}
+
+    /* ---- ⑧ "回合"文字标签在小卡上改用边框高亮表达 ----
+       .seat-title-tags 是 position:absolute 钉在标题栏右侧的,而玩家名是居中的 flex 项;
+       91px 宽的标题栏里两者必然重叠(实测"我自己"被"回合"压掉 8x13px,对手卡上
+       "机器人1"被压成"机器人")。
+       **不需要新造角标**:`.seat.active{border-color:var(--jade);box-shadow:0 0 0 2px
+       var(--jade) inset}` 这条既有规则本来就在给当前行动者画绿色边框高亮,信息完全等价。
+       所以这里只隐藏"回合"这一个文字标签,其余状态标签(连环/缠怨/濒死)保留——它们没有
+       对应的边框表达,而且同时出现的概率低得多。 */
+    .seat-title-tags .tag.turn{display:none;}
+
+    /* ---- ⑨ 隐藏"你的武将：X · 技能"这一行 ----
+       它的内容(武将名+技能名)和座位卡完全重复,在 390px 高的屏上白占 14px。
+       只隐藏 #myGeneral;同一断点上方已有的 `.hand-label:not(#myGeneral){display:none}`
+       负责另一条"你的手牌"标签,两条合起来把这一层 chrome 全部收掉。 */
+    #myGeneral{display:none;}
 
     /* ---- ⑥ 装备条:显示 2 字简称,不再出现"武 ♠5…"这种截断 ----
        三件事一起做才有效:
@@ -2644,29 +2742,29 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=434"></script>
-<script src="data.js?v=434"></script>
-<script src="stages/stage-table.js?v=402"></script>
+<script src="config.js?v=435"></script>
+<script src="data.js?v=435"></script>
+<script src="stages/stage-table.js?v=403"></script>
 <!-- CORE-78 第一期:技能注册表(纯数据登记,本期不被任何代码读取,第二/三期才按表驱动)。
      零依赖(只含字面量与自身的 登记技能() 辅助函数),放在 data.js 之后仅为归类到
      "数据类脚本"一段,不引入任何加载顺序约束。 -->
-<script src="skills/skill-registry.js?v=3"></script>
-<script src="debug-log.js?v=400"></script>
-<script src="room-lifecycle.js?v=409"></script>
-<script src="game.js?v=437"></script>
-<script src="sha/sha-resolution.js?v=406"></script>
-<script src="weapons.js?v=399"></script>
-<script src="skills.js?v=409"></script>
-<script src="skills/late-generals.js?v=404"></script>
-<script src="bot-ai-bus.js?v=412"></script>
-<script src="bot.js?v=428"></script>
-<script src="ai-bot.js?v=411"></script>
-<script src="render.js?v=440"></script>
-<script src="render-table.js?v=396"></script>
-<script src="render-discard.js?v=395"></script>
-<script src="render-hand.js?v=395"></script>
-<script src="render-controls.js?v=422"></script>
-<script src="render-log.js?v=398"></script>
-<script src="game-bg.js?v=12"></script>
+<script src="skills/skill-registry.js?v=4"></script>
+<script src="debug-log.js?v=401"></script>
+<script src="room-lifecycle.js?v=410"></script>
+<script src="game.js?v=438"></script>
+<script src="sha/sha-resolution.js?v=407"></script>
+<script src="weapons.js?v=400"></script>
+<script src="skills.js?v=410"></script>
+<script src="skills/late-generals.js?v=405"></script>
+<script src="bot-ai-bus.js?v=413"></script>
+<script src="bot.js?v=429"></script>
+<script src="ai-bot.js?v=412"></script>
+<script src="render.js?v=442"></script>
+<script src="render-table.js?v=397"></script>
+<script src="render-discard.js?v=396"></script>
+<script src="render-hand.js?v=396"></script>
+<script src="render-controls.js?v=423"></script>
+<script src="render-log.js?v=399"></script>
+<script src="game-bg.js?v=13"></script>
 </body>
 </html>
