@@ -72,8 +72,20 @@ function respondHanbingAsk(activate){
     if(!activate){
       g.log=pushLog(g.log, g.players[from].name+'：不发动【寒冰剑】');
       const sourceCard=g.pending.sourceCard;
+      // CORE-152(issue #211):补伤害时必须和正常路径**逐项对齐**。
+      // 本函数上方的注释写着"不发动:补上正常伤害流程(和 respondShan 的『不闪』分支
+      // 完全一致的一套收尾)"——设计意图就是要一致,但实现里少了两项:
+      //   ① 酒的加成(damageAmount 的第 4 个参数 options.jiuBonus)——真实缺陷,酒的 +1 丢失;
+      //   ② 古锭刀的 +1(gudingBonus)——古锭刀与寒冰剑同为武器、无法同时装备,该项在这条
+      //      路径下恒为 0,属于形式上的不一致而非实际缺陷;这里一并对齐,免得以后武器规则
+      //      变化(比如出现"同时获得两把武器效果"的技能)时它变成真缺陷。
+      // 对照 sha/sha-resolution.js 里那条正常的 '不闪' 结算:
+      //   damageAmount(g, shaFrom, 1+gudingBonus, 'sha', {jiuBonus:!!g.pending.jiuBonus})
+      const jiuBonus = !!g.pending.jiuBonus;
+      const target = g.players[to];
+      const gudingBonus = hasCap(g.players[from],'gudingdao') && ((target&&target.hand||[]).length===0) ? 1 : 0;
       g.pending=null;
-      const dying = dealDamage(g, to, damageAmount(g, from, 1, 'sha'), from, '不闪', 'sha', sourceCard);
+      const dying = dealDamage(g, to, damageAmount(g, from, 1+gudingBonus, 'sha', {jiuBonus:jiuBonus}), from, '不闪', 'sha', sourceCard);
       if(dying) return g;
       if(maybeStartQilin(g, from, to)) return g;
       if(checkWin(g)) return g;

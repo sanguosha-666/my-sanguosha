@@ -551,8 +551,18 @@ function respondShan(useShan, cardIdx){
       const attackerHan=g.players[shaFrom];
       if(hasCap(attackerHan,'hanbing') && hanbingDiscardCount(me)>0){
         const sourceCard=shaSourceCard;
+        // CORE-152(issue #211):**jiuBonus 必须在覆盖 g.pending 之前先取出来**。
+        // 这个分支排在下面那条正常结算之前就 return 了,而那条才是把酒加成
+        // (damageAmount 的 {jiuBonus:!!g.pending.jiuBonus})和古锭刀加成算进去的地方。
+        // 改动前新 pending 只存了 from/to/sourceCard,于是"不发动寒冰剑"分支补伤害时
+        // 无从取用,酒的 +1 直接丢失 —— 实测无武器时目标掉 2 点、装寒冰剑并选"不发动"
+        // 只掉 1 点。**注意下一行会整体覆盖 g.pending**,读取必须在它之前。
+        const carriedJiu = !!(g.pending && g.pending.jiuBonus);
         g.pending={type:'hanbingAsk', from:shaFrom, to:mySeat};
         if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+        // 【只在有值时写入】遵守 CLAUDE.md 第 16 条:Firebase 的 transaction 对显式
+        // undefined 的字段会整体拒绝提交,所以不写 `jiuBonus: carriedJiu` 这种无条件形式。
+        if(carriedJiu) g.pending.jiuBonus=true;
         g.phase='hanbingAsk';
         g.log=pushLog(g.log, attackerHan.name+' 是否发动【寒冰剑】,防止伤害,改为弃置 '+me.name+' 两张牌…');
         return g;
