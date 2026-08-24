@@ -2175,21 +2175,34 @@ const testCode = String.raw`
     if(c.length !== 3) throw new Error('3张池牌应3候选,实际 ' + c.length);
     if(c[0].poolIdx !== 0 || c[1].poolIdx !== 1 || c[2].poolIdx !== 2) throw new Error('poolIdx 应0/1/2');
     if(c[0].cardId !== 'w0' || c[1].cardId !== 'w1' || c[2].cardId !== 'w2') throw new Error('cardId 应取自池牌');
-    if(c[0].label !== '拿【杀】' || c[1].label !== '拿【桃】' || c[2].label !== '拿【闪】')
-      throw new Error('label 应含池牌名,实际 ' + JSON.stringify(c));
+    // CORE-153(issue #212)起 label 额外附带花色点数(五谷的池子是全场公开信息,
+    // 而花色点数决定了转化类技能能不能用这张牌),所以从"全等"改为"以牌名开头"。
+    // 同时新增 localHeuristicScore 作为交给模型的参考基线。
+    if(c[0].label.indexOf('拿【杀】') !== 0 || c[1].label.indexOf('拿【桃】') !== 0
+       || c[2].label.indexOf('拿【闪】') !== 0)
+      throw new Error('label 应以池牌名开头,实际 ' + JSON.stringify(c));
+    if(c.some(function(x){ return typeof x.localHeuristicScore !== 'number'; }))
+      throw new Error('每个候选都应带 localHeuristicScore,实际 ' + JSON.stringify(c));
     var st = s.extraState(g, 0);
     if(!st.wugu || st.wugu.orderIdx !== 1 || st.wugu.poolCount !== 3)
       throw new Error('extraState.wugu 应{orderIdx:1,poolCount:3},实际 ' + JSON.stringify(st));
   });
 
-  await check('wugu无密钥:fallback=池首张 → wuguPick(0, idx, 首张id)', async function(){
+  // 【本条断言已随 CORE-153(issue #212)更新语义】原来钉的是"fallback=池首张",
+  // 而"恒取池中第一张"**正是那张 issue 要修的缺陷**(机器人按顺序拿牌、不看价值)。
+  // 继续按旧命题断言等于把缺陷锁死。改为钉住新的正确行为:按 botWuguCardValue 取
+  // 价值最高的一张。这个池子是 [杀(♥5), 桃(♥5), 闪(♥5)],测试角色满血且手里无闪
+  // —— 满血时【桃】被主动降权(占手牌又用不上),而手里没有【闪】时闪的权重最高,
+  // 所以正确答案是第 3 张(poolIdx=2, id=w2)。
+  // expectedIdx 仍必须是当前真实的 d.idx(=2),这条乐观并发校验的语义没有变。
+  await check('wugu无密钥:fallback=按价值挑(满血无闪时选【闪】)→ wuguPick(2, idx, w2)', async function(){
     window.__wuguCalls = [];
     aiApiKey = ''; aiProvider = null;
     var g = mkWuguG({ idx: 2, order: [1, 2, 0] });
     var r = await botDecide('wuguPick', g, 0);
     if(r !== true) throw new Error('应返回 true,实际 ' + r);
-    if(window.__wuguCalls.length !== 1 || window.__wuguCalls[0][0] !== 0 || window.__wuguCalls[0][1] !== 2 || window.__wuguCalls[0][2] !== 'w0')
-      throw new Error('应 wuguPick(0,2,w0),实际 ' + JSON.stringify(window.__wuguCalls));
+    if(window.__wuguCalls.length !== 1 || window.__wuguCalls[0][0] !== 2 || window.__wuguCalls[0][1] !== 2 || window.__wuguCalls[0][2] !== 'w2')
+      throw new Error('应 wuguPick(2,2,w2),实际 ' + JSON.stringify(window.__wuguCalls));
   });
 
   await check('wugu有密钥:mock 选第3项 → wuguPick(2, idx, 第3张id);userPrompt 含池牌名、不含他人手牌', async function(){
