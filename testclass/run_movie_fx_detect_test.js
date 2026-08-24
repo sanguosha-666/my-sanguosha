@@ -158,6 +158,42 @@ check('于吉杀死左慈 → 左慈最优先,zuociDeath 覆盖 yujiKill', ()=>{
   assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'zuociDeath', seat:1}));
 });
 
+console.log('\n== 游戏层：大乔/小乔/貂蝉 表情事件 ==\n');
+
+check('三人之一杀人 → girlKill(杀手座位, gen+victimSeat)', ()=>{
+  const s = freshGameSandbox();
+  const g = mkDying(s, 0, 1);
+  g.players[1].general = 'daqiao';
+  R(s, 'finishDying')(g, true);
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'girlKill', seat:1, result:{gen:'daqiao', victimSeat:0}}));
+});
+
+check('三人之一被杀 → girlDeath(死者座位, gen+killerSeat)', ()=>{
+  const s = freshGameSandbox();
+  const g = mkDying(s, 0, 1);
+  g.players[0].general = 'xiaoqiao';
+  R(s, 'finishDying')(g, true);
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'girlDeath', seat:0, result:{gen:'xiaoqiao', killerSeat:1}}));
+});
+
+check('三人互杀 → girlKill 先写、girlDeath 后写胜出', ()=>{
+  const s = freshGameSandbox();
+  const g = mkDying(s, 0, 1);
+  g.players[0].general = 'diaochan';
+  g.players[1].general = 'daqiao';
+  R(s, 'finishDying')(g, true);
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'girlDeath', seat:0, result:{gen:'diaochan', killerSeat:1}}));
+});
+
+check('三人被杀无杀手(如闪电) → girlDeath killerSeat:null', ()=>{
+  const s = freshGameSandbox();
+  const g = mkDying(s, 0, 1);
+  g.players[0].general = 'diaochan';
+  delete g.pending.resume.sourceSeat;
+  R(s, 'finishDying')(g, true);
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'girlDeath', seat:0, result:{gen:'diaochan', killerSeat:null}}));
+});
+
 console.log('\n== 游戏层：checkWin 结算结果表 ==\n');
 
 check('内奸胜 → gameOver 全员输,左慈主公输 zuociLose=true', ()=>{
@@ -198,6 +234,25 @@ check('无胜者(none) → 全员输,左慈输 zuociLose=true', ()=>{
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'none');
   assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'lose',lord:'lose',zhong:'lose',nei:'lose',zuociLose:true}}));
+});
+
+check('大乔胜利 → gameOver 带 girlWin;无女孩时无 girl 字段', ()=>{
+  const s = freshGameSandbox();
+  const p0 = mkPlayer(s,'大乔','daqiao', {role:'fan'});
+  const p1 = mkPlayer(s,'主公','zhangfei', {role:'zhu', hp:0, alive:false});
+  const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
+  R(s, 'checkWin')(g);
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlWin:{seat:0,gen:'daqiao'}}}));
+});
+
+check('貂蝉失败 → gameOver 带 girlLose', ()=>{
+  const s = freshGameSandbox();
+  const p0 = mkPlayer(s,'貂蝉','diaochan', {role:'zhu', hp:0, alive:false});
+  const p1 = mkPlayer(s,'反贼','zhangfei', {role:'fan'});
+  const g = mkGame(s, {gameMode:'identity', players:[p0,p1]});
+  R(s, 'checkWin')(g);
+  assert.strictEqual(g.winSide, 'fan');
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'diaochan'}}}));
 });
 
 console.log('\n== 防御层：normalize ==\n');
@@ -340,6 +395,42 @@ check('gameOver：内奸胜→neiWin / 内奸输不播', function(){
   assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:win}, 0, [{alive:true,role:'nei'}])), S(['neiWin']));
   const lose={fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false};
   assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose}, 0, [{alive:true,role:'nei'}])), S([]), '内奸输不应触发');
+});
+
+console.log('\n== 前端层：大乔/小乔/貂蝉 表情分派 ==\n');
+
+check('girlKill：杀手播羞涩无后缀 / 被杀者播妩媚无后缀 / 他人播后缀', function(){
+  const players=[{alive:true},{alive:true},{alive:true}];
+  assert.strictEqual(S(fire({seq:1,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},0,players)), S(['assets/video/daqiao-xiuse.mp4']), '杀手本人');
+  assert.strictEqual(S(fire({seq:2,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},1,players)), S(['assets/video/daqiao-wumei.mp4']), '被杀者');
+  const other=fire({seq:3,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},2,players);
+  const pool=['assets/video/daqiao-xiuse01.mp4','assets/video/daqiao-xiuse02.mp4','assets/video/daqiao-xiuse03.mp4'];
+  assert.ok(pool.indexOf(other[0])>=0, '他人应播后缀羞涩(daqiao 妩媚无后缀),实际 '+S(other));
+});
+
+check('girlDeath：被杀者播麻木 / 杀手播畏惧 / 他人播后缀', function(){
+  const players=[{alive:true},{alive:true},{alive:true}];
+  assert.strictEqual(S(fire({seq:1,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},0,players)), S(['assets/video/xiaoqiao-mamu.mp4']), '被杀者本人');
+  assert.strictEqual(S(fire({seq:2,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},1,players)), S(['assets/video/xiaoqiao-weiju.mp4']), '杀手');
+  const other=fire({seq:3,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},2,players);
+  const pool=['assets/video/xiaoqiao-mamu01.mp4','assets/video/xiaoqiao-weiju01.mp4','assets/video/xiaoqiao-weiju02.mp4'];
+  assert.ok(pool.indexOf(other[0])>=0, '他人应播后缀,实际 '+S(other));
+});
+
+check('gameOver：三人胜利播开心 / 失败播悲痛(无后缀)', function(){
+  const win={fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlWin:{seat:0,gen:'diaochan'}};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:win},0,[{alive:true,role:'fan',general:'diaochan'}])), S(['assets/video/diaochan-kaixin.mp4']), '女孩胜利');
+  const lose={fan:'lose',lord:'win',zhong:'win',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'diaochan'}};
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose},0,[{alive:true,role:'fan',general:'diaochan'}])), S(['assets/video/diaochan-beitong.mp4']), '女孩失败');
+});
+
+check('gameOver：旁观者看后缀表情(替换阵营动画);无后缀池时回退阵营动画', function(){
+  const win={fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlWin:{seat:0,gen:'daqiao'}};
+  const other=fire({seq:1,kind:'gameOver',seat:null,result:win},1,[{alive:true,role:'fan',general:'daqiao'},{alive:true,role:'zhong'}]);
+  assert.ok(['assets/video/daqiao-kaixin01.mp4'].indexOf(other[0])>=0, '旁观者应播后缀开心,实际 '+S(other));
+  // xiaoqiao 悲痛无后缀 → 旁观者回退阵营动画(忠臣赢不播)
+  const lose={fan:'lose',lord:'win',zhong:'win',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'xiaoqiao'}};
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose},1,[{alive:true,role:'fan',general:'xiaoqiao'},{alive:true,role:'zhong'}])), S([]), '无后缀池回退阵营(忠臣赢不播)');
 });
 
 check('seq 未变不重复触发', function(){

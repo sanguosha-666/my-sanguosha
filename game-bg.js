@@ -448,13 +448,22 @@ var MOVIE_VIDEOS = {
   neiWin:     ['assets/video/neijian-win.mp4','assets/video/neijian-win-0.mp4'] // 结算内奸胜 → 内奸玩家(随机二选一)
 };
 
+// kind 既可以是 MOVIE_VIDEOS 的键(legacy),也可以直接是具体视频路径(三人表情按客户端
+// 分派,render.js 已算好每客户端各自要播的文件,这里不再做随机)。
 function triggerMovieFx(kind){
   if(typeof document === 'undefined') return;
-  var list = MOVIE_VIDEOS[kind];
   var v = document.getElementById('movieFxVideo');
-  if(!v || !list || !list.length) return;
+  if(!v) return;
+  var list = MOVIE_VIDEOS[kind];
+  var src;
+  if(list){
+    if(!list.length) return;
+    src = list[Math.floor(Math.random() * list.length)];
+  } else {
+    src = kind; // 已是具体路径
+  }
   applyFxAudio(v);
-  v.src = list[Math.floor(Math.random() * list.length)];
+  v.src = src;
   v.style.visibility = 'visible';
   if(typeof v.load === 'function') v.load();
   var p = v.play();

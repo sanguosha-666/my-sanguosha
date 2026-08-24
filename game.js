@@ -3455,6 +3455,18 @@ function finishDying(g, actuallyDied){
       if(killerP && killerP.general==='yuji') markMovieFx(g, 'yujiKill', killerForReward);
       if(p.general==='zuoci') markMovieFx(g, 'zuociDeath', killerForReward); // 左慈最优先,最后写
     }
+    // 三人表情(大乔/小乔/貂蝉)最优先,写在最后:杀手是三人之一 → girlKill(羞涩给杀手/
+    // 妩媚给被杀者/后缀给他人);被杀者是三人之一 → girlDeath(麻木给死者/畏惧给杀手/后缀给他人)。
+    // 两者同中(三人互杀)时 girlDeath 后写胜出——与左慈/于吉同一套"后写覆盖"约定。
+    if(typeof killerForReward==='number'){
+      const killerP=g.players[killerForReward];
+      if(killerP && typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(killerP.general)>=0){
+        markMovieFx(g, 'girlKill', killerForReward, { gen:killerP.general, victimSeat:seat });
+      }
+    }
+    if(typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(p.general)>=0){
+      markMovieFx(g, 'girlDeath', seat, { gen:p.general, killerSeat:(typeof killerForReward==='number' ? killerForReward : null) });
+    }
     applyIdentityKillReward(g, seat, killerForReward);
     
     // 蔡文姬【断肠】：杀死你的角色失去所有武将技能(锁定技)
@@ -3935,7 +3947,21 @@ function checkWin(g){
     const roleResOf = (role)=> role==='fan' ? fanRes : role==='zhu' ? lordRes : role==='zhong' ? zhongRes : role==='nei' ? neiRes : (winSide==='nei' ? 'win' : 'lose');
     let zuociLose = false;
     g.players.forEach(pp=>{ if(pp && pp.general==='zuoci' && roleResOf(pp.role)==='lose') zuociLose=true; });
-    markMovieFx(g, 'gameOver', null, { fan:fanRes, lord:lordRes, zhong:zhongRes, nei:neiRes, zuociLose });
+    // 三人表情胜负:三人之一所在阵营胜/败 → 记入结果表(自己播无后缀,旁观者播后缀)。
+    // Firebase 丢 null 键 → 没有女孩时整段省略,前端把缺席当 null 处理。
+    const res = { fan:fanRes, lord:lordRes, zhong:zhongRes, nei:neiRes, zuociLose };
+    if(typeof GIRL_EMO_GENERALS!=='undefined'){
+      let girlWin=null, girlLose=null;
+      g.players.forEach((pp,i)=>{
+        if(!pp || GIRL_EMO_GENERALS.indexOf(pp.general)<0) return;
+        const rr=roleResOf(pp.role);
+        if(rr==='win' && !girlWin) girlWin={ seat:i, gen:pp.general };
+        if(rr==='lose' && !girlLose) girlLose={ seat:i, gen:pp.general };
+      });
+      if(girlWin) res.girlWin=girlWin;
+      if(girlLose) res.girlLose=girlLose;
+    }
+    markMovieFx(g, 'gameOver', null, res);
     return true;
   }
   if(aliveCount(g)<=1){

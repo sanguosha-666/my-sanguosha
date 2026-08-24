@@ -681,24 +681,98 @@ function maybePlayLightningFx(g){
 
 // ===== 过场动画:所有客户端共用 g.lastMovieFx.seq 去重 =====
 // 写入端在 game.js 的 finishDying(武将死亡)/checkWin(胜负结算)。kind+seat 决定播放条件,
-// 优先级:左慈 > 于吉 > 阵营统一动画(用户指定)。返回要播的视频 key(即 game-bg.js
-// MOVIE_VIDEOS 的键),null=本客户端不播:
+// 优先级:三人表情 > 左慈 > 于吉 > 阵营统一动画(用户指定)。返回要播的内容:legacy kind
+// 返回 game-bg.js MOVIE_VIDEOS 的键,三人表情直接返回具体视频路径(每客户端不同,不能共用键):
 //   yujiDeath :于吉死 → 于吉以外的玩家播 yuji1
 //   yujiKill  :于吉杀人 → 于吉以外且仍存活的玩家播 yuji0
 //   zuociDeath:左慈死 → 仅杀死左慈的玩家播 zuoci0
-//   gameOver  :胜负结算 → 按身份分派(左慈输播 zuoci1 / 反贼输 fanze-lost / 反贼胜
-//              fanzei-win / 主公输 zhuzhong-lost / 忠臣输 han / 内奸胜 neijian-win)
+//   girlKill  :三人之一杀人(杀手座位/result.gen/victimSeat)→ 杀手播 gen-xiuse 无后缀、
+//              被杀者播 gen-wumei 无后缀、其他玩家随机播后缀变体
+//   girlDeath :三人之一被杀(死者座位/result.gen/killerSeat)→ 死者播 gen-mamu 无后缀、
+//              杀手播 gen-weiju 无后缀、其他玩家随机播后缀变体
+//   gameOver  :胜负结算 → 本人是三人之一:胜播 gen-kaixin / 败播 gen-beitong(无后缀);
+//              旁观者:有 girlWin/girlLose 时随机播对应后缀(替换阵营动画,无后缀池则回退
+//              阵营动画)→ 左慈输播 zuoci1 → 反贼输 fanze-lost / 反贼胜 fanzei-win /
+//              主公输 zhuzhong-lost / 忠臣输 han / 内奸胜 neijian-win
+// 三人表情视频表(GIRL_EMO_GENERALS 见 data.js):{武将id: {情绪: {main:无后缀路径, sfx:[后缀路径]}}}
+// 命名约定 assets/video/<武将>-<情绪>.mp4 与 <武将>-<情绪>NN.mp4。
+const GIRL_VIDEOS = {
+  daqiao: {
+    kaixin:  { main:'assets/video/daqiao-kaixin.mp4',    sfx:['assets/video/daqiao-kaixin01.mp4'] },
+    beitong: { main:'assets/video/daqiao-beitong.mp4',   sfx:['assets/video/daqiao-beitong01.mp4'] },
+    mamu:    { main:'assets/video/daqiao-mamu.mp4',      sfx:['assets/video/daqiao-mamu01.mp4','assets/video/daqiao-mamu02.mp4'] },
+    weiju:   { main:'assets/video/daqiao-weiju.mp4',     sfx:['assets/video/daqiao-weiju01.mp4'] },
+    wumei:   { main:'assets/video/daqiao-wumei.mp4',     sfx:[] },
+    xiuse:   { main:'assets/video/daqiao-xiuse.mp4',     sfx:['assets/video/daqiao-xiuse01.mp4','assets/video/daqiao-xiuse02.mp4','assets/video/daqiao-xiuse03.mp4'] },
+  },
+  diaochan: {
+    kaixin:  { main:'assets/video/diaochan-kaixin.mp4',  sfx:['assets/video/diaochan-kaixin01.mp4','assets/video/diaochan-kaixin02.mp4','assets/video/diaochan-kaixin03.mp4','assets/video/diaochan-kaixin04.mp4'] },
+    beitong: { main:'assets/video/diaochan-beitong.mp4', sfx:['assets/video/diaochan-beitong01.mp4'] },
+    mamu:    { main:'assets/video/diaochan-mamu.mp4',    sfx:['assets/video/diaochan-mamu01.mp4','assets/video/diaochan-mamu02.mp4','assets/video/diaochan-mamu03.mp4'] },
+    weiju:   { main:'assets/video/diaochan-weiju.mp4',   sfx:['assets/video/diaochan-weiju01.mp4'] },
+    wumei:   { main:'assets/video/diaochan-wumei.mp4',   sfx:[] },
+    xiuse:   { main:'assets/video/diaochan-xiuse.mp4',   sfx:['assets/video/diaochan-xiuse01.mp4','assets/video/diaochan-xiuse02.mp4','assets/video/diaochan-xiuse03.mp4','assets/video/diaochan-xiuse04.mp4','assets/video/diaochan-xiuse05.mp4','assets/video/diaochan-xiuse06.mp4','assets/video/diaochan-xiuse07.mp4','assets/video/diaochan-xiuse08.mp4','assets/video/diaochan-xiuse09.mp4'] },
+  },
+  xiaoqiao: {
+    kaixin:  { main:'assets/video/xiaoqiao-kaixin.mp4',  sfx:['assets/video/xiaoqiao-kaixin01.mp4','assets/video/xiaoqiao-kaixin02.mp4'] },
+    beitong: { main:'assets/video/xiaoqiao-beitong.mp4', sfx:[] },
+    mamu:    { main:'assets/video/xiaoqiao-mamu.mp4',    sfx:['assets/video/xiaoqiao-mamu01.mp4'] },
+    weiju:   { main:'assets/video/xiaoqiao-weiju.mp4',   sfx:['assets/video/xiaoqiao-weiju01.mp4','assets/video/xiaoqiao-weiju02.mp4'] },
+    wumei:   { main:'assets/video/xiaoqiao-wumei.mp4',   sfx:[] },
+    xiuse:   { main:'assets/video/xiaoqiao-xiuse.mp4',   sfx:['assets/video/xiaoqiao-xiuse01.mp4','assets/video/xiaoqiao-xiuse02.mp4'] },
+  },
+};
+function girlMainPath(gen, emotion){
+  const e = GIRL_VIDEOS[gen] && GIRL_VIDEOS[gen][emotion];
+  return (e && e.main) || null;
+}
+// 从多个情绪的后缀池里随机取一个(池空返回 null,调用方据此回退)
+function girlSfxPath(gen, emotions){
+  const pools = Array.isArray(emotions) ? emotions : [emotions];
+  let arr=[];
+  pools.forEach(function(em){
+    const e = GIRL_VIDEOS[gen] && GIRL_VIDEOS[gen][em];
+    if(e && Array.isArray(e.sfx)) arr = arr.concat(e.sfx);
+  });
+  if(!arr.length) return null;
+  return arr[Math.floor(Math.random()*arr.length)];
+}
 // 哨兵模式与 maybePlayLightningFx 同款。
 let lastMovieFxSeq = undefined;
 function movieVideoKeyForMe(g, evt){
   const me=g.players && g.players[mySeat];
+  const girlOf = (id)=> (typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(id)>=0);
   switch(evt.kind){
     case 'yujiDeath':  return (mySeat!==evt.seat) ? 'yujiDeath' : null;
     case 'yujiKill':   return (mySeat!==evt.seat && !!me && !!me.alive) ? 'yujiKill' : null;
     case 'zuociDeath': return (mySeat===evt.seat) ? 'zuociDeath' : null;
+    case 'girlKill': {
+      const r=evt.result || {};
+      if(!girlOf(r.gen)) return null;
+      if(mySeat===evt.seat) return girlMainPath(r.gen, 'xiuse');      // 杀手:羞涩
+      if(typeof r.victimSeat==='number' && mySeat===r.victimSeat) return girlMainPath(r.gen, 'wumei'); // 被杀者:妩媚
+      return girlSfxPath(r.gen, ['xiuse','wumei']);                    // 其他玩家:后缀
+    }
+    case 'girlDeath': {
+      const r=evt.result || {};
+      if(!girlOf(r.gen)) return null;
+      if(mySeat===evt.seat) return girlMainPath(r.gen, 'mamu');       // 死者:麻木
+      if(typeof r.killerSeat==='number' && mySeat===r.killerSeat) return girlMainPath(r.gen, 'weiju'); // 杀手:畏惧
+      return girlSfxPath(r.gen, ['mamu','weiju']);                    // 其他玩家:后缀
+    }
     case 'gameOver': {
       const r=evt.result || {};
-      // 左慈最优先:我是左慈且左慈所在阵营输了 → zuoci1
+      // 本人是三人之一 → 胜开心/败悲痛(无后缀),表情最优先(覆盖左慈/阵营)
+      if(me && girlOf(me.general)){
+        if(me.role==='fan') return r.fan==='win' ? girlMainPath(me.general,'kaixin') : (r.fan==='lose' ? girlMainPath(me.general,'beitong') : null);
+        if(me.role==='zhu') return r.lord==='win' ? girlMainPath(me.general,'kaixin') : (r.lord==='lose' ? girlMainPath(me.general,'beitong') : null);
+        if(me.role==='zhong') return r.zhong==='win' ? girlMainPath(me.general,'kaixin') : (r.zhong==='lose' ? girlMainPath(me.general,'beitong') : null);
+        if(me.role==='nei') return r.nei==='win' ? girlMainPath(me.general,'kaixin') : (r.nei==='lose' ? girlMainPath(me.general,'beitong') : null);
+      }
+      // 旁观者:有女孩胜负 → 后缀表情(替换阵营动画);后缀池空 → 回退阵营动画
+      const sfx = r.girlWin ? girlSfxPath(r.girlWin.gen,'kaixin') : (r.girlLose ? girlSfxPath(r.girlLose.gen,'beitong') : null);
+      if(sfx) return sfx;
+      // 左慈次优先:我是左慈且左慈所在阵营输了 → zuoci1
       if(me && me.general==='zuoci' && r.zuociLose) return 'zuociLose';
       // 其次阵营统一动画
       if(me && me.role==='fan') return r.fan==='win' ? 'fanWin' : (r.fan==='lose' ? 'fanLose' : null);
