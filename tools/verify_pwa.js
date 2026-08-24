@@ -87,6 +87,20 @@ console.log('\n■ manifest.json 内容');
   const fs=require('fs');
   m.icons.forEach(i=>{ fs.existsSync(path.join(ROOT,i.src)) ? 0 : F('图标文件缺失: '+i.src); });
   P('全部图标文件存在');
+  // 【为什么还要查 git 跟踪状态】"文件在本地存在"不等于"文件会被部署上去"。
+  // 真实踩过:图标最初放在仓库根,而 .gitignore 有一条忽略根目录 png 的规则,
+  // `git add -A` 把它们**静默跳过**(不报错、git status 也不显示),于是提交里根本没有图标,
+  // 线上 manifest 引用的路径全是 404 —— 而这条只查文件系统的断言当时是绿的。
+  // 这类"文件进不了库"的失败没有任何提示,比误提交更难发现,必须由断言兜住。
+  {
+    const {execSync}=require('child_process');
+    const tracked=new Set(execSync('git ls-files',{cwd:ROOT}).toString().split('\n'));
+    const missing=[...new Set(m.icons.map(i=>i.src))].filter(src=>!tracked.has(src));
+    missing.length===0
+      ? P('全部图标已被 git 跟踪(会真正部署到线上)')
+      : F('图标存在于本地但未被 git 跟踪(线上会 404): '+missing.join(', ')
+          +' —— 多半是被 .gitignore 静默忽略了,用 `git check-ignore -v <路径>` 查');
+  }
 }
 
 console.log('\n■ <head> 的 PWA 标签');
