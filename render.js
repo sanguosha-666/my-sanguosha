@@ -1169,10 +1169,28 @@ function renderSeatCard(g, seat, isSelf){
   // 的,判定区0~N行、装备区对手0~4行不等,早已验证过增删行不会打乱布局)。视觉上仿
   // .seat-delays 的 .dchip(紫色系呼应锦囊)、装备行的金色高亮,这里用青色系区分"这是
   // 借用的技能"这个新概念,不与既有色系混淆。
+  // 「化身：」这三个字在手机横屏的小卡上放不下 —— 实测 91px 宽的卡里,
+  // 「化身：于吉·蛊惑 ?」需要约 90px,直接被 text-overflow 吃掉尾巴(技能名看不见,
+  // 而技能名恰恰是这行最该看的信息)。处理方式沿用装备名简称那一套(CORE-146):
+  // 把可省略的前缀单独包一层,由 CSS 在窄断点下隐藏——**前缀是"这是什么"的标签,
+  // 而青色底衬本来就已经在表达这件事了,是四段内容里信息量最低的一段**,
+  // 优先牺牲它,保住「武将名·技能名」这个真正的载荷。
+  // 不用 JS 按宽度算截断:那需要读 DOM 尺寸、且要在每次 resize 后重算,
+  // 而纯 CSS 的显隐是断点驱动的,零运行时成本、也不会和 render 时机耦合。
   const huashenLine = (avatarReady && isZuociWithHuashen)
-    ? '<div class="seat-huashen-line" title="'+escapeHtml((avatarGen&&avatarGen.desc)||'')+'" onclick="event.stopPropagation();showGeneralInfo(\''+p.huashenGeneral+'\')">化身：'
-      + escapeHtml(avatarGen?avatarGen.name:p.huashenGeneral)+'·'+escapeHtml(p.huashenSkillName||'')
-      + ' <span class="huashen-info-mark">?</span></div>'
+    ? '<div class="seat-huashen-line" title="'+escapeHtml((avatarGen&&avatarGen.desc)||'')+'" onclick="event.stopPropagation();showGeneralInfo(\''+p.huashenGeneral+'\')">'
+      + '<span class="hs-label">化身：</span>'
+      // 载荷单独包一层并带上简称:最窄的一档(852x303 的 Safari 里 8 人局,"我"的卡只有
+      // 70px 宽)光靠省前缀和「?」还是不够——「司马懿·鬼才」6 个字要 54px,可用只有 46px。
+      // 简称规则和装备名那套一致(CORE-146):**武将名和技能名各取前 2 字**,固定 5 字符宽,
+      // 不随武将名长短漂移(最长武将名「颜良文丑」4 字、化身对象里最长的「司马懿」3 字,
+      // 都会被压到 2 字)。不做简称唯一性检查:这里是纯展示、不是选择控件,
+      // 完整信息在 title 属性里,整行 onclick 也能点开武将详情。
+      + '<span class="hs-body" data-s="'
+        + escapeHtml(String(avatarGen?avatarGen.name:p.huashenGeneral).slice(0,2))
+        + '·' + escapeHtml(String(p.huashenSkillName||'').slice(0,2)) + '">'
+        + escapeHtml(avatarGen?avatarGen.name:p.huashenGeneral)+'·'+escapeHtml(p.huashenSkillName||'')
+      + '</span> <span class="huashen-info-mark">?</span></div>'
     : '';
   // 周泰【不屈】:不屈牌行,红色系 chip,只显示花色+点数(不显示牌名——数量可变、名字长度
   // 不可控,塞进小 chip 容易在窄屏挤爆;规则判定只需要点数,牌名放 title 属性里,hover仍可见,

@@ -286,9 +286,13 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
     const p=await ctx.newPage();
     await p.goto('file://'+path.join(ROOT,'index.html')); await p.waitForTimeout(200);
     await p.evaluate(`document.getElementById('lobby').classList.add('hidden');document.getElementById('game').classList.remove('hidden');`);
-    // "我"用左慈(有化身行)、身份局(有身份猜测标记)、轮到我(有 .active/回合标签);
+    // "我"用左慈(有化身行)、身份局(有身份猜测标记)、轮到我(有 .active/回合标签)
+    // 【huashenPool 必须一起设】normalize()(game.js)会把不在 huashenPool 里的
+    // huashenGeneral 整体清空。此前这里只设了 huashenGeneral,于是**化身行从来没有
+    // 真正渲染过** —— 矩阵一直声称覆盖了"我=左慈带化身",实际上跑的是一张没有化身行的
+    // 普通卡,全绿但那一项什么都没验证到(典型的假绿,CLAUDE.md 规则 20)。;
     // 对手一律用颜良文丑——4 字是全表最长武将名,竖排最容易撞到下面的体力/装备。
-    await p.evaluate(mkSetup(n).replace("general:'yanliangwenchou'","general: i===0?'zuoci':'yanliangwenchou', huashenGeneral: i===0?'guanyu':null"));
+    await p.evaluate(mkSetup(n).replace("general:'yanliangwenchou'","general: i===0?'zuoci':'yanliangwenchou', huashenGeneral: i===0?'guanyu':null, huashenPool: i===0?['guanyu']:[], huashenSkillName: i===0?'武圣':null"));
     await p.evaluate(`document.querySelectorAll('.my-turn-banner').forEach(e=>e.classList.remove('show'));`);
     await p.waitForTimeout(400);
     for(const [label, sel] of [['对手卡','#oppRow .seat'], ['我的卡','#meSeat .seat']]){

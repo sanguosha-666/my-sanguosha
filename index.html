@@ -2603,7 +2603,34 @@
     /* 身份猜测标记(🔖)在桌面档是 clamp(22px,14cqw,34px) → 91px 卡上仍取到 22px 下限,
        正好压在装备条第一行"武 青龙"上面。缩到 14px 并让它不再吃掉装备条的横向空间。 */
     .seat.me .seat-identity-mark{width:14px;height:14px;font-size:9px;}
-    .seat.me .seat-huashen-line{font-size:9px;padding:1px 3px;margin:0 2px 1px;}
+    /* 【化身行:省掉前缀 + 压扁高度,别去挤装备区】
+       实测(852x393,"我"=左慈带化身):这一行让 .seat-bottom 从 49px 涨到 68px,
+       而整张卡只有 122px 高、装备区在自己的卡上是固定 4 行(空槽也显示"—"),
+       多出来的 19px 直接压在装备区头上;同时「化身：于吉·蛊惑 ?」在 91px 宽的卡里
+       放不下,被 text-overflow 截掉尾巴,**丢的正好是技能名**。
+       两处一起收:①隐藏「化身：」前缀(见 render.js 里 .hs-label 的说明,青色底衬
+       已经在表达"这是借用的技能"了,前缀是信息量最低的一段);②行高/内边距压到最小,
+       把这一行的纵向成本从 19px 降到约 12px。 */
+    .seat.me .seat-huashen-line{font-size:9px;padding:0 3px;margin:0 2px 1px;line-height:1.25;}
+    .seat-huashen-line .hs-label{display:none;}
+    /* 最窄的一档(Safari 内、8人局,"我"的卡只有 70px 宽)光省掉前缀还不够,
+       「于吉·蛊惑 ?」仍然放不下。这里再省掉行尾的「?」标记 —— 它只是个视觉提示,
+       **点击入口在整行的 onclick 上、不在这个标记上**,隐藏它不丢任何功能;
+       完整信息也一直在 title 属性里(长按/hover 可见)。
+       用 @container 而不是视口断点:决定放不放得下的是**卡片自身宽度**(由人数和视口
+       共同决定),不是视口宽度——同样是 852px 宽的屏,2 人局的卡宽到放得下、8 人局就不行。
+       (注意 @container 本身不增加特异性,这条必须写在 .seat-huashen-line 基础规则之后,
+       见 CLAUDE.md 规则 19。) */
+    @container (max-width:80px){
+      .seat-huashen-line .huashen-info-mark{display:none;}
+      .seat-huashen-line{letter-spacing:-.2px;}
+      /* 省完前缀和「?」仍放不下的最后一档:载荷本身改用简称(武将名/技能名各取前 2 字,
+         见 render.js 里 data-s 的说明)。手法和装备名简称完全一致——原文字号归零、
+         用 ::before 显示 data-s,这样 DOM 里仍保留完整文本(可被复制/被 title 显示),
+         只是不参与排版。 */
+      .seat-huashen-line .hs-body{font-size:0;}
+      .seat-huashen-line .hs-body::before{content:attr(data-s);font-size:9px;}
+    }
     .seat.me .seat-delays .dchip{font-size:9px;padding:1px 3px;}
     .seat.me .seat-buqu-row .bchip{font-size:9px;padding:1px 3px;}
     /* 托管横幅在桌面档是 29px/27px 的大字,91px 宽的卡上会整个盖住牌面 */
@@ -2831,30 +2858,30 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=440"></script>
-<script src="data.js?v=440"></script>
-<script src="stages/stage-table.js?v=408"></script>
+<script src="config.js?v=441"></script>
+<script src="data.js?v=441"></script>
+<script src="stages/stage-table.js?v=409"></script>
 <!-- CORE-78 第一期:技能注册表(纯数据登记,本期不被任何代码读取,第二/三期才按表驱动)。
      零依赖(只含字面量与自身的 登记技能() 辅助函数),放在 data.js 之后仅为归类到
      "数据类脚本"一段,不引入任何加载顺序约束。 -->
-<script src="skills/skill-registry.js?v=9"></script>
-<script src="debug-log.js?v=406"></script>
-<script src="room-lifecycle.js?v=415"></script>
-<script src="game.js?v=443"></script>
-<script src="sha/sha-resolution.js?v=412"></script>
-<script src="weapons.js?v=405"></script>
-<script src="skills.js?v=415"></script>
-<script src="skills/late-generals.js?v=410"></script>
-<script src="bot-ai-bus.js?v=418"></script>
-<script src="bot.js?v=434"></script>
-<script src="ai-bot.js?v=417"></script>
-<script src="render.js?v=447"></script>
-<script src="render-table.js?v=402"></script>
-<script src="render-discard.js?v=401"></script>
-<script src="render-hand.js?v=401"></script>
-<script src="render-controls.js?v=428"></script>
-<script src="render-log.js?v=404"></script>
-<script src="game-bg.js?v=18"></script>
-<script src="pwa.js?v=6"></script>
+<script src="skills/skill-registry.js?v=10"></script>
+<script src="debug-log.js?v=407"></script>
+<script src="room-lifecycle.js?v=416"></script>
+<script src="game.js?v=444"></script>
+<script src="sha/sha-resolution.js?v=413"></script>
+<script src="weapons.js?v=406"></script>
+<script src="skills.js?v=416"></script>
+<script src="skills/late-generals.js?v=411"></script>
+<script src="bot-ai-bus.js?v=419"></script>
+<script src="bot.js?v=435"></script>
+<script src="ai-bot.js?v=418"></script>
+<script src="render.js?v=448"></script>
+<script src="render-table.js?v=403"></script>
+<script src="render-discard.js?v=402"></script>
+<script src="render-hand.js?v=402"></script>
+<script src="render-controls.js?v=429"></script>
+<script src="render-log.js?v=405"></script>
+<script src="game-bg.js?v=19"></script>
+<script src="pwa.js?v=7"></script>
 </body>
 </html>
