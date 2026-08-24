@@ -169,6 +169,10 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
       let f = parseFloat(cs.fontSize);
       if(f === 0 && hasBefore) f = parseFloat(getComputedStyle(e,'::before').fontSize);
       items.push({
+        // 装备条内部的相邻行会有 line-box 意义上的"负间隙"(9px 字、line-height:1.2 → 行距
+        // 10.8px,而行盒高 13px,相邻行名义重叠约 1.2px;字形墨迹只有约 9px,实际并不相碰)。
+        // 那是排版的正常产物,不是布局缺陷,所以下面的"严格间隙"断言把装备条内部的对豁免掉。
+        inEquip: !!e.closest('.seat-equip-bar'),
         c: (typeof e.className==='string' ? e.className : '').split(' ')[0] || e.tagName,
         txt: (txt || bf.replace(/"/g,'')).slice(0,10),
         f, t:r.top, b:r.bottom, l:r.left, rt:r.right,
@@ -186,6 +190,24 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
       if(x>TOL && y>TOL) overlaps.push({a:A.c+'("'+A.txt+'")', b:B.c+'("'+B.txt+'")',
         w:Math.round(x), h:Math.round(y)});
     }
+    // 【严格间隙:零余量位置的回归防线】上面的 overlaps 是"已经撞上了才报"(容差 2px),
+    // 它拦不住"还没撞上、但余量已经归零"的位置——实测 667x375/9人局这一格,
+    // seat-faction↔seat-gen-name 的间隙是 **0px**,任何一方字号 +1px 就会立刻重叠,
+    // 而 overlaps 要到 -2px 才会报。把这类位置写成清单是被动的(得靠人记得回来查),
+    // 所以改成规则:**凡是不属于装备条内部的元素对,间隙一律要求 ≥0**,将来新增的元素
+    // 自动被覆盖,不需要维护任何清单。
+    let minGap = 999, minGapPair = '';
+    const gapPairs = [];
+    for(let i=0;i<items.length;i++) for(let j=i+1;j<items.length;j++){
+      const A=items[i], B=items[j];
+      if(A.inEquip && B.inEquip) continue;              // 装备条内部豁免,理由见 inEquip
+      const gx = Math.max(B.l-A.rt, A.l-B.rt);
+      const gy = Math.max(B.t-A.b, A.t-B.b);
+      const g = Math.max(gx, gy);                        // 只要有一轴分开就不算重叠
+      gapPairs.push({p:A.c+'("'+A.txt+'")↔'+B.c+'("'+B.txt+'")', g:+g.toFixed(1)});
+      if(g < minGap){ minGap = g; minGapPair = A.c+'("'+A.txt+'")↔'+B.c+'("'+B.txt+'")'; }
+    }
+    gapPairs.sort((x,y)=>x.g-y.g);
     const minF = items.reduce((m,i)=>Math.min(m,i.f), 99);
     const minEl = (items.find(i=>i.f===minF)||{});
     return {
@@ -193,6 +215,8 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
             w:Math.round(sr.width),h:Math.round(sr.height)},
       vw:innerWidth, vh:innerHeight,
       overlaps, minF, minEl:minEl.c+':'+minEl.txt,
+      minGap:+minGap.toFixed(1), minGapPair,
+      tightest: gapPairs.slice(0,3).map(x=>x.p+' '+x.g+'px'),
       clippedEquip: items.filter(i=>i.isEquipName && i.clip).map(i=>i.txt),
       clippedAny: items.filter(i=>i.clip).map(i=>i.c+':'+i.txt)
     };
@@ -223,6 +247,9 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
         ? P(label+tag+' 无元素重叠')
         : F(label+tag+' 有 '+m.overlaps.length+' 处元素重叠: '
             + m.overlaps.map(o=>o.a+'↔'+o.b+'('+o.w+'x'+o.h+'px)').join(' '));
+      m.minGap>=0
+        ? P(label+tag+' 无零余量位置(最紧 '+m.minGapPair+' '+m.minGap+'px ≥0)')
+        : F(label+tag+' 出现负余量: '+m.tightest.join(' | '));
       m.minF>=9 ? P(label+tag+' 最小字号 '+m.minF+'px ≥9px')
                 : F(label+tag+' 最小字号 '+m.minF+'px <9px ('+m.minEl+')');
       m.clippedEquip.length===0 ? P(label+tag+' 装备名无截断')

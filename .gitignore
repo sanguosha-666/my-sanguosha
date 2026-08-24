@@ -20,6 +20,41 @@ Desktop.ini
 # 会话进度文件(不入库)
 TASKS.md
 
+# ---- 验证/排查过程的临时工件 ----
+# 【为什么要有这一段】本项目没有 package.json、没有构建流程,长期也就没有真正的
+# .gitignore 兜底;而改动收尾惯用 `git add -A`,两者相加的结果是**任何落在项目根的
+# 临时工件迟早会被误提交**——已经发生过一次(指向 scratchpad 的 node_modules 软链被
+# 提交进 main)。所以这里不是"堵掉那一个洞",而是把这几轮实际产生过的几类工件一次列全:
+# 依赖软链、截图/视频输出、Playwright 自己的产物、一次性验证脚本的输出目录。
+
 # 跑 Playwright/sharp 时会在项目根建一条指向 scratchpad 的 node_modules 软链,
-# 那些包只装在 scratchpad、不是本项目的依赖(本项目无构建流程、无 package.json)。
+# 那些包只装在 scratchpad、不是本项目的依赖。
 node_modules
+
+# 验证脚本的截图/录像输出(tools/verify_*.js、布局对比、对比度取样等)
+*.png
+*.jpeg
+screenshots/
+shots/
+__screenshots__/
+# 例外:真正入库的站点素材放在 assets/ 下,不受上面几条影响
+!assets/**/*.png
+!assets/**/*.jpeg
+
+# Playwright 自己的产物
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+playwright/.cache/
+
+# 一次性验证/排查脚本及其输出(scratchpad 里的东西不该出现在项目根;
+# 真正要长期保留的验证脚本请放进 tools/ 并起正式名字)
+scratchpad/
+tmp/
+.tmp/
+*.tmp
+diag.js
+edge.js
+*.out.txt
+*.dump.json
