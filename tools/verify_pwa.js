@@ -183,58 +183,38 @@ console.log('\n■ 首次访问引导提示');
   await ctx.close();
 }
 
-console.log('\n■ 从主屏恢复时的缩放归零(pwaResetZoom)');
+console.log('\n■ 真机环境诊断入口(pwaDiagnostics)');
 {
-  // standalone:应当先把 viewport 换成带 maximum-scale=1 的版本(逼 WebKit 复位缩放),
-  // 再在随后一帧撤回可缩放版本。两个阶段都要断言,只看最终态是看不出它做过归零的。
-  const {ctx,p}=await open(b,{w:844,h:390,touch:true},{displayMode:'fullscreen'});
-  const mid=await p.evaluate(()=>{
-    const vp=document.querySelector('meta[name="viewport"]');
-    pwaResetZoom();
-    return vp.getAttribute('content');          // 同步读:此时应处于"锁定"中间态
-  });
-  /maximum-scale=1/.test(mid)
-    ? P('standalone:归零时先切到 maximum-scale=1 的锁定态')
-    : F('standalone:未进入锁定态,content='+mid);
-  await p.waitForTimeout(120);
-  const fin=await p.evaluate(()=>document.querySelector('meta[name="viewport"]').getAttribute('content'));
-  (!/maximum-scale/.test(fin) && /initial-scale=1/.test(fin) && /viewport-fit=cover/.test(fin))
-    ? P('standalone:随后撤回可缩放态(用户仍可主动放大看细节): '+fin)
-    : F('standalone:未撤回可缩放态,content='+fin);
-  await ctx.close();
-}
-{
-  // 普通浏览器里不该动 viewport —— 那里页面不保留缩放,复位只会打断用户主动的缩放
+  // 【为什么这里只验"入口可用"】"主屏冷启动画面被放大"只在真机 standalone 下复现,
+  // Playwright 里既没有 iOS 的 viewport 行为、也没有系统状态保留,**测不出那个现象**。
+  // 所以这里只保证:诊断函数不报错、把判断所需的关键量都列出来了、并且真的接进了
+  // ? 帮助弹窗(手机上唯一随时可点、不依赖房间的入口)。数值本身要靠用户真机读。
   const {ctx,p}=await open(b,{w:844,h:390,touch:true});
-  const before=await p.evaluate(()=>document.querySelector('meta[name="viewport"]').getAttribute('content'));
-  await p.evaluate(()=>pwaResetZoom());
-  const after=await p.evaluate(()=>document.querySelector('meta[name="viewport"]').getAttribute('content'));
-  (before===after && !/maximum-scale/.test(after))
-    ? P('普通浏览器:pwaResetZoom 不动 viewport(不打断用户主动缩放)')
-    : F('普通浏览器:viewport 被改动了 '+before+' → '+after);
-  await ctx.close();
-}
-{
-  // 【用户明确纠正过的点】归零只碰缩放,绝不能连带把对局状态清掉/跳回大厅。
-  const {ctx,p}=await open(b,{w:844,h:390,touch:true},{displayMode:'fullscreen'});
   await p.evaluate(mkSetup(8));
   await p.waitForTimeout(200);
-  const st=await p.evaluate(()=>{
-    const before={game:!document.getElementById('game').classList.contains('hidden'),
-                  lobby:!document.getElementById('lobby').classList.contains('hidden'),
-                  seats:document.querySelectorAll('#oppRow .seat').length,
-                  phase:(typeof currentG!=='undefined'&&currentG)?currentG.phase:null};
-    pwaResetZoom();
-    window.dispatchEvent(new Event('pageshow'));
-    const after={game:!document.getElementById('game').classList.contains('hidden'),
-                 lobby:!document.getElementById('lobby').classList.contains('hidden'),
-                 seats:document.querySelectorAll('#oppRow .seat').length,
-                 phase:(typeof currentG!=='undefined'&&currentG)?currentG.phase:null};
-    return {before,after};
-  });
-  JSON.stringify(st.before)===JSON.stringify(st.after) && st.after.game && !st.after.lobby && st.after.seats>0
-    ? P('归零不影响对局状态(仍在对局中、'+st.after.seats+' 张对手卡、phase='+st.after.phase+',没跳回大厅)')
-    : F('归零动了对局状态! '+JSON.stringify(st));
+  const d=await p.evaluate(()=>pwaDiagnostics());
+  const need=['运行形态','window.inner','layoutViewport(documentElement.client)','visualViewport',
+              'screen','viewport meta','关键断点','手牌卡计算值','对手座位卡实测'];
+  const miss=need.filter(k=>!(k in d));
+  miss.length===0 ? P('诊断项齐备('+Object.keys(d).length+' 项)') : F('诊断缺少: '+miss.join(','));
+  /scale=1\.000/.test(d['visualViewport']) ? P('visualViewport 可读: '+d['visualViewport'])
+                                           : F('visualViewport 读数异常: '+d['visualViewport']);
+  /\d+ × \d+/.test(d['对手座位卡实测']) ? P('座位卡实测可读: '+d['对手座位卡实测'])
+                                        : F('座位卡实测不可读: '+d['对手座位卡实测']);
+  const inHelp=await p.evaluate(()=>{ showHelp();
+    const t=(document.getElementById('infoModal')||document.body).textContent||'';
+    return t.indexOf('环境诊断')>=0 && t.indexOf('visualViewport')>=0; });
+  inHelp ? P('诊断已出现在 ? 帮助弹窗里(真机可读)') : F('诊断未接入帮助弹窗');
+  await ctx.close();
+}
+{
+  // pwaResetZoom 已移除(假设被真机推翻),确认不再有残留引用
+  const {ctx,p}=await open(b,{w:844,h:390,touch:true},{displayMode:'fullscreen'});
+  const gone=await p.evaluate(()=>typeof pwaResetZoom==='undefined');
+  const vp=await p.evaluate(()=>document.querySelector('meta[name="viewport"]').getAttribute('content'));
+  gone ? P('pwaResetZoom 已移除(基于已被真机推翻的假设)') : F('pwaResetZoom 仍存在');
+  !/maximum-scale|user-scalable/.test(vp) ? P('viewport 未被任何代码改动: '+vp)
+                                          : F('viewport 仍被改动: '+vp);
   await ctx.close();
 }
 

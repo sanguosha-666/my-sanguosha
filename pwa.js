@@ -127,46 +127,16 @@ function pwaSyncHint(){
   }
 }
 
-// ---- 从主屏恢复时把缩放归零 ----
-//
-// 【症状】从主屏启动(standalone)时画面是放大的,而且是"上次退出时的放大状态"。
-//
-// 【排查过的两个方向,都不是原因】
-//   - 代码里恢复了 transform:scale/zoom:**没有**。全项目 grep `transform:scale` /
-//     `style.zoom` / `scale(` 零命中;localStorage/sessionStorage 只用于身份猜测标记、
-//     AI 密钥、PWA 提示,没有任何缩放相关的存取。
-//   - viewport meta 带了非 1.0 的 initial-scale:**没有**,一直是 initial-scale=1.0。
-//     但它同时**没有** maximum-scale / user-scalable 限制,所以双指缩放是完全开放的
-//     —— 这是"能被放大"的前提,不是"启动时是放大的"的原因。
-//
-// 【真正的原因】iOS 的 standalone web app 会把缩放级别(以及滚动位置)当成 app 状态
-// 由系统保留,下次从主屏启动时一并恢复。所以只要用户在游戏中双指误触放大过一次,
-// 那个放大就会被记住、每次启动都带着。这是系统行为,页面这边只能在启动/恢复时主动归零。
-//
-// 【为什么不用 user-scalable=no / maximum-scale=1 一禁了之】
-//   ① iOS 10 起 Safari **故意忽略** user-scalable=no(无障碍考虑),靠它并不可靠;
-//   ② 这个项目手机横屏下最小字号只有 9px,彻底禁用缩放会让看不清的人没有任何补救手段。
-// 所以保留"用户可以主动放大看细节"的能力,只在**启动/恢复**这个时刻归零。
-//
-// 【归零的手法】WebKit 只在 viewport meta 的 content **发生变化**时才重新应用缩放约束。
-// 所以先临时加上 maximum-scale=1.0 逼它把当前缩放压回 1,再在随后的一帧撤掉,
-// 让页面重新变回可缩放。只设一次同样的值是不会触发重新应用的。
-const PWA_VIEWPORT_BASE = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
-function pwaResetZoom(){
-  const vp = document.querySelector('meta[name="viewport"]');
-  if(!vp) return;
-  // 只在从主屏启动时做。普通浏览器里页面不会保留缩放,反而可能打断用户正在进行的缩放。
-  if(!pwaIsStandalone()) return;
-  vp.setAttribute('content', PWA_VIEWPORT_BASE + ', maximum-scale=1.0, user-scalable=no');
-  const restore = () => vp.setAttribute('content', PWA_VIEWPORT_BASE);
-  if(typeof requestAnimationFrame==='function') requestAnimationFrame(()=>requestAnimationFrame(restore));
-  else setTimeout(restore, 50);
-}
+// 【已移除:pwaResetZoom】曾经加过一段"启动时把缩放归零"的逻辑,依据是"iOS standalone
+// 会保留上次退出时的缩放级别"。**这个假设已被真机推翻**:即使退出前完全没有双指缩放过
+// (缩放一直是 1.0),从主屏冷启动后画面依然是放大的 —— 所以放大与上次的缩放状态无关,
+// 是每次冷启动都会发生的事。基于错误假设、且从未被真机证实有效的代码没有保留价值,
+// 一并移除,同时也把它自己从"会不会是它人为造成了一次缩放跳动"的嫌疑里排除掉。
+// 真正的原因正在排查中,排查手段见 pwaDiagnostics()(真机可读的实测数值)。
 
 function pwaInit(){
   pwaSyncFullscreenBtn();
   pwaSyncHint();
-  pwaResetZoom();
 }
 
 // 和 checkLandscapeGate / unlockAudioOnce 同一套写法:加载后立即跑一次 + 注册监听。
@@ -174,14 +144,67 @@ function pwaInit(){
 if(typeof document!=='undefined'){
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', pwaInit);
   else pwaInit();
-  // pageshow 覆盖两种恢复:普通加载,以及从 bfcache/后台恢复(event.persisted=true)。
-  // **刻意不挂 visibilitychange**:那个事件每次切回前台都会触发,如果用户是主动放大了
-  // 想看清某处细节,切出去接个消息再回来就被强行复位,反而是干扰。只在真正的
-  // "启动/恢复"这个时刻归零,不干预用户主动的缩放。
-  // 注意:归零只改缩放,**不动任何游戏状态**——对局状态由 Firebase 实时同步,
-  // 退出重进后保留当前进度是期望行为,这里不会让它跳回大厅。
-  window.addEventListener('pageshow', pwaResetZoom);
   document.addEventListener('fullscreenchange', pwaSyncFullscreenBtn);
   document.addEventListener('webkitfullscreenchange', pwaSyncFullscreenBtn);
   window.addEventListener('resize', pwaSyncFullscreenBtn);
+}
+
+// ===== 真机环境诊断 =====
+//
+// 【为什么需要它】"从主屏冷启动后画面被放大"这个问题,只在真机的 standalone 模式下出现,
+// 而手机上没有开发者控制台,远程调试也不总是有条件。**继续按推断改代码是错的**——
+// 需要先拿到真机上的实际数值。这个函数把判断这件事所需的全部量一次性列出来,
+// 通过 ? 帮助弹窗底部就能看到,不需要任何调试工具。
+//
+// 【怎么用】在普通 Safari 里打开一次、记下数值;再从主屏快捷方式冷启动一次、记下数值;
+// 两组一对比,就能确定放大到底来自哪一层:
+//   - visualViewport.scale ≠ 1        → 真的是页面被缩放了(浏览器层)
+//   - layoutViewport 宽高在两种模式下不同 → 视口尺寸本身变了(布局层,dvh/断点会跟着变)
+//   - scale=1 但 innerWidth 明显小于 screen 长边 → viewport 按竖屏宽度算了再被拉大填满横屏
+//     (iOS standalone 横屏启动的经典表现,此时元素会整体等比变大)
+//   - 上面都正常但 cardWidth/座位卡实测尺寸跳档 → 是布局计算吃了不同的视口值,不是缩放
+function pwaDiagnostics(){
+  const vv = window.visualViewport || null;
+  const de = document.documentElement;
+  const seat = document.querySelector('#oppRow .seat');
+  const seatR = seat ? seat.getBoundingClientRect() : null;
+  const card = document.querySelector('.hand .card');
+  const cardR = card ? card.getBoundingClientRect() : null;
+  const metrics = (typeof cardMetricsForViewport==='function') ? cardMetricsForViewport() : null;
+  const mq = (q) => (window.matchMedia && window.matchMedia(q).matches) ? '✓' : '✗';
+  return {
+    '运行形态': (pwaIsStandalone()? 'standalone(主屏启动)' : '浏览器内')
+      + '  navigator.standalone=' + String(navigator.standalone),
+    'display-mode': 'fullscreen'+mq('(display-mode: fullscreen)')
+      + ' standalone'+mq('(display-mode: standalone)') + ' browser'+mq('(display-mode: browser)'),
+    'window.inner': window.innerWidth + ' × ' + window.innerHeight,
+    'layoutViewport(documentElement.client)': de.clientWidth + ' × ' + de.clientHeight,
+    'visualViewport': vv ? (Math.round(vv.width) + ' × ' + Math.round(vv.height)
+        + '   scale=' + vv.scale.toFixed(3) + '  offsetTop=' + Math.round(vv.offsetTop)) : '(不支持)',
+    'screen': screen.width + ' × ' + screen.height
+      + '  avail ' + screen.availWidth + ' × ' + screen.availHeight
+      + '  dpr=' + window.devicePixelRatio,
+    'viewport meta': (document.querySelector('meta[name="viewport"]')||{getAttribute:()=>'(无)'}).getAttribute('content'),
+    'safe-area(上右下左)': ['top','right','bottom','left'].map(k=>
+        getComputedStyle(de).getPropertyValue('--sa-'+k) || '?').join(' / '),
+    '关键断点': 'max-height:520+landscape+coarse ' + mq('(max-height:520px) and (orientation:landscape) and (pointer:coarse)')
+      + '   max-width:640 ' + mq('(max-width:640px)'),
+    '手牌卡计算值': metrics ? ('cardWidth=' + metrics.cardWidth + ' badge=' + metrics.badge) : '(不可用)',
+    '手牌卡实测': cardR ? (Math.round(cardR.width) + ' × ' + Math.round(cardR.height)) : '(无手牌)',
+    '对手座位卡实测': seatR ? (Math.round(seatR.width) + ' × ' + Math.round(seatR.height)
+        + '   = ' + (seatR.height / (window.innerHeight||1) * 100).toFixed(1) + '% 视口高') : '(无座位卡)',
+  };
+}
+
+// 渲染成一段 HTML,供 ? 帮助弹窗底部展示(手机上唯一随时可点、且不依赖房间的入口)
+function pwaDiagnosticsHtml(){
+  const d = pwaDiagnostics();
+  let h = '<div class="sec">环境诊断（排查「主屏启动画面被放大」用）</div>'
+        + '<div class="item" style="color:var(--paper-dim)">在普通浏览器里看一次、再从主屏快捷方式冷启动看一次，'
+        + '把两组数值对比，就能定位放大来自哪一层。</div>';
+  for(const k in d){
+    h += '<div class="item"><b>' + escapeHtml(k) + '</b>：<code style="font-size:11px">'
+       + escapeHtml(String(d[k])) + '</code></div>';
+  }
+  return h;
 }

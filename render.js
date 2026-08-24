@@ -2116,5 +2116,10 @@ function showHelp(){
   html+='<div class="sec">装备</div>';
   Object.keys(EQUIPS).forEach(n=>{
     html+='<div class="item"><b>'+escapeHtml(n)+'</b>：'+escapeHtml(getEquip(n).desc||'')+'</div>'; });
+  // 环境诊断附在最后:手机上没有开发者控制台,而"主屏启动画面被放大"这类问题只有在真机的
+  // standalone 模式下才复现,必须有一个不依赖调试工具、随时可点的地方能读到实际视口数值。
+  // pwa.js 加载顺序在 render.js 之后,所以只能在函数被调用时(用户点击时)查,不能在顶层查
+  // ——和 debug-log.js 里查 infoModalGeneration 是同一个约束。
+  if(typeof pwaDiagnosticsHtml === 'function') html += pwaDiagnosticsHtml();
   showInfo('规则 / 说明', html);
 }
