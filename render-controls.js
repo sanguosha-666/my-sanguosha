@@ -583,15 +583,35 @@ function renderPendingXinshengAsk(g,c){
   const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondXinshengAsk(false);
   c.appendChild(yes);c.appendChild(no);setBanner('你受到伤害,是否发动【新生】获得一个新的武将? 剩余 '+g.pending.remaining+' 次。');
 }
+// CORE-150(issue #209):给"选一个人承受负面效果"的按钮标注目标座位与效果性质。
+// 【为什么要在渲染层加这两个 data 属性】机器人的 L1 决策是"镜像真实 DOM 按钮"——
+// DOM 隔离渲染 renderControls(g)、收集全部可点按钮、交给模型选一个 index。它拿到的
+// 只有按钮文案,**目标座位只活在 onclick 闭包里、外部读不到**,所以组队模式下无从判断
+// 某个按钮指向的是不是队友,只能靠模型自觉(而提示词只是建议、不是硬约束)。
+// 把座位与效果性质暴露成结构化属性后,bot.js 就能用既有的 botTargetPolicyAllows 做硬过滤。
+// 【为什么不靠解析按钮文案】文案里的昵称在交给模型前已被 botScrubLogText 替换成代号,
+// 且文案格式随技能千变万化,按文本反解座位既脆弱又不可扩展。
+// 【零回归】只是给 button 多挂两个 data-*,真人 UI 的外观与点击行为完全不受影响;
+// 未标注的按钮 bot 侧一律不过滤,保持原样。
+function markTargetBtn(b, seat, effect){
+  // dataset 缺失时直接跳过标注:标注只服务于机器人侧的过滤,**渲染层绝不能因为它出问题**
+  // ——这个函数在每次 renderControls 里都会跑,一旦抛异常整个响应控件区就渲染不出来,
+  // 真人玩家会直接失去操作按钮。未标注的按钮 bot 侧一律不过滤(退回改动前行为),
+  // 代价只是"这一处少了一层安全网",远小于把 UI 弄崩。
+  if(!b || !b.dataset) return b;
+  b.dataset.targetSeat = String(seat);
+  b.dataset.targetEffect = effect || 'harmful';
+  return b;
+}
 function renderPendingLiuli(g,c){
   const me=g.players[mySeat],targets=g.pending.targets||[];
-  liuliDiscardOptions(me).forEach(opt=>targets.forEach(t=>{const target=g.players[t];if(!target||!target.alive)return;const b=document.createElement('button');b.textContent='弃'+opt.label+' → '+target.name;b.onclick=()=>respondLiuli(opt,t);c.appendChild(b);}));
+  liuliDiscardOptions(me).forEach(opt=>targets.forEach(t=>{const target=g.players[t];if(!target||!target.alive)return;const b=document.createElement('button');b.textContent='弃'+opt.label+' → '+target.name;b.onclick=()=>respondLiuli(opt,t);markTargetBtn(b,t,'harmful');c.appendChild(b);}));
   const no=document.createElement('button');no.className='ghost';no.textContent='不发动';no.onclick=()=>respondLiuli(null,null);c.appendChild(no);
   const from=g.players[g.pending.from];setBanner(escapeHtml(from?from.name:'对方')+' 对你使用【杀】,是否发动【流离】弃一张牌转移目标?');
 }
 function renderPendingTianxiang(g,c){
   const me=g.players[mySeat],targets=g.pending.targets||[];
-  tianxiangHeartOptions(me).forEach(opt=>targets.forEach(t=>{const target=g.players[t];if(!target||!target.alive)return;const b=document.createElement('button');b.className='ghost';b.textContent='弃【'+opt.card.name+'】 → '+target.name;b.onclick=()=>respondTianxiang({idx:opt.idx},t);c.appendChild(b);}));
+  tianxiangHeartOptions(me).forEach(opt=>targets.forEach(t=>{const target=g.players[t];if(!target||!target.alive)return;const b=document.createElement('button');b.className='ghost';b.textContent='弃【'+opt.card.name+'】 → '+target.name;b.onclick=()=>respondTianxiang({idx:opt.idx},t);markTargetBtn(b,t,'harmful');c.appendChild(b);}));
   const no=document.createElement('button');no.className='ghost';no.textContent='不发动';no.onclick=()=>respondTianxiang(null,null);c.appendChild(no);
   setBanner('你即将受到'+g.pending.amount+'点伤害,是否发动【天香】转移给其他角色?');
 }

@@ -1558,10 +1558,16 @@ function collectControlsCandidates(g, seat){
       // 文本级昵称替换(和recentLog同一处理方式)。真人UI本身(box之外的真实#controls)
       // 完全不受影响,仍显示原始昵称。
       const label = botScrubLogText(g, (btn.textContent||'').trim()) || ('按钮'+i);
+      // CORE-150(issue #209):读渲染层标注的目标座位/效果性质(见 render-controls.js
+      // 的 markTargetBtn)。未标注的按钮这两项为 null,下游一律不过滤 —— 零回归。
+      const rawSeat = btn.dataset ? btn.dataset.targetSeat : undefined;
+      const tSeat = (rawSeat!==undefined && rawSeat!=='') ? Number(rawSeat) : null;
       list.push({
         index: i,
         label,
         source: 'controls',
+        targetSeat: Number.isInteger(tSeat) ? tSeat : null,
+        targetEffect: (btn.dataset && btn.dataset.targetEffect) || null,
         invoke: ()=>{ btn.click(); },
       });
     });
@@ -1588,8 +1594,41 @@ function controlsChoiceMatch(g, seat){
   if(CONTROLS_CHOICE_EXCLUDE.has(g.phase)) return false;
   return botSeatForState(g)===seat;
 }
+// CORE-150(issue #209):L1 候选的敌我硬过滤。
+// 【为什么必须有】L1 是"镜像真实 DOM 按钮"的决策路径,服务端渲染出来的目标按钮**本来就
+// 包含队友**(游戏规则允许把伤害转移给任何人),而这条路径不经过 botTargetScore /
+// botBestTarget / pickBestCandidateSeat 中的任何一个 —— 组队模式的两条敌我硬边界
+// (botTargetRelationAllowed / botTargetScore 的 team 分支)全都够不着它。
+// 于是"不选队友"只能靠模型自觉,而 issue #203 已经确立:提示词只是建议、不是硬约束。
+// 更反直觉的是,**无密钥的本地兜底反而是安全的**(liuli/tianxiang 的旧分支用
+// botTargetScore 排序,队友恒 -Infinity、只剩队友时直接不发动),等于"配了密钥安全网更弱"。
+// 【判据复用既有谓词,不新造】botTargetPolicyAllows 已经把 harmful/helpful 两套策略
+// 分发好了,组队模式下分别是 !sameTeam / sameTeam。这里只负责把按钮上的结构化标注
+// 喂给它。未标注 targetSeat 的按钮(绝大多数响应类按钮如"出闪/不出")不参与过滤。
+// 【全被过滤掉时不返回空】返回空会让 botDecide 走 false、回落到该阶段的旧分支,
+// 那条分支对 liuli/tianxiang 恰好是安全的(见上),但对其它未来阶段未必。
+// 保留未标注的按钮(通常含"不发动/取消"这类安全出口),让模型仍有合法选择。
+function controlsChoiceFilterTeam(g, seat, candidates){
+  if(!Array.isArray(candidates) || !candidates.length) return candidates;
+  if(typeof botTargetPolicyAllows!=='function') return candidates;
+  const kept = candidates.filter(function(c){
+    if(!Number.isInteger(c.targetSeat)) return true;      // 未标注:不过滤
+    if(c.targetSeat===seat) return true;                  // 指向自己:不是"打错阵营"
+    return botTargetPolicyAllows(g, seat, c.targetSeat, c.targetEffect || 'harmful');
+  });
+  if(kept.length === candidates.length) return candidates;
+  const dropped = candidates.length - kept.length;
+  // 过滤后若一个都不剩,说明这一刻所有目标都不该选 —— 交回原列表由既有逻辑处理,
+  // 不制造"没有任何候选"的空状态(那会让 L1 整体失效、行为不可预期)。
+  if(!kept.length) return candidates;
+  console.debug && console.debug('[bot] L1 队伍过滤:移除 '+dropped+' 个指向队友的候选');
+  // index 是"按钮在 DOM 里的下标",execute 依赖它定位,**不能重排或重新编号**;
+  // 这里只做删除,保留每一项原本的 index。
+  return kept;
+}
 function controlsChoiceBuildCandidates(g, seat){
   const res = collectControlsCandidates(g, seat);
+  res.candidates = controlsChoiceFilterTeam(g, seat, res.candidates);
   if(!res.candidates.length){
     // 没有可点按钮:立即归还 DOM(否则真实 #controls 会一直顶着改名后的 id,真人界面坏掉),
     // 返回空让 botDecide 走 false → 旧分支继续处理。

@@ -24,6 +24,10 @@ function mkEl(tag){
   const el = {
     tagName: String(tag).toUpperCase(),
     children: [], style: {}, _text: '', _html: '',
+    // CORE-150(issue #209):渲染层会给"选目标"按钮挂 data-target-seat / data-target-effect
+    // (见 render-controls.js 的 markTargetBtn),bot 侧据此做组队模式的同队硬过滤。
+    // stub 必须提供 dataset,否则那段标注跑不起来、本测试也覆盖不到过滤逻辑。
+    dataset: {},
     id: '', className: '', disabled: false, onclick: null, parentEl: null,
     classList: { add: function() {}, remove: function() {}, contains: function() { return false; } },
     appendChild: function(ch){ ch.parentEl = this; this.children.push(ch); return ch; },
