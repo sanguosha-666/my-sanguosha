@@ -185,8 +185,23 @@ function pwaDiagnostics(){
       + '  avail ' + screen.availWidth + ' × ' + screen.availHeight
       + '  dpr=' + window.devicePixelRatio,
     'viewport meta': (document.querySelector('meta[name="viewport"]')||{getAttribute:()=>'(无)'}).getAttribute('content'),
-    'safe-area(上右下左)': ['top','right','bottom','left'].map(k=>
-        getComputedStyle(de).getPropertyValue('--sa-'+k) || '?').join(' / '),
+    // 【修正】第一版读的是 --sa-top 这类 CSS 变量,但项目里**从来没有定义过**这几个变量,
+    // 所以真机上四项全是 "?" —— 一条读不到任何东西的诊断项。env() 只能在 CSS 属性值里
+    // 求值,拿不到 JS 变量,所以造一个临时元素、把四个 env() 写进它的 padding,再读回
+    // computed 值。这是 JS 侧唯一能拿到 safe-area 实际像素的办法。
+    'safe-area(上右下左)': (()=>{
+      try{
+        const t=document.createElement('div');
+        t.style.cssText='position:fixed;left:-9999px;top:-9999px;'
+          +'padding:env(safe-area-inset-top) env(safe-area-inset-right) '
+          +'env(safe-area-inset-bottom) env(safe-area-inset-left);';
+        document.body.appendChild(t);
+        const cs=getComputedStyle(t);
+        const v=[cs.paddingTop,cs.paddingRight,cs.paddingBottom,cs.paddingLeft].join(' / ');
+        t.remove();
+        return v;
+      }catch(e){ return '(读取失败)'; }
+    })(),
     '关键断点': 'max-height:520+landscape+coarse ' + mq('(max-height:520px) and (orientation:landscape) and (pointer:coarse)')
       + '   max-width:640 ' + mq('(max-width:640px)'),
     '手牌卡计算值': metrics ? ('cardWidth=' + metrics.cardWidth + ' badge=' + metrics.badge) : '(不可用)',

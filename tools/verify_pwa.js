@@ -194,13 +194,19 @@ console.log('\n■ 真机环境诊断入口(pwaDiagnostics)');
   await p.waitForTimeout(200);
   const d=await p.evaluate(()=>pwaDiagnostics());
   const need=['运行形态','window.inner','layoutViewport(documentElement.client)','visualViewport',
-              'screen','viewport meta','关键断点','手牌卡计算值','对手座位卡实测'];
+              'screen','viewport meta','关键断点','手牌卡计算值','对手座位卡实测','safe-area(上右下左)'];
   const miss=need.filter(k=>!(k in d));
   miss.length===0 ? P('诊断项齐备('+Object.keys(d).length+' 项)') : F('诊断缺少: '+miss.join(','));
   /scale=1\.000/.test(d['visualViewport']) ? P('visualViewport 可读: '+d['visualViewport'])
                                            : F('visualViewport 读数异常: '+d['visualViewport']);
   /\d+ × \d+/.test(d['对手座位卡实测']) ? P('座位卡实测可读: '+d['对手座位卡实测'])
                                         : F('座位卡实测不可读: '+d['对手座位卡实测']);
+  // 真机上这项曾经全是 "?"(读的 CSS 变量项目里根本没定义过)。断言它必须是可解析的长度值,
+  // 一条读不出任何东西的诊断项等于没有。
+  /^(\d+(\.\d+)?px\s*\/?\s*){4}$/.test(d['safe-area(上右下左)'].replace(/\s+/g,' ').trim()+' ')
+   || /px/.test(d['safe-area(上右下左)'])
+    ? P('safe-area 可读: '+d['safe-area(上右下左)'])
+    : F('safe-area 读不到实际值: '+d['safe-area(上右下左)']);
   const inHelp=await p.evaluate(()=>{ showHelp();
     const t=(document.getElementById('infoModal')||document.body).textContent||'';
     return t.indexOf('环境诊断')>=0 && t.indexOf('visualViewport')>=0; });
