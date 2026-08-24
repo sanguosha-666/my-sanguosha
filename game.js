@@ -4213,7 +4213,28 @@ function aliveOrderFrom(g, from, includeFrom){
   return order;
 }
 function startTaoyuanWuxie(g, from, order, idx){
-  while(idx<order.length && (!g.players[order[idx]] || !g.players[order[idx]].alive)) idx++;
+  // CORE-147(issue #204):满体力角色必须**在开轮询之前**就跳过,不能等到结算时才发现。
+  // 【规则依据】标准版 FAQ:结算【桃园结义】时满体力角色视为不受其影响,不能对该角色
+  // 使用【无懈可击】,应直接跳过该角色的结算。
+  // 【改动前的问题】这个 while 只跳过"不存在/已阵亡",满血角色照样往下走,于是
+  // 对他开一整轮无懈询问(phase='wuxie' + openWuxieRound),等到 finishTaoyuanTarget
+  // 才由 hp<maxHp 判断出"体力已满"、什么也没发生。代价是三重的:①每个满血角色都白等
+  // 一轮询问(无人可响应时还有约 1 秒公共等待窗口,多名满血角色连续累积);②持有无懈或
+  // 可蛊惑响应的 AI 会为此进入一次没有任何合法收益的决策、可能真的调用模型烧 token;
+  // ③**规则错误**——它允许玩家在本不该存在的响应时机把【无懈可击】打出去并消耗掉。
+  // 【为什么放在这里而不是调用点】三个调用点(首次进入、被无懈抵消后推进、正常结算后
+  // 推进)全部经过这个 while,收敛在唯一出口修一次,不在各调用点分别打补丁。
+  while(idx<order.length){
+    const p=g.players[order[idx]];
+    if(!p || !p.alive){ idx++; continue; }
+    if(p.hp>=p.maxHp){
+      // 日志保留,否则满血角色会从结算过程里凭空消失、看不出为什么没轮到他。
+      // 文案沿用改动前 finishTaoyuanTarget 里那条,玩家看到的措辞不变。
+      g.log=pushLog(g.log, p.name+' 受【桃园结义】影响,体力已满');
+      idx++; continue;
+    }
+    break;
+  }
   if(idx>=order.length){
     g.pending=null;
     g.phase='play';
