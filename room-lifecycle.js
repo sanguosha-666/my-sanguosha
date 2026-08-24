@@ -281,7 +281,37 @@ function startGame(mode, gameMode){
         checkHuashenBeforeAssign(g);
         return g;
       }
-      g.lordGeneralPool = shuffled.slice(0, LORD_PICK);
+      // CORE-149(issue #208):主公的 5 张候选按"带不带主公技"分层抽取,固定 2 带 + 3 不带。
+      // 【为什么要分层】改动前是 shuffled.slice(0, LORD_PICK) —— 从全部 66 名武将里纯随机
+      // 切前 5 个。66 名里只有 6 名带主公技(见 data.js 的 LORD_SKILL_CAPS),按超几何分布
+      // 算下来 **61.1% 的局主公一张带主公技的武将都摸不到**、只有 6.1% 能摸到 2 张及以上。
+      // 而项目已经完整实现了六个主公技(激将/护驾/救援/制霸/血裔/黄天),含专门的服务端
+      // pending 阶段、normalize 防御、每回合限一次标志位和机器人决策注册 —— 这些实现在
+      // 超过六成的对局里根本没有机会被触发。
+      // 【随机性从哪来】shuffled 本身已经是全体武将的随机序,filter 保持相对顺序,
+      // 所以两个子池各自取前 N 个就等价于"从该类武将里随机取 N 个",不需要再洗一次。
+      // 【最后那次打乱是必须的】不打乱的话带主公技的恒定排在前两位,**位置本身就泄露了
+      // 哪两张是主公技武将**,等于把"要不要选主公技"这个决策提前暴露在 UI 顺序上。
+      const withLordSkill = shuffled.filter(id => generalHasLordSkill(id));
+      const withoutLordSkill = shuffled.filter(id => !generalHasLordSkill(id));
+      const LORD_PICK_WITH_SKILL = 2;
+      let lordPool = [
+        ...withLordSkill.slice(0, LORD_PICK_WITH_SKILL),
+        ...withoutLordSkill.slice(0, LORD_PICK - LORD_PICK_WITH_SKILL)
+      ];
+      // 【降级路径】任一类不够就用另一类补足到 5 张。当前武将表下不会触发(6 名带主公技、
+      // 60 名不带,两边都够),但武将禁用/自定义武将池是可预见的将来 —— 那时这里必须
+      // "少给几张主公技武将"而不是报错或卡在选将阶段。补完仍不足 5 张的情况由上面那个
+      // `shuffled.length < needed` 的退化分支兜住,走不到这里。
+      if(lordPool.length < LORD_PICK){
+        const already = new Set(lordPool);
+        for(const id of shuffled){
+          if(lordPool.length >= LORD_PICK) break;
+          if(!already.has(id)){ lordPool.push(id); already.add(id); }
+        }
+        g.log = pushLog(g.log, '(可选武将不足,主公候选未能凑齐 2 张主公技武将)');
+      }
+      g.lordGeneralPool = lordPool.sort(()=>Math.random()-0.5);
       g.players[lord].generalChoices = g.lordGeneralPool.slice();
       g.players[lord].general = null;
       g.players.forEach((p,i)=>{

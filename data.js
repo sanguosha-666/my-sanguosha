@@ -500,6 +500,38 @@ const GENERALS = {
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 
+// ---------- 主公技分类(CORE-149 / issue #208) ----------
+// 【这里补的是什么】主公技的**能力**本来就已经是结构化的 caps 了(见下表),业务层也一直
+// 用 hasCap(p,cap) + p.role==='zhu' 双条件判定、不硬编码武将名。缺的只是「**哪些 cap
+// 属于主公技**」这一层分类元数据 —— 身份局给主公发候选武将时要按"带不带主公技"分层,
+// 就需要能回答这个问题。
+//
+// 【为什么不在 GENERALS 上加一个 lordSkill 字段】那等于把同一个事实记两处(caps 里有
+// jijiang、另一处又写 lordSkill:'激将'),迟早漂移 —— CORE-117(issue #125)那次
+// GENERALS.simayi.skill 漏掉"鬼才"就是同类问题。这里只加一张 cap 名单 + 一个派生查询,
+// 单一事实源仍然是 caps。
+//
+// 【名单是穷举核对过的,不是凭印象列的】逐个查了每个 cap 的实现处是否带 role==='zhu' 守卫:
+//   jijiang  刘备【激将】   canTriggerLordAsk 内守卫
+//   hujia    曹操【护驾】   canTriggerLordAsk 内守卫
+//   jiuyuan  孙权【救援】   game.js 内 role==='zhu'
+//   zhiba    孙策【制霸】   game.js 内 role==='zhu'
+//   xueyi    袁绍【血裔】   game.js 内 role==='zhu'
+//   huangtian 张角【黄天】  game.js 内 role==='zhu'
+//
+// 【wangzun 刻意不在名单里】袁术【妄尊】的 role==='zhu' 守卫判断的是**别人**(当前回合的
+// 主公),再遍历去找持有 wangzun 的其他角色 —— 它是"作用于主公的普通武将技",不是
+// "只有主公能发动的技能"。判据放宽一点(比如按 desc 里是否出现"主公"两字)就会把它误纳入,
+// 测试里有一条断言专门钉住这一点。
+const LORD_SKILL_CAPS = ['jijiang','hujia','jiuyuan','zhiba','xueyi','huangtian'];
+// generalHasLordSkill: 这个武将带不带主公技。传 id 或 GENERALS 条目均可。
+// 和 getGeneral/generalHasCap 同一套 seam 风格:业务层只问这一个问题,不关心是哪个技能。
+function generalHasLordSkill(idOrGeneral){
+  const gen = (typeof idOrGeneral === 'string') ? getGeneral(idOrGeneral) : idOrGeneral;
+  if(!gen || !gen.caps) return false;
+  return LORD_SKILL_CAPS.some(cap => !!gen.caps[cap]);
+}
+
 // ---------- 左慈【化身】技能拆分表 ----------
 // HUASHEN_SKILL_TABLE:把 GENERALS 里每个武将"整个打包"的 caps/hooks,按单个技能名的粒度
 // 拆开,供左慈【化身】(选择借用其他武将的单个技能)使用。覆盖 GENERALS 里当前已实现的全部
@@ -532,9 +564,16 @@ function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 // 再考虑加回。
 //
 // 【限定技/主公技/觉醒技/获得技能——本表暂不做类型过滤】官方"化身"规则通常要求排除
-// 限定技(一局限一次的技能,如庞统涅槃niepan)、主公技(袁术妄尊/刘备激将/曹操护驾/
-// 孙策制霸——这几个因为项目无身份局系统压根没被写进GENERALS.caps,天然不会出现在
-// 本表)、觉醒技(如姜维志继zhiji)、以及"觉醒/特殊条件下才动态获得的技能"(志继本身
+// 限定技(一局限一次的技能,如庞统涅槃niepan)、主公技(刘备激将/曹操护驾/孙权救援/
+// 孙策制霸/袁绍血裔/张角黄天)、觉醒技(如姜维志继zhiji)、以及"觉醒/特殊条件下才动态获得
+// 的技能"(志继本身
+// 【2026-08 更正】这段原本写的是"主公技这几个因为项目无身份局系统压根没被写进
+// GENERALS.caps,天然不会出现在本表"——**这句已经过时**:身份局早就实现了,六个主公技
+// 也都有各自的 caps(见 LORD_SKILL_CAPS)。它们确实仍然不在本表里,但原因不是"没写进
+// caps",而是本表在逐个武将拆分技能时**没有收录这几条**(可以核对 sunquan/sunce/liubei/
+// caocao/yuanshao/zhangjiao 六项,里面只有非主公技)。结论没变、理由要改对,
+// 否则以后有人照着这句去 caps 里找、会发现根本不是那么回事。
+// (志继本身
 // 触发后会让姜维player.caps.guanxing=true,这是运行时追加的能力,和本表这种静态查表
 // 结构是两回事)。
 // 本表当前**不含任何技能类型分类元数据**,姜维志继/庞统涅槃这类技能和普通caps技能
