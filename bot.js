@@ -1232,7 +1232,7 @@ function buildBotVisibleState(g, seat, isFirstTurn=false, level='normal'){
 // CORE-133:limit 可选,缺省 6 = 改动前的固定值(既有调用点/测试零变化)。
 function buildBotKeyEvents(g, limit){
   const keep = (typeof limit==='number' && limit>0) ? limit : 6;
-  return (g.log||[]).filter(function(e){
+  const events = (g.log||[]).filter(function(e){
     const t = (e && typeof e==='object') ? (e.text||'') : String(e==null?'':e);
     if(!t) return false;
     if(/^轮到 /.test(t)) return false;                 // 轮到 X
@@ -1243,8 +1243,31 @@ function buildBotKeyEvents(g, limit){
     if(/已添加机器人/.test(t)) return false;
     if(/^游戏开始/.test(t)) return false;
     return true;
-  }).slice(-keep).map(e => {
-    const t = (e && typeof e==='object') ? e.text : String(e==null?'':e);
+  }).map(e => (e && typeof e==='object') ? e.text : String(e==null?'':e));
+
+  // CORE-148(issue #205):**先脱敏、折叠,再截断**。
+  // 无懈轮询只会问真正持有【无懈可击】(或满足蛊惑响应条件)的角色,所以"正在问谁"
+  // 等价于暴露那个人的隐藏牌/隐藏能力。改动前这里直接把 g.log 原文投影进 recentLog,
+  // 再随决策 prompt 和 updateAiSummary 的摘要 prompt 一起发出去 —— 机器人能据此推断
+  // 谁有无懈,拿到真人界面上没有的信息优势;用外部 provider 时还会送给第三方模型。
+  // 规则本体在 game.js 的 redactWuxiePollingLog,和展示层(render-log.js)共用同一条。
+  const redactFn = (typeof redactWuxiePollingLog==='function') ? redactWuxiePollingLog : function(t){ return t; };
+  const publicText = (typeof WUXIE_POLLING_PUBLIC_TEXT==='string')
+    ? WUXIE_POLLING_PUBLIC_TEXT : '等待其他玩家响应【无懈可击】…';
+  // 【为什么要折叠相邻重复】一轮无懈会逐个询问多名候选人,脱敏后它们全变成同一句
+  // "等待其他玩家响应【无懈可击】…"。不折叠的话一轮询问就能占掉 recentLog 仅有的
+  // 名额(默认 6、决策路径 15),**把真正有价值的战况挤出窗口** —— 那是脱敏带来的新
+  // 问题,不是原本就有的。只折叠**相邻且恰好等于这句公开文本**的条目,不碰任何其它
+  // 重复日志,避免误伤"连续两次同样的动作"这种真实信息。
+  // 【顺序】折叠必须在 slice(-keep) 之前:先截断的话,窗口里可能已经塞满重复项,
+  // 折叠完剩不下几条,等于白白缩短了 AI 能看到的历史。
+  const collapsed = [];
+  for(let i=0;i<events.length;i++){
+    const t = redactFn(events[i]);
+    if(t===publicText && collapsed.length && collapsed[collapsed.length-1]===t) continue;
+    collapsed.push(t);
+  }
+  return collapsed.slice(-keep).map(function(t){
     // CORE-101(issue #148):g.log 原文是`${p.name} ...`这样拼出来的,昵称原样嵌在文本
     // 里,交给LLM前必须做一次文本级替换(不是结构化字段,不能简单换key)。
     return botScrubLogText(g, t);
