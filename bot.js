@@ -655,7 +655,35 @@ function botPredictKind(kind){
   return (k==='damage' || k==='duel') ? k : null;
 }
 
-function botTargetScore(g,seat,targetSeat,kind){
+// issue #203:这次的【杀】会不会因为"黑色杀无效"类效果被直接判掉?
+// 判据与结算侧 sha/sha-resolution.js 的 afterShaTargetSkills 严格一一对应:
+//   黑色杀 且 ( 目标有【毅重】且装备区没有防具 || (攻击者没有无视防具 且 目标有【仁王盾】) )
+// 【毅重不受青釭剑影响】它是武将技、不属于防具,所以那一支不看 ignoreArmor;
+// 【仁王盾】是防具,攻击者装备青釭剑(ignoreArmor)时它不生效——两支的条件不对称,
+// 照抄结算侧那一行,不要想当然合并。
+// 【为什么收敛成一个函数】CLAUDE.md 规则 26:这类"服务端会直接拒绝/判无效"的前置条件
+// 要在一处判完,在多个决策分支里各写一遍迟早漏掉一处。
+function botShaVoidedByColor(g, fromSeat, targetSeat, card){
+  const me=g.players[fromSeat], target=g.players[targetSeat];
+  if(!me||!target||!card) return false;
+  // 丈八蛇矛那种"两张牌合成一张杀"的情况 card 是数组,颜色要用 combinedShaColor 另算
+  // (两张都红→红、都黑→黑、一红一黑→无色)。这条路径不经过这里的调用点,
+  // 保守返回 false —— 宁可不减分,也不要按错误的颜色去禁一个其实合法的目标。
+  if(Array.isArray(card)) return false;
+  if(typeof singleCardShaColor!=='function') return false;
+  if(singleCardShaColor(card)!=='black') return false;
+  if(hasCap(target,'yizhong') && !(target.equips && target.equips.armor)) return true;
+  if(!hasCap(me,'ignoreArmor') && hasCap(target,'renwang')) return true;
+  return false;
+}
+// 必定无效时的惩罚分。**刻意不用 -Infinity 硬禁**:结算侧 afterShaTargetSkills 里
+// 【雌雄双股剑】的结算排在毅重/仁王盾判断**之前**,也就是说这张杀虽然最终无效,
+// 装备雌雄的攻击者仍然能吃到"对异性使用杀"的摸牌/弃牌收益 —— 不是零收益,
+// 硬禁会在"场上只剩这一个合法目标"时把 AI 变成不出杀,反而更差。
+// 取 -400:足以压过最大的身份加成(反贼对已知主公 +240)+基础分,保证只要还有别的
+// 合法目标就绝不会选它;而只剩它一个时仍是有限分、AI 照常出牌。
+const BOT_SHA_VOIDED_PENALTY = -400;
+function botTargetScore(g,seat,targetSeat,kind,card){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return -Infinity;
   const known=botKnownRole(g,seat,targetSeat);
@@ -727,6 +755,14 @@ function botTargetScore(g,seat,targetSeat,kind){
     // duel(决斗):胜负由双方杀的数量决定,对方越可能没杀,越值得决斗。
     else if(predKind==='duel') score += (1 - pred.slash) * BOT_PREDICT_WEIGHT;
   }
+  // issue #203:这张【杀】如果会被"黑色杀无效"(毅重/仁王盾)直接判掉,重罚。
+  // 放在最后、用加法:对 -Infinity 免疫(上面那些身份硬禁必须原样穿透到底,
+  // -Infinity + (-400) 仍是 -Infinity),也不会被后续项冲掉。
+  // 只在伤害类 kind 上判 —— 顺手牵羊/过河拆桥/决斗都不是"用一张杀去打",
+  // 毅重和仁王盾对它们没有任何影响。
+  if(predKind==='damage' && card && botShaVoidedByColor(g, seat, targetSeat, card)){
+    score += BOT_SHA_VOIDED_PENALTY;
+  }
   return score;
 }
 function botBestTarget(g,seat,card,actionId){
@@ -739,7 +775,7 @@ function botBestTarget(g,seat,card,actionId){
     // 和"对方有没有闪"是完全不同的一个判断,不能继续混在 damage 里。
     const kind=(actionId==='顺手牵羊'||actionId==='过河拆桥')?'steal'
       :(actionId==='决斗')?'duel':'damage';
-    const score=botTargetScore(g,seat,i,kind);
+    const score=botTargetScore(g,seat,i,kind,card);
     if(score>bestScore){bestScore=score;best=i;}
   });
   return best;
@@ -776,6 +812,10 @@ function pickBestCandidateSeat(g, seat, candidates, kind){
     // 自己作为候选(allowSelf场景,如桃园结义)时botTargetScore(seat===targetSeat)恒
     // 返回-Infinity,不能直接套用——给中性分0,不让"自己"因为公式副作用被系统性排除,
     // 但也不会在有其他真实目标时被优先选中。
+    // 【这里刻意不传 card】pickBestCandidateSeat 是座位技能的共用 helper,
+    // 签名里根本没有 card —— 早先误传过一次,直接 ReferenceError(soak 立刻抓到
+    // "card is not defined")。而且它服务的那些场景(旋风/驱虎/青囊…)本来就不是
+    // "用某一张【杀】去打人",毅重/仁王盾那条黑杀无效的规则对它们没有意义。
     const s = (c.seat===seat) ? 0 : botTargetScore(g, seat, c.seat, kind);
     if(s>bestScore){ bestScore=s; best=c.seat; }
   });
