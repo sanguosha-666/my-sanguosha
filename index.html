@@ -5,7 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>极简三国杀 · 多人联机</title>
 <link rel="icon" href="favicon.png" type="image/png">
+
+<!-- ===== PWA(目标:消掉浏览器地址栏占掉的那条竖向空间) =====
+     手机横屏下视口只有 390~430px 高,浏览器 chrome 吃掉的几十像素占比很可观。
+     从主屏启动时 display:"fullscreen" 会去掉整条地址栏;manifest 的 orientation:"landscape"
+     还能在 Android 上真正锁定横屏(iOS 不支持 orientation 锁定,见 render.js 里
+     checkLandscapeGate 的说明,那层软引导遮罩因此仍然保留、没有被 PWA 取代)。
+     注意:这里**没有注册 Service Worker**——本项目是纯静态无构建流程,且对局状态全部实时
+     依赖 Firebase,离线缓存没有意义,反而会带来"用户拿到旧版本 JS"的风险(cache-bust 的
+     ?v=N 是手动维护的)。没有 SW 不影响"添加到主屏幕"和 display:fullscreen 生效,只影响
+     Chrome 是否弹自动安装横幅(beforeinstallprompt),那条路本来就靠下面的手动引导覆盖。 -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a1714">
+<!-- iOS 专用:Safari 不读 manifest 的 display/orientation,必须用这套私有 meta 才能在
+     从主屏启动时去掉地址栏。black-translucent 让状态栏叠在页面上方(配合 <head> 里已有的
+     viewport-fit=cover 和 body 的 env(safe-area-inset-*) padding,刘海区域已经有避让)。 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="三国杀">
 <link rel="apple-touch-icon" href="favicon-180.png">
+<link rel="apple-touch-icon" sizes="180x180" href="favicon-180.png">
 
 <!-- Firebase (compat build, loaded from Google's CDN). These only run when you DEPLOY this file. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -1402,6 +1422,27 @@
   }
   /* 显示/隐藏靠通用的 .hidden{display:none!important} 规则(文件末尾已有),不用再单独
      写 .landscape-gate.hidden——避免同一个开关维护两份重复(甚至可能不一致)的规则。 */
+  /* PWA 引导条。固定在底部、不挡任何操作区(手牌在上方),高度很小;
+     手机横屏本来就吃紧,所以字号/内边距都按那个断点的尺度写(≥9px 的下限同样适用)。
+     safe-area 的 bottom 内边距要加 —— 横屏 iPhone 的手势条在底部。 */
+  .pwa-hint{
+    position:fixed;left:0;right:0;bottom:0;z-index:60;
+    display:flex;align-items:center;gap:8px;
+    padding:6px 10px;
+    padding-bottom:calc(6px + env(safe-area-inset-bottom, 0px));
+    padding-left:calc(10px + env(safe-area-inset-left, 0px));
+    padding-right:calc(10px + env(safe-area-inset-right, 0px));
+    background:rgba(26,23,20,.96);border-top:1px solid var(--line);
+    color:var(--paper);font-size:12px;line-height:1.4;
+  }
+  .pwa-hint-icon{font-size:15px;flex:none;}
+  .pwa-hint-text{flex:1 1 auto;min-width:0;}
+  .pwa-hint-close{
+    flex:none;background:none;border:1px solid var(--line);border-radius:6px;
+    color:var(--paper-dim);font-size:12px;line-height:1;padding:5px 8px;cursor:pointer;
+    min-width:32px;min-height:32px;   /* 触控目标下限,别做成点不中的小叉 */
+  }
+  .pwa-hint-close:active{background:rgba(233,225,210,.1);}
   .landscape-gate-icon{font-size:56px;color:var(--gold);animation:landscapeGateSpin 1.8s ease-in-out infinite;}
   @keyframes landscapeGateSpin{
     0%,100%{transform:rotate(0deg);}
@@ -2564,6 +2605,22 @@
        只隐藏 #myGeneral;同一断点上方已有的 `.hand-label:not(#myGeneral){display:none}`
        负责另一条"你的手牌"标签,两条合起来把这一层 chrome 全部收掉。 */
     #myGeneral{display:none;}
+    /* (10) PWA 引导条:手机横屏下同样要省高度。
+       【为什么并进这个既有块,而不是另起一个条件相同的断点块】
+       两条按**源码文本**做回归锁定的测试会被"多一个同条件块"或"注释里出现断点关键字"
+       直接带偏,这次两条都真实踩过:
+         - run_core121_hand_scroll_test.js 用 indexOf 取**第一个**同条件块,再在块内找
+           .hand{flex-wrap:nowrap} 等规则。第一版把引导条样式另起一个条件完全相同的块、
+           且位置更靠前,那个 indexOf 就被劫持,断言跑去一个根本没有 .hand 规则的块里查找,
+           表现为"手牌滚动规则凭空消失"这种和本次改动毫不相干的失败。
+         - run_core146_equip_short_name_test.js 从 content:attr(data-s) 往回 lastIndexOf
+           找最近的断点声明,用来确认简称规则确实落在手机横屏断点内。上一版注释里原样写了
+           断点条件(带 at-media 关键字),于是它往回找到的是**注释文本**而不是真正的规则行,
+           同样报了一个假失败。
+       所以:这类样式并进既有块,并且注释里不要出现裸的 at-media 关键字。 */
+    .pwa-hint{padding:4px 8px;padding-bottom:calc(4px + env(safe-area-inset-bottom, 0px));font-size:10px;gap:6px;}
+    .pwa-hint-icon{font-size:12px;}
+    .pwa-hint-close{font-size:10px;padding:4px 6px;min-width:28px;min-height:28px;}
 
     /* ---- ⑥ 装备条:显示 2 字简称,不再出现"武 ♠5…"这种截断 ----
        三件事一起做才有效:
@@ -2639,6 +2696,14 @@
 </div>
 <!-- 强制横屏软引导(骨架级重建阶段3):显隐逻辑纯 JS(render.js 的 checkLandscapeGate),
      这里只是静态结构,不含内联脚本。 -->
+<!-- PWA 引导条:显隐逻辑纯 JS(pwa.js 的 pwaSyncHint),这里只负责结构与外观。
+     只在"移动端 + 非主屏启动 + 用户没永久关掉过"时出现;关掉后写 localStorage,不再出现。 -->
+<div id="pwaHint" class="pwa-hint hidden">
+  <span class="pwa-hint-icon">📲</span>
+  <span class="pwa-hint-text"></span>
+  <button class="pwa-hint-close" onclick="pwaDismissHint()" title="不再提示">✕</button>
+</div>
+
 <div id="landscapeGate" class="landscape-gate hidden">
   <div class="landscape-gate-icon">⟳</div>
   <div class="landscape-gate-text">请将设备横过来使用<br>本游戏按横屏布局设计</div>
@@ -2704,6 +2769,9 @@
            靠 margin-left:auto 推到该行右端,和左侧的阶段标签共用同一行——.panel.table 是
            flex-wrap 容器,这一行本来就有富余横向空间,按钮并进来不新增行、纵向几乎零成本。 -->
       <div id="gameToolbar">
+        <!-- 全屏按钮:默认 hidden,由 pwa.js 的能力检测决定显不显示(iPhone Safari 不支持
+             非视频全屏,那里永远不显示;已从主屏启动时也不显示——地址栏本来就没了)。 -->
+        <button id="fullscreenBtn" class="icon-btn hidden" title="全屏游玩" onclick="pwaToggleFullscreen()">⛶</button>
         <button id="closeRoomBtn" class="icon-btn hidden" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
         <button id="aiPanelBtn" class="icon-btn" title="查看AI决策(理由/武将/模型,含非托管机器人)" onclick="openAiPanelModal()">🧠</button>
         <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
@@ -2742,29 +2810,30 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=435"></script>
-<script src="data.js?v=435"></script>
-<script src="stages/stage-table.js?v=403"></script>
+<script src="config.js?v=436"></script>
+<script src="data.js?v=436"></script>
+<script src="stages/stage-table.js?v=404"></script>
 <!-- CORE-78 第一期:技能注册表(纯数据登记,本期不被任何代码读取,第二/三期才按表驱动)。
      零依赖(只含字面量与自身的 登记技能() 辅助函数),放在 data.js 之后仅为归类到
      "数据类脚本"一段,不引入任何加载顺序约束。 -->
-<script src="skills/skill-registry.js?v=4"></script>
-<script src="debug-log.js?v=401"></script>
-<script src="room-lifecycle.js?v=410"></script>
-<script src="game.js?v=438"></script>
-<script src="sha/sha-resolution.js?v=407"></script>
-<script src="weapons.js?v=400"></script>
-<script src="skills.js?v=410"></script>
-<script src="skills/late-generals.js?v=405"></script>
-<script src="bot-ai-bus.js?v=413"></script>
-<script src="bot.js?v=429"></script>
-<script src="ai-bot.js?v=412"></script>
-<script src="render.js?v=442"></script>
-<script src="render-table.js?v=397"></script>
-<script src="render-discard.js?v=396"></script>
-<script src="render-hand.js?v=396"></script>
-<script src="render-controls.js?v=423"></script>
-<script src="render-log.js?v=399"></script>
-<script src="game-bg.js?v=13"></script>
+<script src="skills/skill-registry.js?v=5"></script>
+<script src="debug-log.js?v=402"></script>
+<script src="room-lifecycle.js?v=411"></script>
+<script src="game.js?v=439"></script>
+<script src="sha/sha-resolution.js?v=408"></script>
+<script src="weapons.js?v=401"></script>
+<script src="skills.js?v=411"></script>
+<script src="skills/late-generals.js?v=406"></script>
+<script src="bot-ai-bus.js?v=414"></script>
+<script src="bot.js?v=430"></script>
+<script src="ai-bot.js?v=413"></script>
+<script src="render.js?v=443"></script>
+<script src="render-table.js?v=398"></script>
+<script src="render-discard.js?v=397"></script>
+<script src="render-hand.js?v=397"></script>
+<script src="render-controls.js?v=424"></script>
+<script src="render-log.js?v=400"></script>
+<script src="game-bg.js?v=14"></script>
+<script src="pwa.js?v=2"></script>
 </body>
 </html>
