@@ -369,7 +369,19 @@ function cardMetricsForViewport(){
     return { cardWidth:118, badge:22, maxTitleFont:19 };
   }
   const coarse = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
-  if(h<=520 && coarse) return { cardWidth:60, badge:15, maxTitleFont:13 };
+  if(h<=520 && coarse){
+    // 【这一档改成连续函数,和 CSS 里 .hand .card 的 dvh 规则严格同源】
+    // 其余各档仍是"按视口分档返回固定值"的老写法(见上方注释),只有手机横屏这一档
+    // 因为手牌卡改成了按视口比例伸缩,必须跟着算,否则字号会按错误的卡片宽度去适配。
+    // 公式必须和 CSS 一一对应:height = clamp(70px, 31dvh, 132px)、宽高比 66:94、
+    // --badge = 高 x 0.17、标题栏最大字号 = 宽 x 0.197(= 改动前的 13/66)。
+    // **改这里必须同时改 index.html 那条规则,反之亦然。**
+    const cardH = Math.max(70, Math.min(31 * h / 100, 132));
+    const cardWidth = Math.round(cardH * 66 / 94);
+    return { cardWidth,
+             badge: Math.round(cardH * 0.17),
+             maxTitleFont: Math.round(cardWidth * 0.197) };
+  }
   if(w<=480) return { cardWidth:52, badge:14, maxTitleFont:12 };
   if(w<=640) return { cardWidth:58, badge:15, maxTitleFont:13 };
   if(w<=1199 || coarse) return { cardWidth:88, badge:19, maxTitleFont:16 };

@@ -2470,7 +2470,28 @@
     .seat.me{height:clamp(74px, 31dvh, 146px);}
     /* 手牌卡跟着 .seat.me 一起放大:两者同在 .bottom-row 里,如果手牌停在原来的 60x86,
        被更高的"我"的卡撑起来的这一行就会在手牌下方空出一截。 */
-    .hand .card{width:66px;height:94px;--badge:16px;}
+    /* 【手牌卡改成按视口比例伸缩,和 .seat 统一】
+       原来这里是写死的 66x94。座位卡是 clamp(70px, 33dvh, 150px) 按比例伸缩,手牌卡却是
+       固定像素 —— **两者伸缩逻辑不统一**,视口高度一变就失配。真机实测(iPhone 16 横屏):
+       Safari 的 layout viewport 是 852x303、从主屏启动(standalone,无地址栏)是 852x393,
+       差 90px;于是座位卡按比例长大 21.5%,手牌卡一个像素没动(算上 Safari 自身 1.066 的
+       缩放,手牌卡在屏幕上反而小了 6%)——一个变大一个变小、差 27 个百分点,看起来就是
+       "上半部分被放大了"。根因不是缩放(standalone 的 visualViewport.scale 实测 = 1.000),
+       就是这条固定像素规则。
+       【为什么系数取 31dvh】要求是 Safari 侧数值不变:31dvh x 303 = 93.9 ≈ 原来的 94px,
+       --badge 与标题栏字号也按同一比例派生,所以 Safari 档算出来和改动前逐像素相同。
+       standalone 的 393 高则算出 122px —— 多出来的空间被真正利用,而不是裁掉座位卡去
+       迁就 Safari 那份更局促的高度预算。
+       【为什么不需要按 standalone 分档】dvh 本身就跟着 layout viewport 走,两种形态自动
+       各取所需,不必再用 class 或 media query 去区分模式(html.is-standalone 仍然会打上,
+       供诊断使用,但没有任何 CSS 规则依赖它)。
+       【宽度用 aspect-ratio 而不是同样写一条 clamp】保证宽高比恒等于原来的 66:94,
+       两条 clamp 各自取值时可能在边界处对不上,比例会悄悄漂移。 */
+    .hand .card{
+      --card-h:clamp(70px, 31dvh, 132px);
+      height:var(--card-h); width:auto; aspect-ratio:66 / 94;
+      --badge:calc(var(--card-h) * 0.17); /* 16/94,与改动前在 Safari 档上完全一致 */
+    }
     /* 中央出牌区:min-height 只是"没牌时的占位下限",真的有人出牌时 flex 会自然撑开,
        所以这里可以压得很小。**不要用 :not(:has(...)) 去做条件收缩** —— 实测没生效:
        #tableStrip 里除了 #tableCard 还常驻一个 #discardReveal(position:absolute 不占
@@ -2810,30 +2831,30 @@
      (或 index.html 里的 <style>/内联脚本)时都要顺手把这个数字改掉(改动原则见 CLAUDE.md)——
      手机浏览器对静态资源的缓存比电脑顽固得多,即使用户在自己那端硬刷新/关闭重开 App 也未必
      清得掉,查询参数不同=浏览器眼里是"新的" URL,必定重新请求,不依赖用户那侧的缓存策略。 -->
-<script src="config.js?v=439"></script>
-<script src="data.js?v=439"></script>
-<script src="stages/stage-table.js?v=407"></script>
+<script src="config.js?v=440"></script>
+<script src="data.js?v=440"></script>
+<script src="stages/stage-table.js?v=408"></script>
 <!-- CORE-78 第一期:技能注册表(纯数据登记,本期不被任何代码读取,第二/三期才按表驱动)。
      零依赖(只含字面量与自身的 登记技能() 辅助函数),放在 data.js 之后仅为归类到
      "数据类脚本"一段,不引入任何加载顺序约束。 -->
-<script src="skills/skill-registry.js?v=8"></script>
-<script src="debug-log.js?v=405"></script>
-<script src="room-lifecycle.js?v=414"></script>
-<script src="game.js?v=442"></script>
-<script src="sha/sha-resolution.js?v=411"></script>
-<script src="weapons.js?v=404"></script>
-<script src="skills.js?v=414"></script>
-<script src="skills/late-generals.js?v=409"></script>
-<script src="bot-ai-bus.js?v=417"></script>
-<script src="bot.js?v=433"></script>
-<script src="ai-bot.js?v=416"></script>
-<script src="render.js?v=446"></script>
-<script src="render-table.js?v=401"></script>
-<script src="render-discard.js?v=400"></script>
-<script src="render-hand.js?v=400"></script>
-<script src="render-controls.js?v=427"></script>
-<script src="render-log.js?v=403"></script>
-<script src="game-bg.js?v=17"></script>
-<script src="pwa.js?v=5"></script>
+<script src="skills/skill-registry.js?v=9"></script>
+<script src="debug-log.js?v=406"></script>
+<script src="room-lifecycle.js?v=415"></script>
+<script src="game.js?v=443"></script>
+<script src="sha/sha-resolution.js?v=412"></script>
+<script src="weapons.js?v=405"></script>
+<script src="skills.js?v=415"></script>
+<script src="skills/late-generals.js?v=410"></script>
+<script src="bot-ai-bus.js?v=418"></script>
+<script src="bot.js?v=434"></script>
+<script src="ai-bot.js?v=417"></script>
+<script src="render.js?v=447"></script>
+<script src="render-table.js?v=402"></script>
+<script src="render-discard.js?v=401"></script>
+<script src="render-hand.js?v=401"></script>
+<script src="render-controls.js?v=428"></script>
+<script src="render-log.js?v=404"></script>
+<script src="game-bg.js?v=18"></script>
+<script src="pwa.js?v=6"></script>
 </body>
 </html>

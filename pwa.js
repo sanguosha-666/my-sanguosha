@@ -134,9 +134,20 @@ function pwaSyncHint(){
 // 一并移除,同时也把它自己从"会不会是它人为造成了一次缩放跳动"的嫌疑里排除掉。
 // 真正的原因正在排查中,排查手段见 pwaDiagnostics()(真机可读的实测数值)。
 
+// 给 <html> 打运行形态标记。**当前没有任何 CSS 规则依赖它** —— 手牌卡/座位卡都改成了
+// 按 dvh 伸缩,dvh 本身就跟着 layout viewport 走,两种形态自动各取所需,不需要按模式分档。
+// 保留这个标记是因为:①诊断时一眼能看出当前形态;②将来若真需要给 standalone 单独微调,
+// 这是现成的 seam(且比 @media (display-mode:...) 可测——Playwright 里 display-mode
+// 模拟不生效,这个坑已经踩过)。
+function pwaSyncStandaloneClass(){
+  if(!document.documentElement) return;
+  document.documentElement.classList.toggle('is-standalone', pwaIsStandalone());
+}
+
 function pwaInit(){
   pwaSyncFullscreenBtn();
   pwaSyncHint();
+  pwaSyncStandaloneClass();
 }
 
 // 和 checkLandscapeGate / unlockAudioOnce 同一套写法:加载后立即跑一次 + 注册监听。

@@ -183,6 +183,42 @@ console.log('\n■ 首次访问引导提示');
   await ctx.close();
 }
 
+console.log('\n■ 手牌卡按视口比例伸缩(与座位卡统一伸缩逻辑)');
+{
+  // 真机实测的两个 layout viewport:Safari 852x303、从主屏启动 852x393。
+  // 这次改动的硬约束是"Safari 侧数值一个像素都不许变",所以两档都要钉。
+  for(const [h, label, wantCard] of [[303,'Safari 档',  '66x94'],
+                                     [393,'standalone', '86x122']]){
+    const ctx=await b.newContext({viewport:{width:852,height:h},hasTouch:true,isMobile:true,deviceScaleFactor:3});
+    const p=await ctx.newPage();
+    await p.goto('file://'+path.join(ROOT,'index.html')); await p.waitForTimeout(150);
+    await p.evaluate(`document.getElementById('lobby').classList.add('hidden');document.getElementById('game').classList.remove('hidden');`);
+    await p.evaluate(mkSetup(8)); await p.waitForTimeout(280);
+    const m=await p.evaluate(()=>{
+      const c=document.querySelector('.hand .card');
+      const me=document.querySelector('#meSeat .seat');
+      const cr=c.getBoundingClientRect(), mr=me.getBoundingClientRect();
+      return {cw:Math.round(cr.width), ch:Math.round(cr.height),
+              meH:Math.round(mr.height),
+              metricW:(typeof cardMetricsForViewport==='function')?cardMetricsForViewport().cardWidth:null};
+    });
+    (m.cw+'x'+m.ch)===wantCard
+      ? P(label+'(852x'+h+') 手牌卡 '+m.cw+'x'+m.ch+' 符合预期')
+      : F(label+'(852x'+h+') 手牌卡 '+m.cw+'x'+m.ch+',预期 '+wantCard);
+    // 【CSS 与 JS 必须同源】cardMetricsForViewport 的 cardWidth 会被 fitFontSize 当成
+    // 牌名可用宽度。改动前它在这一档恒返回 60,而 CSS 实际是 66px —— 两处早就漂移了,
+    // 字号一直是按一个偏小的宽度算的。改成连续函数后两边同源,这条断言防止再次漂移。
+    Math.abs(m.metricW - m.cw) <= 1
+      ? P(label+' cardMetricsForViewport 与实际 CSS 宽度一致 ('+m.metricW+' vs '+m.cw+')')
+      : F(label+' JS/CSS 公式漂移: cardMetricsForViewport='+m.metricW+' 实际='+m.cw);
+    // 手牌卡和"我"的座位卡同在 .bottom-row 里,等高才不会在手牌下方空出一截
+    Math.abs(m.ch - m.meH) <= 2
+      ? P(label+' 手牌卡与"我"的座位卡等高 ('+m.ch+' / '+m.meH+'),bottom-row 内无留白')
+      : F(label+' 手牌卡 '+m.ch+' 与"我"的卡 '+m.meH+' 不等高,bottom-row 内会空出一截');
+    await ctx.close();
+  }
+}
+
 console.log('\n■ 真机环境诊断入口(pwaDiagnostics)');
 {
   // 【为什么这里只验"入口可用"】"主屏冷启动画面被放大"只在真机 standalone 下复现,
