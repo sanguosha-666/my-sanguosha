@@ -169,10 +169,7 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
       let f = parseFloat(cs.fontSize);
       if(f === 0 && hasBefore) f = parseFloat(getComputedStyle(e,'::before').fontSize);
       items.push({
-        // 装备条内部的相邻行会有 line-box 意义上的"负间隙"(9px 字、line-height:1.2 → 行距
-        // 10.8px,而行盒高 13px,相邻行名义重叠约 1.2px;字形墨迹只有约 9px,实际并不相碰)。
-        // 那是排版的正常产物,不是布局缺陷,所以下面的"严格间隙"断言把装备条内部的对豁免掉。
-        inEquip: !!e.closest('.seat-equip-bar'),
+        el: e,   // 严格间隙断言要按"布局关系"判豁免,需要元素本身,见下面 flowSiblings
         c: (typeof e.className==='string' ? e.className : '').split(' ')[0] || e.tagName,
         txt: (txt || bf.replace(/"/g,'')).slice(0,10),
         f, t:r.top, b:r.bottom, l:r.left, rt:r.right,
@@ -196,11 +193,65 @@ let pass=0,fail=0; const P=(m)=>{console.log('  PASS '+m);pass++;}; const F=(m)=
     // 而 overlaps 要到 -2px 才会报。把这类位置写成清单是被动的(得靠人记得回来查),
     // 所以改成规则:**凡是不属于装备条内部的元素对,间隙一律要求 ≥0**,将来新增的元素
     // 自动被覆盖,不需要维护任何清单。
+    //
+    // 【豁免判据：按布局关系，不按位置】第一版写的是"双方都在 .seat-equip-bar 里就豁免",
+    // 那是按元素在卡里的**位置**豁免——本质上是一份清单的变体:将来别处再出现 9px 堆叠
+    // 文字(判定区标签、化身行、状态标签……)还得回来手动加一条。
+    // 真正的判据是**结构**:两个元素如果是同一个格式化上下文里的**流式兄弟分支**,
+    // 它们的相对位置由正常流决定,前一个长大只会把后一个推开,**结构上不可能重叠**——
+    // 量到的"负间隙"必然只是 line-box 的名义重叠(行盒高 > 行距),不是布局缺陷。
+    // 反过来,**绝对定位**的元素脱离了正常流,位置由 top/left 硬指定,才是真会撞上的那一类
+    // (🔖 撞装备条那次就是)。所以豁免按这个结构关系判,新增元素自动归类,不需要维护清单。
+    //
+    // 【负 margin 等要不要排除在豁免外——排除】"流式兄弟结构性安全"这个前提,只在元素
+    // 老老实实待在正常流里时成立。下面几种写法都能让流式兄弟真正重叠,一旦出现,前提就
+    // 不成立了,必须收回豁免、按普通元素要求间隙 ≥0:
+    //   - 负 margin(最典型,直接把后一个拉回去盖住前一个)
+    //   - transform(translate 能把元素平移到任意位置)
+    //   - position:relative 且带偏移(relative 保留原位空间,但渲染位置可以任意挪)
+    //   - float(浮动元素会和后续行盒重叠)
+    //   - 父容器是 grid(grid-area 可以让子项显式占同一格)
+    // 这几条不是假想:它们都是"看起来还在流里、其实已经能自由移动"的写法,如果一并豁免掉,
+    // 断言就会在真出问题时保持沉默。
+    const inFlow = (e) => {
+      const cs = getComputedStyle(e);
+      if(cs.position==='absolute' || cs.position==='fixed' || cs.position==='sticky') return false;
+      if(cs.float!=='none') return false;
+      if(cs.transform!=='none') return false;
+      if(cs.position==='relative'){
+        for(const k of ['top','left','right','bottom']){
+          if(cs[k]!=='auto' && parseFloat(cs[k])!==0) return false;
+        }
+      }
+      for(const k of ['marginTop','marginBottom','marginLeft','marginRight']){
+        if(parseFloat(cs[k]) < 0) return false;
+      }
+      return true;
+    };
+    const flowSiblings = (a, b) => {
+      const aChain=[]; for(let e=a; e && e!==document.body; e=e.parentElement) aChain.push(e);
+      let common=null, bChain=[];
+      for(let e=b; e && e!==document.body; e=e.parentElement){
+        bChain.push(e);
+        if(aChain.indexOf(e)>=0){ common=e; break; }
+      }
+      if(!common) return false;
+      const ai=aChain.indexOf(common);
+      const aBranch=aChain[ai-1], bBranch=bChain[bChain.length-2];
+      // aBranch/bBranch 缺失 = 其中一个就是共同祖先本身(嵌套关系,不是兄弟);
+      // 两者相同 = 走到了同一条分支上,也不是兄弟。两种都不豁免。
+      if(!aBranch || !bBranch || aBranch===bBranch) return false;
+      if(getComputedStyle(common).display.indexOf('grid')>=0) return false;
+      for(const chain of [aChain.slice(0, ai), bChain.slice(0, bChain.length-1)]){
+        for(const e of chain) if(!inFlow(e)) return false;
+      }
+      return true;
+    };
     let minGap = 999, minGapPair = '';
     const gapPairs = [];
     for(let i=0;i<items.length;i++) for(let j=i+1;j<items.length;j++){
       const A=items[i], B=items[j];
-      if(A.inEquip && B.inEquip) continue;              // 装备条内部豁免,理由见 inEquip
+      if(flowSiblings(A.el, B.el)) continue;            // 结构性安全,豁免;理由见上
       const gx = Math.max(B.l-A.rt, A.l-B.rt);
       const gy = Math.max(B.t-A.b, A.t-B.b);
       const g = Math.max(gx, gy);                        // 只要有一轴分开就不算重叠
