@@ -937,6 +937,32 @@ function botTryStartExtraSkills(g, seat){
   return false;
 }
 function botActionId(card){ return isShaName(card.name)?'杀':card.name; }
+// CORE-154(issue #213):补上 4 种主动进攻锦囊的定档。
+// 【改动前的问题】对真实 buildDeck() 做完整枚举后发现,【南蛮入侵】【万箭齐发】
+// 【借刀杀人】【铁索连环】(共 8 张)在这张表里**没有任何条目**,全部掉进末尾的
+// `return 20` 兜底档,与"不主动出的牌"同分。而这个函数是出牌评分的基础分入口
+// (botPlay 里 `let value=botCardPriority(action)` 再叠加 botTargetScore),
+// 基础分 20 意味着机器人手里同时有南蛮和过河拆桥(74)时几乎必然先出后者,
+// 群体伤害牌只有在没有别的牌时才会被打出;`AI_PLAY_CANDIDATE_LIMIT` 按分数降序
+// 截断 Top-25 时,它们在交给模型的候选里排序也靠后,有密钥路径同样受影响。
+//
+// 【定档依据:与已定档牌的相对关系,不是拍脑袋】
+//   借刀杀人 66:效果是"让 A 用【杀】打 B",本质是借用别人的杀且不消耗自己的杀,
+//     收益接近一张【杀】(66);但依赖 A 手里真的有杀,不确定性高于顺手牵羊(74),
+//     所以取与【杀】同档而非更高。
+//   南蛮入侵/万箭齐发 62:单体对照是决斗/火攻(62)。**它们的真实价值强依赖场上人数**
+//     (2 人局约等于一张不可闪的杀,8 人局是 7 个目标),固定值表达不了 —— 基础分取
+//     "等同一张单体伤害牌",人数带来的增益放到调用点按局面叠加(见 botPlay 那处)。
+//   铁索连环 38:本身不造成任何伤害,只在"后续有 AOE 可打"时才兑现价值,还可能反过来
+//     帮敌人串联,所以显著低于伤害牌;但它是主动牌、比"不主动出的牌"(20)高一档。
+//     它同样依赖局面(手里有没有 AOE),细化也放在调用点。
+//
+// 【刻意保持 20 的两张,不要"顺手一起补"】
+//   【无懈可击】:CARD_PLAYS 里**没有条目**,是被动响应牌,botPlay 根本不会把它枚举成
+//     出牌候选 —— 这个函数对它的返回值在出牌路径上从不被调用,20 分无实际影响。
+//   【闪电】:走通用 delayTrickPlay,且 DELAY_TRICKS['闪电'].onlySelf===true(只能放进
+//     **自己**的判定区)。主动打出等于给自己挂一个 3 点雷伤风险,**不积极出是正确策略**。
+//   (测试里有断言钉住这两张仍是 20,防止以后被误当成"漏定档"一起改掉。)
 function botCardPriority(name){
   if(name==='桃') return 100;
   if(name==='无中生有') return 92;
@@ -944,11 +970,44 @@ function botCardPriority(name){
   if(name==='顺手牵羊'||name==='过河拆桥') return 74;
   if(name==='乐不思蜀'||name==='兵粮寸断') return 70;
   if(isShaName(name)) return 66;
+  if(name==='借刀杀人') return 66;
   if(name==='决斗'||name==='火攻') return 62;
+  if(name==='南蛮入侵'||name==='万箭齐发') return 62;
   if(name==='桃园结义') return 58;
   if(name==='五谷丰登') return 48;
   if(name==='酒') return 40;
+  if(name==='铁索连环') return 38;
   return 20;
+}
+
+// CORE-154:局面相关的出牌估值修正。
+// 【为什么不塞进 botCardPriority】那是个只吃牌名的**纯函数**,被多处调用;而 AOE 与
+// 铁索的合理估值天然依赖局面(存活人数、手里有没有配套 AOE),固定值表达不了。
+// 保持纯函数不变、把局面部分放在本来就持有 g 的调用点(botPlay 里已经在做
+// `value+=botTargetScore(...)`,追加一项符合既有结构),不改动被多处调用的函数签名。
+const BOT_AOE_PER_EXTRA_TARGET = 8;   // AOE 每多一个目标的边际价值,见下方推导
+function botSituationalCardBonus(g, seat, action){
+  const me = g.players[seat];
+  if(!me) return 0;
+  const otherAlive = (g.players||[]).filter(function(p,i){ return p && p.alive && i!==seat; }).length;
+  if(action==='南蛮入侵' || action==='万箭齐发'){
+    // 基础分 62 已经等同"打一个人";每多一个目标再加 BOT_AOE_PER_EXTRA_TARGET。
+    // 取 8 的依据:8 人局(otherAlive=7)加成 48、总分 110,略高于无中生有(92)——
+    // 一张牌打 7 个人确实该排在摸两张牌之前;2 人局(otherAlive=1)加成 0、总分 62,
+    // 与决斗持平,也正是它此时的实际效果(约等于一张不可闪的杀)。
+    // 不做"每个目标可能出闪/杀抵消"的概率精算:那需要建模他人手牌,
+    // 而 botAoeSelfRiskAllows 已经拦住了最重要的一类风险(误伤己方到致命线)。
+    return Math.max(0, otherAlive - 1) * BOT_AOE_PER_EXTRA_TARGET;
+  }
+  if(action==='铁索连环'){
+    // 铁索本身零伤害,价值完全取决于"接下来打不打得出 AOE"。手里有 AOE 时它是铺垫牌,
+    // 加分让它排到 AOE 之前(先连环再群体);手里没有 AOE 时它基本是浪费一张牌,扣分。
+    const hasAoe = (me.hand||[]).some(function(c){
+      return c && (c.name==='南蛮入侵' || c.name==='万箭齐发');
+    });
+    return hasAoe ? 20 : -10;
+  }
+  return 0;
 }
 
 // ================= AI机器人接入第二阶段起:botPlay(出什么牌)+ botBestTarget(选目标) =================
@@ -4149,6 +4208,10 @@ async function botPlay(g,seat){
         if(target<0) return;
       }
       let value=botCardPriority(action);
+      // CORE-154(issue #213):叠加局面相关修正(AOE 按存活人数、铁索按手里有无 AOE)。
+      // 放在这里而不是 botCardPriority 内部:后者是只吃牌名的纯函数、被多处调用,
+      // 不改它的签名;这里本来就持有 g,追加一项与既有的 value+=botTargetScore 同构。
+      value += botSituationalCardBonus(g, seat, action);
       if(action==='桃'&&me.hp>=me.maxHp) return;
       if(target!==null && target!==seat) value+=botTargetScore(g,seat,target,action);
       options.push({idx,action,target,value});
