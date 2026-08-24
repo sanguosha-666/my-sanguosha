@@ -32,12 +32,13 @@ const SUIT_COLOR = { '♥':'var(--cinnabar-bright)', '♦':'var(--cinnabar-brigh
 // 无懈逐个轮询的 asking 属于内部调度信息。共享日志保留原始文本供结算/诊断使用，
 // 但所有客户端在展示日志或 toast 时统一隐藏当前被询问者姓名；本人仍由 controls banner
 // 显示具体操作提示和按钮，不依赖这条日志。
+// CORE-148(issue #205):规则本体已上移到 game.js 的 redactWuxiePollingLog(理由见那里)——
+// "正在问谁"等价于暴露那个人的隐藏持牌/响应能力,这是规则层事实,不是展示细节;
+// 上移之后展示层和 AI 可见状态共用同一条规则,不会再出现"只有 UI 脱敏、AI 绕过"的缺口。
+// 这里保留同名薄封装:展示层的调用点(formatLogEntry)保持原样,而且 render-log.js 在
+// 加载顺序上排在 bot.js **之后**,不能反过来让 bot.js 依赖本文件。
 function hideWuxiePollingPlayer(text){
-  if(typeof text!=='string') return text;
-  if(/^询问 .+ 是否(?:使用|反制)【无懈可击】…$/.test(text)){
-    return '等待其他玩家响应【无懈可击】…';
-  }
-  return text;
+  return (typeof redactWuxiePollingLog==='function') ? redactWuxiePollingLog(text) : text;
 }
 
 // colorizeSuits: 对一段"确定没有被姓名替换占用"的纯文本,逐字符扫描,给花色符号包色、

@@ -4115,6 +4115,30 @@ function openWuxieRound(g){
   const verb = g.pending.depth>0 ? '反制' : '使用';
   g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
 }
+
+// ===== 无懈轮询日志的脱敏规则(CORE-148 / issue #205) =====
+// 【这条规则为什么放在规则层,而不是留在展示层】
+// 无懈轮询**只会询问真正持有【无懈可击】的角色**,或手牌非空且仍满足【蛊惑】响应条件的
+// 于吉。所以"正在问谁"这件事本身就等价于暴露了那个人的隐藏持牌/隐藏响应能力 ——
+// 这是"什么信息不该公开"的**规则层事实**,不是展示细节。
+// 改动前它只实现在 render-log.js 的 hideWuxiePollingPlayer 里(issue #59),于是
+// **AI 可见状态整个绕过了它**:buildBotKeyEvents 直接读 g.log[].text,把原始的
+// "询问 XXX 是否使用【无懈可击】…" 投影进 recentLog,再随决策 prompt 和
+// updateAiSummary 的摘要 prompt 一起发出去 —— 机器人因此能推断出谁有无懈,
+// 拿到真人玩家界面上根本没有的信息优势;用外部 provider 时还会把这条送给第三方模型。
+// 现在规则本体放在这里,展示层(render-log.js)和 AI 可见状态(bot.js)都是它的消费者,
+// 加载顺序上 game.js 在两者之前,谁都不必反向依赖谁。
+// 【刻意不做的事】不改 g.log 里存的原文 —— issue #92 已经明确接受"共享 Firebase 下
+// 手牌非真隐藏"这个朋友局边界,本次只修"项目自己的 AI 可见信息投影违反了自己的隐藏
+// 信息原则"这一点,不重构共享状态。也不动无懈的询问顺序/超时/公共窗口/蛊惑资格/结算逻辑。
+const WUXIE_POLLING_PUBLIC_TEXT = '等待其他玩家响应【无懈可击】…';
+function redactWuxiePollingLog(text){
+  if(typeof text!=='string') return text;
+  // 与 openWuxieRound / respondWuxie(false) 两处 pushLog 的文本严格对应
+  // (verb 是"使用"或"反制",取决于 pending.depth)。
+  if(/^询问 .+ 是否(?:使用|反制)【无懈可击】…$/.test(text)) return WUXIE_POLLING_PUBLIC_TEXT;
+  return text;
+}
 function finishWuxiePublicWait(){
   tx(g=>{
     if(g.phase!=='wuxie'||!g.pending||g.pending.type!=='wuxiePublicWait') return g;
