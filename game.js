@@ -3867,8 +3867,20 @@ function advanceFangtianQueue(g){
   // 目标、回到出牌阶段时也要同步清空 g.pending,理由和触发路径完全相同(最后一个目标
   // 的杀链中途可能挂着 tieqi/liegong 这类未清空的过期 pending)。
   if(q.idx>=q.targets.length){ g.fangtianQueue=null; g.pending=null; g.phase='play'; return; }
-  q.shaInfo=null;
-  resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard, undefined);
+  // CORE-151(issue #210):**同一张【杀】的每个目标都要带上 shaInfo(酒的 +1)**。
+  // 【改动前】这里是 `q.shaInfo=null;` 再向 resolveShaUse 传 `undefined`,于是酒的加成
+  // 只对队列里第一个目标生效,第二个及以后只受 1 点伤害。实测:P1 掉 2 点(日志有
+  // "【酒】生效,此【杀】伤害+1")、P2 只掉 1 点(那句日志不再出现)。
+  // 【为什么这是错的】方天画戟/丁奉【短兵】是**同一张【杀】指定多个目标**,不是重新
+  // 使用新的杀;【酒】的效果是"此【杀】造成的伤害+1",作用于这一张牌,因此每个目标都该 +1。
+  // 【与青龙偃月刀的区别,不要混为一谈】青龙是【杀】被闪后**重新使用一张新的【杀】**,
+  // 按规则酒只加"本回合第一张杀",那张新杀不带加成是**正确**的,且 sha-resolution.js
+  // 顶部有明确注释说明。这里没有产生新的杀,不能类比。
+  // 【判断是遗漏而非有意】改动前那两行没有任何注释,而本项目凡是刻意丢弃 jiuBonus 的
+  // 地方都写了理由(见上述青龙那段);且紧挨着的函数注释写的是"重新走一遍**完整的**
+  // resolveShaUse(毅重/仁王盾/铁骑/烈弓/青釭剑/八卦阵/响应阶段**全部照常各自独立判定**)"
+  // ——与丢弃酒加成自相矛盾。
+  resolveShaUse(g, g.players[q.from], q.targets[q.idx], q.usedAs, q.shaColor, q.sourceCard, q.shaInfo);
 }
 // checkWin: 乱斗=存活<=1;身份局=阵营胜负(见 identity 规格)。
 // 返回 true 表示已结束游戏。
