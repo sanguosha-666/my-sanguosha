@@ -2353,6 +2353,81 @@ BOT_DECISIONS.jiedaoResponse = {
 // 【expectedIdx 约定】wuguPick(poolIdx,expectedIdx,expectedCardId) 的 expectedIdx 是乐观
 // 并发校验("我看到的时候轮到第几个人挑"),必须传当前真实的 d.idx,不能硬编码 0——曾经
 // 硬编码成 0 导致机器人不是第一个挑牌人时服务端静默 return、挑牌轮次卡死。
+// CORE-153(issue #212):【五谷丰登】挑牌的价值评估。
+// 【改动前】localFallback 就是 `return candidates[0]` —— 恒取池中第一张,完全没有评分,
+// 就是"按顺序拿"。那行注释写明是从旧分支逐字搬来的历史保守默认(当时的目标是行为零变化
+// 地收敛进决策总线,不是给它一个像样的策略)。
+//
+// 【为什么不能直接复用 botCardPriority】它建模的是"该先**出**哪张牌",与"该**拿**哪张牌"
+// 方向并不一致。最典型的是【闪】和【无懈可击】:它们在那张表里都是最低档 20 分,
+// 因为**出牌阶段确实不会主动打出**——在出牌语境下这是对的;但在拿牌语境下它们价值很高,
+// 直接复用只会把机器人从"按顺序拿"变成"最后才拿闪"。
+// (注:CORE-154/#213 已经把南蛮/万箭/借刀/铁索这 4 种漏定档的主动锦囊补进 botCardPriority,
+//  所以这里作为基线时它们已经是正确值,不需要在本函数里再单独修正。)
+//
+// 【三层结构】基线(botCardPriority) + 拿牌语境的档位修正 + 当前局面修正。
+const BOT_WUGU_DEFENSIVE = { '闪':70, '无懈可击':62 };
+function botWuguCardValue(g, seat, card){
+  const me = g.players[seat];
+  if(!me || !card) return 0;
+  const name = card.name;
+  const hand = me.hand || [];
+  let v = (typeof botCardPriority==='function') ? botCardPriority(name) : 20;
+
+  // ① 拿牌语境的档位修正:把"防御/保命"类牌从出牌语境的最低档拉回合理位置。
+  //    按"手里已经有几张同类"递减加权 —— 第一张最值钱(下一次被杀就是掉血),
+  //    第三张的边际价值已经很低(手牌上限就那么多)。
+  if(BOT_WUGU_DEFENSIVE[name] !== undefined){
+    const own = hand.filter(function(c){ return c && c.name===name; }).length;
+    v = Math.max(v, Math.round(BOT_WUGU_DEFENSIVE[name] / (1 + own)));
+  }
+
+  // ② 体力:hp 越低【桃】越关键。hp===1 时它必须压过池中一切其它牌
+  //    (桃基线已经是全表最高的 100,这里再加一档确保不被任何局面修正反超)。
+  if(name==='桃'){
+    const lost = Math.max(0, me.maxHp - me.hp);
+    if(lost <= 0) v = 10;                 // 满血时桃几乎没用(还占手牌),主动降权
+    else if(me.hp === 1) v += 120;        // 濒死线上,压过一切
+    else v += lost * 12;
+  }
+
+  // ③ 手里一张【闪】都没有时,再给【闪】一档加成(下一次被【杀】就是直接掉血)。
+  if(name==='闪' && !hand.some(function(c){ return c && c.name==='闪'; })) v += 25;
+
+  // ④ 装备:目标槽位空着才给满分;已有装备时只按"是否更优"计价。
+  //    用 getEquip 查槽位/射程,不硬编码装备名(CLAUDE.md 原则 5)。
+  if(typeof EQUIPS!=='undefined' && EQUIPS[name]){
+    const spec = (typeof getEquip==='function') ? getEquip(name) : EQUIPS[name];
+    const slot = spec && spec.slot;
+    const cur = slot && me.equips ? me.equips[slot] : null;
+    if(cur){
+      const curSpec = (typeof getEquip==='function') ? getEquip(cur.name) : EQUIPS[cur.name];
+      const better = (spec && spec.range || 0) > (curSpec && curSpec.range || 0);
+      v = better ? v - 10 : Math.round(v * 0.35);   // 同槽已有:换更好的仍有价值,否则大幅降权
+    }
+  }
+
+  // ⑤ 出杀能力:有【诸葛连弩】/【咆哮】这类"无限杀"能力时,多拿一张【杀】就多一次输出。
+  if(typeof isShaName==='function' && isShaName(name)
+     && typeof hasCap==='function' && hasCap(me,'unlimitedSha')) v += 20;
+
+  // ⑥ 【武将转化,必须走既有 seam】用 canUseAs 判断这张牌对**这个武将**能不能当杀/闪用
+  //    ——关羽【武圣】红牌当杀、甄姬【倾国】黑牌当闪、赵云【龙胆】杀闪互转……
+  //    取"它自己的价值"与"它能转化成的角色的价值"里的较大者。
+  //    这样将来新增任何转化类技能都自动受益,且不硬编码武将名。
+  if(typeof canUseAs==='function'){
+    ['杀','闪'].forEach(function(role){
+      if(name!==role && canUseAs(me, card, role)){
+        const asRole = (role==='闪')
+          ? (BOT_WUGU_DEFENSIVE['闪'] || 70)
+          : (typeof botCardPriority==='function' ? botCardPriority('杀') : 66);
+        v = Math.max(v, Math.round(asRole * 0.9));   // 折价 0.9:转化要占用这张牌本身的用途
+      }
+    });
+  }
+  return v;
+}
+
 BOT_DECISIONS.wuguPick = {
   match: function(g, seat){
     const d = g.pending;
@@ -2360,8 +2435,14 @@ BOT_DECISIONS.wuguPick = {
   },
   buildCandidates: function(g, seat){
     const d = g.pending;
+    // CORE-153:label 补上**花色与点数**,并附 localHeuristicScore 作参考基线
+    // (与出牌候选的既有做法一致)。五谷的池子是**全场公开信息**,不涉及隐藏信息红线;
+    // 而花色点数恰恰决定了转化类技能(武圣/倾国/龙胆)能不能用这张牌。
     return (d.pool||[]).map(function(c, i){
-      return { poolIdx: i, cardId: c && c.id, label: '拿【'+(c&&c.name||'?')+'】' };
+      const face = c ? ((c.suit||'') + (typeof rankText==='function' ? rankText(c.rank) : (c.rank||''))) : '';
+      return { poolIdx: i, cardId: c && c.id,
+               label: '拿【'+(c&&c.name||'?')+'】'+(face?('('+face+')'):''),
+               localHeuristicScore: botWuguCardValue(g, seat, c) };
     });
   },
   extraState: function(g, seat){
@@ -2369,8 +2450,17 @@ BOT_DECISIONS.wuguPick = {
     return { wugu: { orderIdx: d.idx || 0, poolCount: (d.pool||[]).length } };
   },
   localFallback: function(g, seat, candidates){
-    // 旧分支逐字:wuguPick(0, d.idx||0, d.pool[0]&&d.pool[0].id)
-    return candidates[0] || null;
+    // CORE-153:改动前是 `return candidates[0]`(恒取池中第一张,就是"按顺序拿")。
+    // 现在按 botWuguCardValue 取价值最高的一张;同分时保留先出现的那张(稳定,便于复现)。
+    if(!candidates || !candidates.length) return null;
+    let best = candidates[0];
+    let bestV = (typeof best.localHeuristicScore==='number') ? best.localHeuristicScore : -Infinity;
+    for(let i=1;i<candidates.length;i++){
+      const v = (typeof candidates[i].localHeuristicScore==='number')
+        ? candidates[i].localHeuristicScore : -Infinity;
+      if(v > bestV){ bestV = v; best = candidates[i]; }
+    }
+    return best;
   },
   execute: function(g, seat, choice){
     if(!choice) return;
