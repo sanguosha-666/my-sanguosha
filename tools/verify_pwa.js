@@ -183,6 +183,61 @@ console.log('\n■ 首次访问引导提示');
   await ctx.close();
 }
 
+console.log('\n■ 从主屏恢复时的缩放归零(pwaResetZoom)');
+{
+  // standalone:应当先把 viewport 换成带 maximum-scale=1 的版本(逼 WebKit 复位缩放),
+  // 再在随后一帧撤回可缩放版本。两个阶段都要断言,只看最终态是看不出它做过归零的。
+  const {ctx,p}=await open(b,{w:844,h:390,touch:true},{displayMode:'fullscreen'});
+  const mid=await p.evaluate(()=>{
+    const vp=document.querySelector('meta[name="viewport"]');
+    pwaResetZoom();
+    return vp.getAttribute('content');          // 同步读:此时应处于"锁定"中间态
+  });
+  /maximum-scale=1/.test(mid)
+    ? P('standalone:归零时先切到 maximum-scale=1 的锁定态')
+    : F('standalone:未进入锁定态,content='+mid);
+  await p.waitForTimeout(120);
+  const fin=await p.evaluate(()=>document.querySelector('meta[name="viewport"]').getAttribute('content'));
+  (!/maximum-scale/.test(fin) && /initial-scale=1/.test(fin) && /viewport-fit=cover/.test(fin))
+    ? P('standalone:随后撤回可缩放态(用户仍可主动放大看细节): '+fin)
+    : F('standalone:未撤回可缩放态,content='+fin);
+  await ctx.close();
+}
+{
+  // 普通浏览器里不该动 viewport —— 那里页面不保留缩放,复位只会打断用户主动的缩放
+  const {ctx,p}=await open(b,{w:844,h:390,touch:true});
+  const before=await p.evaluate(()=>document.querySelector('meta[name="viewport"]').getAttribute('content'));
+  await p.evaluate(()=>pwaResetZoom());
+  const after=await p.evaluate(()=>document.querySelector('meta[name="viewport"]').getAttribute('content'));
+  (before===after && !/maximum-scale/.test(after))
+    ? P('普通浏览器:pwaResetZoom 不动 viewport(不打断用户主动缩放)')
+    : F('普通浏览器:viewport 被改动了 '+before+' → '+after);
+  await ctx.close();
+}
+{
+  // 【用户明确纠正过的点】归零只碰缩放,绝不能连带把对局状态清掉/跳回大厅。
+  const {ctx,p}=await open(b,{w:844,h:390,touch:true},{displayMode:'fullscreen'});
+  await p.evaluate(mkSetup(8));
+  await p.waitForTimeout(200);
+  const st=await p.evaluate(()=>{
+    const before={game:!document.getElementById('game').classList.contains('hidden'),
+                  lobby:!document.getElementById('lobby').classList.contains('hidden'),
+                  seats:document.querySelectorAll('#oppRow .seat').length,
+                  phase:(typeof currentG!=='undefined'&&currentG)?currentG.phase:null};
+    pwaResetZoom();
+    window.dispatchEvent(new Event('pageshow'));
+    const after={game:!document.getElementById('game').classList.contains('hidden'),
+                 lobby:!document.getElementById('lobby').classList.contains('hidden'),
+                 seats:document.querySelectorAll('#oppRow .seat').length,
+                 phase:(typeof currentG!=='undefined'&&currentG)?currentG.phase:null};
+    return {before,after};
+  });
+  JSON.stringify(st.before)===JSON.stringify(st.after) && st.after.game && !st.after.lobby && st.after.seats>0
+    ? P('归零不影响对局状态(仍在对局中、'+st.after.seats+' 张对手卡、phase='+st.after.phase+',没跳回大厅)')
+    : F('归零动了对局状态! '+JSON.stringify(st));
+  await ctx.close();
+}
+
 console.log('\n■ 与 landscapeGate 的关系(用户点名要实测)');
 {
   const {ctx,p}=await open(b,{w:844,h:390,touch:true},{displayMode:'fullscreen'});

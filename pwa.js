@@ -127,9 +127,46 @@ function pwaSyncHint(){
   }
 }
 
+// ---- 从主屏恢复时把缩放归零 ----
+//
+// 【症状】从主屏启动(standalone)时画面是放大的,而且是"上次退出时的放大状态"。
+//
+// 【排查过的两个方向,都不是原因】
+//   - 代码里恢复了 transform:scale/zoom:**没有**。全项目 grep `transform:scale` /
+//     `style.zoom` / `scale(` 零命中;localStorage/sessionStorage 只用于身份猜测标记、
+//     AI 密钥、PWA 提示,没有任何缩放相关的存取。
+//   - viewport meta 带了非 1.0 的 initial-scale:**没有**,一直是 initial-scale=1.0。
+//     但它同时**没有** maximum-scale / user-scalable 限制,所以双指缩放是完全开放的
+//     —— 这是"能被放大"的前提,不是"启动时是放大的"的原因。
+//
+// 【真正的原因】iOS 的 standalone web app 会把缩放级别(以及滚动位置)当成 app 状态
+// 由系统保留,下次从主屏启动时一并恢复。所以只要用户在游戏中双指误触放大过一次,
+// 那个放大就会被记住、每次启动都带着。这是系统行为,页面这边只能在启动/恢复时主动归零。
+//
+// 【为什么不用 user-scalable=no / maximum-scale=1 一禁了之】
+//   ① iOS 10 起 Safari **故意忽略** user-scalable=no(无障碍考虑),靠它并不可靠;
+//   ② 这个项目手机横屏下最小字号只有 9px,彻底禁用缩放会让看不清的人没有任何补救手段。
+// 所以保留"用户可以主动放大看细节"的能力,只在**启动/恢复**这个时刻归零。
+//
+// 【归零的手法】WebKit 只在 viewport meta 的 content **发生变化**时才重新应用缩放约束。
+// 所以先临时加上 maximum-scale=1.0 逼它把当前缩放压回 1,再在随后的一帧撤掉,
+// 让页面重新变回可缩放。只设一次同样的值是不会触发重新应用的。
+const PWA_VIEWPORT_BASE = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
+function pwaResetZoom(){
+  const vp = document.querySelector('meta[name="viewport"]');
+  if(!vp) return;
+  // 只在从主屏启动时做。普通浏览器里页面不会保留缩放,反而可能打断用户正在进行的缩放。
+  if(!pwaIsStandalone()) return;
+  vp.setAttribute('content', PWA_VIEWPORT_BASE + ', maximum-scale=1.0, user-scalable=no');
+  const restore = () => vp.setAttribute('content', PWA_VIEWPORT_BASE);
+  if(typeof requestAnimationFrame==='function') requestAnimationFrame(()=>requestAnimationFrame(restore));
+  else setTimeout(restore, 50);
+}
+
 function pwaInit(){
   pwaSyncFullscreenBtn();
   pwaSyncHint();
+  pwaResetZoom();
 }
 
 // 和 checkLandscapeGate / unlockAudioOnce 同一套写法:加载后立即跑一次 + 注册监听。
@@ -137,6 +174,13 @@ function pwaInit(){
 if(typeof document!=='undefined'){
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', pwaInit);
   else pwaInit();
+  // pageshow 覆盖两种恢复:普通加载,以及从 bfcache/后台恢复(event.persisted=true)。
+  // **刻意不挂 visibilitychange**:那个事件每次切回前台都会触发,如果用户是主动放大了
+  // 想看清某处细节,切出去接个消息再回来就被强行复位,反而是干扰。只在真正的
+  // "启动/恢复"这个时刻归零,不干预用户主动的缩放。
+  // 注意:归零只改缩放,**不动任何游戏状态**——对局状态由 Firebase 实时同步,
+  // 退出重进后保留当前进度是期望行为,这里不会让它跳回大厅。
+  window.addEventListener('pageshow', pwaResetZoom);
   document.addEventListener('fullscreenchange', pwaSyncFullscreenBtn);
   document.addEventListener('webkitfullscreenchange', pwaSyncFullscreenBtn);
   window.addEventListener('resize', pwaSyncFullscreenBtn);
