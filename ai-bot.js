@@ -86,6 +86,37 @@ let aiApiModels = [];
 let _modelRotateIdx = 0;          // round-robin 指针
 let _modelCooldowns = {};         // modelId → retryAt(时间戳);会话内有效,不持久化
 
+// CORE-158(issue #217):模型被 provider 下架(404 model_archived)时的冷却时长。
+// 【为什么是一个极大的值而不是几十秒】429 是临时限流、过一会儿能恢复,所以按 retry_after
+// 冷却几十秒是对的;model_archived 是**永久**失效,本会话内不可能再变回可用。给一个
+// 覆盖整个会话的值,等价于"本会话内不再选它",但仍走既有的 _modelCooldowns 机制,
+// 不新造一套"永久黑名单"状态(轮换、空串哨兵、UI 展示都能原样复用)。
+const ARCHIVED_MODEL_COOLDOWN_SEC = 365 * 24 * 3600;
+
+// currentModelPoolFor(provider):这个 provider 当前认可的模型池。
+// 用于两处:①hydrate 时校验历史保存的选择;②发现下架模型时从池里摘掉。
+function currentModelPoolFor(provider){
+  if(provider==='groq') return DEFAULT_GROQ_MODELS;
+  if(provider==='cerebras') return DEFAULT_CEREBRAS_MODELS;
+  if(provider==='tri') return DEFAULT_TRI_MODELS;
+  return null;   // cohere 等单模型 provider 不走多选轮换,无池可校验
+}
+
+// dropArchivedModel(modelId):把一个已确认下架的模型从本次会话的轮换池里摘掉并落盘。
+// 【为什么落盘】sessionStorage 里存的是用户的勾选结果;只改内存的话,同一标签页刷新后
+// 又会把它读回来重新踩一遍。落盘后配合下面 hydrate 的校验,两条路径都不会再选中它。
+// 【为什么不动 aiApiModel(手动单选)】那是用户显式指定的单一模型,轮换不参与;
+// 静默改掉它等于替用户做主,应当由 UI 明确提示后让用户自己换(见 reason:'model_unavailable')。
+function dropArchivedModel(modelId){
+  if(!modelId || !Array.isArray(aiApiModels)) return;
+  const before = aiApiModels.length;
+  aiApiModels = aiApiModels.filter(function(m){ return m !== modelId; });
+  if(aiApiModels.length !== before){
+    console.warn('[AI] 已从轮换池移除下架模型: ' + modelId + '(剩余 ' + aiApiModels.length + ' 个)');
+    try{ persistAiState(); }catch(e){}
+  }
+}
+
 // parseGroqRetrySeconds:从 429 错误体解析 "try again in Xm Ys",失败返回 null(调用方给默认)。
 function parseGroqRetrySeconds(text){
   if(typeof text!=='string') return null;
@@ -166,6 +197,25 @@ let aiTestAutopilotDisconnectRef = null;
       aiApiModels = rawModels ? JSON.parse(rawModels) : [];
       if(!Array.isArray(aiApiModels)) aiApiModels = [];
     }catch(e){ aiApiModels = []; }
+    // CORE-158(issue #217):**校验历史保存的选择是否还在当前池里**。
+    // 改动前这里只判断"是不是数组",不看内容;而下面的默认填充只在**列表为空**时生效。
+    // 于是用户在模型下架前勾选过的条目会被原样恢复、继续参与轮换 —— 真实案例:
+    // cerebras:zai-glm-4.7 早在 2026-08-20 就从 DEFAULT_* 里移除了(见那两处注释),
+    // 但用户 sessionStorage 里的旧勾选让它一直被请求,每次 404。
+    // 【取交集而不是整体丢弃】用户可能勾了 9 个、只有 1 个失效,整体回落默认会白白
+    // 覆盖掉其余 8 个的有效选择。交集为空才回落默认(下面那三个 length===0 分支接手)。
+    if(Array.isArray(aiApiModels) && aiApiModels.length){
+      const pool = currentModelPoolFor(aiProvider);
+      if(pool){
+        const kept = aiApiModels.filter(function(m){ return pool.indexOf(m) >= 0; });
+        if(kept.length !== aiApiModels.length){
+          console.warn('[AI] 已忽略 ' + (aiApiModels.length - kept.length)
+            + ' 个不在当前模型池中的历史选择(多为已下架模型): '
+            + aiApiModels.filter(function(m){ return pool.indexOf(m) < 0; }).join(', '));
+          aiApiModels = kept;
+        }
+      }
+    }
     try{ aiBaseUrl = (sessionStorage.getItem(AI_BASEURL_STORAGE_KEY) || '').trim(); }catch(e2){ aiBaseUrl=''; }
     // 【多模型轮换】groq/cerebras/tri 密钥下若用户从未配置过多选,默认勾选对应 DEFAULT_*。
     // 都只在内存生效、不写 sessionStorage——默认值随列表改动自动跟进,见 renderModelPicker。
@@ -501,7 +551,17 @@ function callAI(provider, apiKey, opts){
     }
     if(!res.ok){
       return res.text().then(t=>{
-        if((provider==='groq'||provider==='cerebras'||provider==='cohere') && opts && typeof opts.model==='string' && (res.status===429 || res.status===413)){
+        // CORE-158(issue #217):404 + model_archived 也要写冷却。
+        // 【为什么必须处理】改动前只有 429/413 写 _modelCooldowns,404 完全不记。
+        // 而 resolveAiModel('tri') 是**优先级扫描、刻意不做轮转**(注释原文:"优先使用
+        // cerebras 要求可用时永远选它,而不是轮流"),于是一个已下架的高优先级模型会被
+        // **每一次决策重新选中、重新吃一个 404**,用户实测每次固定浪费约 2.4 秒,
+        // AI 能力等于完全没生效(每次都回落 localFallback)。
+        // 【与 429 的本质区别】429 是临时限流、过一会儿能恢复;model_archived 是**永久**
+        // 失效,本会话内不可能再变回可用 —— 所以冷却时长不是几十秒,而是直接给一个
+        // 长到覆盖整个会话的值(见 ARCHIVED_MODEL_COOLDOWN_SEC 的说明)。
+        const archived = res.status===404 && /model_archived|is archived/i.test(t||'');
+        if((provider==='groq'||provider==='cerebras'||provider==='cohere') && opts && typeof opts.model==='string' && (res.status===429 || res.status===413 || archived)){
           // 429=限流(解析 retry_after);413=请求过大——该模型不适合当前输入规模,
           // 冷却 300s 固定值(解析不到 retry_after),两种都写 _modelCooldowns 让轮换跳过。
           // groq/cerebras/cohere 都接:429/413 都要让轮换知道"这个模型暂时不可用"。
@@ -509,14 +569,22 @@ function callAI(provider, apiKey, opts){
           // _triFullModel(带前缀),否则 resolveAiModel('tri') 匹配不上。
           const coolKey = (opts._triFullModel && typeof opts._triFullModel==='string') ? opts._triFullModel : opts.model;
           const is413 = res.status===413;
-          const sec = is413 ? null : parseGroqRetrySeconds(t);
-          const coolSec = is413 ? 300 : (sec!==null ? sec : 60);
+          const sec = (is413||archived) ? null : parseGroqRetrySeconds(t);
+          const coolSec = archived ? ARCHIVED_MODEL_COOLDOWN_SEC : (is413 ? 300 : (sec!==null ? sec : 60));
           const retryAt = Date.now() + (coolSec * 1000);
           _modelCooldowns[coolKey] = retryAt;
-          console.warn('[AI] 模型 '+coolKey+' '+(is413?'请求过大(413)':'触发限流(429)')
+          console.warn('[AI] 模型 '+coolKey+' '
+            +(archived?'已下架(404 model_archived)':(is413?'请求过大(413)':'触发限流(429)'))
             +',冷却 '+coolSec+'s(到 '+new Date(retryAt).toTimeString().slice(0,8)+')');
+          // 已下架是永久事实:同时从本次会话的轮换池里摘掉并落盘,免得下次会话
+          // 从 sessionStorage 读回来又踩一遍(下面 hydrate 那道校验是防"历史遗留",
+          // 这里是防"本次会话新发现的失效")。
+          if(archived) dropArchivedModel(coolKey);
         }
-        return { ok:false, reason:'other', detail:'HTTP '+res.status+': '+t.slice(0,200) };
+        // CORE-158:模型不可用单列一类,不再混进笼统的 other —— UI 才能给出可操作的
+        // 提示("该模型已下架,已自动切换"),而不是只显示一句失败。
+        return { ok:false, reason: archived ? 'model_unavailable' : 'other',
+                 detail:'HTTP '+res.status+': '+t.slice(0,200) };
       });
     }
     return res.json().then(json=>{

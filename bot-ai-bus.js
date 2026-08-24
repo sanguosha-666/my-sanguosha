@@ -573,8 +573,16 @@ async function callAiChooseIndex(opts){
           turn: g && typeof g.turn==='number' ? g.turn : null,
           roundNum: g && typeof g.roundNum==='number' ? g.roundNum : null,
           seat: seat,
+          // CORE-158(issue #217):模型被下架(reason==='model_unavailable')时给一句可操作的
+          // 提示 —— 改动前这类失败混在笼统的 other 里,用户只看到"HTTP 404",不知道是
+          // "某个模型下架了、已自动跳过、可以去密钥面板换一个"。
+          // 另:冷却原因现在不止限流(429/413),还包括已下架模型,文案相应改为"限流/不可用"。
           message: 'AI调用失败(provider='+aiProvider+',model='+(attemptedModel||'无(全池冷却)')+'):'
-            + (allCooled ? '轮换池全部处于限流冷却中,已跳过请求,回退本地兜底' : ((result&&result.reason||'unknown')+' - '+(result&&result.detail||'')))
+            + (allCooled ? '轮换池全部处于限流/不可用冷却中,已跳过请求,回退本地兜底'
+               : ((result&&result.reason==='model_unavailable')
+                  ? ('该模型已被 provider 下架,已自动从本次轮换池移除并改用其它模型;'
+                     + '如需彻底更换请在密钥面板重新勾选 - '+(result&&result.detail||''))
+                  : ((result&&result.reason||'unknown')+' - '+(result&&result.detail||''))))
             + ',耗时约'+(Date.now()-callStartedAt)+'ms',
           playersSummary: typeof debugLogPlayersSummary==='function' ? debugLogPlayersSummary(g) : null
         });
