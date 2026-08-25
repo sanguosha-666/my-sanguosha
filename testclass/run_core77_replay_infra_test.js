@@ -317,6 +317,22 @@ async function runZeroBehaviorChangeCheck(){
       // 其正确性由 testclass/run_movie_fx_detect_test.js 单独钉住。
       delete gOld.lastMovieFx;
       delete gNew.lastMovieFx;
+      // g.movieFxQueue(过场动画队列，队列化后新增) 同理比对前剔除。
+      delete gOld.movieFxQueue;
+      delete gNew.movieFxQueue;
+      // 新增 res 字段 teamWin/winnerSeat/girlWin/girlLose 同为过场动画结果表扩展，比对前剔除（同剔 girlWin 处理）
+      // 若未来比对保留 movieFxQueue/lastMovieFx，则需剔除这些新增键；当前已整删队列，此处为防御性补充
+      [gOld, gNew].forEach(g=>{
+        if(g.lastMovieFx && g.lastMovieFx.result){
+          delete g.lastMovieFx.result.teamWin;
+          delete g.lastMovieFx.result.winnerSeat;
+          delete g.lastMovieFx.result.girlWin;
+          delete g.lastMovieFx.result.girlLose;
+        }
+        if(Array.isArray(g.movieFxQueue)){
+          g.movieFxQueue.forEach(e=>{ if(e && e.result){ delete e.result.teamWin; delete e.result.winnerSeat; delete e.result.girlWin; delete e.result.girlLose; }});
+        }
+      });
       const jOld = JSON.stringify(gOld);
       const jNew = JSON.stringify(gNew);
       if(jOld !== jNew){

@@ -737,8 +737,9 @@ function girlSfxPath(gen, emotions){
   if(!arr.length) return null;
   return arr[Math.floor(Math.random()*arr.length)];
 }
-// 哨兵模式与 maybePlayLightningFx 同款。
+// 哨兵模式与 maybePlayLightningFx 同款；新增队列游标 lastPlayedMovieFxLen。
 let lastMovieFxSeq = undefined;
+let lastPlayedMovieFxLen = undefined;
 function movieVideoKeyForMe(g, evt){
   const me=g.players && g.players[mySeat];
   const girlOf = (id)=> (typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(id)>=0);
@@ -793,6 +794,13 @@ function movieVideoKeyForMe(g, evt){
       const r=evt.result || {};
       // 本人是三人之一 → 胜开心/败悲痛(无后缀),表情最优先(覆盖左慈/阵营)
       if(me && girlOf(me.general)){
+        // 组队/乱斗分派：按 team / winnerSeat 判定胜负
+        if(g.gameMode==='team' && typeof r.teamWin==='number'){
+          return me.team===r.teamWin ? girlMainPath(me.general,'kaixin') : girlMainPath(me.general,'beitong');
+        }
+        if(g.gameMode==='ffa' && typeof r.winnerSeat==='number'){
+          return mySeat===r.winnerSeat ? girlMainPath(me.general,'kaixin') : girlMainPath(me.general,'beitong');
+        }
         if(me.role==='fan') return r.fan==='win' ? girlMainPath(me.general,'kaixin') : (r.fan==='lose' ? girlMainPath(me.general,'beitong') : null);
         if(me.role==='zhu') return r.lord==='win' ? girlMainPath(me.general,'kaixin') : (r.lord==='lose' ? girlMainPath(me.general,'beitong') : null);
         if(me.role==='zhong') return r.zhong==='win' ? girlMainPath(me.general,'kaixin') : (r.zhong==='lose' ? girlMainPath(me.general,'beitong') : null);
@@ -801,9 +809,17 @@ function movieVideoKeyForMe(g, evt){
       // 旁观者:有女孩胜负 → 后缀表情(替换阵营动画);后缀池空 → 回退阵营动画
       const sfx = r.girlWin ? girlSfxPath(r.girlWin.gen,'kaixin') : (r.girlLose ? girlSfxPath(r.girlLose.gen,'beitong') : null);
       if(sfx) return sfx;
-      // 左慈次优先:我是左慈且左慈所在阵营输了 → zuoci1
+      // 左慈次优先:我是左慈且左慈所在阵营输了 → zuoci1（组队/乱斗也生效）
       if(me && me.general==='zuoci' && r.zuociLose) return 'zuociLose';
-      // 其次阵营统一动画
+      // 其次阵营统一动画（仅身份局）；组队空池回退复用 fanWin 或静默，乱斗回退静默
+      if(g.gameMode==='team' && typeof r.teamWin==='number'){
+        // 组队回退：有 teamWin 时尝试复用 fanWin，若无需求则静默
+        // 保持静默以免误播身份局素材，旁观无女孩时返回 null
+        return null;
+      }
+      if(g.gameMode==='ffa'){
+        return null;
+      }
       if(me && me.role==='fan') return r.fan==='win' ? 'fanWin' : (r.fan==='lose' ? 'fanLose' : null);
       if(me && me.role==='zhu') return r.lord==='lose' ? 'lordLose' : null;
       if(me && me.role==='zhong') return r.zhong==='lose' ? 'zhongLose' : null;
@@ -814,13 +830,43 @@ function movieVideoKeyForMe(g, evt){
   return null;
 }
 function maybePlayMovieFx(g){
-  const evt=g.lastMovieFx;
-  if(!evt || !Number.isInteger(evt.seq)){ if(lastMovieFxSeq===undefined) lastMovieFxSeq=0; return; }
-  if(lastMovieFxSeq===undefined){ lastMovieFxSeq=evt.seq; return; } // 刷新不补播历史
-  if(evt.seq===lastMovieFxSeq) return;
-  lastMovieFxSeq=evt.seq;
-  const key=movieVideoKeyForMe(g, evt);
-  if(key && typeof triggerMovieFx==='function') triggerMovieFx(key);
+  const queue = Array.isArray(g.movieFxQueue) ? g.movieFxQueue : [];
+  const single = g.lastMovieFx;
+  // 首次进房：以队列长度为游标跳过历史（不整批吞掉首条后的增量），同时同步单槽 seq。
+  if(lastPlayedMovieFxLen===undefined){
+    lastPlayedMovieFxLen = queue.length;
+    if(single && Number.isInteger(single.seq)) lastMovieFxSeq = single.seq;
+    else if(lastMovieFxSeq===undefined) lastMovieFxSeq = 0;
+    // 若队列为空但单槽有历史，视为已跳过；后续增量由队列或单槽兼容分支处理。
+    // 首条不再整批吞掉：此 return 仅跳过历史，后续 while 会从 queue.length 开始播新增条目。
+    return;
+  }
+  // 按队列长度游标排队播放：依次取 queue[idx] 经 movieVideoKeyForMe 取 key 调 triggerMovieFx
+  while(lastPlayedMovieFxLen < queue.length){
+    const evt = queue[lastPlayedMovieFxLen];
+    if(evt && Number.isInteger(evt.seq)){
+      const key=movieVideoKeyForMe(g, evt);
+      if(key && typeof triggerMovieFx==='function') triggerMovieFx(key);
+    }
+    lastPlayedMovieFxLen++;
+    // 同步单槽 seq 为队尾，避免兼容分支重复播
+    if(evt && Number.isInteger(evt.seq)) lastMovieFxSeq = evt.seq;
+  }
+  // 兼容：期间 g.lastMovieFx 单槽仍被外部写入（旧逻辑）则按 seq 去重播放
+  if(single && Number.isInteger(single.seq)){
+    if(lastMovieFxSeq===undefined){ lastMovieFxSeq=single.seq; return; }
+    if(single.seq===lastMovieFxSeq) return;
+    const tailSeq = queue.length ? queue[queue.length-1].seq : null;
+    if(tailSeq !== single.seq){
+      const key=movieVideoKeyForMe(g, single);
+      if(key && typeof triggerMovieFx==='function') triggerMovieFx(key);
+    }
+    lastMovieFxSeq=single.seq;
+    // 若单槽 seq 超前于队列长度，同步游标防止下次 while 重播
+    if(queue.length && single.seq > tailSeq) lastPlayedMovieFxLen = queue.length;
+  } else {
+    if(lastMovieFxSeq===undefined) lastMovieFxSeq=0;
+  }
 }
 
 

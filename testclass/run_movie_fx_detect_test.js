@@ -122,7 +122,10 @@ check('于吉死 → yujiDeath(死者座位)', ()=>{
   const g = mkDying(s, 0, 1);
   g.players[0].general = 'yuji';
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'yujiDeath', seat:0}));
+  // ffa 2人局死亡即终局，队列：死亡事件 + gameOver
+  assert.strictEqual(S(g.movieFxQueue[0]), S({seq:1, kind:'yujiDeath', seat:0}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, zuociLose:false}}));
+  assert.strictEqual(S(g.movieFxQueue[1]), S(g.lastMovieFx));
 });
 
 check('左慈死 → zuociDeath(杀手座位)', ()=>{
@@ -130,7 +133,8 @@ check('左慈死 → zuociDeath(杀手座位)', ()=>{
   const g = mkDying(s, 0, 1);
   g.players[0].general = 'zuoci';
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'zuociDeath', seat:1}));
+  assert.strictEqual(S(g.movieFxQueue[0]), S({seq:1, kind:'zuociDeath', seat:1}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, zuociLose:true}}));
 });
 
 check('于吉杀人 → yujiKill(于吉座位)', ()=>{
@@ -138,14 +142,16 @@ check('于吉杀人 → yujiKill(于吉座位)', ()=>{
   const g = mkDying(s, 0, 1);
   g.players[1].general = 'yuji';
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'yujiKill', seat:1}));
+  assert.strictEqual(S(g.movieFxQueue[0]), S({seq:1, kind:'yujiKill', seat:1}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, zuociLose:false}}));
 });
 
-check('普通人死亡 → 不写任何过场事件', ()=>{
+check('普通人死亡 → 仅 gameOver（ffa 2人局终局）', ()=>{
   const s = freshGameSandbox();
   const g = mkDying(s, 0, 1);
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(g.lastMovieFx, undefined);
+  assert.strictEqual(g.movieFxQueue.length, 1);
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{winnerSeat:1, zuociLose:false}}));
 });
 
 check('于吉杀死左慈 → 单条 yujiZuociDeath，yujiKill/zuociDeath 随机', ()=>{
@@ -155,7 +161,8 @@ check('于吉杀死左慈 → 单条 yujiZuociDeath，yujiKill/zuociDeath 随机
   g.players[1].general = 'yuji';
   R(s, 'finishDying')(g, true);
   const want={seq:1, kind:'yujiZuociDeath', seat:1, result:{killerSeat:1, victimSeat:0}};
-  assert.strictEqual(S(g.lastMovieFx), S(want));
+  assert.strictEqual(S(g.movieFxQueue[0]), S(want));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, zuociLose:true}}));
 });
 
 console.log('\n== 游戏层：大乔/小乔/貂蝉 表情事件 ==\n');
@@ -165,7 +172,8 @@ check('三人之一杀人 → girlKill(杀手座位, gen+victimSeat)', ()=>{
   const g = mkDying(s, 0, 1);
   g.players[1].general = 'daqiao';
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'girlKill', seat:1, result:{gen:'daqiao', victimSeat:0}}));
+  assert.strictEqual(S(g.movieFxQueue[0]), S({seq:1, kind:'girlKill', seat:1, result:{gen:'daqiao', victimSeat:0}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, girlWin:{seat:1, gen:'daqiao'}, zuociLose:false}}));
 });
 
 check('三人之一被杀 → girlDeath(死者座位, gen+killerSeat)', ()=>{
@@ -173,7 +181,8 @@ check('三人之一被杀 → girlDeath(死者座位, gen+killerSeat)', ()=>{
   const g = mkDying(s, 0, 1);
   g.players[0].general = 'xiaoqiao';
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'girlDeath', seat:0, result:{gen:'xiaoqiao', killerSeat:1}}));
+  assert.strictEqual(S(g.movieFxQueue[0]), S({seq:1, kind:'girlDeath', seat:0, result:{gen:'xiaoqiao', killerSeat:1}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, zuociLose:false, girlLose:{seat:0, gen:'xiaoqiao'}}}));
 });
 
 check('三人互杀 → 单条 girlKillDeath，杀与被杀视频随机', ()=>{
@@ -182,9 +191,10 @@ check('三人互杀 → 单条 girlKillDeath，杀与被杀视频随机', ()=>{
   g.players[0].general = 'diaochan';
   g.players[1].general = 'daqiao';
   R(s, 'finishDying')(g, true);
-  // 覆盖前：seq=2 的 girlDeath；现：单条 girlKillDeath，seq=1，含双方信息
+  // 覆盖前：seq=2 的 girlDeath；现：单条 girlKillDeath，seq=1，含双方信息，终局 gameOver 为 seq2
   const want = {seq:1, kind:'girlKillDeath', seat:0, result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}};
-  assert.strictEqual(S(g.lastMovieFx), S(want));
+  assert.strictEqual(S(g.movieFxQueue[0]), S(want));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, girlWin:{seat:1, gen:'daqiao'}, zuociLose:false}}));
 });
 
 check('三人被杀无杀手(如闪电) → girlDeath killerSeat:null', ()=>{
@@ -193,7 +203,8 @@ check('三人被杀无杀手(如闪电) → girlDeath killerSeat:null', ()=>{
   g.players[0].general = 'diaochan';
   delete g.pending.resume.sourceSeat;
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'girlDeath', seat:0, result:{gen:'diaochan', killerSeat:null}}));
+  assert.strictEqual(S(g.movieFxQueue[0]), S({seq:1, kind:'girlDeath', seat:0, result:{gen:'diaochan', killerSeat:null}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, zuociLose:false, girlLose:{seat:0, gen:'diaochan'}}}));
 });
 
 console.log('\n== 游戏层：checkWin 结算结果表 ==\n');
@@ -255,6 +266,50 @@ check('貂蝉失败 → gameOver 带 girlLose', ()=>{
   R(s, 'checkWin')(g);
   assert.strictEqual(g.winSide, 'fan');
   assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'diaochan'}}}));
+});
+
+console.log('\n== 游戏层：checkWin 组队/乱斗 gameOver ==\n');
+
+check('组队胜 → gameOver 带 teamWin 与 girlWin/girlLose 首个', ()=>{
+  const s = freshGameSandbox();
+  const p0 = mkPlayer(s,'大乔','daqiao', {team:0});
+  const p1 = mkPlayer(s,'小乔','xiaoqiao', {team:1, hp:0, alive:false});
+  const p2 = mkPlayer(s,'路人','zhangfei', {team:0});
+  const p3 = mkPlayer(s,'路人2','guanyu', {team:1, hp:0, alive:false});
+  const g = mkGame(s, {gameMode:'team', players:[p0,p1,p2,p3]});
+  R(s, 'checkWin')(g);
+  assert.strictEqual(g.winSide, 'team:0');
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{teamWin:0, zuociLose:false, girlWin:{seat:0, gen:'daqiao'}, girlLose:{seat:1, gen:'xiaoqiao'}}}));
+  assert.strictEqual(g.movieFxQueue.length, 1);
+});
+
+check('组队无胜者 → gameOver 空 res 仍入队', ()=>{
+  const s = freshGameSandbox();
+  const p0 = mkPlayer(s,'张飞','zhangfei', {team:0, hp:0, alive:false});
+  const p1 = mkPlayer(s,'关羽','guanyu', {team:1, hp:0, alive:false});
+  const g = mkGame(s, {gameMode:'team', players:[p0,p1]});
+  R(s, 'checkWin')(g);
+  assert.strictEqual(g.winner, '无');
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{zuociLose:false}}));
+});
+
+check('乱斗胜 → gameOver 带 winnerSeat 与 girlWin', ()=>{
+  const s = freshGameSandbox();
+  const p0 = mkPlayer(s,'大乔','daqiao', {hp:0, alive:false});
+  const p1 = mkPlayer(s,'胜者','zhangfei', {general:'daqiao'});
+  const g = mkGame(s, {gameMode:'ffa', players:[p0,p1]});
+  R(s, 'checkWin')(g);
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{winnerSeat:1, girlWin:{seat:1, gen:'daqiao'}, zuociLose:false}}));
+});
+
+check('乱斗无胜者 → gameOver 空 res 仍入队', ()=>{
+  const s = freshGameSandbox();
+  const p0 = mkPlayer(s,'张飞','zhangfei', {hp:0, alive:false});
+  const p1 = mkPlayer(s,'关羽','guanyu', {hp:0, alive:false});
+  const g = mkGame(s, {gameMode:'ffa', players:[p0,p1]});
+  R(s, 'checkWin')(g);
+  assert.strictEqual(g.winner, '无');
+  assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'gameOver', seat:null, result:{zuociLose:false}}));
 });
 
 console.log('\n== 防御层：normalize ==\n');

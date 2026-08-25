@@ -150,6 +150,12 @@ function normalize(g){
   else if(g.lastMovieFx!==null && (!Number.isInteger(g.lastMovieFx.seq) || typeof g.lastMovieFx.kind!=='string' || (g.lastMovieFx.seat!=null && !Number.isInteger(g.lastMovieFx.seat)) || (g.lastMovieFx.result!==undefined && (g.lastMovieFx.result===null || typeof g.lastMovieFx.result!=='object' || Array.isArray(g.lastMovieFx.result))))) g.lastMovieFx=null;
   // Firebase RTDB 丢 null 键：gameOver 的 seat:null 读回是缺键。缺席/undefined 回填 null，不当非法。
   if(g.lastMovieFx && g.lastMovieFx.seat==null) g.lastMovieFx.seat=null;
+  // 过场动画队列：Firebase 空数组吞掉需 normalize 回退为 []，元素校验同 lastMovieFx。
+  if(!Array.isArray(g.movieFxQueue)) g.movieFxQueue=[];
+  else {
+    g.movieFxQueue = g.movieFxQueue.filter(e=> e && typeof e==='object' && Number.isInteger(e.seq) && typeof e.kind==='string' && (e.seat==null || Number.isInteger(e.seat)) && (e.result===undefined || (e.result!==null && typeof e.result==='object' && !Array.isArray(e.result))));
+    g.movieFxQueue.forEach(e=>{ if(e.seat==null) e.seat=null; });
+  }
   if(!Array.isArray(g.exchangeCards)) g.exchangeCards=[];
   // 每一项的 targets 字段防御(原来只在单独的 g.tableCard.targets 上做,现在 g.tableCard 已经
   // 消灭、统一到 g.exchangeCards,防御要作用于数组里的每一项)。这条是纯粹的"数据形状防御"
@@ -783,13 +789,23 @@ function markSkillSound(g, skillName){
 }
 // markMovieFx: 过场动画事件——游戏逻辑在关键剧情点(武将死亡/胜负结算)写入,各客户端
 // render.js 的 maybePlayMovieFx 检测 seq 变化后按 kind+座位/身份过滤播放对应全屏视频
-// (见 game-bg.js MOVIE_VIDEOS)。和 markCardSound/g.lastDamageEffect 同一套"seq 自增去重、
-// 只保留最新一次"的模式。seat 语义按 kind 而定(死者/杀手/事件主体座位),不需要时传 null。
+// (见 game-bg.js MOVIE_VIDEOS)。队列化：push 入 g.movieFxQueue 并同时更新 g.lastMovieFx
+// 指向队尾以兼容既有 g.lastMovieFx.seq 断言；seq 取队列尾与单槽最大值自增，避免覆盖。
+// seat 语义按 kind 而定(死者/杀手/事件主体座位),不需要时传 null。
 // result: 可选的结算结果表(仅 kind==='gameOver' 使用,含各阵营胜负),前端按身份分派动画。
 function markMovieFx(g, kind, seat, result){
-  const seq=(g.lastMovieFx && Number.isInteger(g.lastMovieFx.seq)) ? g.lastMovieFx.seq : 0;
-  g.lastMovieFx={seq:seq+1, kind:kind, seat:(Number.isInteger(seat)?seat:null)};
-  if(result!==undefined) g.lastMovieFx.result=result;
+  let baseSeq=0;
+  if(Array.isArray(g.movieFxQueue) && g.movieFxQueue.length){
+    const last=g.movieFxQueue[g.movieFxQueue.length-1];
+    if(Number.isInteger(last.seq)) baseSeq=last.seq;
+  }
+  if(g.lastMovieFx && Number.isInteger(g.lastMovieFx.seq) && g.lastMovieFx.seq>baseSeq) baseSeq=g.lastMovieFx.seq;
+  const seq=baseSeq+1;
+  const entry={seq, kind, seat:(Number.isInteger(seat)?seat:null)};
+  if(result!==undefined) entry.result=result;
+  if(!Array.isArray(g.movieFxQueue)) g.movieFxQueue=[];
+  g.movieFxQueue.push(entry);
+  g.lastMovieFx=entry;
 }
 function nextAlive(g, from){
   const n=g.players.length; // 按实际玩家数取模,支持 2 或 3 人
@@ -3925,10 +3941,36 @@ function checkWin(g){
     const teamKeys = Object.keys(aliveTeams);
     if(teamKeys.length<=1){
       g.phase='over';
-      g.winSide = null;
-      g.winner = teamKeys.length===1 ? ('队伍'+(Number(teamKeys[0])+1)) : '无';
+      let winTeam = null;
+      if(teamKeys.length===1) winTeam = Number(teamKeys[0]);
+      g.winSide = winTeam!==null ? ('team:'+winTeam) : null;
+      g.winner = teamKeys.length===1 ? ('队伍'+(winTeam+1)) : '无';
       g.pending=null; g.aoe=null;
       g.log=pushLog(g.log, '游戏结束,胜方：'+g.winner);
+      const res={};
+      if(winTeam!==null) res.teamWin=winTeam;
+      // zuoci 仍最优先：组队维度按 team 判定
+      let zuociLose=false;
+      if(winTeam!==null){
+        g.players.forEach(pp=>{ if(pp && pp.general==='zuoci' && pp.team!==winTeam) zuociLose=true; });
+      } else {
+        // 无胜者时凡存活 zuoci 视为输（若全部阵亡则无活 zuoci，仍为 false）
+        g.players.forEach(pp=>{ if(pp && pp.general==='zuoci' && pp.alive) zuociLose=true; });
+      }
+      res.zuociLose=zuociLose;
+      if(typeof GIRL_EMO_GENERALS!=='undefined'){
+        let girlWin=null, girlLose=null;
+        g.players.forEach((pp,i)=>{
+          if(!pp || GIRL_EMO_GENERALS.indexOf(pp.general)<0) return;
+          if(winTeam!==null){
+            if(pp.team===winTeam && !girlWin) girlWin={ seat:i, gen:pp.general };
+            if(pp.team!==winTeam && !girlLose) girlLose={ seat:i, gen:pp.general };
+          }
+        });
+        if(girlWin) res.girlWin=girlWin;
+        if(girlLose) res.girlLose=girlLose;
+      }
+      markMovieFx(g,'gameOver',null,res);
       return true;
     }
     return false;
@@ -3970,6 +4012,7 @@ function checkWin(g){
     g.players.forEach(pp=>{ if(pp && pp.general==='zuoci' && roleResOf(pp.role)==='lose') zuociLose=true; });
     // 三人表情胜负:三人之一所在阵营胜/败 → 记入结果表(自己播无后缀,旁观者播后缀)。
     // Firebase 丢 null 键 → 没有女孩时整段省略,前端把缺席当 null 处理。
+    // 注：girlWin/girlLose 保持首个语义，大乔小乔同胜截断是预期（若需多女孩胜可改为数组并让渲染轮询，此处保留单条以兼容现有 MOVIE_VIDEOS 键与测试）。
     const res = { fan:fanRes, lord:lordRes, zhong:zhongRes, nei:neiRes, zuociLose };
     if(typeof GIRL_EMO_GENERALS!=='undefined'){
       let girlWin=null, girlLose=null;
@@ -3982,6 +4025,7 @@ function checkWin(g){
       if(girlWin) res.girlWin=girlWin;
       if(girlLose) res.girlLose=girlLose;
     }
+    // 队列化：若已存在死亡队列则追加为独立条目（markMovieFx 内部 push，seq 自增，不覆盖）。
     markMovieFx(g, 'gameOver', null, res);
     return true;
   }
@@ -3991,6 +4035,35 @@ function checkWin(g){
     g.winSide = null;
     g.pending=null; g.aoe=null;
     g.log=pushLog(g.log, '游戏结束,胜者：'+g.winner);
+    const res={};
+    let winnerSeat=null;
+    if(w){
+      winnerSeat=g.players.indexOf(w);
+      if(Number.isInteger(winnerSeat) && winnerSeat>=0) res.winnerSeat=winnerSeat;
+      if(typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(w.general)>=0){
+        res.girlWin={ seat:winnerSeat, gen:w.general };
+      }
+      // zuoci：乱斗中非胜者的左慈视为输
+      let zuociLose=false;
+      g.players.forEach(pp=>{ if(pp && pp.general==='zuoci' && pp!==w) zuociLose=true; });
+      res.zuociLose=zuociLose;
+      // 非胜者中的首个女孩记为 girlLose（与身份局首个语义一致，旁观视角备用）
+      if(typeof GIRL_EMO_GENERALS!=='undefined' && !res.girlWin){
+        // 若胜者不是女孩，找首个失败的女孩
+        let girlLose=null;
+        g.players.forEach((pp,i)=>{
+          if(!pp || pp===w || GIRL_EMO_GENERALS.indexOf(pp.general)<0) return;
+          if(!girlLose) girlLose={ seat:i, gen:pp.general };
+        });
+        if(girlLose) res.girlLose=girlLose;
+      }
+    } else {
+      // 无胜者仍保证队列，zuoci 若存在视为输
+      let zuociLose=false;
+      g.players.forEach(pp=>{ if(pp && pp.general==='zuoci') zuociLose=true; });
+      res.zuociLose=zuociLose;
+    }
+    markMovieFx(g,'gameOver',null,res);
     return true;
   }
   return false;
