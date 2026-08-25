@@ -3449,23 +3449,32 @@ function finishDying(g, actuallyDied){
     // 且存活玩家播 yuji0;左慈死→仅杀手播 zuoci0。优先级:左慈 > 于吉 > 阵营统一动画(用户
     // 指定)。同一次死亡可能命中多条(如于吉杀死左慈:yujiKill+zuociDeath),按优先级从低到高
     // 写入、最后一条(最高优先级)胜出,各客户端只播最后一条。
-    if(p.general==='yuji') markMovieFx(g, 'yujiDeath', seat);
-    if(typeof killerForReward==='number'){
-      const killerP=g.players[killerForReward];
-      if(killerP && killerP.general==='yuji') markMovieFx(g, 'yujiKill', killerForReward);
-      if(p.general==='zuoci') markMovieFx(g, 'zuociDeath', killerForReward); // 左慈最优先,最后写
+    // 于吉/左慈：单条命中各写一条；于吉杀左慈时合为单条 yujiZuociDeath，各客户端在 yujiKill/zuociDeath 里随机
+    const _isYujiDeath = p.general==='yuji';
+    const _isZuociDeath = p.general==='zuoci' && typeof killerForReward==='number';
+    const _killerIsYuji = typeof killerForReward==='number' && g.players[killerForReward] && g.players[killerForReward].general==='yuji';
+    if(_killerIsYuji && _isZuociDeath){
+      markMovieFx(g, 'yujiZuociDeath', killerForReward, { killerSeat:killerForReward, victimSeat:seat });
+    } else {
+      if(_isYujiDeath) markMovieFx(g, 'yujiDeath', seat);
+      if(_killerIsYuji) markMovieFx(g, 'yujiKill', killerForReward);
+      if(_isZuociDeath) markMovieFx(g, 'zuociDeath', killerForReward);
     }
     // 三人表情(大乔/小乔/貂蝉)最优先,写在最后:杀手是三人之一 → girlKill(羞涩给杀手/
     // 妩媚给被杀者/后缀给他人);被杀者是三人之一 → girlDeath(麻木给死者/畏惧给杀手/后缀给他人)。
-    // 两者同中(三人互杀)时 girlDeath 后写胜出——与左慈/于吉同一套"后写覆盖"约定。
-    if(typeof killerForReward==='number'){
-      const killerP=g.players[killerForReward];
-      if(killerP && typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(killerP.general)>=0){
+    // 三人互杀时合为单条 girlKillDeath,各客户端在杀与被杀视频里随机——不再后写覆盖。
+    const _killerIsGirl = typeof killerForReward==='number' && g.players[killerForReward] && typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(g.players[killerForReward].general)>=0;
+    const _victimIsGirl = typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(p.general)>=0;
+    if(_killerIsGirl && _victimIsGirl){
+      markMovieFx(g, 'girlKillDeath', seat, { killerGen:g.players[killerForReward].general, victimGen:p.general, killerSeat:killerForReward, victimSeat:seat });
+    } else {
+      if(_killerIsGirl){
+        const killerP=g.players[killerForReward];
         markMovieFx(g, 'girlKill', killerForReward, { gen:killerP.general, victimSeat:seat });
       }
-    }
-    if(typeof GIRL_EMO_GENERALS!=='undefined' && GIRL_EMO_GENERALS.indexOf(p.general)>=0){
-      markMovieFx(g, 'girlDeath', seat, { gen:p.general, killerSeat:(typeof killerForReward==='number' ? killerForReward : null) });
+      if(_victimIsGirl){
+        markMovieFx(g, 'girlDeath', seat, { gen:p.general, killerSeat:(typeof killerForReward==='number' ? killerForReward : null) });
+      }
     }
     applyIdentityKillReward(g, seat, killerForReward);
     

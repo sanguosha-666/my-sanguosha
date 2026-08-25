@@ -148,14 +148,14 @@ check('普通人死亡 → 不写任何过场事件', ()=>{
   assert.strictEqual(g.lastMovieFx, undefined);
 });
 
-check('于吉杀死左慈 → 左慈最优先,zuociDeath 覆盖 yujiKill', ()=>{
+check('于吉杀死左慈 → 单条 yujiZuociDeath，yujiKill/zuociDeath 随机', ()=>{
   const s = freshGameSandbox();
   const g = mkDying(s, 0, 1);
   g.players[0].general = 'zuoci';
   g.players[1].general = 'yuji';
   R(s, 'finishDying')(g, true);
-  // 优先级 左慈>于吉:yujiKill(seq1) 先写,zuociDeath(seq2) 后写覆盖
-  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'zuociDeath', seat:1}));
+  const want={seq:1, kind:'yujiZuociDeath', seat:1, result:{killerSeat:1, victimSeat:0}};
+  assert.strictEqual(S(g.lastMovieFx), S(want));
 });
 
 console.log('\n== 游戏层：大乔/小乔/貂蝉 表情事件 ==\n');
@@ -176,13 +176,15 @@ check('三人之一被杀 → girlDeath(死者座位, gen+killerSeat)', ()=>{
   assert.strictEqual(S(g.lastMovieFx), S({seq:1, kind:'girlDeath', seat:0, result:{gen:'xiaoqiao', killerSeat:1}}));
 });
 
-check('三人互杀 → girlKill 先写、girlDeath 后写胜出', ()=>{
+check('三人互杀 → 单条 girlKillDeath，杀与被杀视频随机', ()=>{
   const s = freshGameSandbox();
   const g = mkDying(s, 0, 1);
   g.players[0].general = 'diaochan';
   g.players[1].general = 'daqiao';
   R(s, 'finishDying')(g, true);
-  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'girlDeath', seat:0, result:{gen:'diaochan', killerSeat:1}}));
+  // 覆盖前：seq=2 的 girlDeath；现：单条 girlKillDeath，seq=1，含双方信息
+  const want = {seq:1, kind:'girlKillDeath', seat:0, result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}};
+  assert.strictEqual(S(g.lastMovieFx), S(want));
 });
 
 check('三人被杀无杀手(如闪电) → girlDeath killerSeat:null', ()=>{
@@ -415,6 +417,27 @@ check('girlDeath：被杀者播麻木 / 杀手播畏惧 / 他人播后缀', func
   const other=fire({seq:3,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},2,players);
   const pool=['assets/video/xiaoqiao-mamu01.mp4','assets/video/xiaoqiao-weiju01.mp4','assets/video/xiaoqiao-weiju02.mp4'];
   assert.ok(pool.indexOf(other[0])>=0, '他人应播后缀,实际 '+S(other));
+});
+
+check('girlKillDeath：三人互杀时杀与被杀视频随机', function(){
+  const players=[{alive:true},{alive:true},{alive:true}];
+  const evt={seq:1,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}};
+  // 杀手视角: 杀时羞涩(daqiao-xiuse) vs 被杀时畏惧(diaochan-weiju) 二选一
+  const killerSeen=new Set();
+  for(let i=0;i<20;i++) killerSeen.add(fire({seq:10+i,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}},1,players)[0]);
+  assert.ok(killerSeen.has('assets/video/daqiao-xiuse.mp4'), '杀手应能看到 daqiao-xiuse');
+  assert.ok(killerSeen.has('assets/video/diaochan-weiju.mp4'), '杀手应能看到 diaochan-weiju');
+  // 被杀者视角: 杀时妩媚(daqiao-wumei) vs 被杀时麻木(diaochan-mamu) 二选一
+  const victimSeen=new Set();
+  for(let i=0;i<20;i++) victimSeen.add(fire({seq:30+i,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}},0,players)[0]);
+  assert.ok(victimSeen.has('assets/video/daqiao-wumei.mp4'), '被杀者应能看到 daqiao-wumei');
+  assert.ok(victimSeen.has('assets/video/diaochan-mamu.mp4'), '被杀者应能看到 diaochan-mamu');
+  // 其他玩家: 后缀池随机(杀后缀 vs 被杀后缀 二选一)
+  const other=fire({seq:100,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}},2,players);
+  const killSfx=['assets/video/daqiao-xiuse01.mp4','assets/video/daqiao-xiuse02.mp4','assets/video/daqiao-xiuse03.mp4'];
+  const deathSfx=['assets/video/diaochan-mamu01.mp4','assets/video/diaochan-mamu02.mp4','assets/video/diaochan-mamu03.mp4','assets/video/diaochan-weiju01.mp4'];
+  const pool=killSfx.concat(deathSfx);
+  assert.ok(pool.indexOf(other[0])>=0, '他人应播后缀(杀或被杀),实际 '+S(other));
 });
 
 check('gameOver：三人胜利播开心 / 失败播悲痛(无后缀)', function(){

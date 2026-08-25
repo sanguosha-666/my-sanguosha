@@ -746,6 +746,12 @@ function movieVideoKeyForMe(g, evt){
     case 'yujiDeath':  return (mySeat!==evt.seat) ? 'yujiDeath' : null;
     case 'yujiKill':   return (mySeat!==evt.seat && !!me && !!me.alive) ? 'yujiKill' : null;
     case 'zuociDeath': return (mySeat===evt.seat) ? 'zuociDeath' : null;
+    case 'yujiZuociDeath': {
+      // 于吉杀左慈时合为单条，随机播 yujiKill / zuociDeath 之一（原优先级后写覆盖改为随机）
+      const r=evt.result || {};
+      if(typeof r.killerSeat!=='number' || typeof r.victimSeat!=='number') return null;
+      return Math.random()<0.5 ? 'yujiKill' : 'zuociDeath';
+    }
     case 'girlKill': {
       const r=evt.result || {};
       if(!girlOf(r.gen)) return null;
@@ -759,6 +765,29 @@ function movieVideoKeyForMe(g, evt){
       if(mySeat===evt.seat) return girlMainPath(r.gen, 'mamu');       // 死者:麻木
       if(typeof r.killerSeat==='number' && mySeat===r.killerSeat) return girlMainPath(r.gen, 'weiju'); // 杀手:畏惧
       return girlSfxPath(r.gen, ['mamu','weiju']);                    // 其他玩家:后缀
+    }
+    case 'girlKillDeath': {
+      const r=evt.result || {};
+      if(!girlOf(r.killerGen) || !girlOf(r.victimGen)) return null;
+      // 杀手视角: 杀时羞涩 vs 被杀时畏惧 二选一
+      if(typeof r.killerSeat==='number' && mySeat===r.killerSeat){
+        const a=girlMainPath(r.killerGen, 'xiuse');
+        const b=girlMainPath(r.victimGen, 'weiju');
+        const arr=[a,b].filter(Boolean);
+        return arr.length ? arr[Math.floor(Math.random()*arr.length)] : null;
+      }
+      // 被杀者视角: 杀时妩媚 vs 被杀时麻木 二选一
+      if(typeof r.victimSeat==='number' && mySeat===r.victimSeat){
+        const a=girlMainPath(r.killerGen, 'wumei');
+        const b=girlMainPath(r.victimGen, 'mamu');
+        const arr=[a,b].filter(Boolean);
+        return arr.length ? arr[Math.floor(Math.random()*arr.length)] : null;
+      }
+      // 其他玩家: 杀后缀池 vs 被杀后缀池 二选一
+      const sfxKill=girlSfxPath(r.killerGen, ['xiuse','wumei']);
+      const sfxDeath=girlSfxPath(r.victimGen, ['mamu','weiju']);
+      const arr=[sfxKill,sfxDeath].filter(Boolean);
+      return arr.length ? arr[Math.floor(Math.random()*arr.length)] : null;
     }
     case 'gameOver': {
       const r=evt.result || {};
