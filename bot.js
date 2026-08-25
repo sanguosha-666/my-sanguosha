@@ -448,6 +448,64 @@ function botAoeSelfRiskAllows(g,seat){
     return known && allies.indexOf(known)>=0;
   });
 }
+// CORE-161(issue #220):乱武不是「对发动者零风险」。其他角色的最近目标可以包含贾诩
+// 本人(CORE-94),友方也会被逼出杀或掉血;限定技整局一次,可发动≠应发动。
+// 友方口径与 botAoeSelfRiskAllows 同一套:team 看 sameTeam;identity 只认已知同阵营
+// (忠/主互为友军,反贼互为友军);内奸/FFA 不虚构友方。
+function botLuanwuIsKnownAlly(g,seat,otherSeat){
+  if(seat===otherSeat) return false;
+  const me=g.players[seat], other=g.players[otherSeat];
+  if(!me||!other||!other.alive) return false;
+  if(g.gameMode==='team') return sameTeam(g,seat,otherSeat);
+  if(g.gameMode!=='identity') return false;
+  if(me.role==='nei') return false;
+  const known=botKnownRole(g,seat,otherSeat);
+  if(!known) return false;
+  const allySets={ zhu:['zhu','zhong'], zhong:['zhu','zhong'], fan:['fan'] };
+  return (allySets[me.role]||[]).indexOf(known)>=0;
+}
+// 轻量确定性评估,不调大模型。预测每名其他角色:有杀且存在合法最近目标则出杀,
+// 否则失去1点体力。硬否决=友方致命或自己血薄且会被瞄;正收益=非友方收割或至少
+// 两名非友方被压到危险线。没有击杀时,自己仍可能被杀则留技能。
+function botShouldStartLuanwu(g,seat){
+  const me=g.players[seat];
+  if(!me||!me.alive||!hasCap(me,'luanwu')||g.luanwuUsed) return false;
+  const others=[];
+  for(let i=0;i<g.players.length;i++){
+    if(i!==seat && g.players[i] && g.players[i].alive) others.push(i);
+  }
+  if(!others.length) return false;
+  let selfShaRisk=false, allyFatal=false, kills=0, pressure=0;
+  for(let k=0;k<others.length;k++){
+    const actor=others[k];
+    const targets=(typeof findNearestTargets==='function') ? findNearestTargets(g,actor) : [];
+    const willSha=hasShaCard(g,actor) && targets.length>0;
+    if(willSha){
+      if(targets.indexOf(seat)>=0) selfShaRisk=true;
+      for(let t=0;t<targets.length;t++){
+        const ts=targets[t];
+        const tp=g.players[ts];
+        if(!tp||!tp.alive) continue;
+        if(botLuanwuIsKnownAlly(g,seat,ts) && tp.hp<=1) allyFatal=true;
+        if(ts!==seat && !botLuanwuIsKnownAlly(g,seat,ts) && tp.hp<=1) kills++;
+      }
+    }else{
+      const ap=g.players[actor];
+      if(botLuanwuIsKnownAlly(g,seat,actor)){
+        if(ap.hp<=1) allyFatal=true;
+      }else if(ap.hp<=1){
+        kills++;
+      }else if(ap.hp<=2){
+        pressure++;
+      }
+    }
+  }
+  if(allyFatal) return false;
+  if(selfShaRisk && me.hp<=2) return false;
+  if(kills>0) return true;
+  if(selfShaRisk) return false;
+  return pressure>=2;
+}
 function botTargetRelationAllowed(g,seat,targetSeat,kind){
   const me=g.players[seat], target=g.players[targetSeat];
   if(!me||!target||!target.alive||seat===targetSeat) return false;
@@ -853,16 +911,21 @@ function pickHealFallbackSeat(g, seat, candidates){
 function botTryStartExtraSkills(g, seat){
   const me=g.players[seat];
   if(!me || !me.alive) return false;
-  // 贾诩【乱武】:令所有其他角色各自选择出杀或掉血,对发动者自己零代价零风险,固定发动
-  // (和落英/洛神同一基调,只要求场上还有其他存活角色)。
+  // 贾诩【乱武】:限定技。CORE-161:可发动≠应发动,必须过 botShouldStartLuanwu
+  // (自己被瞄/友方致命/无收割则留着;真人按钮仍走 startLuanwu,不受这里影响)。
   if(hasCap(me,'luanwu') && !g.luanwuUsed){
-    if(g.players.some((p,i)=>i!==seat && p && p.alive)){ botInvoke(seat, startLuanwu); return true; }
+    if(botShouldStartLuanwu(g,seat)){ botInvoke(seat, startLuanwu); return true; }
   }
   // 太史慈【天义】:拼点赢获得本阶段【杀】次数/距离/目标数加成,拼点输本阶段不能用杀,
   // 大致五五开的赌注,赢面收益明显大于输面代价(多数回合根本用不完已有的杀次数上限)。
   // 要求留至少2张手牌(拼点牌+至少1张备用),避免为了赌一次拼点把手牌梭哈到只剩0张。
+  // CORE-159(issue #218):发动条件必须和 tianyiPickTarget 同一套策略口径。旧写法只看
+  // 「其他存活有手牌」,忠臣唯一目标是主公时仍会 startTianyi,选目标被
+  // pickBestCandidateSeat 滤空后再 cancelTianyi,取消又不置 tianyiUsed → 发动-取消循环。
+  // 这里提前叠 botTargetPolicyAllows('harmful'),与 CORE-96 强袭/奋迅同一修法。
   if(hasCap(me,'tianyi') && !g.tianyiUsed){
-    const hasTarget=g.players.some((p,i)=>i!==seat && p && p.alive && (p.hand||[]).length>0);
+    const hasTarget=g.players.some((p,i)=>i!==seat && p && p.alive && (p.hand||[]).length>0
+      && botTargetPolicyAllows(g,seat,i,'harmful'));
     if(hasTarget && (me.hand||[]).length>=2){ botInvoke(seat, startTianyi); return true; }
   }
   // 典韦【强袭】:花1点体力或弃置一张武器牌,对攻击范围内一名角色造成1点伤害——进攻性

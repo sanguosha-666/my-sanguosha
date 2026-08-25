@@ -3984,15 +3984,24 @@ function checkWin(g){
   return false;
 }
 
-// 身份局击杀奖惩(finishDying 死亡分支调用)。killerSeat 非数字/杀手已死 → 无奖惩。
-// 主杀忠:弃手牌+装备,判定区保留;弃装触发 onLoseEquip。
+// 击杀奖惩(finishDying 死亡分支调用)。killerSeat 非数字/杀手已死 → 无奖惩。
+// 身份局:杀反摸三;主杀忠弃手牌+装备,判定区保留,弃装触发 onLoseEquip。
+// CORE-160(issue #219):ffa/team 杀手存活则摸两张。自杀/同归于尽(杀手已死)与
+// 无来源击杀(闪电)走上面同一条守卫,不摸。
 function applyIdentityKillReward(g, victimSeat, killerSeat){
-  if(g.gameMode!=='identity') return;
-  const victim = g.players[victimSeat];
-  if(!victim || !victim.role) return;
   if(typeof killerSeat!=='number') return;
   const killer = g.players[killerSeat];
   if(!killer || !killer.alive) return;
+  if(g.gameMode==='ffa' || g.gameMode==='team'){
+    const victim = g.players[victimSeat];
+    const victimName = (victim && victim.name) || '一名角色';
+    drawN(g, killerSeat, 2);
+    g.log = pushLog(g.log, killer.name+' 击杀 '+victimName+'，摸两张牌');
+    return;
+  }
+  if(g.gameMode!=='identity') return;
+  const victim = g.players[victimSeat];
+  if(!victim || !victim.role) return;
   if(victim.role==='fan'){
     drawN(g, killerSeat, 3);
     g.log = pushLog(g.log, killer.name+' 杀死反贼，摸三张牌');

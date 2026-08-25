@@ -1332,6 +1332,10 @@ function cancelTianyi() {
   tx(g => {
     if (g.pending && (g.pending.type === 'tianyiPickCard' || g.pending.type === 'tianyiPickTarget') && 
         g.pending.seat === mySeat) {
+      // CORE-159:取消也算本回合已用。否则 AI 选不到策略允许的目标后回到 play,
+      // botTryStartExtraSkills 会再次 startTianyi,形成发动-取消循环。
+      // 出牌阶段限一次:点开再取消不再给第二次。超时走同一条 cancel。
+      g.tianyiUsed = true;
       g.pending = null;
       g.phase = 'play';
       g.log = pushLog(g.log, `${g.players[mySeat].name} 取消发动【天义】`);

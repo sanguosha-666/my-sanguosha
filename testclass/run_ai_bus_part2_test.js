@@ -261,11 +261,13 @@ const testCode = String.raw`
   });
 
   // ================= 贾诩【乱武】 =================
-  await check('乱武:有其他存活角色 → startLuanwu 被调,进入 luanwuChoose', async function(){
+  // CORE-161:不再「场上有人就发动」。这里改成明确收割场面(对方1血无杀),只证明
+  // 调度仍能点着 startLuanwu;应保留场面见 run_core161_luanwu_start_test.js。
+  await check('乱武:敌方1血无杀 → startLuanwu 被调,进入 luanwuChoose', async function(){
     window.__startLuanwuCalls = 0;
     var realStart = startLuanwu;
     startLuanwu = function(){ window.__startLuanwuCalls++; return realStart(); };
-    var g = mkSeatG({ caps0: { luanwu: true } });
+    var g = mkSeatG({ n: 2, caps0: { luanwu: true }, hpOf: { 1: 1 } });
     _g = g;
     await runBotDecision(g, 0);
     startLuanwu = realStart;

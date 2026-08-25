@@ -498,16 +498,18 @@ check('主杀忠弃手牌装备、判定区保留', ()=>{
   assert.ok(g.discard.length >= 3);
 });
 
-check('ffa 不奖惩', ()=>{
+check('ffa 击杀摸两张(CORE-160,不再是零奖惩)', ()=>{
   const g = {
-    gameMode:'ffa', deck:[{id:1,name:'杀',suit:'♠',rank:1}], discard:[], log:[],
+    gameMode:'ffa',
+    deck: Array.from({length:5}, (_,i)=>({id:i,name:'杀',suit:'♠',rank:1})),
+    discard:[], log:[],
     players:[
       {role:'fan', name:'A', alive:false, hand:[], equips:R('emptyEquips')()},
       {name:'B', alive:true, hand:[], equips:R('emptyEquips')()},
     ]
   };
   R('applyIdentityKillReward')(g, 0, 1);
-  assert.strictEqual(g.players[1].hand.length, 0);
+  assert.strictEqual(g.players[1].hand.length, 2, '非身份局击杀应摸两张');
 });
 
 console.log('\n== Task6: 死亡翻身份端到端(真实 dealDamage→startDying→respondDying→finishDying,不用合成状态跳过) ==\n');
