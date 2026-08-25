@@ -1227,6 +1227,7 @@ function registerStageTimeoutAction(types, factory){
   });
 }
 registerStageTimeoutAction("wuxiePublicWait", function(g){ return function(){ finishWuxiePublicWait(); }; });
+registerStageTimeoutAction("dyingPublicWait", function(g){ return function(){ finishDyingPublicWait(); }; });
 registerStageTimeoutAction("respond", function(g){ return function(){ respondShan(false); }; });
 registerStageTimeoutAction("aoeResp", function(g){ return function(){ aoeRespond(false); }; });
 registerStageTimeoutAction("duel", function(g){ return function(){ duelResponse(false); }; });

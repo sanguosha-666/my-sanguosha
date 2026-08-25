@@ -94,9 +94,9 @@ console.log('\n== 贾诩【完杀】濒死轮询跳过限制外座位 ==\n');
 
 // 场景1:贾诩(座位0)回合内,座位2 濒死,场上还有座位1/3/4 —— 只应问 座位2(濒死者)和座位0(贾诩)
 check('完杀生效:轮询只问濒死者本人和贾诩,其余座位被跳过(不产生等待响应的pending)', ()=>{
-  const jiaxu = mkPlayer('贾诩','jiaxu');
+  const jiaxu = mkPlayer('贾诩','jiaxu', {hand:[{id:'jt',name:'桃',suit:'♥',rank:3}]});
   const p1 = mkPlayer('玩家1','yuJi');
-  const dyingP = mkPlayer('濒死者','yuJi', {hp:0});
+  const dyingP = mkPlayer('濒死者','yuJi', {hp:0, hand:[{id:'dt',name:'桃',suit:'♥',rank:4}]});
   const p3 = mkPlayer('玩家3','yuJi');
   const p4 = mkPlayer('玩家4','yuJi');
   const g = {
@@ -128,9 +128,9 @@ check('完杀生效:轮询只问濒死者本人和贾诩,其余座位被跳过(�
 
 // 场景1b:确认非贾诩/非濒死者的座位全程没有被问过(逐一验证不会意外落在1/3/4上)
 check('完杀生效:座位1/3/4全程不会被 asking 命中', ()=>{
-  const jiaxu = mkPlayer('贾诩','jiaxu');
+  const jiaxu = mkPlayer('贾诩','jiaxu', {hand:[{id:'jt',name:'桃',suit:'♥',rank:3}]});
   const p1 = mkPlayer('玩家1','yuJi');
-  const dyingP = mkPlayer('濒死者','yuJi', {hp:0});
+  const dyingP = mkPlayer('濒死者','yuJi', {hp:0, hand:[{id:'dt',name:'桃',suit:'♥',rank:4}]});
   const p3 = mkPlayer('玩家3','yuJi');
   const p4 = mkPlayer('玩家4','yuJi');
   const g = {
@@ -149,7 +149,7 @@ check('完杀生效:座位1/3/4全程不会被 asking 命中', ()=>{
 
 // 场景2:贾诩本人恰好是濒死者(座位0) —— 只应问这一个人
 check('边界:贾诩本人濒死时,只问贾诩自己一人,不救即直接死亡结算', ()=>{
-  const jiaxu = mkPlayer('贾诩','jiaxu', {hp:0});
+  const jiaxu = mkPlayer('贾诩','jiaxu', {hp:0, hand:[{id:'jt',name:'桃',suit:'♥',rank:3}]});
   const p1 = mkPlayer('玩家1','yuJi');
   const p2 = mkPlayer('玩家2','yuJi');
   const g = {
@@ -173,10 +173,10 @@ check('边界:贾诩本人濒死时,只问贾诩自己一人,不救即直接死�
 
 // 场景3:非贾诩回合内让人濒死 —— 完杀不生效,原有"依次问所有人"逻辑不受影响
 check('对照:非贾诩回合完杀不生效,依次问所有存活玩家', ()=>{
-  const jiaxu = mkPlayer('贾诩','jiaxu');
-  const p1 = mkPlayer('玩家1','yuJi');
-  const dyingP = mkPlayer('濒死者','yuJi', {hp:0});
-  const p3 = mkPlayer('玩家3','yuJi');
+  const jiaxu = mkPlayer('贾诩','jiaxu', {hand:[{id:'t0',name:'桃',suit:'♥',rank:2}]});
+  const p1 = mkPlayer('玩家1','yuJi', {hand:[{id:'t1',name:'桃',suit:'♥',rank:3}]});
+  const dyingP = mkPlayer('濒死者','yuJi', {hp:0, hand:[{id:'t2',name:'桃',suit:'♥',rank:4}]});
+  const p3 = mkPlayer('玩家3','yuJi', {hand:[{id:'t3',name:'桃',suit:'♥',rank:5}]});
   const g = {
     phase:'play', turn:3, started:true, players:[jiaxu,p1,dyingP,p3], // turn=3,不是贾诩(0)的回合
     deck:[], discard:[], pending:null, log:[], exchangeCards:[], gameMode:'ffa',
@@ -209,8 +209,8 @@ check('对照:非贾诩回合完杀不生效,依次问所有存活玩家', ()=>{
 check('多个完杀拥有者:当前回合的后扫描拥有者仍正常发动', ()=>{
   const first = mkPlayer('先扫描完杀','jiaxu');
   const p1 = mkPlayer('玩家1','yuJi');
-  const dyingP = mkPlayer('濒死者','yuJi',{hp:0});
-  const current = mkPlayer('当前回合完杀','jiaxu');
+  const dyingP = mkPlayer('濒死者','yuJi',{hp:0, hand:[{id:'dt',name:'桃',suit:'♥',rank:4}]});
+  const current = mkPlayer('当前回合完杀','jiaxu', {hand:[{id:'ct',name:'桃',suit:'♥',rank:3}]});
   const g={phase:'play',turn:3,started:true,players:[first,p1,dyingP,current],deck:[],discard:[],pending:null,log:[],exchangeCards:[],gameMode:'ffa',wanshaActive:false,wanshaDyingSeat:null};
   bindG(g);
   R('startDying')(g,2,'sha');

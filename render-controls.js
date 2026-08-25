@@ -1953,6 +1953,11 @@ function renderControls(g){
     setBanner(escapeHtml(text));
     return;
   }
+  if(g.phase==='dying' && g.pending && g.pending.type==='dyingPublicWait'){
+    const dyingP=g.players[g.pending.seat];
+    setBanner(escapeHtml(dyingP?dyingP.name:'?')+' 濒死！等待救援…');
+    return;
+  }
   if(g.phase==='dying' && g.pending && g.pending.type==='dying' && g.pending.asking===mySeat){
     const dyingP=g.players[g.pending.seat];
     const isSelf = g.pending.seat===mySeat;
@@ -2004,7 +2009,7 @@ function renderControls(g){
   // 贾诩【乱武】:乱武选择阶段（当前选择的角色）
   if(g.phase==='dying' && g.pending && g.pending.type==='dying'){
     const dyingP=g.players[g.pending.seat], asking=g.players[g.pending.asking]?g.players[g.pending.asking].name:'?';
-    setBanner(escapeHtml(dyingP?dyingP.name:'?')+' 濒死！正在询问 '+escapeHtml(asking)+' 是否使用【桃】…');
+    setBanner(escapeHtml(dyingP?dyingP.name:'?')+' 濒死！等待救援…');
     return;
   }
   if(g.phase==='aoeResp' && g.pending && g.pending.to===mySeat){

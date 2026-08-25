@@ -93,7 +93,7 @@ assert.strictEqual(['wuxie','wuxiePublicWait'].includes(g.pending.type),true,'�
 assert.strictEqual(g.players[1].hand.length,0,'于吉的扣置牌应被移出手牌');
 assert.strictEqual(g.discard.some(c=>c.id==='k1'),true,'于吉的扣置牌应进弃牌堆');
 // 公共等待窗口结束后按 depth 奇偶判定:1=奇数=锦囊作废
-g.pending.askedAt=Date.now()-1100; g.pending.publicUntil=Date.now()-1;
+g.pending.askedAt=Date.now()-3100; g.pending.publicUntil=Date.now()-1;
 assert.strictEqual(R('maybeAutoRespondTimeout(__g)'),true);
 assert.strictEqual(g.pending,null,'无懈成功抵消后应直接结算作废');
 assert.strictEqual(g.players[0].hand.length,0,'无中生有被抵消,甲不得摸牌');

@@ -86,7 +86,7 @@ const g3={players:[
 ],deck:[],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null};
 sandbox.__g=g3;
 assert.strictEqual(R('dealDamage(__g,1,1,0,"濒死称象","sha")'),true);
-assert.strictEqual(g3.pending.type,'dying');
+assert.ok(['dying','dyingPublicWait'].includes(g3.pending.type),'濒死应挂起 dying 或无人可救公共窗');
 assert.strictEqual(g3.pending.resume.type,'afterDamageEffects');
 g3.players[1].hp=1;
 R('finishDying(__g,false)');

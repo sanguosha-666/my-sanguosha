@@ -7,6 +7,9 @@
 if(typeof logPendingOrphan==='undefined'){
   var logPendingOrphan = function(){};
 }
+// 无人可响应时的公共等待:立刻结算会暴露「全场没无懈/没桃」。
+const WUXIE_PUBLIC_WAIT_MS = 3000;
+const DYING_PUBLIC_WAIT_MS = 4000;
 let roomId = null, mySeat = null;
 let gameRef = null;
 let chatRef = null, chatQuery = null;
@@ -57,7 +60,7 @@ function pendingResponderSeat(g, pending){
 }
 function isTimedResponsePending(g, pending){
   if(!pending || typeof pending!=='object') return false;
-  if(pending.type==='wuxiePublicWait') return true;
+  if(pending.type==='wuxiePublicWait' || pending.type==='dyingPublicWait') return true;
   const spec=typeof pending.type==='string' ? STAGE_TABLE[pending.type] : null;
   if(spec && typeof spec.timeoutAction==='function') return true;
   return Number.isInteger(pendingResponderSeat(g,pending));
@@ -3146,7 +3149,14 @@ function startDying(g, seat, resumeType, sourceSeat, amount){
   
   g.pending=setResponseAskedAt({type:'dying', seat, asking:seat, resume});
   g.phase='dying';
-  g.log=pushLog(g.log, p.name+' 濒死！询问 '+p.name+' 是否使用【桃】自救…');
+  const first=firstDyingAskee(g, seat);
+  if(first===null){
+    g.log=pushLog(g.log, p.name+' 濒死！等待救援…');
+    enterDyingPublicWait(g);
+    return;
+  }
+  g.pending.asking=first;
+  g.log=pushLog(g.log, p.name+' 濒死！等待救援…');
 }
 // respondDying: 仅当前被问的人(pending.asking)可响应。
 // 打出桃:回1点体力;若脱离濒死(hp>0)则 finishDying(false)结束;若仍<=0,留在同一个人身上,
@@ -3258,12 +3268,14 @@ function respondDying(useTao, jijiuChoice){
       finishDyingRescueCard(g,mySeat,card,asText,soundName,isJijiu);
       return g;
     }
-    g.log=pushLog(g.log, me.name+'：不使用【桃】');
+    if(canRescueSeat(g, mySeat, g.pending.seat)){
+      g.log=pushLog(g.log, '有人放弃响应');
+    }
     const nxt=nextDyingAskee(g, g.pending.seat, mySeat);
     if(nxt===null){ finishDying(g, true); return g; }
     g.pending.asking=nxt;
     setResponseAskedAt(g.pending); // A1:切换被问者即重新计时
-    g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否对 '+dyingP.name+' 使用【桃】…');
+    g.log=pushLog(g.log, '等待其他玩家响应…');
     return g;
   });
 }
@@ -3513,7 +3525,7 @@ function finishDying(g, actuallyDied){
     g.log=pushLog(g.log, p.name+' 脱离濒死！');
   }
   // 死亡路径上奖惩/钩子可能已把 g.pending 从 dying 换成其它(旋风等);未终局须保留。
-  const postDeathPending = (actuallyDied && g.pending && g.pending.type!=='dying') ? g.pending : null;
+  const postDeathPending = (actuallyDied && g.pending && g.pending.type!=='dying' && g.pending.type!=='dyingPublicWait') ? g.pending : null;
   if(checkWin(g)) return; // checkWin 会清 pending/aoe
   if(postDeathPending){
     g.pending = postDeathPending;
@@ -4107,17 +4119,52 @@ function nextAskee(g, from, current){
 // 且当前濒死者是 g.wanshaDyingSeat),只有贾诩本人和濒死者本人能被问是否用桃,中间那些
 // "问了也白问"(respondDying 会直接拒绝)的座位直接跳过、不产生等待响应的 pending,
 // 等价于他们自动选择不救。非完杀场景(或完杀未命中当前濒死者)行为与 nextAskee 完全一致。
+function canRescueSeat(g, seat, dyingSeat){
+  const p=g.players[seat], dying=g.players[dyingSeat];
+  if(!p || !p.alive || !dying) return false;
+  if(g.wanshaActive && g.wanshaDyingSeat===dyingSeat){
+    const jiaxuSeat = Number.isInteger(g.turn) && g.players[g.turn] && g.players[g.turn].alive && hasCap(g.players[g.turn],'wansha') ? g.turn : null;
+    if(jiaxuSeat!==null && seat!==jiaxuSeat && seat!==dyingSeat) return false;
+  }
+  const isSelf=seat===dyingSeat;
+  if(typeof findUsableAs==='function' && findUsableAs(p.hand||[], p, '桃')>=0) return true;
+  if(isSelf && typeof findUsableAs==='function' && findUsableAs(p.hand||[], p, '酒')>=0) return true;
+  if(isSelf && hasCap(p,'jiushi') && p.faceup!==false) return true;
+  if(isSelf && hasCap(p,'niepan') && !p.nirvanaUsed) return true;
+  if(hasCap(p,'jijiu') && g.turn!==seat){
+    const hasRedHand=(p.hand||[]).some(c=>typeof isRed==='function' && isRed(c));
+    const hasRedEquip=typeof EQUIP_SLOTS!=='undefined' && EQUIP_SLOTS.some(s=>p.equips&&p.equips[s]&&typeof isRed==='function'&&isRed(p.equips[s]));
+    if(hasRedHand || hasRedEquip) return true;
+  }
+  if(hasCap(p,'guhuo') && !g.guhuoUsed && (p.hand||[]).length>0) return true;
+  return false;
+}
 function nextDyingAskee(g, dyingSeat, current){
   let nxt = nextAskee(g, dyingSeat, current);
-  if(g.wanshaActive && g.wanshaDyingSeat === dyingSeat){
-    const jiaxuSeat = Number.isInteger(g.turn) && g.players[g.turn] && g.players[g.turn].alive && hasCap(g.players[g.turn],'wansha') ? g.turn : null;
-    if(jiaxuSeat !== null){
-      while(nxt !== null && nxt !== jiaxuSeat && nxt !== dyingSeat){
-        nxt = nextAskee(g, dyingSeat, nxt);
-      }
-    }
+  while(nxt!==null && !canRescueSeat(g, nxt, dyingSeat)){
+    nxt = nextAskee(g, dyingSeat, nxt);
   }
   return nxt;
+}
+function firstDyingAskee(g, dyingSeat){
+  if(canRescueSeat(g, dyingSeat, dyingSeat)) return dyingSeat;
+  return nextDyingAskee(g, dyingSeat, dyingSeat);
+}
+function enterDyingPublicWait(g){
+  if(!g.pending) return;
+  g.pending.type='dyingPublicWait';
+  g.pending.asking=g.pending.seat;
+  g.pending.publicUntil=Date.now()+DYING_PUBLIC_WAIT_MS;
+  setResponseAskedAt(g.pending);
+}
+function finishDyingPublicWait(){
+  tx(g=>{
+    if(g.phase!=='dying'||!g.pending||g.pending.type!=='dyingPublicWait') return g;
+    if(typeof g.pending.publicUntil==='number' && Date.now()<g.pending.publicUntil) return g;
+    delete g.pending.publicUntil;
+    finishDying(g, true);
+    return g;
+  });
 }
 // startTrick: 锦囊牌已进弃牌堆后调用。初始化无懈询问轮次(exclude/depth 见 openWuxieRound 注释),
 // 交给 openWuxieRound 统一处理"算下一个问谁/问不到人就直接收尾"。
@@ -4161,7 +4208,7 @@ function openWuxieRound(g){
     // 反推出全场手牌中是否存在【无懈可击】。不让无资格玩家逐个等待。
     g.pending.type='wuxiePublicWait';
     g.pending.asking=Number.isInteger(g.pending.from)?g.pending.from:0;
-    g.pending.publicUntil=Date.now()+1000;
+    g.pending.publicUntil=Date.now()+WUXIE_PUBLIC_WAIT_MS;
     setResponseAskedAt(g.pending);
     return;
   }
@@ -4169,7 +4216,7 @@ function openWuxieRound(g){
   setResponseAskedAt(g.pending); // A1:每次轮到下一位无懈候选人即重新计时
   markWuxieAsked(g);
   const verb = g.pending.depth>0 ? '反制' : '使用';
-  g.log=pushLog(g.log, '询问 '+g.players[asking].name+' 是否'+verb+'【无懈可击】…');
+  g.log=pushLog(g.log, WUXIE_POLLING_PUBLIC_TEXT);
 }
 
 // ===== 无懈轮询日志的脱敏规则(CORE-148 / issue #205) =====
@@ -4193,6 +4240,9 @@ function redactWuxiePollingLog(text){
   // 与 openWuxieRound / respondWuxie(false) 两处 pushLog 的文本严格对应
   // (verb 是"使用"或"反制",取决于 pending.depth)。
   if(/^询问 .+ 是否(?:使用|反制)【无懈可击】…$/.test(text)) return WUXIE_POLLING_PUBLIC_TEXT;
+  if(/^[^：\n]+：不出$/.test(text)) return '有人放弃响应';
+  if(/^询问 .+ 是否(?:对 .+ )?使用【桃】/.test(text)) return '等待其他玩家响应…';
+  if(/^[^：\n]+：不使用【桃】$/.test(text)) return '有人放弃响应';
   return text;
 }
 function finishWuxiePublicWait(){
@@ -4594,7 +4644,7 @@ function respondWuxie(useWuxie){
       return g;
     }
     // 不出:指针推进到下一个存活玩家;绕回 exclude 即这一轮问完一圈 -> 收尾
-    g.log=pushLog(g.log, me.name+'：不出');
+    g.log=pushLog(g.log, '有人放弃响应');
     const nxt=nextWuxieAskee(g, g.pending, mySeat);
     if(nxt===null){
       finishWuxieRound(g);
@@ -4602,8 +4652,7 @@ function respondWuxie(useWuxie){
       g.pending.asking=nxt;
       setResponseAskedAt(g.pending); // A1:切换被问者即重新计时
       markWuxieAsked(g);
-      const verb = g.pending.depth>0 ? '反制' : '使用';
-      g.log=pushLog(g.log, '询问 '+g.players[nxt].name+' 是否'+verb+'【无懈可击】…');
+      g.log=pushLog(g.log, WUXIE_POLLING_PUBLIC_TEXT);
     }
     return g;
   });

@@ -428,7 +428,7 @@ async function soakOneGame(seed, n, cfg){
     if(!g2.pending) return true;
     var act = (typeof autoRespondAction === 'function') ? autoRespondAction(g2) : null;
     if(!act) return false;
-    if(g2.pending.type === 'wuxiePublicWait'){ act(); return true; }
+    if(g2.pending.type === 'wuxiePublicWait' || g2.pending.type === 'dyingPublicWait'){ act(); return true; }
     var actor = pendingResponderSeat(g2, g2.pending);
     if(!Number.isInteger(actor)) return false;
     botInvoke(actor, act);

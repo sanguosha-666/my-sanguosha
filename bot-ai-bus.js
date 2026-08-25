@@ -977,7 +977,11 @@ function defaultAbandonPending(snapshot){
 // 返回 true 表示本次提交了动作(供测试断言用),未提交返回 false。
 function maybeAutoRespondTimeout(g){
   if(!g || !g.pending || typeof g.pending.askedAt !== 'number') return false;
-  const timeoutMs=g.pending.type==='wuxiePublicWait' ? 1000 : RESPONSE_TIMEOUT_MS;
+  const timeoutMs=g.pending.type==='wuxiePublicWait'
+    ? (typeof WUXIE_PUBLIC_WAIT_MS==='number'?WUXIE_PUBLIC_WAIT_MS:3000)
+    : g.pending.type==='dyingPublicWait'
+      ? (typeof DYING_PUBLIC_WAIT_MS==='number'?DYING_PUBLIC_WAIT_MS:4000)
+      : RESPONSE_TIMEOUT_MS;
   if(Date.now() - g.pending.askedAt < timeoutMs) return false;
   const act = autoRespondAction(g);
   if(!act){
@@ -998,7 +1002,7 @@ function maybeAutoRespondTimeout(g){
   }
   // 公共无懈窗口没有真正的响应玩家，任意客户端直接提交幂等收尾事务即可；
   // 不经过 botInvoke，避免被误当成某个座位的私人决策并异步延后。
-  if(g.pending.type==='wuxiePublicWait'){
+  if(g.pending.type==='wuxiePublicWait' || g.pending.type==='dyingPublicWait'){
     act();
     return true;
   }

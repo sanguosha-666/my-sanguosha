@@ -704,7 +704,7 @@ function 登记技能(条目){ 技能注册表[条目.武将+'/'+条目.技能�
 // 要么被上面某条技能登记引用,要么出现在这里。白名单本身也是登记的一部分——不允许
 // 用"没登记就算了"糊弄过去,每一项都是经过确认"确实不属于任何武将技能"的通用机制
 // (基本牌/锦囊牌/装备特效/通用响应窗口/机器人通用调度)。
-const 非技能阶段白名单 = ['respond','aoeResp','duel','dying','wuxie','wuxiePublicWait','pick','wugu',
+const 非技能阶段白名单 = ['respond','aoeResp','duel','dying','dyingPublicWait','wuxie','wuxiePublicWait','pick','wugu',
   'huogong','huogongReveal','hanbing','hanbingAsk','guanshi','qinglong','qilin',
   'cixiongAsk','cixiongChoice','shaOffsetChoice','jiedaoChoice'];
 const 非技能机器人决策白名单 = ['controlsChoice','discardSubset','pickSlot','pickGeneral','seatPick',

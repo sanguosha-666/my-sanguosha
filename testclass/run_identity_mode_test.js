@@ -518,10 +518,15 @@ console.log('\n== Task6: 死亡翻身份端到端(真实 dealDamage→startDying
 function runDyingLoopNoTao(){
   let guard = 0;
   let gg = vm.runInContext('_g', sandbox);
-  while(gg.phase==='dying' && gg.pending && gg.pending.type==='dying' && guard<10){
-    const asking = gg.pending.asking;
-    vm.runInContext('mySeat = '+asking, sandbox);
-    R('respondDying')(false);
+  while(gg.phase==='dying' && gg.pending && guard<10){
+    if(gg.pending.type==='dyingPublicWait'){
+      R('finishDying(_g, true)');
+    } else if(gg.pending.type==='dying'){
+      const asking = gg.pending.asking;
+      if(typeof asking!=='number') break;
+      vm.runInContext('mySeat = '+asking, sandbox);
+      R('respondDying(false)');
+    } else break;
     gg = vm.runInContext('_g', sandbox);
     guard++;
   }
