@@ -28,4 +28,5 @@
 - Keep finer classifications in the Issue body or labels; the title's module segment must contain only `AI`, `GAME`, or `UI`.
 - Before fixing a bug, read only the target Issue unless broader triage is explicitly requested.
 - Use `Fixes #<issue-number>` in the fixing commit when automatic closure is intended.
+- When closing an Issue, always write the close reason and how it was fixed (or why no code change). Put this in the closing comment; if auto-closing via `Fixes #<n>`, also put it in the commit body. Do not close with an empty comment.
 - Do not create, edit, close, or delete Issues unless the user explicitly requests it.

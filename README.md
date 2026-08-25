@@ -44,5 +44,5 @@ node run_all_tests.js
 
 ## Bug 管理
 
-Bug 统一使用 GitHub Issues 管理。每个 `CORE-xx` 对应一张 Issue；修复前阅读目标 Issue，修复提交使用 `Fixes #<issue-number>`。
+Bug 统一使用 GitHub Issues 管理。每个 `CORE-xx` 对应一张 Issue；修复前阅读目标 Issue，修复提交使用 `Fixes #<issue-number>`。关闭 Issue 时必须写关闭理由和修复方式（commit 正文或关票评论）；误开或不改代码也要写清原因，禁止空评论关票。
 
