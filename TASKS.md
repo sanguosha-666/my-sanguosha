@@ -39,6 +39,7 @@
   - 根因 `game.js:4213` `nextDyingAskee/firstDyingAskee` 按 `canRescueSeat` 直接进 `dyingPublicWait` 吞掉 `g.chainDamageQueue`
   - 修复当 `g.chainDamageQueue` 非空绕过过滤 `return nextAskee / return dyingSeat`，保留逐个濒死询问
   - 验证 `run_cixiong 20/20` `run_movie_fx 38/38`
+  - 归档 2026-08-26：`af923c6` 已合入（game.js +7 行），工作区干净无新增改动，`run_cixiong 20/20` 复核通过
 
 ## 2026-08-25 — 关票规则补一条
 
