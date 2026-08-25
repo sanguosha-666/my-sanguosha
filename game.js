@@ -4213,6 +4213,10 @@ function canRescueSeat(g, seat, dyingSeat){
   return false;
 }
 function nextDyingAskee(g, dyingSeat, current){
+  // 连环传导中的濒死必须逐个询问，避免 dyingPublicWait 直接吞掉 chainDamageQueue 的后续目标
+  if(g.chainDamageQueue){
+    return nextAskee(g, dyingSeat, current);
+  }
   let nxt = nextAskee(g, dyingSeat, current);
   while(nxt!==null && !canRescueSeat(g, nxt, dyingSeat)){
     nxt = nextAskee(g, dyingSeat, nxt);
@@ -4220,6 +4224,9 @@ function nextDyingAskee(g, dyingSeat, current){
   return nxt;
 }
 function firstDyingAskee(g, dyingSeat){
+  if(g.chainDamageQueue){
+    return dyingSeat;
+  }
   if(canRescueSeat(g, dyingSeat, dyingSeat)) return dyingSeat;
   return nextDyingAskee(g, dyingSeat, dyingSeat);
 }

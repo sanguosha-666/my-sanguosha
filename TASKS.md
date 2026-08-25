@@ -35,9 +35,10 @@
 - [x] Phase 7/7：组队/乱斗结算补齐
   - 组队 `game.js:3936-3988` 新增 `winTeam/g.winSide='team:'+winTeam` + `res.teamWin/zuociLose/girlWin-girlLose(首个)` 并 `markMovieFx` 入队；乱斗 `game.js:4006-4042` 新增 `winnerSeat/res.girlWin` 入队；`render.js:793-817` gameOver 分派新增 `team/ffa` 本人 `kaixin/beitong` 与旁观后缀
   - 验证 `testclass/run_movie_fx_detect_test.js 38/38`（组队/乱斗各2条），`check_cache_bust.js` PASS
-- [x] Phase 7/7：组队/乱斗结算补齐
-  - 组队 `game.js:3936-3988` 新增 `winTeam/g.winSide='team:'+winTeam` + `res.teamWin/zuociLose/girlWin-girlLose(首个)` 并 `markMovieFx` 入队；乱斗 `game.js:4006-4042` 新增 `winnerSeat/res.girlWin` 入队；`render.js:793-817` gameOver 分派新增 `team/ffa` 本人 `kaixin/beitong` 与旁观后缀
-  - 验证 `testclass/run_movie_fx_detect_test.js 38/38`（组队/乱斗各2条），`check_cache_bust.js` PASS
+- [x] Phase 8/8：连环传导濒死修复
+  - 根因 `game.js:4213` `nextDyingAskee/firstDyingAskee` 按 `canRescueSeat` 直接进 `dyingPublicWait` 吞掉 `g.chainDamageQueue`
+  - 修复当 `g.chainDamageQueue` 非空绕过过滤 `return nextAskee / return dyingSeat`，保留逐个濒死询问
+  - 验证 `run_cixiong 20/20` `run_movie_fx 38/38`
 
 ## 2026-08-25 — 关票规则补一条
 
