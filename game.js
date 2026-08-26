@@ -2639,9 +2639,17 @@ function lianHuan(cardIdx, targetSeat){
     if(!card || card.suit!=='♣') return g;
     const targets=(Array.isArray(targetSeat)?targetSeat:[targetSeat])
       .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
-      .slice(0,2)
-      .filter(seat=>g.players[seat] && g.players[seat].alive);
+      .slice(0,2);
     if(targets.length===0) return g;
+    // CORE-176(issue #235):连环视为使用【铁索连环】,目标合法性必须复用同一个
+    // CARD_PLAYS['铁索连环'].canTarget(存活/智迟/帷幕),不能只判存活——否则帷幕、
+    // 智迟保护的角色在这条独立入口上仍可被选中,和真实铁索的口径分叉。
+    // 校验用的牌沿用被转化的那张实体牌的花色(连环限定♣,即黑色锦囊),和真实铁索一致。
+    const asTieSuo={name:'铁索连环', suit:card.suit, rank:card.rank, virtual:true};
+    const tieSpec=CARD_PLAYS['铁索连环'];
+    // 和 playCard 对真实铁索的处理同口径:任一目标非法则整体拒绝,不消耗牌。
+    if(targets.some(seat=>!(g.players[seat] && g.players[seat].alive))) return g;
+    if(tieSpec && tieSpec.canTarget && targets.some(seat=>!tieSpec.canTarget(g, me, asTieSuo, seat))) return g;
     removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【铁索连环】使用,目标 '+targets.map(seat=>g.players[seat].name).join('、'));
@@ -2716,6 +2724,8 @@ function respondLiuli(choice, newTargetSeat){
   tx(g=>{
     if(g.phase!=='liuli'||!g.pending||g.pending.type!=='liuli'||g.pending.to!==mySeat) return g;
     const {from, to, usedAs, shaColor, sourceCard}=g.pending;
+    // CORE-162(issue #221):恢复这张被流离挂起的杀时,把挂起前存下的酒加成一并带回。
+    const jiuBonus=!!g.pending.jiuBonus;
     const me=g.players[to], newTarget=g.players[newTargetSeat];
     if(!choice){
       g.log=pushLog(g.log, me.name+'：不发动【流离】');
@@ -2723,7 +2733,7 @@ function respondLiuli(choice, newTargetSeat){
       // 的 canTarget 里校验过一次攻击者→to 的距离(否则杀根本出不来),理论上重新校验也该
       // 通过——但为了和下面"真实转移"分支保持同一处理方式(不依赖"位置/装备中途没变"这个
       // 假设),同样传 {noDistance:true} 跳过 resolveShaUseNoLiuli 内部的二次距离校验。
-      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard, {noDistance:true});
+      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard, {noDistance:true, jiuBonus});
       return g;
     }
     if(!newTarget || !newTarget.alive || newTargetSeat===from || newTargetSeat===to || !liuliTargets(g, from, to).includes(newTargetSeat)) return g;
@@ -2747,7 +2757,7 @@ function respondLiuli(choice, newTargetSeat){
       const pendingBefore=g.pending;
       triggerHook(g,to,'onLoseEquip',{count:1});
       if(g.pending!==pendingBefore && g.pending){
-        g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard};
+        g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard,jiuBonus};
         return g;
       }
     }
@@ -2756,7 +2766,7 @@ function respondLiuli(choice, newTargetSeat){
     // 一次,resolveShaUseNoLiuli 内部默认的距离校验对象是攻击者自己,和流离的规则基准
     // 完全不是同一个人,不该在这里重新生效。传 {noDistance:true} 跳过它(和神速
     // respondShensuSha 用同一套既有模式,skills.js 那边的"无距离限制的杀")。
-    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard, {noDistance:true});
+    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard, {noDistance:true, jiuBonus});
     return g;
   });
 }
@@ -2877,7 +2887,12 @@ function continueAfterDamageEffects(g){
   const q=g.afterDamageEffects;
   if(!q || !Array.isArray(q.actions)) return false;
   const p=g.players[q.seat];
-  if(!p || !p.alive){ g.afterDamageEffects=null; return false; }
+  // CORE-178(issue #237):队列结束时不能一律置 null——本次伤害可能是在"外层某人的受伤后
+  // 队列还没走完"的时候由技能反弹产生的嵌套伤害(如刚烈让伤害来源也受伤),那次嵌套
+  // dealDamage 会新建自己的队列并把外层队列挤掉。新建时已经把外层队列存进 q.outer,
+  // 这里结束时原样还原,外层队列(以及它携带的 originalResume,例如南蛮的 {type:'aoe'})
+  // 才不会丢。没有外层时 q.outer 为 null,行为与改动前一致。
+  if(!p || !p.alive){ g.afterDamageEffects=q.outer||null; return false; }
   while(q.index<q.actions.length){
     const action=q.actions[q.index++];
     const pendingBefore=g.pending;
@@ -2929,7 +2944,7 @@ function continueAfterDamageEffects(g){
       return true;
     }
   }
-  g.afterDamageEffects=null;
+  g.afterDamageEffects=q.outer||null;
   return false;
 }
 // dealDamage 调用方为 delay/xiaoguo/刚烈等补充专用恢复信息时，若当前正处于受伤后技能
@@ -3102,8 +3117,13 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     // 濒死/不屈只是暂时打断本次伤害。先保存尚未执行的受伤后队列；获救或不屈
     // 防死后由 resumeAfterInterrupt 接回，真死时则因角色不存活而安全丢弃。
     enqueueDamageWangxi(g,seat,amount,sourceSeat);
+    // CORE-178:嵌套伤害(如刚烈反弹给伤害来源)不得吞掉外层尚未走完的队列——有外层时存进
+    // outer,continueAfterDamageEffects 结束时还原。没有外层就不加这个字段,避免给绝大多数
+    // 场景平白多出一个恒为 null 的持久化字段。
+    const outerQueue=g.afterDamageEffects||null;
     g.afterDamageEffects={seat,amount,sourceSeat,reason,srcType,sourceCard,jiushiFacedownAtDamage,
       actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige'],index:0,originalResume:{type:srcType}};
+    if(outerQueue) g.afterDamageEffects.outer=outerQueue;
     // 周泰【不屈】触发次数:"体力降到0或以下"这个区间里,这一下伤害一共有几点落在
     // 这个区间,就问几次(每点独立一次放置不屈牌的机会),不是"只要结算后≤0就问一次"。
     // 推导:把 amount 点伤害看成 amount 次连续的-1,第 k 次(k=1..amount)扣完后的体力是
@@ -3136,8 +3156,10 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
 
   // 实际受伤且存活 -> 所有受伤后效果进入统一队列，挂起的技能响应后继续下一项。
   if(amount>0){
+    const outerQueue2=g.afterDamageEffects||null; // CORE-178:同上,嵌套伤害不得吞掉外层队列
     g.afterDamageEffects={seat,amount,sourceSeat,reason,srcType,sourceCard,jiushiFacedownAtDamage,
       actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige'],index:0,originalResume:{type:srcType}};
+    if(outerQueue2) g.afterDamageEffects.outer=outerQueue2;
     if(continueAfterDamageEffects(g)) return true;
   }
   if(!skipChain && startNextWangxi(g, {type:srcType})) return true;
@@ -3745,7 +3767,7 @@ function resumeAfterInterrupt(g, resume, seat){
     const attacker=g.players[resume.from];
     const target=g.players[resume.newTargetSeat];
     if(attacker&&attacker.alive&&target&&target.alive){
-      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard,{noDistance:true});
+      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard,{noDistance:true, jiuBonus:!!resume.jiuBonus});
     }else finishSingleShaTarget(g);
   } else if(resume.type==='dyingJijiu'){
     // 急救用红色装备触发失装技能后，恢复原 dying 快照，再完成这张牌的回复结算。

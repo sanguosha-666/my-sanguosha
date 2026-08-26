@@ -210,7 +210,7 @@ function canReachSha(g, fromSeat, targetSeat){
 
 function resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo){
   const fromSeat=g.players.indexOf(me);
-  if(maybeStartLiuli(g, fromSeat, targetSeat, usedAs, shaColor, sourceCard)) return;
+  if(maybeStartLiuli(g, fromSeat, targetSeat, usedAs, shaColor, sourceCard, shaInfo)) return;
   resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo);
 }
 
@@ -432,14 +432,18 @@ function playShaFangtian(cardIdx, targets){
   });
 }
 
-function maybeStartLiuli(g, from, to, usedAs, shaColor, sourceCard){
+function maybeStartLiuli(g, from, to, usedAs, shaColor, sourceCard, shaInfo){
   const target=g.players[to];
   if(!target || !target.alive || from===to || !hasCap(target,'liuli')) return false;
   if(liuliDiscardOptions(target).length===0) return false;
   const targets=liuliTargets(g, from, to);
   if(targets.length===0) return false;
+  // CORE-162(issue #221):这张杀可能带着酒加成(shaInfo.jiuBonus)。流离是"同一张杀中途
+  // 挂起再恢复",挂起期间必须把酒加成一并存进 pending,否则恢复结算时新造的 shaInfo
+  // ({noDistance:true})会把它盖掉,目标只受 1 点伤害。
   g.pending=setResponseAskedAt({type:'liuli', from, to, usedAs, shaColor, targets});
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+  if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
   g.phase='liuli';
   g.log=pushLog(g.log, target.name+' 是否发动【流离】,弃一张牌转移此【杀】…');
   return true;
