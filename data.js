@@ -1047,7 +1047,10 @@ function triggerHook(g, seat, hookName, ctx){
     ownFn(g, seat, ctx);
     if(g.pending !== pendingBefore){
       if(huashenHasHook(p, hookName)){
-        g.pendingHookQueue = { seat, hookName, ctx, source:'borrowed' };
+        // CORE-168(issue #227):原来是直接赋值,队列里已有的那一项(可能来自同一次伤害的
+        // 上一个 triggerHook,或上一次还没消费完的排队)会被无声覆盖丢失。改为追加进队列,
+        // 由 consumePendingHookQueue 按先进先出逐项消费。
+        enqueuePendingHook(g, { seat, hookName, ctx, source:'borrowed' });
       }
       return;
     }

@@ -528,11 +528,12 @@ function normalize(g){
   // consumePendingHookQueue)——结构不完整/座位已失效就整体清空,不阻塞流程
   // (和其它排队型字段同一处理原则)。
   if(g.pendingHookQueue){
-    const q=g.pendingHookQueue;
-    if(typeof q.seat!=='number' || typeof q.hookName!=='string' || !q.ctx
-       || (q.source!=='own' && q.source!=='borrowed') || !g.players[q.seat] || !g.players[q.seat].alive){
-      g.pendingHookQueue=null;
-    }
+    // CORE-168:队列化之后逐项做同一套形状防御,坏项单独剔除(不再因为其中一项有问题就
+    // 整体清空、连带丢掉合法的排队);全部剔完则回落 null。旧的单槽形状同样受理。
+    const items=Array.isArray(g.pendingHookQueue)?g.pendingHookQueue:[g.pendingHookQueue];
+    const kept=items.filter(q=>q && typeof q.seat==='number' && typeof q.hookName==='string' && q.ctx
+       && (q.source==='own' || q.source==='borrowed') && g.players[q.seat] && g.players[q.seat].alive);
+    g.pendingHookQueue = kept.length ? kept : null;
   }
   if(g.beigeQueue===undefined) g.beigeQueue=null;
   if(g.beigeQueue && (!Array.isArray(g.beigeQueue.candidates) || !Number.isInteger(g.beigeQueue.index) ||
@@ -2863,22 +2864,36 @@ function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
 // hook之后,如果它确实开出了新pending,要强制用外部传入的resume覆盖它自己建的那个,
 // 和startNextWangxi/wrapPendingForTianxiang"把外部resume原样接到新pending上"是同一
 // 个道理。
+// CORE-168(issue #227):排队从"单个槽位"改成"数组队列"——同一次伤害可能连续排进多项
+// (自己的 hook 挂起 pending 后借来的 hook 排队,而这一项还没消费完又来了下一次伤害),
+// 单槽赋值会把前一项直接冲掉。空队列一律回落成 null(不留空数组:Firebase 存不下空数组,
+// 而且 normalize 的形状防御和"没有排队"这个语义都以 null 为准)。
+function enqueuePendingHook(g, item){
+  if(!Array.isArray(g.pendingHookQueue)) g.pendingHookQueue = g.pendingHookQueue ? [g.pendingHookQueue] : [];
+  g.pendingHookQueue.push(item);
+}
 function consumePendingHookQueue(g, resume){
   if(!g.pendingHookQueue) return false;
-  const item = g.pendingHookQueue;
-  g.pendingHookQueue = null;
-  const p = g.players[item.seat];
-  if(!p || !p.alive) return false; // 座位已失效:安全丢弃这条排队,不阻塞流程
-  const borrowGen = item.source==='borrowed' ? getGeneral(p.huashenGeneral) : getGeneral(p.general);
-  const fn = borrowGen && borrowGen.hooks && borrowGen.hooks[item.hookName];
-  if(typeof fn !== 'function') return false;
-  const pendingBefore = g.pending;
-  fn(g, item.seat, item.ctx);
-  if(g.pending !== pendingBefore && g.pending){
-    g.pending.resume = resume;
-    return true; // 挂起了新pending,调用方要return,交给玩家响应
+  // 兼容旧的单槽形状(可能来自改动前写进 Firebase 的房间状态)
+  if(!Array.isArray(g.pendingHookQueue)) g.pendingHookQueue = [g.pendingHookQueue];
+  while(g.pendingHookQueue.length){
+    const item = g.pendingHookQueue.shift();
+    if(g.pendingHookQueue.length===0) g.pendingHookQueue = null;
+    const p = g.players[item.seat];
+    if(!p || !p.alive) continue; // 座位已失效:安全丢弃这条排队,继续看下一项,不阻塞流程
+    const borrowGen = item.source==='borrowed' ? getGeneral(p.huashenGeneral) : getGeneral(p.general);
+    const fn = borrowGen && borrowGen.hooks && borrowGen.hooks[item.hookName];
+    if(typeof fn !== 'function') continue;
+    const pendingBefore = g.pending;
+    fn(g, item.seat, item.ctx);
+    if(g.pending !== pendingBefore && g.pending){
+      g.pending.resume = resume;
+      return true; // 挂起了新pending,调用方要return,交给玩家响应;队列剩余项等下一次消费
+    }
+    // 即时效果(如反馈/奸雄),没有新pending,继续消费队列里的下一项
   }
-  return false; // 即时效果(如反馈/奸雄),没有新pending,继续往下走原有resume分派
+  g.pendingHookQueue = null;
+  return false; // 队列已空,继续往下走原有resume分派
 }
 
 // 同一次伤害可能同时满足多个受伤后技能。统一队列按固定顺序逐项执行；任何一项挂起
