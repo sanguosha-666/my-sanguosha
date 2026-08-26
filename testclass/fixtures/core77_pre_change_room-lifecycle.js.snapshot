@@ -12,6 +12,15 @@ function joinRoom(){
   errEl.textContent = '';
   if (NOT_CONFIGURED){ errEl.textContent = '请先在文件里填入 Firebase 配置再部署。'; return; }
   const room = document.getElementById('roomInput').value.trim();
+  // CORE-110(issue #110)XSS 审计已确认:玩家名 name 在这里(以及全项目)不做任何字符
+  // 过滤,只 trim() 空白——可以是任意字符,包括 <>"' 这类 HTML 特殊字符。这是刻意的
+  // 策略选择,不是遗漏:采用"渲染侧统一转义"而不是"输入侧过滤"作为唯一防线——过滤
+  // 本身存在被绕过的风险(HTML 实体编码/大小写混用/Unicode 变体等),且过滤会误伤玩家
+  // 正常想用的特殊字符(emoji/带符号的花名)。渲染层的强制约束是:任何把玩家名/聊天
+  // 文本等用户输入拼进 innerHTML 的地方,必须经过 escapeHtml()(定义在 render.js)——
+  // 已审计过全部 setBanner(155处)/innerHTML/insertAdjacentHTML 调用点，把当时发现的
+  // 17 处未转义玩家名裸拼接全部补上了 escapeHtml。textContent 赋值天然安全,不需要转义
+  // (浏览器不会把 textContent 的内容当 HTML 解析)。
   const name = document.getElementById('nameInput').value.trim();
   if(!room){ errEl.textContent='请填房间号'; return; }
   // bug1:房间号被拼进 Firebase 路径,key 不允许 . # $ [ ] / 等字符,只放行字母/数字/-/_
@@ -70,6 +79,13 @@ function enterGame(){
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('configWarn').classList.add('hidden');
   document.getElementById('game').classList.remove('hidden');
+  // CORE-119(issue #151):shouldShowLandscapeGate() 现在按 #game 是否可见判断要不要拦截
+  // 竖屏(见 render.js)——但这里只是切了一个 class,不触发 resize/orientationchange,
+  // 遮罩不会自动感知"刚刚进入对局"这个变化。如果用户在竖屏状态下点"进入房间",不补这一
+  // 行调用,遮罩会一直停留在大厅阶段"不拦截"的状态,直到用户下一次真的旋转设备才会重新
+  // 出现——等于放这段时间完全绕过横屏保护,不是可以接受的行为。这里显式跑一次,和页面
+  // 加载时的初始检测(render.js 底部 `checkLandscapeGate()`)同一套写法。
+  if(typeof checkLandscapeGate==='function') checkLandscapeGate();
   if(typeof pauseBgVideo==='function') pauseBgVideo();          // 大厅视频暂停,避免后台耗流量
   if(typeof startGameBg==='function') startGameBg();            // 启动游戏内飘牌 Canvas
   gameRef.on('value', snap => render(snap.val()));
@@ -265,7 +281,37 @@ function startGame(mode, gameMode){
         checkHuashenBeforeAssign(g);
         return g;
       }
-      g.lordGeneralPool = shuffled.slice(0, LORD_PICK);
+      // CORE-149(issue #208):主公的 5 张候选按"带不带主公技"分层抽取,固定 2 带 + 3 不带。
+      // 【为什么要分层】改动前是 shuffled.slice(0, LORD_PICK) —— 从全部 66 名武将里纯随机
+      // 切前 5 个。66 名里只有 6 名带主公技(见 data.js 的 LORD_SKILL_CAPS),按超几何分布
+      // 算下来 **61.1% 的局主公一张带主公技的武将都摸不到**、只有 6.1% 能摸到 2 张及以上。
+      // 而项目已经完整实现了六个主公技(激将/护驾/救援/制霸/血裔/黄天),含专门的服务端
+      // pending 阶段、normalize 防御、每回合限一次标志位和机器人决策注册 —— 这些实现在
+      // 超过六成的对局里根本没有机会被触发。
+      // 【随机性从哪来】shuffled 本身已经是全体武将的随机序,filter 保持相对顺序,
+      // 所以两个子池各自取前 N 个就等价于"从该类武将里随机取 N 个",不需要再洗一次。
+      // 【最后那次打乱是必须的】不打乱的话带主公技的恒定排在前两位,**位置本身就泄露了
+      // 哪两张是主公技武将**,等于把"要不要选主公技"这个决策提前暴露在 UI 顺序上。
+      const withLordSkill = shuffled.filter(id => generalHasLordSkill(id));
+      const withoutLordSkill = shuffled.filter(id => !generalHasLordSkill(id));
+      const LORD_PICK_WITH_SKILL = 2;
+      let lordPool = [
+        ...withLordSkill.slice(0, LORD_PICK_WITH_SKILL),
+        ...withoutLordSkill.slice(0, LORD_PICK - LORD_PICK_WITH_SKILL)
+      ];
+      // 【降级路径】任一类不够就用另一类补足到 5 张。当前武将表下不会触发(6 名带主公技、
+      // 60 名不带,两边都够),但武将禁用/自定义武将池是可预见的将来 —— 那时这里必须
+      // "少给几张主公技武将"而不是报错或卡在选将阶段。补完仍不足 5 张的情况由上面那个
+      // `shuffled.length < needed` 的退化分支兜住,走不到这里。
+      if(lordPool.length < LORD_PICK){
+        const already = new Set(lordPool);
+        for(const id of shuffled){
+          if(lordPool.length >= LORD_PICK) break;
+          if(!already.has(id)){ lordPool.push(id); already.add(id); }
+        }
+        g.log = pushLog(g.log, '(可选武将不足,主公候选未能凑齐 2 张主公技武将)');
+      }
+      g.lordGeneralPool = lordPool.sort(()=>Math.random()-0.5);
       g.players[lord].generalChoices = g.lordGeneralPool.slice();
       g.players[lord].general = null;
       g.players.forEach((p,i)=>{
@@ -310,6 +356,9 @@ function startGame(mode, gameMode){
 // ——这正是"开局第一回合甄姬洛神不触发"那个bug当年的教训(见下面 startTurn 调用处的注释),
 // 不能因为这次改动顺手引入新的手写 g.phase。
 function finishGeneralAssign(g){
+  // CORE-77(issue #122)第一期:开局记录seed。这里只是"生成并记录"这个数值,没有任何
+  // 其它代码读它做决策(见 game.js generateSeed 顶部注释)——本期不改变任何随机结果。
+  g.seed = generateSeed();
   g.deck = buildDeck(); g.discard=[];
   g.lordGeneralPool = null;
   g.players.forEach((p,i)=>{
@@ -588,6 +637,7 @@ function newGame(){
   // 抛异常崩溃整局。修法照抄同一函数里已有的 aiSummaryReset 那行(backToLobby 里也有
   // 一份同款调用),不是新发明的模式。
   if(typeof resetBotTwoStep==='function') resetBotTwoStep();
+  if(typeof aiSummaryReset==='function') aiSummaryReset();
   // CORE-115:身份猜测标记(玩家自己对某座位身份的猜测)存在 localStorage,按房间号+
   // 座位号做key、不入g/不经过Firebase——上一局的标记对新一局没有参考价值(不同局身份
   // 不同),这里清空。和上面 resetBotTwoStep 同一个写法:render.js 里定义的函数,
@@ -625,6 +675,13 @@ function cleanupRoom(){
 }
 
 function backToLobby(){
+  // CORE-102(issue #149):托管清理必须在 mySeat/gameRef 等上下文被置空之前(下面几行
+  // 就会清),否则 stopAiTestAutopilot 内部 publishAiTestAutopilot 想撤销的座位号已经
+  // 读不到了。覆盖房主主动关房(cleanupRoom→backToLobby)和被动收到房间删除(render.js
+  // 的"room was deleted"分支同样调 backToLobby)两条路径——两者都走这一个收敛点,不需要
+  // 分别处理。见 ai-bot.js 里 aiTestAutopilot 的完整说明。
+  if(typeof aiTestAutopilot!=='undefined' && aiTestAutopilot && aiTestAutopilot.active
+    && typeof stopAiTestAutopilot==='function') stopAiTestAutopilot();
   if(typeof aiSummaryReset === 'function') aiSummaryReset();
   if(typeof resetBotTwoStep==='function') resetBotTwoStep(); // CORE-113,同newGame()那处注释
   if(chatQuery) chatQuery.off();
@@ -632,6 +689,12 @@ function backToLobby(){
   mySeat = null; selectedCardIdx = null; resetZhangba();
   document.getElementById('game').classList.add('hidden');
   document.getElementById('lobby').classList.remove('hidden');
+  // CORE-119(issue #151):和 enterGame() 那处同一个理由的对称修复——离开对局回大厅同样
+  // 只是切 class,不触发 resize/orientationchange。如果窄屏竖屏用户当时正被遮罩正确拦截
+  // 在对局里(比如房间被强制关闭、走的是"被动收到删除"这条路径,不是用户自己点按钮离开),
+  // 不补这一行,遮罩会在回到大厅后继续错误拦截本该放行的大厅表单,直到用户碰巧旋转一次
+  // 设备才会解除。
+  if(typeof checkLandscapeGate==='function') checkLandscapeGate();
   if(typeof stopGameBg==='function') stopGameBg();              // 停止并清空飘牌
   if(typeof resumeBgVideo==='function') resumeBgVideo();        // 恢复大厅视频(随机换一个)
   document.getElementById('lobbyErr').textContent = '房间已清理,可重新进入。';

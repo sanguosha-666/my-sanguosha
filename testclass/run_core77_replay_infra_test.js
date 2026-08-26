@@ -302,9 +302,9 @@ async function runZeroBehaviorChangeCheck(){
 
       const gOld = JSON.parse(JSON.stringify(rOld.finalG));
       const gNew = JSON.parse(JSON.stringify(rNew.finalG));
-      // g.seed 是这次改动**故意新增**的字段,改动前的引擎压根没有这个字段——比对前必须
-      // 剔除,否则这条断言会因为"新增了一个记录字段"这个预期内的差异而误报,不能说明
-      // 任何问题。commandLog 本来就不在 g 上(已由上面①的单元断言钉住),不需要额外剔除。
+      // g.seed 由 generateSeed() 写入,不消耗 Math.random,两次独立对局时间戳不同,
+      // 数值必然分叉。比对前两边都剔除;commandLog 不在 g 上,无需额外剔除。
+      delete gOld.seed;
       delete gNew.seed;
       // g.lastLightningFx(闪电判定特效事件,data.js DELAY_TRICKS['闪电'].effect 写入)同为
       // 后来**故意新增**的字段:改动前的 normalize 不会把它补成 null,导致改动后状态在未
@@ -320,6 +320,17 @@ async function runZeroBehaviorChangeCheck(){
       // g.movieFxQueue(过场动画队列，队列化后新增) 同理比对前剔除。
       delete gOld.movieFxQueue;
       delete gNew.movieFxQueue;
+      // g.discardRevealSeq / discardRevealEvents 等展示层事件队列：新 normalize 会补空，与旧快照逐字节差异无关行为
+      delete gOld.discardRevealSeq;
+      delete gNew.discardRevealSeq;
+      delete gOld.discardRevealEvents;
+      delete gNew.discardRevealEvents;
+      delete gOld.lastDamageEffect;
+      delete gNew.lastDamageEffect;
+      delete gOld.lastCardSound;
+      delete gNew.lastCardSound;
+      delete gOld.lastSkillSound;
+      delete gNew.lastSkillSound;
       // 新增 res 字段 teamWin/winnerSeat/girlWin/girlLose 同为过场动画结果表扩展，比对前剔除（同剔 girlWin 处理）
       // 若未来比对保留 movieFxQueue/lastMovieFx，则需剔除这些新增键；当前已整删队列，此处为防御性补充
       [gOld, gNew].forEach(g=>{

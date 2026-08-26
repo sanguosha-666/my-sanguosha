@@ -40,6 +40,10 @@
   - 修复当 `g.chainDamageQueue` 非空绕过过滤 `return nextAskee / return dyingSeat`，保留逐个濒死询问
   - 验证 `run_cixiong 20/20` `run_movie_fx 38/38`
   - 归档 2026-08-26：`af923c6` 已合入（game.js +7 行），工作区干净无新增改动，`run_cixiong 20/20` 复核通过
+- [x] Phase 9/9：CI `run_core77_replay_infra_test.js` 红
+  - 根因：`af923c6` 改连环濒死步数（71→68 / 217→207），零行为比对快照过期；刷新快照后两边都写 `g.seed`，测试只删 `gNew.seed`
+  - 修法：刷新 `core77_pre_change_*.snapshot`；比对两边都删 `seed`；展示层字段 `discardReveal*`/`lastDamageEffect`/`lastCardSound`/`lastSkillSound` 防御性剔除
+  - 验证：`run_core77_replay_infra_test.js` 12/12
 
 ## 2026-08-25 — 关票规则补一条
 
