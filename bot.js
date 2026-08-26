@@ -5232,14 +5232,18 @@ async function runBotDecision(g,seat){
     }
     return;
   }
+  // CORE-171(issue #230):明策两步原本硬编码"第一个存活非自己"/"candidates[0]",完全绕过
+  // 阵营策略。两步的效果方向不同,要分开建模:第一步是把一张牌**交给**某人(纯帮助,走
+  // helpful),第二步是指定那个人用【杀】打谁(纯伤害,走 harmful)。过滤后为空时不硬选,
+  // 取消发动(cancelMingce 会把 g.mingceUsed 复位,不白白消耗限次)。
   if(g.phase==='mingcePickTarget'&&d.type==='mingcePickTarget'&&d.sourceSeat===seat){
-    const target=g.players.findIndex((p,i)=>p&&p.alive&&i!==seat);
+    const target=g.players.findIndex((p,i)=>p&&p.alive&&i!==seat&&botTargetPolicyAllows(g,seat,i,'helpful'));
     if(target>=0) botInvoke(seat,()=>pickMingceTarget(target));
     else botInvoke(seat,cancelMingce);
     return;
   }
   if(g.phase==='mingcePickTarget2'&&d.type==='mingcePickTarget2'&&d.sourceSeat===seat){
-    const target2=(d.candidates||[])[0];
+    const target2=(d.candidates||[]).find(i=>Number.isInteger(i)&&botTargetPolicyAllows(g,seat,i,'harmful'));
     if(typeof target2==='number') botInvoke(seat,()=>pickMingceTarget2(target2));
     else botInvoke(seat,cancelMingce);
     return;
@@ -5275,11 +5279,20 @@ async function runBotDecision(g,seat){
     botInvoke(seat,()=>respondYaowu(me&&me.hp<me.maxHp?'recover':'draw'));
     return;
   }
-  // 夏侯渊【神速】选目标(防御性收录,机器人目前不会主动发动神速1/2):固定选第一个存活
-  // 非自己的角色,respondShensuSha内部无距离限制、不受canReachSha约束。
+  // 夏侯渊【神速】选目标(防御性收录,机器人目前不会主动发动神速1/2)。
+  // CORE-170(issue #229):原来是裸 findIndex 取第一个存活非自己的角色,既绕过阵营策略
+  // (身份局会打自己人),也绕过 respondShensuSha 自己会查的 CARD_PLAYS['杀'].canTarget
+  // ——后者更危险:服务端原地 return、状态一字不变,机器人下次醒来重算又选同一个人,
+  // 就是 CLAUDE.md 规则 26 说的那类永久死循环。这里两条一起判:先按 harmful 过阵营策略,
+  // 再用服务端同一个 canTarget(ignoreShaDistance:true,神速只无视距离)确认真的能打。
   if(g.phase==='shensuSha'&&d.type==='shensuSha'&&d.seat===seat){
-    const target=g.players.findIndex((p,i)=>p&&p.alive&&i!==seat);
+    const shaSpec=CARD_PLAYS['杀'];
+    const virtualSha={name:'杀', virtual:true, ignoreShaDistance:true};
+    const target=g.players.findIndex((p,i)=>p&&p.alive&&i!==seat
+      && botTargetPolicyAllows(g,seat,i,'harmful')
+      && (!shaSpec||!shaSpec.canTarget||shaSpec.canTarget(g,g.players[seat],virtualSha,i)));
     if(target>=0) botInvoke(seat,()=>respondShensuSha(target));
+    else botInvoke(seat,cancelShensuSha); // 没有策略/规则都允许的目标:直接取消,不硬选也不干等超时
     return;
   }
   // 马谡【制蛮】是否发动:发动会防止自己刚造成的这次伤害(改为获得目标一张牌)——代价是

@@ -511,11 +511,23 @@ registerStageNormalizer("guhuoTarget", function(g){
 });
 registerStageNormalizer("wugu", function(g){
   if(g.pending && g.pending.type==='wugu'){
-    g.pending.pool = g.pending.pool || [];
-    g.pending.order = g.pending.order || [];
-    if(typeof g.pending.from!=='number' || typeof g.pending.idx!=='number' || g.pending.order.length===0){
+    const d=g.pending;
+    // CORE-169(issue #228):先补默认、再做结构校验,两件事分开——Firebase 吞空数组,
+    // pool/order 读回来可能是 undefined,而"空"本身不等于"脏"(和 guiduAsk/xuanfengPick/
+    // luanwuChoose 同族已经修过的写法一致,见 CLAUDE.md 规则 25)。
+    if(!Array.isArray(d.pool)) d.pool=[];
+    if(!Array.isArray(d.order)) d.order=[];
+    // 真正的结构性非法只有这一类:发起者座位号/指针不是数字,或指向不存在的玩家。
+    if(typeof d.from!=='number' || !g.players[d.from] || !Number.isInteger(d.idx) || d.idx<0){
       logPendingOrphan(g, 'A:normalize校验未通过,pending结构不合法(wugu)');
       g.pending=null; g.phase='play';
+      return;
+    }
+    // "没有人可以再挑了"(队列排完/池子空)不是脏数据,是这条链该收尾了——但收尾必须走
+    // finishWugu,把 pool 里剩下的**真实牌**弃进弃牌堆,不能像原来那样直接 pending=null
+    // 让这些牌凭空消失(原实现在 order.length===0 时正是这么做的)。
+    if(d.order.length===0 || d.idx>=d.order.length || d.pool.length===0){
+      finishWugu(g, d.pool);
     }
   }
 });

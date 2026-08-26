@@ -2782,9 +2782,17 @@ function renderControls(g){
       const confirmBtn=document.createElement('button'); confirmBtn.className='primary';
       confirmBtn.textContent='确认弃牌('+discardSelectedSet.size+'/'+over+')';
       confirmBtn.disabled = discardSelectedSet.size!==over;
+      // CORE-172(issue #231):点击时才去读共享可变的 discardSelectedSet 是 CLAUDE.md 规则14
+      // 说的那类隐患——第一次点击已经把它清空,而网络往返完成前这个旧按钮还留在页面上可点,
+      // 二次点击/误触双击就会提交一个空集合、被服务端静默拒绝(表现为"点了确认没弃掉")。
+      // 修法:挂载时先冻结快照,点击时立刻 disabled 防二次提交(和五谷挑牌那边"点完把按钮
+      // 全部 disabled"同一套做法)。
+      const picksSnapshot = [...discardSelectedSet];
       confirmBtn.onclick=()=>{
-        discardCards([...discardSelectedSet]);
+        if(confirmBtn.disabled) return;
+        confirmBtn.disabled = true;
         discardSelectedSet = new Set();
+        discardCards(picksSnapshot);
       };
       c.appendChild(confirmBtn);
     }
