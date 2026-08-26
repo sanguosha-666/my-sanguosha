@@ -3680,9 +3680,15 @@ BOT_DECISIONS.rendeTwoStep = {
     // 队友(候选为空),交给下面buildCandidates返回[]→botDecide返回false→
     // runBotDecision继续走其它决策——"这一轮不发动仁德"永远比"发动仁德资敌"更好,
     // 不需要额外的兜底分支去强行选一个敌方目标。
+    // CORE-163(issue #222):上面那条 sameTeam 过滤在身份局恒为空操作(sameTeam 只在
+    // team 模式下有意义),于是身份局里忠臣/主公会把牌白送给已知反贼、还顺带给自己回血
+    // ——确定资敌。仁德是纯帮助型效果,统一改走 botTargetPolicyAllows(...,'helpful'):
+    // 组队模式仍只给队友、身份局排除已知敌人、身份未知放行、内奸不设硬边界,和青囊/
+    // 举荐/好施等已接入的帮助型技能同一口径。过滤后为空则候选为空→botDecide 返回
+    // false→走出牌窗,即"本轮不发动仁德",与既有契约一致。
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
-      if(g.gameMode==='team' && !sameTeam(g, seat, i)) return;
+      if(!botTargetPolicyAllows(g, seat, i, 'helpful')) return;
       out.push({ index: 0, label: '仁德:选目标 '+botAiName(g,i), step:'A', a: i });
     });
     return out;

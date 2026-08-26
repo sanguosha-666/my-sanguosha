@@ -3027,19 +3027,31 @@ function chooseQiangxiCost(costType) {
   });
 }
 
+// CORE-175(issue #234):典韦【强袭】的候选生成原本只按攻击距离筛选,绕过了
+// CARD_PLAYS['杀'].canTarget 里的空城/同疾/智迟等目标合法性(执行端 pickQiangxiTarget
+// 又只校验 candidates.includes,等于完全不拦)。这里收敛成唯一的候选生成入口,距离仍由
+// 强袭自己按攻击范围判断,故传 ignoreShaDistance:true 只跳过 canTarget 尾部的距离判断,
+// 其余规则全部保留(和借刀杀人/神速已有的写法同一套)。
+function qiangxiCandidateSeats(g, seat){
+  const me = g.players[seat];
+  const myAttackRange = getAttackRange(g, seat);
+  const virtualSha = {name:'杀', virtual:true, ignoreShaDistance:true};
+  const shaSpec = CARD_PLAYS['杀'];
+  const out = [];
+  for (let i = 0; i < g.players.length; i++) {
+    if (i === seat || !g.players[i] || !g.players[i].alive) continue;
+    if (distance(g, seat, i) > myAttackRange) continue;
+    if (shaSpec && shaSpec.canTarget && !shaSpec.canTarget(g, me, virtualSha, i)) continue;
+    out.push(i);
+  }
+  return out;
+}
+
 // proceedWithWeaponDiscard: 典韦【强袭】—— 处理武器弃置的具体执行
 function proceedWithWeaponDiscard(g, source, weapon, weaponIndex) {
   const me = g.players[mySeat];
-  const myAttackRange = getAttackRange(g, mySeat);
-  
-  // 找到所有在攻击范围内的目标
-  const candidates = [];
-  for (let i = 0; i < g.players.length; i++) {
-    if (i === mySeat || !g.players[i] || !g.players[i].alive) continue;
-    if (distance(g, mySeat, i) <= myAttackRange) {
-      candidates.push(i);
-    }
-  }
+  // 候选生成统一走 qiangxiCandidateSeats(距离 + 杀的目标合法性)
+  const candidates = qiangxiCandidateSeats(g, mySeat);
   
   if (candidates.length === 0) {
     g.log = pushLog(g.log, `${me.name} 攻击范围内无目标,无法发动【强袭】`);
@@ -3065,16 +3077,8 @@ function proceedWithWeaponDiscard(g, source, weapon, weaponIndex) {
 // proceedWithCostType: 典韦【强袭】—— 处理失去体力的消耗类型
 function proceedWithCostType(g, costType) {
   const me = g.players[mySeat];
-  const myAttackRange = getAttackRange(g, mySeat);
-  
-  // 找到所有在攻击范围内的目标
-  const candidates = [];
-  for (let i = 0; i < g.players.length; i++) {
-    if (i === mySeat || !g.players[i] || !g.players[i].alive) continue;
-    if (distance(g, mySeat, i) <= myAttackRange) {
-      candidates.push(i);
-    }
-  }
+  // 候选生成统一走 qiangxiCandidateSeats(距离 + 杀的目标合法性)
+  const candidates = qiangxiCandidateSeats(g, mySeat);
   
   if (candidates.length === 0) {
     g.log = pushLog(g.log, `${me.name} 攻击范围内无目标,无法发动【强袭】`);
@@ -3124,6 +3128,10 @@ function pickQiangxiTarget(targetSeat) {
     
     // 验证目标是否在候选列表中
     if (!g.pending.candidates.includes(targetSeat)) return g;
+    // CORE-175(issue #234):候选列表是发动那一刻算出来的快照,支付方式选择期间局势可能已变
+    // (例如目标手牌被拿空触发空城)。落地前再用同一套 canTarget 兜底一次。
+    const shaSpec = CARD_PLAYS['杀'];
+    if (shaSpec && shaSpec.canTarget && !shaSpec.canTarget(g, me, {name:'杀', virtual:true, ignoreShaDistance:true}, targetSeat)) return g;
     
     const costType = g.pending.costType;
     
