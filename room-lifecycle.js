@@ -645,6 +645,9 @@ function newGame(){
   // 时才被调用(晚于全部脚本加载完成),typeof 守卫这里只是防御性写法,不是真的会遇到
   // 未定义的情况。
   if(typeof clearAllIdentityMarks==='function') clearAllIdentityMarks();
+  // CORE-173(issue #232):"最近N次出牌"是纯客户端本地记忆,不入 g,重开一局必须清掉,
+  // 否则新局前两次出牌期间还挂着上一局的记录。同 resetBotTwoStep 那批写法。
+  if(typeof resetRecentPlaysHistory==='function') resetRecentPlaysHistory();
   tx(g=>{
     ensureOwner(g); // #104 迁移:老房间无 owner 先补记,守卫才可能放行
     if(!isRoomOwner(g,mySeat)) return g;
@@ -684,6 +687,7 @@ function backToLobby(){
     && typeof stopAiTestAutopilot==='function') stopAiTestAutopilot();
   if(typeof aiSummaryReset === 'function') aiSummaryReset();
   if(typeof resetBotTwoStep==='function') resetBotTwoStep(); // CORE-113,同newGame()那处注释
+  if(typeof resetRecentPlaysHistory==='function') resetRecentPlaysHistory(); // CORE-173,同newGame()那处
   if(chatQuery) chatQuery.off();
   chatQuery=null; chatRef=null; chatMessages=[];
   mySeat = null; selectedCardIdx = null; resetZhangba();

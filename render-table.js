@@ -32,11 +32,18 @@ let lastShownEntrySeq = undefined;
 let lastFadedBatchSeq = undefined;
 // CORE-122(issue #154)方向2:平板"最近N次出牌"历史记忆——纯客户端本地内存,不写入g,
 // 不碰pruneExchangeCards/game.js任何共享状态。固定大小FIFO(RECENT_PLAYS_LIMIT条),
-// 超出自动丢最老的一条,不额外监听"新对局开始"信号做重置——新对局里最多3次真实出牌,
-// 旧对局的记录就被自然挤出窗口,逻辑更简单、和服务端状态零交集。刷新页面/重进房间时
-// 这个模块级变量本来就会重新初始化,天然清空,不需要专门处理。
+// 超出自动丢最老的一条。刷新页面/重进房间时这个模块级变量本来就会重新初始化,天然清空;
+// "再来一局"/回大厅不重新加载页面,由 resetRecentPlaysHistory() 显式清空(见下,CORE-173)。
 const RECENT_PLAYS_LIMIT = 3;
 let recentPlaysHistory = [];
+// CORE-173(issue #232):上面那段"新对局最多3次出牌就自然挤出旧记录、不需要重置"的推理
+// 只在"挤满3条之后"成立——新局的前0~2次出牌期间,上一局的记录仍然挂在那里,和"重开即
+// 全新"的直觉相违。这里补一个显式清空入口,由 newGame()/backToLobby() 调用(和
+// resetBotTwoStep/aiSummaryReset 同一批纯客户端本地状态的重置写法)。
+function resetRecentPlaysHistory(){
+  recentPlaysHistory = [];
+  if(typeof renderRecentPlaysHistory==='function') renderRecentPlaysHistory();
+}
 // summarizeCompletedChain: 把一条刚结束的结算链(g.exchangeCards这一批)总结成一行纯
 // 文字chip(不带卡面图片,故意保持轻量——只在平板断点内展示,见index.html对应CSS)。
 // 出牌方取链里第一项的seat(链条自始至终都是同一个人在操作,取第一项和取最后一项等价,
