@@ -1044,7 +1044,10 @@ const testCode = String.raw`
     botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
     var c1 = s.buildCandidates(g1, 0);
     var seats = c1.map(function(c){ return c.seatB; }).sort(function(a,b){ return a-b; }).join(',');
-    if(seats !== '0,2') throw new Error('阶段B候选应为0,2,实际 ' + seats);
+    // CORE-164(issue #223)后:B 侧叠加了 botTargetPolicyAllows(...,'harmful'),施术者自己
+    // 不再是合法的被杀方("花一张借刀请别人来杀我"本来就不该是机器人的候选)。规则层仍
+    // 允许把自己选成B,这只是机器人策略层的收窄。
+    if(seats !== '2') throw new Error('阶段B候选应为2(施术者自己已按harmful策略排除),实际 ' + seats);
     if(c1[0].step !== 'B' || c1[0].seatA !== 1) throw new Error('阶段B候选应带 step:B 和 seatA,实际 ' + JSON.stringify(c1[0]));
     if(c1[0].label.indexOf('杀 ') < 0) throw new Error('label 应含"令A杀B",实际 ' + c1[0].label);
     // 空城者排除
@@ -1054,7 +1057,8 @@ const testCode = String.raw`
     g2.players[2].hand = [];
     botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
     var c2 = s.buildCandidates(g2, 0);
-    if(c2.length !== 1 || c2[0].seatB !== 0) throw new Error('空城者应排除,只剩座位0,实际 ' + JSON.stringify(c2));
+    // 同上:座位0(施术者自己)也已被 harmful 策略排除,座位2 空城被排除后候选为空
+    if(c2.length !== 0) throw new Error('空城者与施术者自己都应排除,候选应为空,实际 ' + JSON.stringify(c2));
     // A 自己不能当B
     var g3 = mkSeatG({ myHand: [card('借刀杀人','j9')] });
     g3.players[1].equips.weapon = { name: '青龙偃月刀' };
@@ -1080,7 +1084,8 @@ const testCode = String.raw`
     if(botTwoStepA !== null) throw new Error('阶段B提交后 botTwoStepA 应重置为 null,实际 ' + JSON.stringify(botTwoStepA));
     if(window.__jiedaoCalls.length !== 1) throw new Error('jieDaoShaRen 应被调1次,实际 ' + window.__jiedaoCalls.length);
     var call0 = window.__jiedaoCalls[0];
-    if(call0[0] !== 0 || call0[1] !== 1 || call0[2] !== 0) throw new Error('应 jieDaoShaRen(0,1,0),实际 ' + JSON.stringify(call0));
+    // CORE-164 后阶段B唯一候选是座位2(施术者自己已被 harmful 策略排除)
+    if(call0[0] !== 0 || call0[1] !== 1 || call0[2] !== 2) throw new Error('应 jieDaoShaRen(0,1,2),实际 ' + JSON.stringify(call0));
   });
 
   await check('借刀阶段B有密钥:mock 选 seatB → jieDaoShaRen(借刀idx,seatA,seatB);userPrompt 不含他人手牌', async function(){
@@ -1089,13 +1094,15 @@ const testCode = String.raw`
     window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
     aiApiKey = 'test-key';
     aiProvider = 'claude';
-    var g = mkSeatG({ myHand: [card('借刀杀人','j11')], hands: { 1: [card('桃园结义','sec')] } });
+    // CORE-164 后施术者自己已被 harmful 策略排除,3人局阶段B只剩1个候选、AI 选 index 1 会
+    // 越界;这里改用4人局,保证"AI 真的在多个候选里做选择"这件事仍被验证(index1=座位3)。
+    var g = mkSeatG({ n: 4, myHand: [card('借刀杀人','j11')], hands: { 1: [card('桃园结义','sec')] } });
     g.players[1].equips.weapon = { name: '青龙偃月刀' };
     botTwoStepA = { decisionId: 'jiedaoTwoStep', a: 1 };
     var r = await botDecide('jiedaoTwoStep', g, 0);
     if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
-    if(window.__jiedaoCalls.length !== 1 || window.__jiedaoCalls[0][1] !== 1 || window.__jiedaoCalls[0][2] !== 2)
-      throw new Error('应 jieDaoShaRen(idx,1,2),实际 ' + JSON.stringify(window.__jiedaoCalls));
+    if(window.__jiedaoCalls.length !== 1 || window.__jiedaoCalls[0][1] !== 1 || window.__jiedaoCalls[0][2] !== 3)
+      throw new Error('应 jieDaoShaRen(idx,1,3),实际 ' + JSON.stringify(window.__jiedaoCalls));
     var up = window.__mockAiArgs.opts.userPrompt;
     if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
     botTwoStepA = null;
@@ -1309,14 +1316,17 @@ const testCode = String.raw`
     botTwoStepA = { decisionId: 'lijianTwoStep', a: 1 };
     var c1 = s.buildCandidates(g1, 0);
     var seats = c1.map(function(c){ return c.toSeat; }).sort().join(',');
-    if(seats !== '0,2') throw new Error('阶段B候选应为 0,2,实际 ' + seats);
+    // CORE-164(issue #223)后:B(被指定为【决斗】目标的一方)叠加了 harmful 策略,
+    // 施术者自己不再入选(官方规则里貂蝉本来也只能指定"其他两名男性角色")。
+    if(seats !== '2') throw new Error('阶段B候选应为 2(施术者自己已按harmful策略排除),实际 ' + seats);
     if(c1[0].step !== 'B' || c1[0].fromSeat !== 1)
       throw new Error('候选应带 step:B+fromSeat,实际 ' + JSON.stringify(c1[0]));
     // 死者排除
     var g2 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l6')], aliveOf: { 2: false } });
     botTwoStepA = { decisionId: 'lijianTwoStep', a: 1 };
     var c2 = s.buildCandidates(g2, 0);
-    if(c2.length !== 1 || c2[0].toSeat !== 0) throw new Error('死者(座位2)应排除,实际 ' + JSON.stringify(c2));
+    // CORE-164 后:座位2 已阵亡、座位0 是施术者自己(harmful 策略排除)→ 候选为空
+    if(c2.length !== 0) throw new Error('死者(座位2)与施术者自己都应排除,候选应为空,实际 ' + JSON.stringify(c2));
     // from 自己不能当 to
     var g3 = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l7')] });
     botTwoStepA = { decisionId: 'lijianTwoStep', a: 0 };
@@ -1353,13 +1363,14 @@ const testCode = String.raw`
     window.__mockAiResults = [{ ok: true, text: '{"choice":1}' }];
     aiApiKey = 'test-key';
     aiProvider = 'claude';
-    var g = mkSeatG({ caps0: { lijian: true }, myHand: [card('杀','l9')],
+    // 同上:改用4人局,index1=座位3
+    var g = mkSeatG({ n: 4, caps0: { lijian: true }, myHand: [card('杀','l9')],
       hands: { 1: [card('桃园结义','sec')], 2: [card('桃','la')] } });
     botTwoStepA = { decisionId: 'lijianTwoStep', a: 1 };
     var r = await botDecide('lijianTwoStep', g, 0);
     if(r !== true || window.__mockAiCalls !== 1) throw new Error('AI 调用异常,实际 r=' + r);
-    if(window.__lijianCalls.length !== 1 || window.__lijianCalls[0][1] !== 1 || window.__lijianCalls[0][2] !== 2)
-      throw new Error('应 liJian(0,1,2),实际 ' + JSON.stringify(window.__lijianCalls));
+    if(window.__lijianCalls.length !== 1 || window.__lijianCalls[0][1] !== 1 || window.__lijianCalls[0][2] !== 3)
+      throw new Error('应 liJian(0,1,3),实际 ' + JSON.stringify(window.__lijianCalls));
     var up = window.__mockAiArgs.opts.userPrompt;
     if(up.indexOf('桃园结义') >= 0) throw new Error('userPrompt 泄露他人手牌(桃园结义)!实际 ' + up);
     botTwoStepA = null;

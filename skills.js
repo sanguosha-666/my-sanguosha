@@ -2971,7 +2971,7 @@ function startQiangxi() {
 // chooseQiangxiCost: 典韦【强袭】—— 选择支付方式
 function chooseQiangxiCost(costType) {
   tx(g => {
-    if (g.pending.type !== 'qiangxiChooseCost' || g.pending.seat !== mySeat) return g;
+    if (!g.pending || g.pending.type !== 'qiangxiChooseCost' || g.pending.seat !== mySeat) return g;
     const me = g.players[mySeat];
     if (!me || !me.alive) return g;
     
@@ -3054,6 +3054,11 @@ function proceedWithWeaponDiscard(g, source, weapon, weaponIndex) {
   const candidates = qiangxiCandidateSeats(g, mySeat);
   
   if (candidates.length === 0) {
+    // CORE-167(issue #226):【强袭】是"出牌阶段限一次发动",不是"限一次成功"。这条早退分支
+    // 原来不置 qiangxiUsed,可以反复点发动刷询问/日志(不耗体力/武器)。这里补上置位,和
+    // 断粮/离间/反间等"入口即置位"的限一次技能同口径。cancelQiangxi(玩家主动取消)仍不
+    // 置位——那是玩家没有真的发动,不该消耗次数。
+    g.qiangxiUsed = true;
     g.log = pushLog(g.log, `${me.name} 攻击范围内无目标,无法发动【强袭】`);
     g.pending = null;
     g.phase = 'play';
@@ -3081,6 +3086,11 @@ function proceedWithCostType(g, costType) {
   const candidates = qiangxiCandidateSeats(g, mySeat);
   
   if (candidates.length === 0) {
+    // CORE-167(issue #226):【强袭】是"出牌阶段限一次发动",不是"限一次成功"。这条早退分支
+    // 原来不置 qiangxiUsed,可以反复点发动刷询问/日志(不耗体力/武器)。这里补上置位,和
+    // 断粮/离间/反间等"入口即置位"的限一次技能同口径。cancelQiangxi(玩家主动取消)仍不
+    // 置位——那是玩家没有真的发动,不该消耗次数。
+    g.qiangxiUsed = true;
     g.log = pushLog(g.log, `${me.name} 攻击范围内无目标,无法发动【强袭】`);
     g.pending = null;
     g.phase = 'play';
@@ -3101,7 +3111,7 @@ function proceedWithCostType(g, costType) {
 // chooseQiangxiWeaponFromHand: 典韦【强袭】—— 选择手牌中的武器牌
 function chooseQiangxiWeaponFromHand(cardIndex) {
   tx(g => {
-    if (g.pending.type !== 'qiangxiChooseWeaponFromHand' || g.pending.seat !== mySeat) return g;
+    if (!g.pending || g.pending.type !== 'qiangxiChooseWeaponFromHand' || g.pending.seat !== mySeat) return g;
     const me = g.players[mySeat];
     if (!me || !me.alive) return g;
     
@@ -3120,7 +3130,7 @@ function chooseQiangxiWeaponFromHand(cardIndex) {
 // pickQiangxiTarget: 典韦【强袭】—— 选择目标并执行强袭效果
 function pickQiangxiTarget(targetSeat) {
   tx(g => {
-    if (g.pending.type !== 'qiangxiPickTarget' || g.pending.seat !== mySeat) return g;
+    if (!g.pending || g.pending.type !== 'qiangxiPickTarget' || g.pending.seat !== mySeat) return g;
     const me = g.players[mySeat];
     const target = g.players[targetSeat];
     

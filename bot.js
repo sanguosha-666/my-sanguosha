@@ -992,12 +992,32 @@ function botTryStartExtraSkills(g, seat){
         const claimed={ id:actual.id, name:'杀', suit:actual.suit, rank:actual.rank, originalName:actual.name };
         if(spec.canPlay && !spec.canPlay(g, me, claimed)) continue;
         if(!guhuoHasLegalTarget(g, seat, claimed, spec)) continue;
+        // CORE-165(issue #224):"规则上有目标"不等于"应该发动"。真正的阵营过滤发生在后续
+        // BOT_SEAT_PICKS.guhuoTarget(effectKind:'harmful'),那时牌已经扣置、guhuoUsed 已经
+        // 消耗——候选被策略滤空就只能空转。所以发动前先按同一套 harmful 策略确认至少存在
+        // 一个可打的目标(和天义 CORE-159、强袭/奋迅 CORE-96 的"发动门槛=执行门槛"同款)。
+        if(!botGuhuoHasPolicyTarget(g, seat, claimed, spec)) continue;
         botInvoke(seat, ()=>startGuhuo(i, '杀'));
         return true;
       }
     }
   }
   return false;
+}
+// CORE-165(issue #224):蛊惑发动前的目标策略预检。规则合法性沿用 skills.js 的
+// guhuoHasLegalTarget(唯一口径,不另维护一份目标列表),这里只额外叠一层与
+// BOT_SEAT_PICKS.guhuoTarget 完全相同的 harmful 阵营策略(botTargetPolicyAllows),
+// 保证"发动门槛"和"执行门槛"一致。allowSelf 的自我目标不参与——蛊惑声明为【杀】
+// 打自己没有意义,而 CARD_PLAYS['杀'].canTarget 本身也会拒绝自己。
+function botGuhuoHasPolicyTarget(g, seat, claimed, spec){
+  if(!spec || !spec.target) return true;
+  const me=g.players[seat];
+  if(!me || !me.alive) return false;
+  return g.players.some(function(p, i){
+    if(!p || !p.alive || i===seat) return false;
+    if(spec.canTarget && !spec.canTarget(g, me, claimed, i)) return false;
+    return botTargetPolicyAllows(g, seat, i, 'harmful');
+  });
 }
 function botActionId(card){ return isShaName(card.name)?'杀':card.name; }
 // CORE-154(issue #213):补上 4 种主动进攻锦囊的定档。
@@ -3407,6 +3427,11 @@ BOT_DECISIONS.jiedaoTwoStep = {
         if(!canReachSha(g, A, i)) return;
         if(hasCap(p,'kongcheng') && (p.hand||[]).length===0) return;
         if(sameTeam(g, A, i)) return;
+        // CORE-164(issue #223):sameTeam 在身份局恒为 false,那条过滤等于空操作,忠臣能
+        // 令人杀主公、反贼能让已知反贼互砍。B 是这张借刀真正承受伤害的人,必须按施术者
+        // (seat)视角过一层 harmful 阵营策略,和丈八/方天(CORE-95)同一口径;两条是叠加
+        // 关系,组队仍用 sameTeam,身份局用 botTargetPolicyAllows,内奸不设固定敌我。
+        if(!botTargetPolicyAllows(g, seat, i, 'harmful')) return;
         if(shaSpec && shaSpec.canTarget && !shaSpec.canTarget(g, g.players[A], {name:'杀', virtual:true, ignoreShaDistance:true}, i)) return;
         out.push({ index: 0, label: '借刀:令 '+botAiName(g,A)+' 杀 '+botAiName(g,i), step:'B', seatA: A, seatB: i, jiedaoIdx: jiedaoIdx });
       });
@@ -3424,10 +3449,13 @@ BOT_DECISIONS.jiedaoTwoStep = {
       if(!p || !p.alive || i===seat) return;
       if(!p.equips || !p.equips.weapon) return;
       if(jiedaoSpec && jiedaoSpec.canTarget && !jiedaoSpec.canTarget(g, me, jiedaoSelCard, i)) return;
+      // CORE-164:hasSomeB 必须和阶段B用同一口径(含 harmful 策略),否则会选出一个
+      // "阶段B候选恒为空"的A,白白挂起一轮。
       const hasSomeB = g.players.some(function(B, bi){
         return B && B.alive && bi!==i && canReachSha(g, i, bi)
           && !(hasCap(B,'kongcheng') && (B.hand||[]).length===0)
-          && !sameTeam(g, i, bi);
+          && !sameTeam(g, i, bi)
+          && botTargetPolicyAllows(g, seat, bi, 'harmful');
       });
       if(!hasSomeB) return;
       out.push({ index: 0, label: '借刀:选 '+botAiName(g,i), step:'A', a: i, jiedaoIdx: jiedaoIdx });
@@ -3485,6 +3513,9 @@ BOT_DECISIONS.lijianTwoStep = {
       g.players.forEach(function(p, i){
         if(!p || !p.alive || i===from || !isMale(p)) return;
         if(sameTeam(g, from, i)) return;
+        // CORE-164(issue #223):B 是被指定为【决斗】目标、真正被逼承受伤害的一方,必须按
+        // 施术者视角过一层 harmful 阵营策略(A 侧不过,理由见阶段A注释)。
+        if(!botTargetPolicyAllows(g, seat, i, 'harmful')) return;
         out.push({ index: 0, label: '离间:令 '+botAiName(g,from)+' 对 '+botAiName(g,i)+' 使用【决斗】', step:'B', fromSeat: from, toSeat: i });
       });
       return out;
@@ -3493,8 +3524,14 @@ BOT_DECISIONS.lijianTwoStep = {
     // 一定能找到合法的非同队B。
     g.players.forEach(function(p, i){
       if(!p || !p.alive || !isMale(p)) return;
+      // CORE-164:harmful 只施加在 B(被指定为【决斗】目标、真正被逼承受这次伤害的一方),
+      // **不施加在 A**。A 是被逼"使用"决斗的人,他既可能掉血也可能赢——把 harmful 也套在
+      // A 上会把"让我方队友A去决斗敌人B"这种正常好棋一并封掉(组队模式下更是让离间彻底
+      // 无解)。issue #223 原文也给了这个余地("或至少被决斗承受伤害的一方过 harmful")。
+      // hasSomeB 与阶段B同口径,保证阶段A不会选出一个阶段B必然为空的 A。
       const hasSomeB = g.players.some(function(B, bi){
-        return B && B.alive && bi!==i && isMale(B) && !sameTeam(g, i, bi);
+        return B && B.alive && bi!==i && isMale(B) && !sameTeam(g, i, bi)
+          && botTargetPolicyAllows(g, seat, bi, 'harmful');
       });
       if(!hasSomeB) return;
       out.push({ index: 0, label: '离间:选 '+botAiName(g,i)+' 为【决斗】使用者', step:'A', a: i });

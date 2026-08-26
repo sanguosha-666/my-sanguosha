@@ -1892,29 +1892,51 @@ function render(g){
     // "够不着"暗色点线+角标的视觉写法)。
     if(duanliangMode && duanliangCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
       const inRange = distance(g, mySeat, i) <= 2;
-      if(inRange){
+      // CORE-166(issue #225):目标合法性必须和服务端 duanLiang 完全一致——它走的是
+      // canTargetDelayTrick(g,me,trickCard,seat,2)(帷幕挡黑色锦囊、判定区已有同名兵粮
+      // 寸断等全部由它统一校验),UI 原来只手写了一条"距离≤2",于是帷幕角色仍画成可点、
+      // 点了被服务端静默拒绝(表现为"点了没反应")。花色取已选那张实体黑牌本身。
+      const dlCard=(meP.hand||[])[duanliangCardIdx];
+      const dlTrick=dlCard?{...dlCard, name:'兵粮寸断', originalName:dlCard.name}:null;
+      const dlOk = !!dlTrick && canTargetDelayTrick(g, meP, dlTrick, i, 2);
+      if(dlOk){
         // 同上:idx 挂载时冻结,不在点击时才读 duanliangCardIdx
         const idx=duanliangCardIdx;
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
         d.onclick=()=>{ confirmAndPlay('将这张牌当【兵粮寸断】使用,对 '+g.players[i].name+' 发动【断粮】？', ()=>duanLiang(idx, i)); };
-      } else {
+      } else if(!inRange){
         d.style.outline='2px dotted #6b5b4d';
         d.title='距离外（距离 '+distance(g,mySeat,i)+' ＞ 2）';
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
+      } else {
+        // 帷幕/判定区已有兵粮等业务层拒绝的目标:同款暗色点线+"不可选"角标(与国色一致)
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='该角色不能成为【兵粮寸断】的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">不可选</span>';
       }
     }
     // 甘宁【奇袭】选目标:已选中一张黑色手牌后,点一名有手牌/装备/判定区牌的其他存活玩家提交。
     if(qixiMode && qixiCardIdx!==null && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive){
-      if(hasHandOrEquip){
+      // CORE-166(issue #225):除"目标身上有牌"外,服务端 qiXi 还会走
+      // CARD_PLAYS['过河拆桥'].canTarget(帷幕挡黑色锦囊、智迟免疫),UI 原来只查了前者。
+      const qxCard=(meP.hand||[])[qixiCardIdx];
+      const qxTrick=qxCard?{...qxCard, name:'过河拆桥', originalName:qxCard.name}:null;
+      const qxOk = hasHandOrEquip && !!qxTrick &&
+        singleTargetCanTarget(g, CARD_PLAYS['过河拆桥'], meP, qxTrick, i);
+      if(qxOk){
         const idx=qixiCardIdx;
         d.style.cursor='pointer';
         d.style.outline='2px dashed var(--cinnabar-bright)';
         d.onclick=()=>{ confirmAndPlay('将这张牌当【过河拆桥】使用,对 '+g.players[i].name+' 发动【奇袭】？', ()=>qiXi(idx, i)); };
-      } else {
+      } else if(!hasHandOrEquip){
         d.style.outline='2px dotted #6b5b4d';
         d.title='该角色没有手牌、装备或判定区的牌';
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">无牌</span>';
+      } else {
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='该角色不能成为【过河拆桥】的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">不可选</span>';
       }
     }
     // 大乔【国色】选目标:已选中一张方块牌后,点一名判定区没有【乐不思蜀】的其他存活玩家提交。
@@ -1942,26 +1964,46 @@ function render(g){
       }
     }
     if(lianhuanMode && lianhuanCardIdx!==null && g.phase==='play' && g.turn===mySeat && p.alive){
+      // CORE-166(issue #225):连环视为使用【铁索连环】,目标合法性必须复用
+      // CARD_PLAYS['铁索连环'].canTarget(帷幕/智迟),不能只判存活——服务端 lianHuan
+      // 已在 CORE-176 收口到同一个 canTarget,UI 这里同步(allowSelf 仍允许点自己)。
+      const lhCard=(meP.hand||[])[lianhuanCardIdx];
+      const lhAs=lhCard?{name:'铁索连环', suit:lhCard.suit, rank:lhCard.rank, virtual:true}:null;
+      const lhOk = !!lhAs && singleTargetCanTarget(g, CARD_PLAYS['铁索连环'], meP, lhAs, i);
       const picked=lianhuanTargets.includes(i);
-      d.style.cursor='pointer';
-      d.style.outline=picked?'3px solid var(--accent)':'2px dashed var(--cinnabar-bright)';
-      d.title=picked?'已选择为【铁索连环】目标':'选择为【铁索连环】目标';
-      d.onclick=()=>{
-        if(picked) lianhuanTargets=lianhuanTargets.filter(seat=>seat!==i);
-        else if(lianhuanTargets.length<2) lianhuanTargets=[...lianhuanTargets, i];
-        render(g);
-      };
+      if(lhOk){
+        d.style.cursor='pointer';
+        d.style.outline=picked?'3px solid var(--accent)':'2px dashed var(--cinnabar-bright)';
+        d.title=picked?'已选择为【铁索连环】目标':'选择为【铁索连环】目标';
+        d.onclick=()=>{
+          if(picked) lianhuanTargets=lianhuanTargets.filter(seat=>seat!==i);
+          else if(lianhuanTargets.length<2) lianhuanTargets=[...lianhuanTargets, i];
+          render(g);
+        };
+      } else {
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='该角色不能成为【铁索连环】的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">不可选</span>';
+      }
     }
     if(selectedCardIdx!==null && selCard && resolveActionId(g,meP,selCard)==='铁索连环' && g.phase==='play' && g.turn===mySeat && p.alive){
+      // CORE-166(issue #225):同上,实体【铁索连环】选目标也要走服务端同一个 canTarget。
+      const tsOk = singleTargetCanTarget(g, CARD_PLAYS['铁索连环'], meP, selCard, i);
       const picked=tiesuoTargets.includes(i);
-      d.style.cursor='pointer';
-      d.style.outline=picked?'3px solid var(--accent)':'2px dashed var(--cinnabar-bright)';
-      d.title=picked?'已选择为【铁索连环】目标':'选择为【铁索连环】目标';
-      d.onclick=()=>{
-        if(picked) tiesuoTargets=tiesuoTargets.filter(seat=>seat!==i);
-        else if(tiesuoTargets.length<2) tiesuoTargets=[...tiesuoTargets, i];
-        render(g);
-      };
+      if(tsOk){
+        d.style.cursor='pointer';
+        d.style.outline=picked?'3px solid var(--accent)':'2px dashed var(--cinnabar-bright)';
+        d.title=picked?'已选择为【铁索连环】目标':'选择为【铁索连环】目标';
+        d.onclick=()=>{
+          if(picked) tiesuoTargets=tiesuoTargets.filter(seat=>seat!==i);
+          else if(tiesuoTargets.length<2) tiesuoTargets=[...tiesuoTargets, i];
+          render(g);
+        };
+      } else {
+        d.style.outline='2px dotted #6b5b4d';
+        d.title='该角色不能成为【铁索连环】的目标';
+        d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">不可选</span>';
+      }
     }
     if(g.phase==='quhuDamageChoice' && g.pending && g.pending.type==='quhuDamageChoice' && g.pending.seat===mySeat && (g.pending.targets||[]).includes(i)){
       d.style.cursor='pointer';
