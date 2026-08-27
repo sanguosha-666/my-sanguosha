@@ -250,9 +250,9 @@ function renderHand(g){
       // gate 是结构化判断,不硬编码牌名、也不查 getEquip(遵循规则5,以后新增同型牌零改动):
       //   ownSpec 存在 + 它自己不需要选目标(target:false) + 它此刻真的能按自己的效果打出 + 也能当杀。
       // 覆盖装备牌 + 6张 target:false 的普通红牌(桃♥8/无中生有♥4/五谷丰登♥2/酒♦1/万箭齐发♥1/桃园结义♥1)。
-      // target:true 的9张红牌(乐不思蜀/闪电/决斗/顺手牵羊/过河拆桥/火攻)两种用法都要选目标、必须同屏
-      // 共存,走 render.js 座位循环里的"武圣:杀"独立按钮,不走这个弹窗——两套机制共用同一个触发判据,
-      // 只按 spec.target 分流,天然互斥不重叠。
+      // target:true 的红牌(乐不思蜀/决斗/顺手牵羊/过河拆桥/火攻)两种用法都要选目标、必须同屏
+      // 共存,走 render.js 座位循环里的"武圣:杀"独立按钮,不走这个弹窗。
+      // 【闪电】onlySelf:不进选目标,点牌即对自己使用;关羽同时能当杀时走下面 needsShaChoice 弹窗。
       //
       // 【ownSpec.canPlay 这一项不能省】装备的 equipPlay.canPlay 恒真,所以早期只做装备时漏掉它没
       // 暴露问题;但【桃】(me.hp<me.maxHp)和【酒】(!g.jiuUsed)的 canPlay 是状态相关的。带上这一项后:
@@ -260,7 +260,8 @@ function renderHand(g){
       // 打得出 → 弹窗二选一。这同时消掉了"满血能当杀、受伤反而不能"那个反直觉的翻转——不是为桃/酒
       // 写特例,是这条通用条件的自然结果。
       const ownSpec = CARD_PLAYS[card.name];
-      const needsShaChoice = !!ownSpec && !ownSpec.target
+      const onlySelfDelay = !!(typeof DELAY_TRICKS==='object' && DELAY_TRICKS[card.name] && DELAY_TRICKS[card.name].onlySelf);
+      const needsShaChoice = !!ownSpec && (!ownSpec.target || onlySelfDelay)
         && ownSpec.canPlay(g, me, card)
         && CARD_PLAYS['杀'].canPlay(g, me, card);
       if(needsShaChoice){
@@ -281,7 +282,9 @@ function renderHand(g){
       });
       if(spec && spec.canPlay(g,me,card)){
         usable=true;
-        if(spec.target || canShuangxiong || canGuhuoActive){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/双雄/蛊惑:点=选中
+        if(onlySelfDelay){
+          onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card, mySeat), ()=>playCard(idx, actionId, mySeat));
+        } else if(spec.target || canShuangxiong || canGuhuoActive){ onClick=()=>{ selectedCardIdx = (selectedCardIdx===idx?null:idx); resetTiesuo(); render(g);} ; } // 目标牌/双雄/蛊惑:点=选中
         else { onClick=()=>confirmAndPlay(playConfirmMsg(g, actionId, card), ()=>playCard(idx, actionId)); } // 桃/无中生有/AOE/装备:确认后出牌
       } else if(canShuangxiong || canGuhuoActive){
         // 颜良文丑【双雄】可把异色手牌当【决斗】使用;于吉【蛊惑】可扣置任意手牌声明合法牌名。

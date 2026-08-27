@@ -2074,19 +2074,13 @@ const CARD_PLAYS = {
   },
   '火攻': {
     target:true,
-    allowSelf:true, // 火攻可对自己使用(需目标有手牌可展示,见 canTarget)
     canPlay:(g,me,card)=> card.name==='火攻',
     canTarget:(g,me,card,targetSeat)=>{
       const sourceSeat=g.players.indexOf(me);
       const target=g.players[targetSeat];
       if(!target || !target.alive) return false;
-      let handCount=(target.hand||[]).length;
-      // 自用(目标=使用者)时,正在使用的这张实体火攻还在手牌里——playCard 是先 canTarget
-      // 后 splice,不能让它自己被数进去,否则"只剩这一张火攻"会被误判为有手牌可展示。
-      // 蛊惑等转化路径的实际牌早已离手,claimedCard 与手牌对象引用不同,此过滤自然不生效。
-      if(targetSeat===sourceSeat && card && Array.isArray(target.hand)){
-        handCount=target.hand.filter(c=>c!==card).length;
-      }
+      if(targetSeat===sourceSeat) return false;
+      const handCount=(target.hand||[]).length;
       if(handCount===0) return false;
       // 陈宫【智迟】：检查免疫状态
       if(isZhichiImmune(g, targetSeat, card)) return false;

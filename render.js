@@ -982,7 +982,11 @@ function confirmOwnOrSha(card, idx){
   const hide=()=>{ m.classList.add('hidden'); m.innerHTML=''; };
   // 这两个分支都是牌种类无关的,不需要按牌种类各自路由:playCard 内部自己查 CARD_PLAYS[actionId]
   // 分派(装备拿到 equipPlay、桃拿到 CARD_PLAYS['桃']),分派本来就在 playCard 里、不在这里。
-  m.querySelector('#confirmAsOwn').onclick=()=>{ hide(); resetSelectionState(); render(currentG); playCard(idx, card.name); };
+  m.querySelector('#confirmAsOwn').onclick=()=>{
+    hide(); resetSelectionState(); render(currentG);
+    const selfTarget=!!(typeof DELAY_TRICKS==='object' && DELAY_TRICKS[card.name] && DELAY_TRICKS[card.name].onlySelf);
+    playCard(idx, card.name, selfTarget?mySeat:undefined);
+  };
   m.querySelector('#confirmAsSha').onclick=()=>{ hide(); selectedCardIdx=idx; forcedShaCardId=card.id; render(currentG); };
   m.querySelector('#confirmCancelOwn').onclick=()=>{ hide(); };
   m.onclick=(e)=>{ if(e.target===m){ hide(); } };

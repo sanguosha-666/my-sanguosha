@@ -2687,8 +2687,8 @@
 
   /* ===== 背景视觉层（大厅视频 + 游戏内飘牌 Canvas） ===== */
   .bg-video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none;background:transparent;}
-  /* 特效视频：contain 居中，不铺满裁切；z-index:1500 盖过座位卡 */
-  .fx-video{position:fixed;inset:0;margin:auto;width:auto;height:auto;max-width:min(90vw,960px);max-height:min(80vh,540px);object-fit:contain;z-index:1500;pointer-events:none;background:transparent;}
+  /* 特效视频：全视口背景层 + contain 留黑边，不 cover 裁切、不 stretch；z-index:1500 盖过座位卡 */
+  .fx-video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:1500;pointer-events:none;}
   .bg-veil{position:fixed;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg, rgba(26,23,20,.40) 0%, rgba(26,23,20,.62) 100%);}
   .wrap{position:relative;z-index:2;}
   #gameBgCanvas{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;}
@@ -2869,7 +2869,7 @@
 <script src="skills/skill-registry.js?v=20"></script>
 <script src="debug-log.js?v=417"></script>
 <script src="room-lifecycle.js?v=428"></script>
-<script src="game.js?v=463"></script>
+<script src="game.js?v=464"></script>
 <script src="sha/sha-resolution.js?v=424"></script>
 <script src="weapons.js?v=416"></script>
 <script src="skills.js?v=429"></script>
@@ -2877,10 +2877,10 @@
 <script src="bot-ai-bus.js?v=430"></script>
 <script src="bot.js?v=450"></script>
 <script src="ai-bot.js?v=428"></script>
-<script src="render.js?v=464"></script>
+<script src="render.js?v=465"></script>
 <script src="render-table.js?v=415"></script>
 <script src="render-discard.js?v=413"></script>
-<script src="render-hand.js?v=412"></script>
+<script src="render-hand.js?v=413"></script>
 <script src="render-controls.js?v=441"></script>
 <script src="render-log.js?v=415"></script>
 <script src="game-bg.js?v=30"></script>

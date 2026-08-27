@@ -1,6 +1,4 @@
-// #99 回归:火攻自选目标支持。
-// 自己持有火攻且另有至少一张手牌时可对自己使用;自己只有火攻一张手牌时不可对自己使用;
-// 对有手牌角色正常、对无手牌角色拒绝;智迟/帷幕不回归。
+// 火攻禁止对自己使用。另有手牌也对己拒绝;对有手牌角色正常、对无手牌角色拒绝;智迟/帷幕不回归。
 const vm=require('vm'),fs=require('fs'),assert=require('assert');
 const el=()=>({onclick:null,onchange:null,style:{},innerHTML:'',textContent:'',value:'',classList:{add(){},remove(){},toggle(){}}});
 const context={firebase:{initializeApp(){return{database(){return{ref(){return{on(){},once(){},transaction(){},set(){},update(){},child(){return this;},remove(){}};}};}};},database(){return this.initializeApp().database();}},document:{getElementById:el,createElement:el,querySelector(){return null;},querySelectorAll(){return[];},addEventListener(){}},window:{location:{search:'',href:''},localStorage:{getItem(){return null;},setItem(){}},addEventListener(){},setTimeout,clearTimeout,alert(){}},console,Math,Date,JSON,RegExp,Array,Object,String,Number,Boolean,parseInt,isNaN,setTimeout,clearTimeout};
@@ -15,12 +13,13 @@ const state=()=>{const players=[player('甲'),player('乙')];return{players,deck
 let g=state();sandbox.__g=g;
 const inWuxie=()=>['wuxie','wuxiePublicWait'].includes(g.pending&&g.pending.type);
 
-// 1. 自己持有火攻且另有至少一张手牌 → 可对自己使用
+// 1. 即使另有手牌，也不可对自己使用火攻
 g.players[0].hand=[card('h1','火攻'),card('h2','闪','♥')];
+assert.ok(!run("!!CARD_PLAYS['火攻'].allowSelf"),'火攻不应 allowSelf');
+assert.strictEqual(run("CARD_PLAYS['火攻'].canTarget(__g,__g.players[0],{name:'火攻',suit:'♥'},0)"),false,'canTarget 对自己应为 false');
 run("playCard(0,'火攻',0)");
-assert.strictEqual(g.players[0].hand.length,1,'自己另有手牌时对己用火攻应消耗火攻');
-assert.strictEqual(g.players[0].hand[0].name,'闪','自己另有手牌时对己用火攻应保留其余手牌');
-assert.strictEqual(inWuxie(),true,'对己用火攻应进入无懈窗口');
+assert.strictEqual(g.players[0].hand.length,2,'对己用火攻应被拒绝,手牌不变');
+assert.strictEqual(g.pending,null,'对己用火攻不得进入结算');
 
 // 2. 自己只有火攻一张手牌 → 不可对自己使用
 g=state();g.players[0].hand=[card('h1','火攻')];sandbox.__g=g;

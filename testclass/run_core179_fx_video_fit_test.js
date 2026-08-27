@@ -4,7 +4,7 @@
  * 锁定：
  *  1. 大厅 #bgVideo 仍用 .bg-video + object-fit:cover 铺满
  *  2. 死亡/闪电/过场三条特效 video 改用独立 .fx-video，不再复用 .bg-video
- *  3. .fx-video 保持比例（contain），用 max-width/max-height 限制视口占比，不 cover 裁切
+ *  3. .fx-video 全视口背景层 + contain 留黑边，不 cover 裁切、不 stretch；不要 max-width/max-height 小窗
  */
 const fs = require('fs');
 const assert = require('assert');
@@ -53,12 +53,15 @@ check('.bg-video 仍是 cover 铺满', function(){
   assert.ok(rule.indexOf('object-fit:cover') >= 0, '.bg-video 应保持 cover，实际 '+rule);
 });
 
-check('.fx-video 用 contain + max-width/max-height，不 cover', function(){
+check('.fx-video 全视口 contain 黑边，不 cover、不小窗', function(){
   const rule = cssRule('.fx-video');
   assert.ok(rule.indexOf('object-fit:contain') >= 0, '.fx-video 应为 contain，实际 '+rule);
-  assert.ok(rule.indexOf('max-width') >= 0, '.fx-video 应限制 max-width');
-  assert.ok(rule.indexOf('max-height') >= 0, '.fx-video 应限制 max-height');
+  assert.ok(rule.indexOf('width:100%') >= 0, '.fx-video 应为 width:100%，实际 '+rule);
+  assert.ok(rule.indexOf('height:100%') >= 0, '.fx-video 应为 height:100%，实际 '+rule);
+  assert.ok(/background:#000|background:#000000|background:black/.test(rule), '.fx-video 背景应为黑，实际 '+rule);
   assert.ok(rule.indexOf('object-fit:cover') < 0, '.fx-video 不应 cover 裁切');
+  assert.ok(rule.indexOf('max-width') < 0, '.fx-video 不应有 max-width 小窗限制');
+  assert.ok(rule.indexOf('max-height') < 0, '.fx-video 不应有 max-height 小窗限制');
 });
 
 console.log('\ncore179 fx video fit: '+passed+'/'+(passed+failed)+' passed');

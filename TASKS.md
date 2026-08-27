@@ -1,5 +1,27 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-28 — 火攻禁自己 + 闪电免选目标
+
+- [x] Phase 1/2：TDD RED — 火攻 `allowSelf`/`canTarget(自己)`/`playCard(自己)` 拒绝；闪电点击 `playCard(..., mySeat)`，对别人拒绝。
+- [x] Phase 2/2：`CARD_PLAYS['火攻']` 去掉 allowSelf，canTarget 拒自己。`render-hand` onlySelf 延时锦囊点牌即对自己出；关羽闪电当杀仍走弹窗。cache-bust game 464 / render 465 / render-hand 413。
+- 验证：huogong self-target 12/12；shandian skip target PASS；ai_bus_c 34/34；ai_bus_l2 24/24；cache-bust PASS。
+
+## 2026-08-28 — CORE-179 特效视频改回全视口背景 + contain 黑边
+
+- [x] Phase 1/2：`.fx-video` 去掉 auto/max-* 小窗，改 `width/height:100%` + `object-fit:contain` + `background:#000`。大厅 `#bgVideo` 不动。
+- [x] Phase 2/2：测试口径改成全视口 contain 黑边，禁 max-width/max-height。跑 `run_core179_fx_video_fit_test.js`。
+- 只改 `index.html` 一条 CSS + 测试文件。不改 `game-bg.js`、三条 video class。
+
+## 2026-08-27 — #239 CORE-180 第二次无懈询问跳过
+
+- [x] Phase 1/2：源码核 + 隔离复现。`asked[]` 在 `startTrick`/`aoeAdvance`/桃园/五谷都会重建；同回合两张无中生有、南蛮第二目标、第二次濒死，直接调入口都会再问。
+- [x] Phase 2/2：起票 #239 CORE-180 [GAME][P1]。桃无同类 `asked[]` 跨窗，不另开票。可疑点：陈旧 `askedAt` 立刻超时、`asking=-1` 把本人按钮打掉。未改游戏代码。
+- 下一步：真机/dump 钉现场后再修。
+
+## 2026-08-27 — #240 CORE-181 别人濒死只有酒仍被问
+
+- [x] Phase 1/1：用户确认「别人死的时候」。无连环时 `canRescueSeat` 对只有酒的旁人是 false，会跳过。连环 `chainDamageQueue` 非空时 `nextDyingAskee` 绕过过滤，救不了的人也会被问。起票 #240 CORE-181 [GAME][P2]。未改游戏代码。
+
 ## 2026-08-27 — #233+#238 动画哨兵重置 + 特效自适应
 
 - [x] Phase 1/2：#233 CORE-174 — `resetRenderSentinels` / `resetTableSentinels` / `resetDiscardReveal`；`newGame`/`backToLobby` typeof 守卫调用。台面 seq 置 null（防吞首张飞牌），清 `#flyingCard`/`#targetLines`/`.damage-hit`/`#discardReveal`。不碰 recentPlaysHistory。
