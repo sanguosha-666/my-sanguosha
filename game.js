@@ -323,8 +323,20 @@ function normalize(g){
   // 也不需要校验"候选是不是过时快照"这类问题,只需要校验seat对应的huashenPool/
   // huashenGeneral本身是否处于"确实还在等待声明"这个状态。
 
-  // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
-  if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
+  // 无懈询问阶段:asking 缺失时重算下一个候选人,禁止写成 -1(本人按钮 asking===mySeat 全失败)。
+  if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number'){
+    const nxt=typeof nextWuxieAskee==='function' ? nextWuxieAskee(g, g.pending) : null;
+    if(Number.isInteger(nxt)){
+      g.pending.asking=nxt;
+      setResponseAskedAt(g.pending);
+      if(typeof markWuxieAsked==='function') markWuxieAsked(g);
+    } else {
+      g.pending.type='wuxiePublicWait';
+      g.pending.asking=Number.isInteger(g.pending.from)?g.pending.from:0;
+      if(typeof g.pending.publicUntil!=='number') g.pending.publicUntil=Date.now()+WUXIE_PUBLIC_WAIT_MS;
+      setResponseAskedAt(g.pending);
+    }
+  }
   // 无懈反制:exclude(当前轮不问谁的座位号)/depth(成功次数)都应是数字;缺失多半是旧数据,回退到"层0"
 
   // 濒死询问阶段:seat/asking 都应是数字座位号,resume.type 应是字符串;任一不对就整体判无效,防止卡死
@@ -3199,6 +3211,11 @@ function startDying(g, seat, resumeType, sourceSeat, amount){
   const first=firstDyingAskee(g, seat);
   if(first===null){
     g.log=pushLog(g.log, p.name+' 濒死！等待救援…');
+    // 连环传导中无人可救不能进公共窗，否则会吞掉 chainDamageQueue 后续目标。
+    if(g.chainDamageQueue){
+      finishDying(g, true);
+      return;
+    }
     enterDyingPublicWait(g);
     return;
   }
@@ -4244,10 +4261,6 @@ function canRescueSeat(g, seat, dyingSeat){
   return false;
 }
 function nextDyingAskee(g, dyingSeat, current){
-  // 连环传导中的濒死必须逐个询问，避免 dyingPublicWait 直接吞掉 chainDamageQueue 的后续目标
-  if(g.chainDamageQueue){
-    return nextAskee(g, dyingSeat, current);
-  }
   let nxt = nextAskee(g, dyingSeat, current);
   while(nxt!==null && !canRescueSeat(g, nxt, dyingSeat)){
     nxt = nextAskee(g, dyingSeat, nxt);
@@ -4255,9 +4268,6 @@ function nextDyingAskee(g, dyingSeat, current){
   return nxt;
 }
 function firstDyingAskee(g, dyingSeat){
-  if(g.chainDamageQueue){
-    return dyingSeat;
-  }
   if(canRescueSeat(g, dyingSeat, dyingSeat)) return dyingSeat;
   return nextDyingAskee(g, dyingSeat, dyingSeat);
 }

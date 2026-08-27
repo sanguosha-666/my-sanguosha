@@ -1,5 +1,11 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-28 — #239+#240 第二次无懈 + 濒死只问能救的人
+
+- [x] Phase 1/2：#239 CORE-180 — `normalize` 无懈缺 `asking` 不再写成 `-1`，重算 `nextWuxieAskee` 或进公共窗并打新 `askedAt`。
+- [x] Phase 2/2：#240 CORE-181 — 连环濒死也走 `canRescueSeat`；无人可救时 `finishDying` 继续队列，不进 `dyingPublicWait`。cache-bust game.js 465。
+- 验证：core180 3/3；core181 5/5；core155 5/5；cixiong 20/20；luoyi chain 6/6；cache-bust PASS。未提交。
+
 ## 2026-08-28 — 火攻禁自己 + 闪电免选目标
 
 - [x] Phase 1/2：TDD RED — 火攻 `allowSelf`/`canTarget(自己)`/`playCard(自己)` 拒绝；闪电点击 `playCard(..., mySeat)`，对别人拒绝。

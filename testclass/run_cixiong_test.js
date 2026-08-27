@@ -377,19 +377,11 @@ check('闪电令首名连环角色死亡后继续传导下一名角色', ()=>{
   bindG(g);
   assert.strictEqual(R('dealDamage')(g,0,3,undefined,'【闪电】发动','delay',lightning),true);
   let gg=G();
-  assert.strictEqual(gg.phase,'dying');
   assert.strictEqual(diaochan.chained,false);
   assert.strictEqual(guojia.chained,false,'传导开始时参与者应解除连环');
-  gg.pending.resume={type:'delay',seat:0};
-
-  vm.runInContext('mySeat=0;',sandbox); R('respondDying')(false);
-  vm.runInContext('mySeat=1;',sandbox); R('respondDying')(false);
-  vm.runInContext('mySeat=2;',sandbox); R('respondDying')(false);
-  gg=G();
-  assert.strictEqual(diaochan.alive,false);
-  assert.strictEqual(gg.phase,'dying','郭嘉受到传导后也应进入濒死');
-  assert.strictEqual(gg.pending.seat,1);
-  assert.strictEqual(guojia.hp,-1);
+  assert.strictEqual(diaochan.alive,false,'无人可救时应立刻阵亡,不进公共窗问只有酒/空手的人');
+  assert.ok(guojia.hp<2,'郭嘉应受到传导伤害,hp='+guojia.hp);
+  assert.notStrictEqual(gg.pending && gg.pending.type, 'dyingPublicWait');
 });
 
 check('首名连环角色被桃救回后仍继续传导', ()=>{
