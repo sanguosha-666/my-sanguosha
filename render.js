@@ -869,6 +869,27 @@ function maybePlayMovieFx(g){
   }
 }
 
+// CORE-174:动画/音效去重哨兵是模块级变量,newGame/backToLobby 原先都不清。
+// 上一局的 seq 会带到下一局,导致新局首张牌/伤害/过场被当成"已播过的历史"吞掉,
+// 或残留 .damage-hit 座位高亮。重置成各哨兵的声明初值(turn/pending 用 null,
+// 音效/特效用 undefined——undefined 走「首次进房吞历史」,和 maybePlay* 去重逻辑对齐)。
+function resetRenderSentinels(){
+  lastAnnouncedTurnKey = null;
+  lastAnnouncedPendingKey = null;
+  lastPlayedCardSeq = undefined;
+  lastPlayedSkillSeq = undefined;
+  lastPlayedDamageSeq = undefined;
+  lastLightningFxSeq = undefined;
+  lastMovieFxSeq = undefined;
+  lastPlayedMovieFxLen = undefined;
+  if(typeof document === 'undefined' || !document.querySelectorAll) return;
+  document.querySelectorAll('.seat.damage-hit').forEach(function(seat){
+    if(seat._damageTimer) clearTimeout(seat._damageTimer);
+    seat._damageTimer = null;
+    seat.classList.remove('damage-hit');
+  });
+}
+
 
 // ===== 出牌确认弹窗:独立于 showInfo(那是"只读说明+关闭",这里是"确定/取消"两种不同结果) =====
 function showConfirm(message, onOk, onCancel){

@@ -30,6 +30,28 @@ function tableCardFaceHtml(card){
 // 好几次,"链结束"是最后单独发生的一次,不一定伴随新牌)。
 let lastShownEntrySeq = undefined;
 let lastFadedBatchSeq = undefined;
+// CORE-174:飞牌/连线/台面高亮哨兵跨局不清,会吞新局首张飞牌或残留 #flyingCard。
+// 不碰 recentPlaysHistory(那是 CORE-173)。
+function resetTableSentinels(){
+  // null 不是 undefined：undefined 会走「首次进房吞历史」，重开后首张飞牌被吞。
+  lastShownEntrySeq = null;
+  lastFadedBatchSeq = null;
+  if(typeof document === 'undefined') return;
+  const fly = document.getElementById('flyingCard');
+  if(fly && fly.remove) fly.remove();
+  const lines = document.getElementById('targetLines');
+  if(lines && lines.remove) lines.remove();
+  const el = document.getElementById('tableCard');
+  if(el){
+    el.classList.remove('exchange-mode','show');
+    el.innerHTML = '';
+  }
+  if(document.querySelectorAll){
+    document.querySelectorAll('.seat.table-actor,.seat.table-target').forEach(function(s){
+      s.classList.remove('table-actor','table-target');
+    });
+  }
+}
 // CORE-122(issue #154)方向2:平板"最近N次出牌"历史记忆——纯客户端本地内存,不写入g,
 // 不碰pruneExchangeCards/game.js任何共享状态。固定大小FIFO(RECENT_PLAYS_LIMIT条),
 // 超出自动丢最老的一条。刷新页面/重进房间时这个模块级变量本来就会重新初始化,天然清空;

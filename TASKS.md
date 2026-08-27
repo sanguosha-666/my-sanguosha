@@ -1,8 +1,10 @@
 # TASKS.md — 三国杀项目进度
 
-## 2026-08-25 — 动画自适应（用户报障起票）
+## 2026-08-27 — #233+#238 动画哨兵重置 + 特效自适应
 
-- [x] Phase 1/1：起票 CORE-179 #238 [UI][P3] 动画全屏拉伸未自适应 — `.bg-video` 全屏 `cover` 裁切，3 个特效 video 复用同一套全屏样式，诉求改 `contain` 自适应居中（`fx-video` 分离方案 `max-width 90vw / max-height 80vh`）。仅起票未改代码。
+- [x] Phase 1/2：#233 CORE-174 — `resetRenderSentinels` / `resetTableSentinels` / `resetDiscardReveal`；`newGame`/`backToLobby` typeof 守卫调用。台面 seq 置 null（防吞首张飞牌），清 `#flyingCard`/`#targetLines`/`.damage-hit`/`#discardReveal`。不碰 recentPlaysHistory。
+- [x] Phase 2/2：#238 CORE-179 — 三条特效 video 改 `.fx-video`（contain + max 90vw/80vh，z-index 1500）；大厅 `#bgVideo` 仍 `.bg-video` cover。cache-bust：room-lifecycle 427 / render 463 / table 414 / discard 413。
+- 验证：core174 8/8；core179 4/4；movie fx 38/38；lightning 12/12；fx audio 3/3；discard reveal 17/17；cache-bust PASS。未关票（需你点头才关）。
 
 ## 2026-08-25 — 全库扫缺陷并起票
 

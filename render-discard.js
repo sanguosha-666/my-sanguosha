@@ -10,6 +10,19 @@ let lastObservedDiscardRevealSeq = null;
 let discardRevealQueue = [];
 let discardRevealPlaying = false;
 
+// CORE-174:弃牌展示哨兵/队列是模块级状态,跨局不清会残留 #discardReveal 或误播旧事件。
+function resetDiscardReveal(){
+  lastObservedDiscardRevealSeq = null;
+  discardRevealQueue = [];
+  discardRevealPlaying = false;
+  if(typeof document === 'undefined') return;
+  const el = document.getElementById('discardReveal');
+  if(el){
+    el.classList.remove('show');
+    el.innerHTML = '';
+  }
+}
+
 function discardRevealDuration(cardCount){
   return Math.min(DISCARD_REVEAL_MAX_MS,
     DISCARD_REVEAL_BASE_MS + Math.max(1,cardCount)*DISCARD_REVEAL_PER_CARD_MS);

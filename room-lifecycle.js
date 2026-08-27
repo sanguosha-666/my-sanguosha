@@ -648,6 +648,11 @@ function newGame(){
   // CORE-173(issue #232):"最近N次出牌"是纯客户端本地记忆,不入 g,重开一局必须清掉,
   // 否则新局前两次出牌期间还挂着上一局的记录。同 resetBotTwoStep 那批写法。
   if(typeof resetRecentPlaysHistory==='function') resetRecentPlaysHistory();
+  // CORE-174:动画/音效去重哨兵和残留飞牌/连线/伤害高亮 DOM 都是客户端模块级状态,
+  // 不入 g。再来一局不清会吞新局首张飞牌或残留上一局动效。typeof 守卫同 CORE-113。
+  if(typeof resetRenderSentinels==='function') resetRenderSentinels();
+  if(typeof resetTableSentinels==='function') resetTableSentinels();
+  if(typeof resetDiscardReveal==='function') resetDiscardReveal();
   tx(g=>{
     ensureOwner(g); // #104 迁移:老房间无 owner 先补记,守卫才可能放行
     if(!isRoomOwner(g,mySeat)) return g;
@@ -688,6 +693,10 @@ function backToLobby(){
   if(typeof aiSummaryReset === 'function') aiSummaryReset();
   if(typeof resetBotTwoStep==='function') resetBotTwoStep(); // CORE-113,同newGame()那处注释
   if(typeof resetRecentPlaysHistory==='function') resetRecentPlaysHistory(); // CORE-173,同newGame()那处
+  // CORE-174:回大厅同样清动画哨兵/残留 DOM,避免下一房沿用上一局 seq。
+  if(typeof resetRenderSentinels==='function') resetRenderSentinels();
+  if(typeof resetTableSentinels==='function') resetTableSentinels();
+  if(typeof resetDiscardReveal==='function') resetDiscardReveal();
   if(chatQuery) chatQuery.off();
   chatQuery=null; chatRef=null; chatMessages=[];
   mySeat = null; selectedCardIdx = null; resetZhangba();
