@@ -8,6 +8,11 @@
 - 验证：sha predeclare 12/12；new equips 9/9；cixiong 20/20；core162 PASS；ai_bus_c 34/34。
 - 未接：借刀/丈八/神速/青龙追加杀仍走旧 Ask。
 
+## 2026-08-28 — CI 三红（推送后）
+
+- [x] Phase 1/1：core135 牌堆 140 重打表；core142 雌雄卡图缩到 480×720；core77 刷新 game.js 快照。bot.js cache-bust 453。
+- 验证：core135 23/23；core142 9/9；core77 12/12。
+
 ## 2026-08-28 — 藤甲/白银狮子/朱雀羽扇
 
 - [x] Phase 1/2：TDD RED — `run_new_equips_test.js` 9 条先红。

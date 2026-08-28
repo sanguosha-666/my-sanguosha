@@ -78,7 +78,7 @@ const testCode = String.raw`
     var N = deck.length;
     var Kshan = deck.filter(function(c){ return c.name==='闪'; }).length;
     var Ksha  = deck.filter(function(c){ return isShaName(c.name); }).length;
-    if(N !== 136) throw new Error('牌堆总数应为 136,实际 ' + N + '(牌堆改过就要重新打表)');
+    if(N !== 140) throw new Error('牌堆总数应为 140,实际 ' + N + '(牌堆改过就要重新打表)');
     if(Kshan !== 15) throw new Error('闪应为 15 张,实际 ' + Kshan + '(牌堆改过就要重新打表)');
     if(Ksha !== 44) throw new Error('杀系应为 44 张,实际 ' + Ksha + '(牌堆改过就要重新打表)');
     function hyper(N,K,n){ if(n<=0) return 0; if(n>N-K) return 1;

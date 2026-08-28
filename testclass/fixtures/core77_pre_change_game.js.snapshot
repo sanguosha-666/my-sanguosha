@@ -323,8 +323,20 @@ function normalize(g){
   // 也不需要校验"候选是不是过时快照"这类问题,只需要校验seat对应的huashenPool/
   // huashenGeneral本身是否处于"确实还在等待声明"这个状态。
 
-  // 无懈询问阶段:asking 是当前响应者座位号(数字);防御非法值
-  if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number') g.pending.asking=-1;
+  // 无懈询问阶段:asking 缺失时重算下一个候选人,禁止写成 -1(本人按钮 asking===mySeat 全失败)。
+  if(g.pending && g.pending.type==='wuxie' && typeof g.pending.asking!=='number'){
+    const nxt=typeof nextWuxieAskee==='function' ? nextWuxieAskee(g, g.pending) : null;
+    if(Number.isInteger(nxt)){
+      g.pending.asking=nxt;
+      setResponseAskedAt(g.pending);
+      if(typeof markWuxieAsked==='function') markWuxieAsked(g);
+    } else {
+      g.pending.type='wuxiePublicWait';
+      g.pending.asking=Number.isInteger(g.pending.from)?g.pending.from:0;
+      if(typeof g.pending.publicUntil!=='number') g.pending.publicUntil=Date.now()+WUXIE_PUBLIC_WAIT_MS;
+      setResponseAskedAt(g.pending);
+    }
+  }
   // 无懈反制:exclude(当前轮不问谁的座位号)/depth(成功次数)都应是数字;缺失多半是旧数据,回退到"层0"
 
   // 濒死询问阶段:seat/asking 都应是数字座位号,resume.type 应是字符串;任一不对就整体判无效,防止卡死
@@ -528,11 +540,12 @@ function normalize(g){
   // consumePendingHookQueue)——结构不完整/座位已失效就整体清空,不阻塞流程
   // (和其它排队型字段同一处理原则)。
   if(g.pendingHookQueue){
-    const q=g.pendingHookQueue;
-    if(typeof q.seat!=='number' || typeof q.hookName!=='string' || !q.ctx
-       || (q.source!=='own' && q.source!=='borrowed') || !g.players[q.seat] || !g.players[q.seat].alive){
-      g.pendingHookQueue=null;
-    }
+    // CORE-168:队列化之后逐项做同一套形状防御,坏项单独剔除(不再因为其中一项有问题就
+    // 整体清空、连带丢掉合法的排队);全部剔完则回落 null。旧的单槽形状同样受理。
+    const items=Array.isArray(g.pendingHookQueue)?g.pendingHookQueue:[g.pendingHookQueue];
+    const kept=items.filter(q=>q && typeof q.seat==='number' && typeof q.hookName==='string' && q.ctx
+       && (q.source==='own' || q.source==='borrowed') && g.players[q.seat] && g.players[q.seat].alive);
+    g.pendingHookQueue = kept.length ? kept : null;
   }
   if(g.beigeQueue===undefined) g.beigeQueue=null;
   if(g.beigeQueue && (!Array.isArray(g.beigeQueue.candidates) || !Number.isInteger(g.beigeQueue.index) ||
@@ -1922,7 +1935,7 @@ const CARD_PLAYS = {
       if(card && card.ignoreShaDistance) return true;
       return canReachSha(g, sourceSeat, targetSeat); // 只有杀受攻击距离限制
     },
-    effect:(g,me,card,targetSeat)=>{
+    effect:(g,me,card,targetSeat,extra)=>{
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
       const shaWasAlreadyUsed=!!g.shaUsed;
       // 太史慈【天义】:天义赢时不消耗出杀次数（次数上限+1的效果）
@@ -1961,7 +1974,8 @@ const CARD_PLAYS = {
             sourceSeat: mySeat,
             baseTarget: targetSeat,
             card: card,
-            availableTargets: aliveSeats
+            availableTargets: aliveSeats,
+            playExtra: extra||null
           });
           g.phase = 'duanbingChoose';
           g.log = pushLog(g.log, `${me.name} 可以发动【短兵】,多选择一名距离为1的角色为目标`);
@@ -1970,7 +1984,14 @@ const CARD_PLAYS = {
       }
       
       // 正常结算杀
-      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card, consumeJiuShaBonus(g, me));
+      let shaInfo=consumeJiuShaBonus(g, me);
+      let sourceCard=card;
+      if(typeof applyShaPlayExtra==='function'){
+        const applied=applyShaPlayExtra(shaInfo, extra, sourceCard);
+        shaInfo=applied.shaInfo;
+        sourceCard=applied.card;
+      }
+      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), sourceCard, shaInfo);
     }
   },
   '桃': {
@@ -2073,19 +2094,13 @@ const CARD_PLAYS = {
   },
   '火攻': {
     target:true,
-    allowSelf:true, // 火攻可对自己使用(需目标有手牌可展示,见 canTarget)
     canPlay:(g,me,card)=> card.name==='火攻',
     canTarget:(g,me,card,targetSeat)=>{
       const sourceSeat=g.players.indexOf(me);
       const target=g.players[targetSeat];
       if(!target || !target.alive) return false;
-      let handCount=(target.hand||[]).length;
-      // 自用(目标=使用者)时,正在使用的这张实体火攻还在手牌里——playCard 是先 canTarget
-      // 后 splice,不能让它自己被数进去,否则"只剩这一张火攻"会被误判为有手牌可展示。
-      // 蛊惑等转化路径的实际牌早已离手,claimedCard 与手牌对象引用不同,此过滤自然不生效。
-      if(targetSeat===sourceSeat && card && Array.isArray(target.hand)){
-        handCount=target.hand.filter(c=>c!==card).length;
-      }
+      if(targetSeat===sourceSeat) return false;
+      const handCount=(target.hand||[]).length;
       if(handCount===0) return false;
       // 陈宫【智迟】：检查免疫状态
       if(isZhichiImmune(g, targetSeat, card)) return false;
@@ -2215,7 +2230,21 @@ function equipCard(g, me, card){
   const slotName = { weapon:'武器', armor:'防具', plus1:'+1马', minus1:'-1马' }[slot];
   g.log=pushLog(g.log, me.name+' 装备了【'+card.name+'】'+(old?'，替换下【'+old.name+'】':'')+'（'+slotName+'）');
   // 同槽换装 = 换下的旧装备离开装备区 → 触发失去装备钩子(如孙尚香【枭姬】)。恒失去 1 张。
-  if(old) triggerHook(g, g.players.indexOf(me), 'onLoseEquip', { count:1 });
+  if(old){
+    maybeBaiyinRecover(g, g.players.indexOf(me), old);
+    triggerHook(g, g.players.indexOf(me), 'onLoseEquip', { count:1 });
+  }
+}
+function maybeBaiyinRecover(g, seat, lostCard){
+  if(!lostCard || lostCard.name!=='白银狮子') return;
+  const p=g.players[seat];
+  if(!p || !p.alive) return;
+  const before=p.hp;
+  p.hp=Math.min(p.maxHp, p.hp+1);
+  if(p.hp>before){
+    g.log=pushLog(g.log, p.name+' 失去【白银狮子】,回复1点体力（体力'+p.hp+'）');
+    if(typeof removeBuquCard==='function') removeBuquCard(g, seat);
+  }
 }
 // ===== 距离机制(装备第2步):马的 dist、武器的 range 均从 EQUIPS 读,不硬编码 =====
 // 读某槽装备的距离修正(的卢 plus1:+1、赤兔 minus1:-1);无装备/无 dist 返回 0。
@@ -2310,7 +2339,7 @@ function aoeEffect(g, me, card){
   aoeAdvance(g, mySeat); // 从下家起结算第一个目标
 }
 // playCard: 统一校验(阶段/回合、取牌、身份+独特前置、目标存活、默认非自己)、出牌入弃牌堆(noDiscard 的装备/延时锦囊除外),再执行该牌独特效果。
-function playCard(cardIdx, actionId, targetSeat, onCommitted){
+function playCard(cardIdx, actionId, targetSeat, onCommitted, extra){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     const me=g.players[mySeat], card=me.hand[cardIdx];
@@ -2345,7 +2374,7 @@ function playCard(cardIdx, actionId, targetSeat, onCommitted){
     }
     removeHandCards(g, mySeat, cardIdx);
     if(!spec.noDiscard) g.discard.push(card); // 装备牌 noDiscard:不进弃牌堆,由 effect 放进装备区
-    spec.effect(g, me, card, targetSeat);
+    spec.effect(g, me, card, targetSeat, extra);
     if(hasCap(me,'jizhi') && isTrickCardName(actionId)){
       drawN(g, mySeat, 1);
       g.log=pushLog(g.log, me.name+' 发动【集智】,摸一张牌');
@@ -2639,9 +2668,17 @@ function lianHuan(cardIdx, targetSeat){
     if(!card || card.suit!=='♣') return g;
     const targets=(Array.isArray(targetSeat)?targetSeat:[targetSeat])
       .filter((seat, idx, arr)=>Number.isInteger(seat) && arr.indexOf(seat)===idx)
-      .slice(0,2)
-      .filter(seat=>g.players[seat] && g.players[seat].alive);
+      .slice(0,2);
     if(targets.length===0) return g;
+    // CORE-176(issue #235):连环视为使用【铁索连环】,目标合法性必须复用同一个
+    // CARD_PLAYS['铁索连环'].canTarget(存活/智迟/帷幕),不能只判存活——否则帷幕、
+    // 智迟保护的角色在这条独立入口上仍可被选中,和真实铁索的口径分叉。
+    // 校验用的牌沿用被转化的那张实体牌的花色(连环限定♣,即黑色锦囊),和真实铁索一致。
+    const asTieSuo={name:'铁索连环', suit:card.suit, rank:card.rank, virtual:true};
+    const tieSpec=CARD_PLAYS['铁索连环'];
+    // 和 playCard 对真实铁索的处理同口径:任一目标非法则整体拒绝,不消耗牌。
+    if(targets.some(seat=>!(g.players[seat] && g.players[seat].alive))) return g;
+    if(tieSpec && tieSpec.canTarget && targets.some(seat=>!tieSpec.canTarget(g, me, asTieSuo, seat))) return g;
     removeHandCards(g, mySeat, cardIdx);
     g.discard.push(card);
     g.log=pushLog(g.log, me.name+' 将【'+card.name+'】当【铁索连环】使用,目标 '+targets.map(seat=>g.players[seat].name).join('、'));
@@ -2716,6 +2753,11 @@ function respondLiuli(choice, newTargetSeat){
   tx(g=>{
     if(g.phase!=='liuli'||!g.pending||g.pending.type!=='liuli'||g.pending.to!==mySeat) return g;
     const {from, to, usedAs, shaColor, sourceCard}=g.pending;
+    // CORE-162(issue #221):恢复这张被流离挂起的杀时,把挂起前存下的酒加成一并带回。
+    const jiuBonus=!!g.pending.jiuBonus;
+    const restoredShaInfo=typeof shaInfoAfterLiuli==='function'
+      ? shaInfoAfterLiuli(g.pending)
+      : {noDistance:true, jiuBonus};
     const me=g.players[to], newTarget=g.players[newTargetSeat];
     if(!choice){
       g.log=pushLog(g.log, me.name+'：不发动【流离】');
@@ -2723,7 +2765,7 @@ function respondLiuli(choice, newTargetSeat){
       // 的 canTarget 里校验过一次攻击者→to 的距离(否则杀根本出不来),理论上重新校验也该
       // 通过——但为了和下面"真实转移"分支保持同一处理方式(不依赖"位置/装备中途没变"这个
       // 假设),同样传 {noDistance:true} 跳过 resolveShaUseNoLiuli 内部的二次距离校验。
-      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard, {noDistance:true});
+      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard, restoredShaInfo);
       return g;
     }
     if(!newTarget || !newTarget.alive || newTargetSeat===from || newTargetSeat===to || !liuliTargets(g, from, to).includes(newTargetSeat)) return g;
@@ -2747,7 +2789,7 @@ function respondLiuli(choice, newTargetSeat){
       const pendingBefore=g.pending;
       triggerHook(g,to,'onLoseEquip',{count:1});
       if(g.pending!==pendingBefore && g.pending){
-        g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard};
+        g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard,jiuBonus,shaInfo:g.pending.shaInfo};
         return g;
       }
     }
@@ -2756,7 +2798,7 @@ function respondLiuli(choice, newTargetSeat){
     // 一次,resolveShaUseNoLiuli 内部默认的距离校验对象是攻击者自己,和流离的规则基准
     // 完全不是同一个人,不该在这里重新生效。传 {noDistance:true} 跳过它(和神速
     // respondShensuSha 用同一套既有模式,skills.js 那边的"无距离限制的杀")。
-    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard, {noDistance:true});
+    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard, restoredShaInfo);
     return g;
   });
 }
@@ -2853,22 +2895,36 @@ function heal(g, targetSeat, amount, sourceSeat, reason, srcType) {
 // hook之后,如果它确实开出了新pending,要强制用外部传入的resume覆盖它自己建的那个,
 // 和startNextWangxi/wrapPendingForTianxiang"把外部resume原样接到新pending上"是同一
 // 个道理。
+// CORE-168(issue #227):排队从"单个槽位"改成"数组队列"——同一次伤害可能连续排进多项
+// (自己的 hook 挂起 pending 后借来的 hook 排队,而这一项还没消费完又来了下一次伤害),
+// 单槽赋值会把前一项直接冲掉。空队列一律回落成 null(不留空数组:Firebase 存不下空数组,
+// 而且 normalize 的形状防御和"没有排队"这个语义都以 null 为准)。
+function enqueuePendingHook(g, item){
+  if(!Array.isArray(g.pendingHookQueue)) g.pendingHookQueue = g.pendingHookQueue ? [g.pendingHookQueue] : [];
+  g.pendingHookQueue.push(item);
+}
 function consumePendingHookQueue(g, resume){
   if(!g.pendingHookQueue) return false;
-  const item = g.pendingHookQueue;
-  g.pendingHookQueue = null;
-  const p = g.players[item.seat];
-  if(!p || !p.alive) return false; // 座位已失效:安全丢弃这条排队,不阻塞流程
-  const borrowGen = item.source==='borrowed' ? getGeneral(p.huashenGeneral) : getGeneral(p.general);
-  const fn = borrowGen && borrowGen.hooks && borrowGen.hooks[item.hookName];
-  if(typeof fn !== 'function') return false;
-  const pendingBefore = g.pending;
-  fn(g, item.seat, item.ctx);
-  if(g.pending !== pendingBefore && g.pending){
-    g.pending.resume = resume;
-    return true; // 挂起了新pending,调用方要return,交给玩家响应
+  // 兼容旧的单槽形状(可能来自改动前写进 Firebase 的房间状态)
+  if(!Array.isArray(g.pendingHookQueue)) g.pendingHookQueue = [g.pendingHookQueue];
+  while(g.pendingHookQueue.length){
+    const item = g.pendingHookQueue.shift();
+    if(g.pendingHookQueue.length===0) g.pendingHookQueue = null;
+    const p = g.players[item.seat];
+    if(!p || !p.alive) continue; // 座位已失效:安全丢弃这条排队,继续看下一项,不阻塞流程
+    const borrowGen = item.source==='borrowed' ? getGeneral(p.huashenGeneral) : getGeneral(p.general);
+    const fn = borrowGen && borrowGen.hooks && borrowGen.hooks[item.hookName];
+    if(typeof fn !== 'function') continue;
+    const pendingBefore = g.pending;
+    fn(g, item.seat, item.ctx);
+    if(g.pending !== pendingBefore && g.pending){
+      g.pending.resume = resume;
+      return true; // 挂起了新pending,调用方要return,交给玩家响应;队列剩余项等下一次消费
+    }
+    // 即时效果(如反馈/奸雄),没有新pending,继续消费队列里的下一项
   }
-  return false; // 即时效果(如反馈/奸雄),没有新pending,继续往下走原有resume分派
+  g.pendingHookQueue = null;
+  return false; // 队列已空,继续往下走原有resume分派
 }
 
 // 同一次伤害可能同时满足多个受伤后技能。统一队列按固定顺序逐项执行；任何一项挂起
@@ -2877,7 +2933,12 @@ function continueAfterDamageEffects(g){
   const q=g.afterDamageEffects;
   if(!q || !Array.isArray(q.actions)) return false;
   const p=g.players[q.seat];
-  if(!p || !p.alive){ g.afterDamageEffects=null; return false; }
+  // CORE-178(issue #237):队列结束时不能一律置 null——本次伤害可能是在"外层某人的受伤后
+  // 队列还没走完"的时候由技能反弹产生的嵌套伤害(如刚烈让伤害来源也受伤),那次嵌套
+  // dealDamage 会新建自己的队列并把外层队列挤掉。新建时已经把外层队列存进 q.outer,
+  // 这里结束时原样还原,外层队列(以及它携带的 originalResume,例如南蛮的 {type:'aoe'})
+  // 才不会丢。没有外层时 q.outer 为 null,行为与改动前一致。
+  if(!p || !p.alive){ g.afterDamageEffects=q.outer||null; return false; }
   while(q.index<q.actions.length){
     const action=q.actions[q.index++];
     const pendingBefore=g.pending;
@@ -2929,7 +2990,7 @@ function continueAfterDamageEffects(g){
       return true;
     }
   }
-  g.afterDamageEffects=null;
+  g.afterDamageEffects=q.outer||null;
   return false;
 }
 // dealDamage 调用方为 delay/xiaoguo/刚烈等补充专用恢复信息时，若当前正处于受伤后技能
@@ -3052,6 +3113,18 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     }
   }
 
+  const nature=cardDamageNature(sourceCard);
+  const shaLike=srcType==='sha' || (sourceCard && typeof isShaName==='function' && isShaName(sourceCard.name));
+  const ignoreArm=!!(shaLike && typeof sourceSeat==='number' && g.players[sourceSeat] && hasCap(g.players[sourceSeat],'ignoreArmor'));
+  if(amount>0 && nature==='fire' && hasCap(p,'tengjia') && !ignoreArm){
+    amount++;
+    g.log=pushLog(g.log, p.name+' 的【藤甲】使火焰伤害+1');
+  }
+  if(amount>1 && hasCap(p,'baiyin') && !ignoreArm){
+    amount=1;
+    g.log=pushLog(g.log, p.name+' 的【白银狮子】将伤害改为1点');
+  }
+
   // 【体力值可以为负,这是有意为之,不要再在这里加 Math.max(0,...)】
   // 官方规则:伤害超过剩余体力时体力真的变成负数(1血挨闪电3点 -> -2),濒死救援要把体力
   // 补回 1 以上才能脱离,所以 -2 需要连续 3 个【桃】。曾经这里写的是 Math.max(0, p.hp-amount),
@@ -3102,8 +3175,13 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
     // 濒死/不屈只是暂时打断本次伤害。先保存尚未执行的受伤后队列；获救或不屈
     // 防死后由 resumeAfterInterrupt 接回，真死时则因角色不存活而安全丢弃。
     enqueueDamageWangxi(g,seat,amount,sourceSeat);
+    // CORE-178:嵌套伤害(如刚烈反弹给伤害来源)不得吞掉外层尚未走完的队列——有外层时存进
+    // outer,continueAfterDamageEffects 结束时还原。没有外层就不加这个字段,避免给绝大多数
+    // 场景平白多出一个恒为 null 的持久化字段。
+    const outerQueue=g.afterDamageEffects||null;
     g.afterDamageEffects={seat,amount,sourceSeat,reason,srcType,sourceCard,jiushiFacedownAtDamage,
       actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige'],index:0,originalResume:{type:srcType}};
+    if(outerQueue) g.afterDamageEffects.outer=outerQueue;
     // 周泰【不屈】触发次数:"体力降到0或以下"这个区间里,这一下伤害一共有几点落在
     // 这个区间,就问几次(每点独立一次放置不屈牌的机会),不是"只要结算后≤0就问一次"。
     // 推导:把 amount 点伤害看成 amount 次连续的-1,第 k 次(k=1..amount)扣完后的体力是
@@ -3136,8 +3214,10 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
 
   // 实际受伤且存活 -> 所有受伤后效果进入统一队列，挂起的技能响应后继续下一项。
   if(amount>0){
+    const outerQueue2=g.afterDamageEffects||null; // CORE-178:同上,嵌套伤害不得吞掉外层队列
     g.afterDamageEffects={seat,amount,sourceSeat,reason,srcType,sourceCard,jiushiFacedownAtDamage,
       actions:['yaowu','enyuan','hooks','jiushi','chengxiang','beige'],index:0,originalResume:{type:srcType}};
+    if(outerQueue2) g.afterDamageEffects.outer=outerQueue2;
     if(continueAfterDamageEffects(g)) return true;
   }
   if(!skipChain && startNextWangxi(g, {type:srcType})) return true;
@@ -3168,6 +3248,11 @@ function startDying(g, seat, resumeType, sourceSeat, amount){
   const first=firstDyingAskee(g, seat);
   if(first===null){
     g.log=pushLog(g.log, p.name+' 濒死！等待救援…');
+    // 连环传导中无人可救不能进公共窗，否则会吞掉 chainDamageQueue 后续目标。
+    if(g.chainDamageQueue){
+      finishDying(g, true);
+      return;
+    }
     enterDyingPublicWait(g);
     return;
   }
@@ -3745,7 +3830,8 @@ function resumeAfterInterrupt(g, resume, seat){
     const attacker=g.players[resume.from];
     const target=g.players[resume.newTargetSeat];
     if(attacker&&attacker.alive&&target&&target.alive){
-      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard,{noDistance:true});
+      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard,
+        typeof shaInfoAfterLiuli==='function' ? shaInfoAfterLiuli(resume) : {noDistance:true, jiuBonus:!!resume.jiuBonus});
     }else finishSingleShaTarget(g);
   } else if(resume.type==='dyingJijiu'){
     // 急救用红色装备触发失装技能后，恢复原 dying 快照，再完成这张牌的回复结算。
@@ -4213,10 +4299,6 @@ function canRescueSeat(g, seat, dyingSeat){
   return false;
 }
 function nextDyingAskee(g, dyingSeat, current){
-  // 连环传导中的濒死必须逐个询问，避免 dyingPublicWait 直接吞掉 chainDamageQueue 的后续目标
-  if(g.chainDamageQueue){
-    return nextAskee(g, dyingSeat, current);
-  }
   let nxt = nextAskee(g, dyingSeat, current);
   while(nxt!==null && !canRescueSeat(g, nxt, dyingSeat)){
     nxt = nextAskee(g, dyingSeat, nxt);
@@ -4224,9 +4306,6 @@ function nextDyingAskee(g, dyingSeat, current){
   return nxt;
 }
 function firstDyingAskee(g, dyingSeat){
-  if(g.chainDamageQueue){
-    return dyingSeat;
-  }
   if(canRescueSeat(g, dyingSeat, dyingSeat)) return dyingSeat;
   return nextDyingAskee(g, dyingSeat, dyingSeat);
 }
@@ -4655,6 +4734,7 @@ function applyTrickOnEquip(g, info, slot){
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 顺走 '+tgt.name+' 的装备【'+card.name+'】'); }
   else { g.discard.push(card); markDiscardReveal(g, info.to, [card]); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 的装备【'+card.name+'】'); }
   // 失主(info.to)的装备离开装备区 → 触发失去装备钩子(如孙尚香【枭姬】)。顺手/拆桥单次仅动一槽,恒失去 1 张。
+  maybeBaiyinRecover(g, info.to, card);
   triggerHook(g, info.to, 'onLoseEquip', { count:1 });
 }
 // applyTrickOnDelay: 拿/拆目标判定区里第idx张延时锦囊。判定区是公开信息 -> 日志写明牌名。
@@ -4873,6 +4953,12 @@ function aoeRespond(useCard, cardIdx){
       if(hasCap(me,'leiji') && card.name==='闪'){
         if(maybeStartLeiji(g, mySeat, card, {prevSeat:mySeat})) return g;
       }
+      aoeAdvance(g, mySeat);
+      return g;
+    }
+    // 藤甲:南蛮/万箭伤害无效(锁定技)。青釭剑只对【杀】无视防具,破不了这里。
+    if((g.aoe.trick==='南蛮入侵'||g.aoe.trick==='万箭齐发') && hasCap(me,'tengjia')){
+      g.log=pushLog(g.log, me.name+' 的【藤甲】使【'+g.aoe.trick+'】无效');
       aoeAdvance(g, mySeat);
       return g;
     }
@@ -6692,16 +6778,22 @@ function triggerDuanbing(extraTarget) {
     const targets=[baseTarget,extraTarget];
     const order=[]; let s=mySeat;
     for(let i=0;i<g.players.length;i++){ s=nextAlive(g,s); if(targets.includes(s)) order.push(s); }
-    const shaInfo=consumeJiuShaBonus(g,me);
+    let shaInfo=consumeJiuShaBonus(g,me);
+    let sourceCard=card;
+    if(typeof applyShaPlayExtra==='function'){
+      const applied=applyShaPlayExtra(shaInfo, pending.playExtra, sourceCard);
+      shaInfo=applied.shaInfo;
+      sourceCard=applied.card;
+    }
     g.pending=null;
     g.fangtianQueue={
       kind:'duanbing',from:mySeat,targets:order,idx:0,usedAs,
-      shaColor:singleCardShaColor(card),sourceCard:card,shaInfo
+      shaColor:singleCardShaColor(sourceCard),sourceCard,shaInfo
     };
-    triggerJiangOnTarget(g,mySeat,extraTarget,'sha',isRed(card));
+    triggerJiangOnTarget(g,mySeat,extraTarget,'sha',isRed(sourceCard));
     g.log = pushLog(g.log, `${me.name} 发动【短兵】,对 ${order.map(seat=>g.players[seat].name).join(' 和 ')} 使用【杀】`);
     markSkillSound(g, '短兵');
-    resolveShaUse(g,me,order[0],usedAs,singleCardShaColor(card),card,shaInfo);
+    resolveShaUse(g,me,order[0],usedAs,singleCardShaColor(sourceCard),sourceCard,shaInfo);
     
     return g;
   });
@@ -6714,6 +6806,7 @@ function cancelDuanbing() {
       const me = g.players[mySeat];
       const baseTarget = g.pending.baseTarget;
       const card = g.pending.card;
+      const playExtra = g.pending.playExtra;
       
       g.pending = null;
       g.phase = 'play';
@@ -6721,7 +6814,14 @@ function cancelDuanbing() {
       
       // 直接结算单目标的杀
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
-      resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(card), card, consumeJiuShaBonus(g, me));
+      let shaInfo=consumeJiuShaBonus(g, me);
+      let sourceCard=card;
+      if(typeof applyShaPlayExtra==='function'){
+        const applied=applyShaPlayExtra(shaInfo, playExtra, sourceCard);
+        shaInfo=applied.shaInfo;
+        sourceCard=applied.card;
+      }
+      resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(sourceCard), sourceCard, shaInfo);
     }
     return g;
   });
