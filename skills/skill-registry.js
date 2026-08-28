@@ -706,6 +706,6 @@ function 登记技能(条目){ 技能注册表[条目.武将+'/'+条目.技能�
 // (基本牌/锦囊牌/装备特效/通用响应窗口/机器人通用调度)。
 const 非技能阶段白名单 = ['respond','aoeResp','duel','dying','dyingPublicWait','wuxie','wuxiePublicWait','pick','wugu',
   'huogong','huogongReveal','hanbing','hanbingAsk','guanshi','qinglong','qilin',
-  'cixiongAsk','cixiongChoice','shaOffsetChoice','jiedaoChoice'];
+  'cixiongAsk','cixiongChoice','zhuqueAsk','shaOffsetChoice','jiedaoChoice'];
 const 非技能机器人决策白名单 = ['controlsChoice','discardSubset','pickSlot','pickGeneral','seatPick',
   'dying','duel','aoeResp','wuguPick','jiedaoResponse','jiedaoTwoStep','zhangbaTwoStep','fangtian'];

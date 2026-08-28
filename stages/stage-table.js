@@ -24,7 +24,7 @@ Object.entries({
   zhibaAsk:'lordSeat',yinghunTarget:'seat',beigeChoose:'sourceSeat',beigeDiscard:'sourceSeat',
   beigeJudge:'sourceSeat',luanwuChoose:'currentSeat',xuanfengPick:'from',
   lieRenRespond:'targetSeat',qiangxiPickTarget:'seat',qiangxiChooseCost:'seat',
-  jujianPickCard:'sourceSeat',jushouChoose:'seat',cixiongAsk:'from',guanshi:'from',
+  jujianPickCard:'sourceSeat',jushouChoose:'seat',  cixiongAsk:'from',zhuqueAsk:'from',guanshi:'from',
   hanbingAsk:'from',qinglong:'from',shuangxiongAsk:'seat',leijiChoose:'sourceSeat',
   haoshiPick:'seat',tiaoxinDiscard:'from',biyue:'seat',buquAsk:'seat',renxinChoose:'seat',
   chengxiangAsk:'seat',luoyiAsk:'seat',jiemingAsk:'seat',xinshengAsk:'seat',
@@ -1375,6 +1375,7 @@ registerStageTimeoutAction("jujianPickTarget", function(g){ return function(){ c
 registerStageTimeoutAction("jujianChooseEffect", function(g){ return function(){ respondJujianEffect('draw'); }; });
 registerStageTimeoutAction("luoyingAsk", function(g){ return function(){ respondLuoying(false); }; });
 registerStageTimeoutAction("cixiongAsk", function(g){ return function(){ respondCixiongAsk(false); }; });
+registerStageTimeoutAction("zhuqueAsk", function(g){ return function(){ respondZhuque(false); }; });
 registerStageTimeoutAction("chengxiangAsk", function(g){ return function(){ cancelChengxiangAsk(); }; });
 registerStageTimeoutAction("chengxiangChoose", function(g){ return function(){ cancelChengxiang(); }; });
 registerStageTimeoutAction("renxinChoose", function(g){ return function(){ cancelRenxin(); }; });

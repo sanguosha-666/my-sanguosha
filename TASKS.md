@@ -1,5 +1,15 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-28 — 藤甲/白银狮子/朱雀羽扇
+
+- [x] Phase 1/2：TDD RED — `run_new_equips_test.js` 9 条先红。
+- [x] Phase 2/2：EQUIPS + 牌堆；藤甲免疫普通杀/南蛮/万箭、火伤+1、青釭可破杀；白银狮子伤害>1改1、失去装备回1血；朱雀羽扇询问改火杀，机器人固定改。cache-bust data 454 / game 466 / sha 425 / weapons 417 / bot 451 / render 466 / controls 442 / stage 422 / registry 21。
+- 验证：new equips 9/9；qinggangjian 6/6；skill-registry 20/20；pending renderer 190；cache-bust PASS。
+
+## 2026-08-28 — 替换雌雄双股剑卡图
+
+- [x] Phase 1/1：`assets/cards/cixiongshuanggujian.jpg` 换成用户提供的双剑图（JPEG 1280×1920）。路径/文件名不变。
+
 ## 2026-08-28 — #239+#240 第二次无懈 + 濒死只问能救的人
 
 - [x] Phase 1/2：#239 CORE-180 — `normalize` 无懈缺 `asking` 不再写成 `-1`，重算 `nextWuxieAskee` 或进公共窗并打新 `askedAt`。

@@ -74,6 +74,9 @@ const EQUIPS = {
   '丈八蛇矛': { slot:'weapon', range:3, cap:'twoAsSha', desc:'武器,射程3。你可以把任意两张手牌合起来当作一张【杀】使用。' },
   '八卦阵':   { slot:'armor', cap:'bagua', desc:'防具。当你需要打出【闪】时,可先翻开牌堆顶一张牌碰运气:翻到红色就当作你打出了【闪】,黑色则无效、仍需正常应对。' },
   '仁王盾':   { slot:'armor', cap:'renwang', desc:'防具。黑色的【杀】对你无效。' },
+  '藤甲':     { slot:'armor', cap:'tengjia', desc:'防具。锁定技,普通【杀】、【南蛮入侵】和【万箭齐发】对你无效;你受到的火焰伤害+1。' },
+  '白银狮子': { slot:'armor', cap:'baiyin', desc:'防具。锁定技,你每次受到伤害时,若该伤害多于1点,则防止多余的伤害;当你失去装备区里的【白银狮子】时,你回复1点体力。' },
+  '朱雀羽扇': { slot:'weapon', range:4, cap:'zhuque', desc:'武器,射程4。当你使用普通【杀】时,你可以将此【杀】改为火【杀】。' },
   '青釭剑':   { slot:'weapon', range:2, cap:'ignoreArmor', desc:'武器,射程2。你使用【杀】时无视对方的防具(例如对方的【八卦阵】无法发动)。' },
   '麒麟弓':   { slot:'weapon', range:5, cap:'qilin', desc:'武器,射程5。你的【杀】对目标造成伤害时,可以弃掉对方装备的一匹坐骑。' },
   '青龙偃月刀': { slot:'weapon', range:3, cap:'qinglong', desc:'武器,射程3。你使用的【杀】被【闪】抵消时,你可以对同一目标再使用一张【杀】(不计入出杀次数限制,无距离限制,只要又被闪抵消可以连续触发)。' },
@@ -981,7 +984,7 @@ function isShaName(name){ return name==='杀' || name==='火杀' || name==='雷�
 function singleCardShaColor(card){ return card ? (isRed(card)?'red':'black') : undefined; }
 function cardDamageNature(card){
   if(!card || Array.isArray(card)) return null;
-  if(card.name==='火杀' || card.name==='火攻') return 'fire';
+  if(card.asFireSha || card.name==='火杀' || card.name==='火攻') return 'fire';
   if(card.name==='雷杀' || card.name==='闪电') return 'thunder';
   return null;
 }
@@ -1135,6 +1138,7 @@ function buildDeck(){
     ['青釭剑',S,6],['青龙偃月刀',S,5],['丈八蛇矛',S,12],
     ['贯石斧',D,5],['方天画戟',D,12],['麒麟弓',H,5],['寒冰剑',S,2],
     ['八卦阵',S,2],['八卦阵',C,2],['仁王盾',C,2],
+    ['藤甲',S,2],['藤甲',C,2],['白银狮子',C,1],['朱雀羽扇',D,1],
     ['绝影',S,5],['爪黄飞电',H,13],['的卢',C,5],
     ['大宛',S,13],['赤兔',H,5],['紫骍',D,13],
     // 项目额外实现的军争/非官方牌 4(按官方军争花色点数;骕骦无官方值暂定♣K)

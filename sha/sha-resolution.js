@@ -214,9 +214,25 @@ function resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo)
   resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo);
 }
 
+function isNormalShaForTengjia(sourceCard, shaInfo){
+  if(shaInfo && shaInfo.zhuqueFire) return false;
+  if(sourceCard && sourceCard.asFireSha) return false;
+  if(!sourceCard || Array.isArray(sourceCard)) return true;
+  if(sourceCard.name==='火杀' || sourceCard.name==='雷杀') return false;
+  return true;
+}
 function resolveShaUseNoLiuli(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo){
   const fromSeat=g.players.indexOf(me);
   const target=g.players[targetSeat];
+  if(!(shaInfo && shaInfo.zhuqueDecided) && hasCap(me,'zhuque')){
+    const nature=sourceCard && !Array.isArray(sourceCard) && typeof cardDamageNature==='function' ? cardDamageNature(sourceCard) : null;
+    if(nature!=='fire' && nature!=='thunder'){
+      g.pending=setResponseAskedAt({type:'zhuqueAsk', from:fromSeat, to:targetSeat, usedAs, shaColor, sourceCard, shaInfo});
+      g.phase='zhuqueAsk';
+      g.log=pushLog(g.log, me.name+' 是否发动【朱雀羽扇】,将【杀】改为火【杀】？');
+      return;
+    }
+  }
   if(hasSkillName(me,'马术') && distanceWithoutCharacterModifiers(g,fromSeat,targetSeat)>attackRange(g,fromSeat)) markSkillSound(g,'马术');
   if(hasSkillName(me,'义从') && me.hp>2 && distanceWithoutCharacterModifiers(g,fromSeat,targetSeat)>attackRange(g,fromSeat)) markSkillSound(g,'义从');
   
@@ -276,6 +292,11 @@ function afterShaTargetSkills(g, from, to, noShan, sourceCard, shaColor, shaInfo
     const reason = hasCap(target,'renwang') ? '【仁王盾】' : '【毅重】';
     if(reason==='【毅重】') markSkillSound(g,'毅重');
     g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的黑色【杀】因'+reason+'无效' });
+    finishSingleShaTarget(g);
+    return;
+  }
+  if(!ignoresArmor && hasCap(target,'tengjia') && isNormalShaForTengjia(sourceCard, shaInfo)){
+    g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的【杀】因【藤甲】无效' });
     finishSingleShaTarget(g);
     return;
   }

@@ -1654,7 +1654,7 @@ const CONTROLS_CHOICE_EXCLUDE = new Set([
   'jujianPickCard','jujianPickTarget','jujianChooseEffect','jushouChoose',
   // 【第二批-第2组】雌雄双股剑/贯石斧/寒冰剑/青龙偃月刀四个装备特效都有专用的确定性
   // runBotDecision分支(接线在controlsChoice之前)——同上原则收录。
-  'cixiongAsk','cixiongChoice','guanshi','hanbingAsk','qinglong',
+  'cixiongAsk','cixiongChoice','zhuqueAsk','guanshi','hanbingAsk','qinglong',
   // 【第二批-第3组】双雄+雷击都有专用的确定性runBotDecision分支(接线在controlsChoice
   // 之前)——同上原则收录。
   'shuangxiongAsk','leijiChoose','leijiJudge',
@@ -4872,6 +4872,9 @@ async function runBotDecision(g,seat){
   // 任何下行风险(要么令目标弃牌,要么自己白摸一张),固定发动,不接AI。
   if(g.phase==='cixiongAsk'&&d.type==='cixiongAsk'&&d.from===seat){
     botInvoke(seat,()=>respondCixiongAsk(true)); return;
+  }
+  if(g.phase==='zhuqueAsk'&&d.type==='zhuqueAsk'&&d.from===seat){
+    botInvoke(seat,()=>respondZhuque(true)); return;
   }
   // 雌雄双股剑目标选弃牌还是让攻击者摸牌:两者对目标都是纯损失,固定选"弃一张手牌"
   // (代码保证走到这一步时目标手牌非空),不接AI、不追求判断哪个更优。

@@ -2222,7 +2222,21 @@ function equipCard(g, me, card){
   const slotName = { weapon:'武器', armor:'防具', plus1:'+1马', minus1:'-1马' }[slot];
   g.log=pushLog(g.log, me.name+' 装备了【'+card.name+'】'+(old?'，替换下【'+old.name+'】':'')+'（'+slotName+'）');
   // 同槽换装 = 换下的旧装备离开装备区 → 触发失去装备钩子(如孙尚香【枭姬】)。恒失去 1 张。
-  if(old) triggerHook(g, g.players.indexOf(me), 'onLoseEquip', { count:1 });
+  if(old){
+    maybeBaiyinRecover(g, g.players.indexOf(me), old);
+    triggerHook(g, g.players.indexOf(me), 'onLoseEquip', { count:1 });
+  }
+}
+function maybeBaiyinRecover(g, seat, lostCard){
+  if(!lostCard || lostCard.name!=='白银狮子') return;
+  const p=g.players[seat];
+  if(!p || !p.alive) return;
+  const before=p.hp;
+  p.hp=Math.min(p.maxHp, p.hp+1);
+  if(p.hp>before){
+    g.log=pushLog(g.log, p.name+' 失去【白银狮子】,回复1点体力（体力'+p.hp+'）');
+    if(typeof removeBuquCard==='function') removeBuquCard(g, seat);
+  }
 }
 // ===== 距离机制(装备第2步):马的 dist、武器的 range 均从 EQUIPS 读,不硬编码 =====
 // 读某槽装备的距离修正(的卢 plus1:+1、赤兔 minus1:-1);无装备/无 dist 返回 0。
@@ -3086,6 +3100,18 @@ function dealDamage(g, seat, amount, sourceSeat, reason, srcType, sourceCard, sk
         }
       }
     }
+  }
+
+  const nature=cardDamageNature(sourceCard);
+  const shaLike=srcType==='sha' || (sourceCard && typeof isShaName==='function' && isShaName(sourceCard.name));
+  const ignoreArm=!!(shaLike && typeof sourceSeat==='number' && g.players[sourceSeat] && hasCap(g.players[sourceSeat],'ignoreArmor'));
+  if(amount>0 && nature==='fire' && hasCap(p,'tengjia') && !ignoreArm){
+    amount++;
+    g.log=pushLog(g.log, p.name+' 的【藤甲】使火焰伤害+1');
+  }
+  if(amount>1 && hasCap(p,'baiyin') && !ignoreArm){
+    amount=1;
+    g.log=pushLog(g.log, p.name+' 的【白银狮子】将伤害改为1点');
   }
 
   // 【体力值可以为负,这是有意为之,不要再在这里加 Math.max(0,...)】
@@ -4696,6 +4722,7 @@ function applyTrickOnEquip(g, info, slot){
   if(info.trick==='顺手牵羊'){ me.hand.push(card); g.log=pushLog(g.log, me.name+' 顺走 '+tgt.name+' 的装备【'+card.name+'】'); }
   else { g.discard.push(card); markDiscardReveal(g, info.to, [card]); g.log=pushLog(g.log, me.name+' 拆掉 '+tgt.name+' 的装备【'+card.name+'】'); }
   // 失主(info.to)的装备离开装备区 → 触发失去装备钩子(如孙尚香【枭姬】)。顺手/拆桥单次仅动一槽,恒失去 1 张。
+  maybeBaiyinRecover(g, info.to, card);
   triggerHook(g, info.to, 'onLoseEquip', { count:1 });
 }
 // applyTrickOnDelay: 拿/拆目标判定区里第idx张延时锦囊。判定区是公开信息 -> 日志写明牌名。
@@ -4914,6 +4941,12 @@ function aoeRespond(useCard, cardIdx){
       if(hasCap(me,'leiji') && card.name==='闪'){
         if(maybeStartLeiji(g, mySeat, card, {prevSeat:mySeat})) return g;
       }
+      aoeAdvance(g, mySeat);
+      return g;
+    }
+    // 藤甲:南蛮/万箭伤害无效(锁定技)。青釭剑只对【杀】无视防具,破不了这里。
+    if((g.aoe.trick==='南蛮入侵'||g.aoe.trick==='万箭齐发') && hasCap(me,'tengjia')){
+      g.log=pushLog(g.log, me.name+' 的【藤甲】使【'+g.aoe.trick+'】无效');
       aoeAdvance(g, mySeat);
       return g;
     }

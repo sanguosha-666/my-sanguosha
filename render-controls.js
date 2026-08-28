@@ -282,6 +282,7 @@ Object.entries({
   huashenChangePickEnd:{skill:'化身', render:renderPendingHuashenChangePickEnd},
   biyue:              {skill:'闭月', render:renderPendingBiyue},
   cixiongAsk:         {skill:'雌雄双股剑', render:renderPendingCixiongAsk},
+  zhuqueAsk:          {skill:'朱雀羽扇', render:renderPendingZhuqueAsk},
   hanbingAsk:         {skill:'寒冰剑', render:renderPendingHanbingAsk},
   xiaoguo:            {skill:'骁果', render:renderPendingXiaoguo},
   xiaoguoChoice:      {skill:'骁果', render:renderPendingXiaoguoChoice},
@@ -629,6 +630,12 @@ function renderPendingCixiongAsk(g,c){
   const yes=document.createElement('button');yes.className='primary';yes.textContent='发动【雌雄双股剑】';yes.onclick=()=>respondCixiongAsk(true);
   const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondCixiongAsk(false);
   c.appendChild(yes);c.appendChild(no);setBanner('对 '+escapeHtml(to||'目标')+' 使用【杀】,是否发动【雌雄双股剑】?');
+}
+function renderPendingZhuqueAsk(g,c){
+  const to=g.players[g.pending.to]&&g.players[g.pending.to].name;
+  const yes=document.createElement('button');yes.className='primary';yes.textContent='改为火【杀】';yes.onclick=()=>respondZhuque(true);
+  const no=document.createElement('button');no.textContent='不发动';no.onclick=()=>respondZhuque(false);
+  c.appendChild(yes);c.appendChild(no);setBanner('对 '+escapeHtml(to||'目标')+' 使用【杀】,是否发动【朱雀羽扇】改为火【杀】?');
 }
 function renderPendingHanbingAsk(g,c){
   const to=g.players[g.pending.to].name;

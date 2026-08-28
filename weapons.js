@@ -397,6 +397,11 @@ function continueAfterCixiong(g){
     finishSingleShaTarget(g);
     return;
   }
+  if(!ignoresArmor && hasCap(target,'tengjia') && typeof isNormalShaForTengjia==='function' && isNormalShaForTengjia(sourceCard, shaInfo)){
+    g.log=logEvent(g.log, { kind:'sha', actor:from, targets:[to], text: me.name+' 对 '+target.name+' 使用的【杀】因【藤甲】无效' });
+    finishSingleShaTarget(g);
+    return;
+  }
   continueShaAfterTieqi(g, from, to, noShan, sourceCard, shaColor, shaInfo);
 }
 
@@ -448,6 +453,27 @@ function respondCixiongChoice(choice, cardIdx){
       continueAfterCixiong(g);
       return g;
     }
+    return g;
+  });
+}
+
+function respondZhuque(convert){
+  tx(g=>{
+    if(g.phase!=='zhuqueAsk'||!g.pending||g.pending.type!=='zhuqueAsk'||g.pending.from!==mySeat) return g;
+    const d=g.pending;
+    const me=g.players[d.from];
+    let shaInfo=Object.assign({}, d.shaInfo||{}, {zhuqueDecided:true});
+    let sourceCard=d.sourceCard;
+    if(convert){
+      shaInfo.zhuqueFire=true;
+      if(sourceCard && !Array.isArray(sourceCard)) sourceCard=Object.assign({}, sourceCard, {asFireSha:true});
+      else sourceCard={name:'杀', virtual:true, asFireSha:true};
+      g.log=pushLog(g.log, me.name+' 发动【朱雀羽扇】,将【杀】改为火【杀】');
+    } else {
+      g.log=pushLog(g.log, me.name+'：不发动【朱雀羽扇】');
+    }
+    g.pending=null;
+    resolveShaUseNoLiuli(g, me, d.to, d.usedAs, d.shaColor, sourceCard, shaInfo);
     return g;
   });
 }
