@@ -368,6 +368,26 @@ function maybeStartCixiong(g, from, to, noShan, sourceCard, shaColor, shaInfo){
   if(typeof isOppositeGender==='function'){
     if(!isOppositeGender(attacker, target)) return false;
   } else if(generalGender(attacker)===generalGender(target)) return false;
+  if(shaInfo && shaInfo.cixiongDecided){
+    if(!shaInfo.cixiongActivate){
+      g.log = pushLog(g.log, attacker.name+'：不发动【雌雄双股剑】');
+      return false;
+    }
+    g.log = pushLog(g.log, attacker.name+' 发动【雌雄双股剑】');
+    markCardSound(g, '雌雄双股剑', from, (attacker.equips&&attacker.equips.weapon)||null);
+    const handLen = (target.hand||[]).length;
+    if(handLen===0){
+      drawN(g, from, 1);
+      g.log = pushLog(g.log, target.name+' 没有手牌，'+attacker.name+' 摸一张牌');
+      return false;
+    }
+    g.pending = { type:'cixiongChoice', from, to, noShan:!!noShan, shaColor };
+    if(sourceCard!==undefined) g.pending.sourceCard = sourceCard;
+    if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus = true;
+    g.phase = 'cixiongChoice';
+    g.log = pushLog(g.log, '等待 '+target.name+' 选择：弃一张手牌 或 令 '+attacker.name+' 摸一张牌…');
+    return true;
+  }
   g.pending = { type:'cixiongAsk', from, to, noShan:!!noShan, shaColor };
   if(sourceCard!==undefined) g.pending.sourceCard = sourceCard;
   if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus = true;

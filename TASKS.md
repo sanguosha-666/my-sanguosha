@@ -1,5 +1,13 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-28 — 出杀预填朱雀/雌雄（一次 AI 调用）
+
+- [x] Phase 1/3：spike 清单。可压朱雀/雌雄；青龙/贯石/寒冰等结算后不能压。
+- [x] Phase 2/3：TDD RED — `run_sha_predeclare_test.js` 先红。
+- [x] Phase 3/3：playCard 第5参 extra → shaInfo；预填跳过 Ask；流离透传 shaInfo；枚举拆候选；execute 传 extra。人类无 extra 仍问。cache-bust game 467 / sha 426 / weapons 418 / bot 452。
+- 验证：sha predeclare 12/12；new equips 9/9；cixiong 20/20；core162 PASS；ai_bus_c 34/34。
+- 未接：借刀/丈八/神速/青龙追加杀仍走旧 Ask。
+
 ## 2026-08-28 — 藤甲/白银狮子/朱雀羽扇
 
 - [x] Phase 1/2：TDD RED — `run_new_equips_test.js` 9 条先红。

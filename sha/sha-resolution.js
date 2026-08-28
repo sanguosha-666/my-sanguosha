@@ -208,6 +208,31 @@ function canReachSha(g, fromSeat, targetSeat){
   return distance(g, fromSeat, targetSeat) <= attackRange(g, fromSeat);
 }
 
+// playCard 第5参 extra → shaInfo 预填。zhuqueFire/cixiongActivate 出现即视为已决定。
+function applyShaPlayExtra(shaInfo, extra, card){
+  const out = shaInfo ? Object.assign({}, shaInfo) : {};
+  let sourceCard = card;
+  if(extra){
+    if(extra.zhuqueDecided || extra.zhuqueFire===true || extra.zhuqueFire===false){
+      out.zhuqueDecided=true;
+      out.zhuqueFire=!!extra.zhuqueFire;
+      if(out.zhuqueFire && sourceCard && !Array.isArray(sourceCard)){
+        sourceCard=Object.assign({}, sourceCard, {asFireSha:true});
+      }
+    }
+    if(extra.cixiongDecided || extra.cixiongActivate===true || extra.cixiongActivate===false){
+      out.cixiongDecided=true;
+      out.cixiongActivate=!!extra.cixiongActivate;
+    }
+  }
+  const has = out.jiuBonus||out.zhuqueDecided||out.cixiongDecided||out.noDistance||out.fromShensu||out.skipShaLimit;
+  return { shaInfo: has ? out : shaInfo, card: sourceCard };
+}
+function shaInfoAfterLiuli(bag){
+  const src = (bag && bag.shaInfo) || {};
+  return Object.assign({}, src, { noDistance:true, jiuBonus:!!(bag && bag.jiuBonus) || !!src.jiuBonus });
+}
+
 function resolveShaUse(g, me, targetSeat, usedAs, shaColor, sourceCard, shaInfo){
   const fromSeat=g.players.indexOf(me);
   if(maybeStartLiuli(g, fromSeat, targetSeat, usedAs, shaColor, sourceCard, shaInfo)) return;
@@ -464,6 +489,7 @@ function maybeStartLiuli(g, from, to, usedAs, shaColor, sourceCard, shaInfo){
   // ({noDistance:true})会把它盖掉,目标只受 1 点伤害。
   g.pending=setResponseAskedAt({type:'liuli', from, to, usedAs, shaColor, targets});
   if(sourceCard!==undefined) g.pending.sourceCard=sourceCard;
+  if(shaInfo) g.pending.shaInfo=shaInfo;
   if(shaInfo && shaInfo.jiuBonus) g.pending.jiuBonus=true;
   g.phase='liuli';
   g.log=pushLog(g.log, target.name+' 是否发动【流离】,弃一张牌转移此【杀】…');

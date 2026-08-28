@@ -5534,6 +5534,29 @@ function isBotActionWindow(g, seat){
 // 不参与截断。无密钥兜底零变化:localFallbackPlayWindow 只取最高分非结束候选,Top-1
 // (最高分)恒在截断结果里,fallback 选择与截断前一致(测试锁定)。
 const AI_PLAY_CANDIDATE_LIMIT = 25;
+function botShaPlayVariants(g, seat, me, card, targetSeat, action){
+  const baseScore = botCardPriority(action) + botTargetScore(g, seat, targetSeat, action);
+  if(action!=='杀') return [{ extra:null, tag:'', score:baseScore }];
+  const target = g.players[targetSeat];
+  if(hasCap(me,'zhuque') && typeof cardDamageNature==='function'){
+    const nature = cardDamageNature(card);
+    if(nature!=='fire' && nature!=='thunder'){
+      const tengjia = !!(target && hasCap(target,'tengjia'));
+      return [
+        { extra:{zhuqueFire:false}, tag:'', score: baseScore + (tengjia?-80:0) },
+        { extra:{zhuqueFire:true}, tag:'(朱雀→火杀)', score: baseScore + 3 + (tengjia?40:0) + ((target&&target.chained)?5:0) }
+      ];
+    }
+  }
+  if(hasCap(me,'cixiong') && target && typeof isOppositeGender==='function' && isOppositeGender(me, target)){
+    return [
+      { extra:{cixiongActivate:false}, tag:'', score:baseScore },
+      { extra:{cixiongActivate:true}, tag:'(发动雌雄)', score:baseScore + 5 }
+    ];
+  }
+  return [{ extra:null, tag:'', score:baseScore }];
+}
+
 function enumerateAllLegalOneStepActions(g, seat){
   const out = [];
   const me = g.players[seat];
@@ -5580,7 +5603,13 @@ function enumerateAllLegalOneStepActions(g, seat){
           if(spec.canTarget && !spec.canTarget(g, me, card, i)) return;
           // CORE-89:同上,候选生成阶段硬过滤策略禁止目标,不只是打低分。
           if(!botTargetRelationAllowed(g, seat, i, action)) return;
-          out.push({ label: '出【'+action+'】→'+botAiName(g,i), action, card: botCardBrief(card), handIndex: idx, seat: i, target: i, localHeuristicScore: botCardPriority(action) + botTargetScore(g, seat, i, action) });
+          botShaPlayVariants(g, seat, me, card, i, action).forEach(function(v){
+            out.push({
+              label: '出【'+action+'】'+(v.tag||'')+'→'+botAiName(g,i),
+              action, card: botCardBrief(card), handIndex: idx, seat: i, target: i,
+              extra: v.extra, localHeuristicScore: v.score
+            });
+          });
         });
         // allowSelf 自目标兜底(沿用 botPlay 的 L3 通用写法,不按牌名特判):onlySelf 型
         // 延时锦囊(闪电)的合法目标只有自己,上面循环跳过自己后一个都不剩,这里补上;
@@ -5685,7 +5714,7 @@ function executePlayWindowChoiceAwait(g, seat, choice){
     if(choice && choice.isEndPlay){
       botInvoke(seat, function(){ endPlay(onCommitted); });
     } else {
-      botInvoke(seat, function(){ playCard(choice.handIndex, choice.action, (choice.target != null ? choice.target : null), onCommitted); });
+      botInvoke(seat, function(){ playCard(choice.handIndex, choice.action, (choice.target != null ? choice.target : null), onCommitted, choice.extra); });
     }
   });
 }

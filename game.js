@@ -1935,7 +1935,7 @@ const CARD_PLAYS = {
       if(card && card.ignoreShaDistance) return true;
       return canReachSha(g, sourceSeat, targetSeat); // 只有杀受攻击距离限制
     },
-    effect:(g,me,card,targetSeat)=>{
+    effect:(g,me,card,targetSeat,extra)=>{
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
       const shaWasAlreadyUsed=!!g.shaUsed;
       // 太史慈【天义】:天义赢时不消耗出杀次数（次数上限+1的效果）
@@ -1974,7 +1974,8 @@ const CARD_PLAYS = {
             sourceSeat: mySeat,
             baseTarget: targetSeat,
             card: card,
-            availableTargets: aliveSeats
+            availableTargets: aliveSeats,
+            playExtra: extra||null
           });
           g.phase = 'duanbingChoose';
           g.log = pushLog(g.log, `${me.name} 可以发动【短兵】,多选择一名距离为1的角色为目标`);
@@ -1983,7 +1984,14 @@ const CARD_PLAYS = {
       }
       
       // 正常结算杀
-      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), card, consumeJiuShaBonus(g, me));
+      let shaInfo=consumeJiuShaBonus(g, me);
+      let sourceCard=card;
+      if(typeof applyShaPlayExtra==='function'){
+        const applied=applyShaPlayExtra(shaInfo, extra, sourceCard);
+        shaInfo=applied.shaInfo;
+        sourceCard=applied.card;
+      }
+      resolveShaUse(g, me, targetSeat, usedAs, singleCardShaColor(card), sourceCard, shaInfo);
     }
   },
   '桃': {
@@ -2331,7 +2339,7 @@ function aoeEffect(g, me, card){
   aoeAdvance(g, mySeat); // 从下家起结算第一个目标
 }
 // playCard: 统一校验(阶段/回合、取牌、身份+独特前置、目标存活、默认非自己)、出牌入弃牌堆(noDiscard 的装备/延时锦囊除外),再执行该牌独特效果。
-function playCard(cardIdx, actionId, targetSeat, onCommitted){
+function playCard(cardIdx, actionId, targetSeat, onCommitted, extra){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     const me=g.players[mySeat], card=me.hand[cardIdx];
@@ -2366,7 +2374,7 @@ function playCard(cardIdx, actionId, targetSeat, onCommitted){
     }
     removeHandCards(g, mySeat, cardIdx);
     if(!spec.noDiscard) g.discard.push(card); // 装备牌 noDiscard:不进弃牌堆,由 effect 放进装备区
-    spec.effect(g, me, card, targetSeat);
+    spec.effect(g, me, card, targetSeat, extra);
     if(hasCap(me,'jizhi') && isTrickCardName(actionId)){
       drawN(g, mySeat, 1);
       g.log=pushLog(g.log, me.name+' 发动【集智】,摸一张牌');
@@ -2747,6 +2755,9 @@ function respondLiuli(choice, newTargetSeat){
     const {from, to, usedAs, shaColor, sourceCard}=g.pending;
     // CORE-162(issue #221):恢复这张被流离挂起的杀时,把挂起前存下的酒加成一并带回。
     const jiuBonus=!!g.pending.jiuBonus;
+    const restoredShaInfo=typeof shaInfoAfterLiuli==='function'
+      ? shaInfoAfterLiuli(g.pending)
+      : {noDistance:true, jiuBonus};
     const me=g.players[to], newTarget=g.players[newTargetSeat];
     if(!choice){
       g.log=pushLog(g.log, me.name+'：不发动【流离】');
@@ -2754,7 +2765,7 @@ function respondLiuli(choice, newTargetSeat){
       // 的 canTarget 里校验过一次攻击者→to 的距离(否则杀根本出不来),理论上重新校验也该
       // 通过——但为了和下面"真实转移"分支保持同一处理方式(不依赖"位置/装备中途没变"这个
       // 假设),同样传 {noDistance:true} 跳过 resolveShaUseNoLiuli 内部的二次距离校验。
-      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard, {noDistance:true, jiuBonus});
+      resolveShaUseNoLiuli(g, g.players[from], to, usedAs, shaColor, sourceCard, restoredShaInfo);
       return g;
     }
     if(!newTarget || !newTarget.alive || newTargetSeat===from || newTargetSeat===to || !liuliTargets(g, from, to).includes(newTargetSeat)) return g;
@@ -2778,7 +2789,7 @@ function respondLiuli(choice, newTargetSeat){
       const pendingBefore=g.pending;
       triggerHook(g,to,'onLoseEquip',{count:1});
       if(g.pending!==pendingBefore && g.pending){
-        g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard,jiuBonus};
+        g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard,jiuBonus,shaInfo:g.pending.shaInfo};
         return g;
       }
     }
@@ -2787,7 +2798,7 @@ function respondLiuli(choice, newTargetSeat){
     // 一次,resolveShaUseNoLiuli 内部默认的距离校验对象是攻击者自己,和流离的规则基准
     // 完全不是同一个人,不该在这里重新生效。传 {noDistance:true} 跳过它(和神速
     // respondShensuSha 用同一套既有模式,skills.js 那边的"无距离限制的杀")。
-    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard, {noDistance:true, jiuBonus});
+    resolveShaUseNoLiuli(g, g.players[from], newTargetSeat, usedAs, shaColor, sourceCard, restoredShaInfo);
     return g;
   });
 }
@@ -3819,7 +3830,8 @@ function resumeAfterInterrupt(g, resume, seat){
     const attacker=g.players[resume.from];
     const target=g.players[resume.newTargetSeat];
     if(attacker&&attacker.alive&&target&&target.alive){
-      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard,{noDistance:true, jiuBonus:!!resume.jiuBonus});
+      resolveShaUseNoLiuli(g,attacker,resume.newTargetSeat,resume.usedAs,resume.shaColor,resume.sourceCard,
+        typeof shaInfoAfterLiuli==='function' ? shaInfoAfterLiuli(resume) : {noDistance:true, jiuBonus:!!resume.jiuBonus});
     }else finishSingleShaTarget(g);
   } else if(resume.type==='dyingJijiu'){
     // 急救用红色装备触发失装技能后，恢复原 dying 快照，再完成这张牌的回复结算。
@@ -6766,16 +6778,22 @@ function triggerDuanbing(extraTarget) {
     const targets=[baseTarget,extraTarget];
     const order=[]; let s=mySeat;
     for(let i=0;i<g.players.length;i++){ s=nextAlive(g,s); if(targets.includes(s)) order.push(s); }
-    const shaInfo=consumeJiuShaBonus(g,me);
+    let shaInfo=consumeJiuShaBonus(g,me);
+    let sourceCard=card;
+    if(typeof applyShaPlayExtra==='function'){
+      const applied=applyShaPlayExtra(shaInfo, pending.playExtra, sourceCard);
+      shaInfo=applied.shaInfo;
+      sourceCard=applied.card;
+    }
     g.pending=null;
     g.fangtianQueue={
       kind:'duanbing',from:mySeat,targets:order,idx:0,usedAs,
-      shaColor:singleCardShaColor(card),sourceCard:card,shaInfo
+      shaColor:singleCardShaColor(sourceCard),sourceCard,shaInfo
     };
-    triggerJiangOnTarget(g,mySeat,extraTarget,'sha',isRed(card));
+    triggerJiangOnTarget(g,mySeat,extraTarget,'sha',isRed(sourceCard));
     g.log = pushLog(g.log, `${me.name} 发动【短兵】,对 ${order.map(seat=>g.players[seat].name).join(' 和 ')} 使用【杀】`);
     markSkillSound(g, '短兵');
-    resolveShaUse(g,me,order[0],usedAs,singleCardShaColor(card),card,shaInfo);
+    resolveShaUse(g,me,order[0],usedAs,singleCardShaColor(sourceCard),sourceCard,shaInfo);
     
     return g;
   });
@@ -6788,6 +6806,7 @@ function cancelDuanbing() {
       const me = g.players[mySeat];
       const baseTarget = g.pending.baseTarget;
       const card = g.pending.card;
+      const playExtra = g.pending.playExtra;
       
       g.pending = null;
       g.phase = 'play';
@@ -6795,7 +6814,14 @@ function cancelDuanbing() {
       
       // 直接结算单目标的杀
       const usedAs = isShaName(card.name) ? '出【'+card.name+'】' : '出【'+card.name+'】当【杀】';
-      resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(card), card, consumeJiuShaBonus(g, me));
+      let shaInfo=consumeJiuShaBonus(g, me);
+      let sourceCard=card;
+      if(typeof applyShaPlayExtra==='function'){
+        const applied=applyShaPlayExtra(shaInfo, playExtra, sourceCard);
+        shaInfo=applied.shaInfo;
+        sourceCard=applied.card;
+      }
+      resolveShaUse(g, me, baseTarget, usedAs, singleCardShaColor(sourceCard), sourceCard, shaInfo);
     }
     return g;
   });
