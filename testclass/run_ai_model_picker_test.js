@@ -335,22 +335,23 @@ const testCode = String.raw`
   await check('10. 点击选项不写入调用池,点确定才提交', async function(){
     delete modelListCache.groq;
     window.__fetchImpl = function(){ return jsonRes({ data: [
-      { id: 'groq/compound' }, { id: 'openai/gpt-oss-20b' } ] }); };
+      { id: 'groq/compound' }, { id: 'openai/gpt-oss-20b' }, { id: 'llama-3.1-8b-instant' } ] }); };
     aiApiKey = 'gsk_test'; aiProvider = 'groq'; aiApiModel = ''; aiApiModels = ['groq/compound'];
     showAiKeyModal();
-    await waitFor(function(){ return statusNoteText().indexOf('共 2 个模型') >= 0; }, '模型列表渲染');
+    await waitFor(function(){ return statusNoteText().indexOf('共 3 个模型') >= 0; }, '模型列表渲染');
     var btns = listButtons();
     var target = null;
-    btns.forEach(function(b){ if(b.textContent.indexOf('openai/gpt-oss-20b') >= 0) target = b; });
-    if(!target) throw new Error('应找到 openai/gpt-oss-20b 按钮');
+    btns.forEach(function(b){ if(b.textContent.indexOf('llama-3.1-8b-instant') >= 0) target = b; });
+    if(!target) throw new Error('应找到 llama-3.1-8b-instant 按钮');
     target.click();
-    if(aiApiModels.indexOf('openai/gpt-oss-20b') >= 0) throw new Error('未点确定前调用池不应含 openai/gpt-oss-20b,实际 ' + JSON.stringify(aiApiModels));
+    if(aiApiModels.indexOf('llama-3.1-8b-instant') >= 0) throw new Error('未点确定前调用池不应含 8b,实际 ' + JSON.stringify(aiApiModels));
     if(aiApiModels.indexOf('groq/compound') < 0) throw new Error('未点确定前旧池应保留 groq/compound');
     var saveBtn = document.getElementById('aiKeySaveBtn');
     if(!saveBtn) throw new Error('应有确定按钮');
     saveBtn.click();
-    if(aiApiModels.indexOf('openai/gpt-oss-20b') < 0) throw new Error('点确定后调用池应含 openai/gpt-oss-20b,实际 ' + JSON.stringify(aiApiModels));
+    if(aiApiModels.indexOf('llama-3.1-8b-instant') < 0) throw new Error('点确定后调用池应含 8b,实际 ' + JSON.stringify(aiApiModels));
     if(aiApiModels.indexOf('groq/compound') < 0) throw new Error('点确定后应保留画面上仍勾着的 groq/compound,实际 ' + JSON.stringify(aiApiModels));
+    if(aiApiModels.indexOf('openai/gpt-oss-20b') < 0) throw new Error('拉列表应自动勾上 ≥20B,实际 ' + JSON.stringify(aiApiModels));
   });
 
   await check('10b. 确定时剔除画面上没有的死模型', async function(){

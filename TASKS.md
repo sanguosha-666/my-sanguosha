@@ -4,6 +4,7 @@
 
 - [x] Phase 1/1：`modelSizeB` 从 id 抓 Nb；拉列表时并入 ≥20B；hydrate 保留 DEFAULT 或 ≥20B。compound 仍靠硬编码。cache-bust ai-bot 429。
 - 验证：model_rotation 20/20。
+- CI：picker 测「点 20B」变成取消勾选。改点 8B；确定后仍断言 20B 已自动勾。
 
 ## 2026-08-28 — 出杀预填朱雀/雌雄（一次 AI 调用）
 
