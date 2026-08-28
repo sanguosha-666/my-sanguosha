@@ -1,5 +1,10 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-28 — 按名称自动勾选 20B+ 模型
+
+- [x] Phase 1/1：`modelSizeB` 从 id 抓 Nb；拉列表时并入 ≥20B；hydrate 保留 DEFAULT 或 ≥20B。compound 仍靠硬编码。cache-bust ai-bot 429。
+- 验证：model_rotation 20/20。
+
 ## 2026-08-28 — 出杀预填朱雀/雌雄（一次 AI 调用）
 
 - [x] Phase 1/3：spike 清单。可压朱雀/雌雄；青龙/贯石/寒冰等结算后不能压。

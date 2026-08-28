@@ -173,6 +173,38 @@ async function check(name, fn){
       vm.runInContext('window.fetch = window.__origFetch2;', sandbox);
     }
   });
+
+  await check('modelSizeB: 120b/27b/31b/20b/70b,compound=0,8b=8,tri前缀', function(){
+    const sz = vm.runInContext('modelSizeB', sandbox);
+    if(typeof sz!=='function') throw new Error('缺 modelSizeB');
+    if(sz('openai/gpt-oss-120b')!==120) throw new Error('120b');
+    if(sz('qwen/qwen3.6-27b')!==27) throw new Error('27b');
+    if(sz('gemma-4-31b')!==31) throw new Error('31b');
+    if(sz('openai/gpt-oss-20b')!==20) throw new Error('20b');
+    if(sz('llama-3.3-70b-versatile')!==70) throw new Error('70b');
+    if(sz('groq/compound')!==0) throw new Error('compound 无体积');
+    if(sz('llama-3.1-8b-instant')!==8) throw new Error('8b');
+    if(sz('cerebras:gpt-oss-120b')!==120) throw new Error('tri 前缀');
+    if(sz('groq:openai/gpt-oss-safeguard-20b')!==20) throw new Error('tri groq 20b');
+  });
+
+  await check('mergeAutoSelectModels: ≥20B 并入,8b/compound 不因规则加入', function(){
+    const merge = vm.runInContext('mergeAutoSelectModels', sandbox);
+    const out = merge(['groq/compound'], ['groq/compound','llama-3.1-8b-instant','openai/gpt-oss-120b','new-70b','tiny-7b']);
+    if(out.indexOf('openai/gpt-oss-120b')<0) throw new Error('应并上 120b');
+    if(out.indexOf('new-70b')<0) throw new Error('应并上新 70b');
+    if(out.indexOf('llama-3.1-8b-instant')>=0) throw new Error('8b 不应并');
+    if(out.filter(function(x){ return x==='groq/compound'; }).length!==1) throw new Error('compound 只留原勾选一份');
+  });
+
+  await check('modelIdAllowedInSavedPool: DEFAULT 或 ≥20B 保留,8b 丢', function(){
+    const ok = vm.runInContext('modelIdAllowedInSavedPool', sandbox);
+    if(!ok('groq/compound','groq')) throw new Error('硬编码 compound 应留');
+    if(!ok('openai/gpt-oss-120b','groq')) throw new Error('DEFAULT 20B 应留');
+    if(!ok('brand-new-70b','groq')) throw new Error('非 DEFAULT 的 70B 应留');
+    if(ok('llama-3.1-8b-instant','groq')) throw new Error('8b 应丢');
+  });
+
   console.log('\n 结果: '+pass+' 通过, '+fail+' 失败');
   process.exit(fail>0?1:0);
 })();

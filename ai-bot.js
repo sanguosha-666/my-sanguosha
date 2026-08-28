@@ -82,6 +82,33 @@ const DEFAULT_TRI_MODELS = [
   'groq:openai/gpt-oss-safeguard-20b',
   'cohere:command-a-plus-05-2026',
 ];
+function modelSizeB(id){
+  const raw = String(id||'');
+  const colon = raw.indexOf(':');
+  const name = colon>=0 ? raw.slice(colon+1) : raw;
+  let best = 0;
+  const re = /(\d+(?:\.\d+)?)[bB](?![a-zA-Z])/g;
+  let m;
+  while((m = re.exec(name))){
+    const n = parseFloat(m[1]);
+    if(Number.isFinite(n) && n>best) best = n;
+  }
+  return best;
+}
+function isAutoSelectModel(id){ return modelSizeB(id) >= 20; }
+function mergeAutoSelectModels(selected, liveIds){
+  const out = Array.isArray(selected) ? selected.slice() : [];
+  (liveIds||[]).forEach(function(id){
+    if(isAutoSelectModel(id) && out.indexOf(id)<0) out.push(id);
+  });
+  return out;
+}
+function modelIdAllowedInSavedPool(id, provider){
+  const pool = currentModelPoolFor(provider);
+  if(pool && pool.indexOf(id)>=0) return true;
+  return isAutoSelectModel(id);
+}
+
 let aiApiModels = [];
 let _modelRotateIdx = 0;          // round-robin 指针
 let _modelCooldowns = {};         // modelId → retryAt(时间戳);会话内有效,不持久化
@@ -207,7 +234,7 @@ let aiTestAutopilotDisconnectRef = null;
     if(Array.isArray(aiApiModels) && aiApiModels.length){
       const pool = currentModelPoolFor(aiProvider);
       if(pool){
-        const kept = aiApiModels.filter(function(m){ return pool.indexOf(m) >= 0; });
+        const kept = aiApiModels.filter(function(m){ return modelIdAllowedInSavedPool(m, aiProvider); });
         if(kept.length !== aiApiModels.length){
           console.warn('[AI] 已忽略 ' + (aiApiModels.length - kept.length)
             + ' 个不在当前模型池中的历史选择(多为已下架模型): '
@@ -1114,6 +1141,7 @@ function showAiKeyModal(onDone){
     const isRotating = (provider==='groq' || provider==='cerebras' || provider==='tri');
     function applyList(list, fromFallback){
       liveModelIds = (list||[]).map(function(m){ return m.id; });
+      if(isRotating) pendingApiModels = mergeAutoSelectModels(pendingApiModels, liveModelIds);
       statusNote.textContent = fromFallback ? '模型列表加载失败,使用内置列表' : ('共 ' + list.length + ' 个模型')
         + (isRotating ? ';勾选项按顺序轮换使用(429自动冷却跳过),想固定单模型请用自定义输入;自定义输入会退出轮换(点勾选恢复)' : '');
       const isCustom = !!pendingApiModel && !list.some(function(m){ return m.id === pendingApiModel; });
