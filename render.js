@@ -754,41 +754,29 @@ function movieVideoKeyForMe(g, evt){
       return Math.random()<0.5 ? 'yujiKill' : 'zuociDeath';
     }
     case 'girlKill': {
-      const r=evt.result || {};
-      if(!girlOf(r.gen)) return null;
-      if(mySeat===evt.seat) return girlMainPath(r.gen, 'xiuse');      // 杀手:羞涩
-      if(typeof r.victimSeat==='number' && mySeat===r.victimSeat) return girlMainPath(r.gen, 'wumei'); // 被杀者:妩媚
-      return girlSfxPath(r.gen, ['xiuse','wumei']);                    // 其他玩家:后缀
+      const r=evt.result||{}; if(!girlOf(r.gen)) return null; const seat=evt.seat;
+      if(mySeat===evt.seat) return {path:girlMainPath(r.gen,'xiuse'), seat};
+      if(typeof r.victimSeat==='number'&&mySeat===r.victimSeat) return {path:girlMainPath(r.gen,'wumei'), seat};
+      const sp=girlSfxPath(r.gen,['xiuse','wumei']); return sp?{path:sp,seat}:null;
     }
     case 'girlDeath': {
-      const r=evt.result || {};
-      if(!girlOf(r.gen)) return null;
-      if(mySeat===evt.seat) return girlMainPath(r.gen, 'mamu');       // 死者:麻木
-      if(typeof r.killerSeat==='number' && mySeat===r.killerSeat) return girlMainPath(r.gen, 'weiju'); // 杀手:畏惧
-      return girlSfxPath(r.gen, ['mamu','weiju']);                    // 其他玩家:后缀
+      const r=evt.result||{}; if(!girlOf(r.gen)) return null; const seat=evt.seat;
+      if(mySeat===evt.seat) return {path:girlMainPath(r.gen,'mamu'), seat};
+      if(typeof r.killerSeat==='number'&&mySeat===r.killerSeat) return {path:girlMainPath(r.gen,'weiju'), seat};
+      const sp=girlSfxPath(r.gen,['mamu','weiju']); return sp?{path:sp,seat}:null;
     }
     case 'girlKillDeath': {
-      const r=evt.result || {};
-      if(!girlOf(r.killerGen) || !girlOf(r.victimGen)) return null;
-      // 杀手视角: 杀时羞涩 vs 被杀时畏惧 二选一
-      if(typeof r.killerSeat==='number' && mySeat===r.killerSeat){
-        const a=girlMainPath(r.killerGen, 'xiuse');
-        const b=girlMainPath(r.victimGen, 'weiju');
-        const arr=[a,b].filter(Boolean);
-        return arr.length ? arr[Math.floor(Math.random()*arr.length)] : null;
+      const r=evt.result||{};
+      if(!girlOf(r.killerGen)||!girlOf(r.victimGen)) return null;
+      function pick2(aPath,bPath,aSeat,bSeat){
+        const arr=[]; if(aPath)arr.push({path:aPath,seat:aSeat}); if(bPath)arr.push({path:bPath,seat:bSeat});
+        return arr.length?arr[Math.floor(Math.random()*arr.length)]:null;
       }
-      // 被杀者视角: 杀时妩媚 vs 被杀时麻木 二选一
-      if(typeof r.victimSeat==='number' && mySeat===r.victimSeat){
-        const a=girlMainPath(r.killerGen, 'wumei');
-        const b=girlMainPath(r.victimGen, 'mamu');
-        const arr=[a,b].filter(Boolean);
-        return arr.length ? arr[Math.floor(Math.random()*arr.length)] : null;
-      }
-      // 其他玩家: 杀后缀池 vs 被杀后缀池 二选一
-      const sfxKill=girlSfxPath(r.killerGen, ['xiuse','wumei']);
-      const sfxDeath=girlSfxPath(r.victimGen, ['mamu','weiju']);
-      const arr=[sfxKill,sfxDeath].filter(Boolean);
-      return arr.length ? arr[Math.floor(Math.random()*arr.length)] : null;
+      if(typeof r.killerSeat==='number'&&mySeat===r.killerSeat)
+        return pick2(girlMainPath(r.killerGen,'xiuse'), girlMainPath(r.victimGen,'weiju'), r.killerSeat, r.victimSeat);
+      if(typeof r.victimSeat==='number'&&mySeat===r.victimSeat)
+        return pick2(girlMainPath(r.killerGen,'wumei'), girlMainPath(r.victimGen,'mamu'), r.killerSeat, r.victimSeat);
+      return pick2(girlSfxPath(r.killerGen,['xiuse','wumei']), girlSfxPath(r.victimGen,['mamu','weiju']), r.killerSeat, r.victimSeat);
     }
     case 'gameOver': {
       const r=evt.result || {};
@@ -796,19 +784,21 @@ function movieVideoKeyForMe(g, evt){
       if(me && girlOf(me.general)){
         // 组队/乱斗分派：按 team / winnerSeat 判定胜负
         if(g.gameMode==='team' && typeof r.teamWin==='number'){
-          return me.team===r.teamWin ? girlMainPath(me.general,'kaixin') : girlMainPath(me.general,'beitong');
+          const p=me.team===r.teamWin ? girlMainPath(me.general,'kaixin') : girlMainPath(me.general,'beitong');
+          return {path:p, seat:mySeat};
         }
         if(g.gameMode==='ffa' && typeof r.winnerSeat==='number'){
-          return mySeat===r.winnerSeat ? girlMainPath(me.general,'kaixin') : girlMainPath(me.general,'beitong');
+          const p=mySeat===r.winnerSeat ? girlMainPath(me.general,'kaixin') : girlMainPath(me.general,'beitong');
+          return {path:p, seat:mySeat};
         }
-        if(me.role==='fan') return r.fan==='win' ? girlMainPath(me.general,'kaixin') : (r.fan==='lose' ? girlMainPath(me.general,'beitong') : null);
-        if(me.role==='zhu') return r.lord==='win' ? girlMainPath(me.general,'kaixin') : (r.lord==='lose' ? girlMainPath(me.general,'beitong') : null);
-        if(me.role==='zhong') return r.zhong==='win' ? girlMainPath(me.general,'kaixin') : (r.zhong==='lose' ? girlMainPath(me.general,'beitong') : null);
-        if(me.role==='nei') return r.nei==='win' ? girlMainPath(me.general,'kaixin') : (r.nei==='lose' ? girlMainPath(me.general,'beitong') : null);
+        if(me.role==='fan'){ if(r.fan==='win') return {path:girlMainPath(me.general,'kaixin'), seat:mySeat}; if(r.fan==='lose') return {path:girlMainPath(me.general,'beitong'), seat:mySeat}; return null; }
+        if(me.role==='zhu'){ if(r.lord==='win') return {path:girlMainPath(me.general,'kaixin'), seat:mySeat}; if(r.lord==='lose') return {path:girlMainPath(me.general,'beitong'), seat:mySeat}; return null; }
+        if(me.role==='zhong'){ if(r.zhong==='win') return {path:girlMainPath(me.general,'kaixin'), seat:mySeat}; if(r.zhong==='lose') return {path:girlMainPath(me.general,'beitong'), seat:mySeat}; return null; }
+        if(me.role==='nei'){ if(r.nei==='win') return {path:girlMainPath(me.general,'kaixin'), seat:mySeat}; if(r.nei==='lose') return {path:girlMainPath(me.general,'beitong'), seat:mySeat}; return null; }
       }
       // 旁观者:有女孩胜负 → 后缀表情(替换阵营动画);后缀池空 → 回退阵营动画
       const sfx = r.girlWin ? girlSfxPath(r.girlWin.gen,'kaixin') : (r.girlLose ? girlSfxPath(r.girlLose.gen,'beitong') : null);
-      if(sfx) return sfx;
+      if(sfx){ const girlSeat=r.girlWin?r.girlWin.seat:(r.girlLose?r.girlLose.seat:null); return {path:sfx, seat:(typeof girlSeat==='number'?girlSeat:null)}; }
       // 左慈次优先:我是左慈且左慈所在阵营输了 → zuoci1（组队/乱斗也生效）
       if(me && me.general==='zuoci' && r.zuociLose) return 'zuociLose';
       // 其次阵营统一动画（仅身份局）；组队空池回退复用 fanWin 或静默，乱斗回退静默
@@ -832,6 +822,16 @@ function movieVideoKeyForMe(g, evt){
 function maybePlayMovieFx(g){
   const queue = Array.isArray(g.movieFxQueue) ? g.movieFxQueue : [];
   const single = g.lastMovieFx;
+  function dispatchMovie(out){
+    if(!out) return;
+    if(typeof out==='string'){ if(typeof triggerMovieFx==='function') triggerMovieFx(out); return; }
+    // 三姐妹 {path, seat}
+    if(out.path && Number.isInteger(out.seat) && typeof triggerGirlFx==='function'){
+      triggerGirlFx({path:out.path, seat:out.seat, selfSeat:mySeat});
+    } else if(out.path && typeof triggerMovieFx==='function'){
+      triggerMovieFx(out.path); // 无有效座位/无头像层 → 回退全屏
+    }
+  }
   // 首次进房：以队列长度为游标跳过历史（不整批吞掉首条后的增量），同时同步单槽 seq。
   if(lastPlayedMovieFxLen===undefined){
     lastPlayedMovieFxLen = queue.length;
@@ -845,8 +845,7 @@ function maybePlayMovieFx(g){
   while(lastPlayedMovieFxLen < queue.length){
     const evt = queue[lastPlayedMovieFxLen];
     if(evt && Number.isInteger(evt.seq)){
-      const key=movieVideoKeyForMe(g, evt);
-      if(key && typeof triggerMovieFx==='function') triggerMovieFx(key);
+      dispatchMovie(movieVideoKeyForMe(g, evt));
     }
     lastPlayedMovieFxLen++;
     // 同步单槽 seq 为队尾，避免兼容分支重复播
@@ -858,8 +857,7 @@ function maybePlayMovieFx(g){
     if(single.seq===lastMovieFxSeq) return;
     const tailSeq = queue.length ? queue[queue.length-1].seq : null;
     if(tailSeq !== single.seq){
-      const key=movieVideoKeyForMe(g, single);
-      if(key && typeof triggerMovieFx==='function') triggerMovieFx(key);
+      dispatchMovie(movieVideoKeyForMe(g, single));
     }
     lastMovieFxSeq=single.seq;
     // 若单槽 seq 超前于队列长度，同步游标防止下次 while 重播

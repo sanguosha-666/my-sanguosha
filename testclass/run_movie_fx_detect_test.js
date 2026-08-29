@@ -379,6 +379,8 @@ function FR(code){return vm.runInContext(code,fsandbox);}
 fsandbox.__mvFired=[];
 FR('window.triggerMovieFx=function(key){ global.__mvFired.push(key); };');
 FR('triggerMovieFx=window.triggerMovieFx;');
+FR('window.triggerGirlFx=function(o){ global.__mvFired.push(o); };');
+FR('triggerGirlFx=window.triggerGirlFx;');
 
 // 一次性跑"基线 + 当前事件",返回触发的 key 数组
 function fire(evt, mySeat, players){
@@ -456,56 +458,52 @@ check('gameOver：内奸胜→neiWin / 内奸输不播', function(){
 
 console.log('\n== 前端层：大乔/小乔/貂蝉 表情分派 ==\n');
 
-check('girlKill：杀手播羞涩无后缀 / 被杀者播妩媚无后缀 / 他人播后缀', function(){
+check('girlKill：杀手/被杀/他人各播自己视角, 全部锚定杀手女孩座位', function(){
   const players=[{alive:true},{alive:true},{alive:true}];
-  assert.strictEqual(S(fire({seq:1,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},0,players)), S(['assets/video/daqiao-xiuse.mp4']), '杀手本人');
-  assert.strictEqual(S(fire({seq:2,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},1,players)), S(['assets/video/daqiao-wumei.mp4']), '被杀者');
+  assert.strictEqual(S(fire({seq:1,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},0,players)), S([{path:'assets/video/daqiao-xiuse.mp4',seat:0,selfSeat:0}]), '杀手本人');
+  assert.strictEqual(S(fire({seq:2,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},1,players)), S([{path:'assets/video/daqiao-wumei.mp4',seat:0,selfSeat:1}]), '被杀者(锚点仍是杀手女孩座位)');
   const other=fire({seq:3,kind:'girlKill',seat:0,result:{gen:'daqiao',victimSeat:1}},2,players);
-  const pool=['assets/video/daqiao-xiuse01.mp4','assets/video/daqiao-xiuse02.mp4','assets/video/daqiao-xiuse03.mp4'];
-  assert.ok(pool.indexOf(other[0])>=0, '他人应播后缀羞涩(daqiao 妩媚无后缀),实际 '+S(other));
+  const pool=['assets/video/daqiao-xiuse01.mp4','assets/video/daqiao-xiuse02.mp4','assets/video/daqiao-xiuse03.mp4'].map(p=>({path:p,seat:0}));
+  const o=other[0]; assert.ok(o && pool.some(function(p){return p.path===o.path&&p.seat===o.seat;}) && o.selfSeat===2, '他人应播后缀且锚点=女孩座位0, 实际 '+S(other));
 });
 
-check('girlDeath：被杀者播麻木 / 杀手播畏惧 / 他人播后缀', function(){
+check('girlDeath：各视角锚定死者女孩座位(evt.seat)', function(){
   const players=[{alive:true},{alive:true},{alive:true}];
-  assert.strictEqual(S(fire({seq:1,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},0,players)), S(['assets/video/xiaoqiao-mamu.mp4']), '被杀者本人');
-  assert.strictEqual(S(fire({seq:2,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},1,players)), S(['assets/video/xiaoqiao-weiju.mp4']), '杀手');
+  assert.strictEqual(S(fire({seq:1,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},0,players)), S([{path:'assets/video/xiaoqiao-mamu.mp4',seat:0,selfSeat:0}]));
+  assert.strictEqual(S(fire({seq:2,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},1,players)), S([{path:'assets/video/xiaoqiao-weiju.mp4',seat:0,selfSeat:1}]));
   const other=fire({seq:3,kind:'girlDeath',seat:0,result:{gen:'xiaoqiao',killerSeat:1}},2,players);
-  const pool=['assets/video/xiaoqiao-mamu01.mp4','assets/video/xiaoqiao-weiju01.mp4','assets/video/xiaoqiao-weiju02.mp4'];
-  assert.ok(pool.indexOf(other[0])>=0, '他人应播后缀,实际 '+S(other));
+  const pool=['assets/video/xiaoqiao-mamu01.mp4','assets/video/xiaoqiao-weiju01.mp4','assets/video/xiaoqiao-weiju02.mp4'].map(p=>({path:p,seat:0}));
+  const o=other[0]; assert.ok(o && pool.some(function(p){return p.path===o.path&&p.seat===o.seat;}) && o.selfSeat===2, '他人应播后缀且锚点=女孩座位0, 实际 '+S(other));
 });
 
-check('girlKillDeath：三人互杀时杀与被杀视频随机', function(){
+check('girlKillDeath：三人互杀时杀与被杀视频随机, 锚点随选中女孩', function(){
   const players=[{alive:true},{alive:true},{alive:true}];
-  const evt={seq:1,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}};
-  // 杀手视角: 杀时羞涩(daqiao-xiuse) vs 被杀时畏惧(diaochan-weiju) 二选一
   const killerSeen=new Set();
-  for(let i=0;i<20;i++) killerSeen.add(fire({seq:10+i,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}},1,players)[0]);
-  assert.ok(killerSeen.has('assets/video/daqiao-xiuse.mp4'), '杀手应能看到 daqiao-xiuse');
-  assert.ok(killerSeen.has('assets/video/diaochan-weiju.mp4'), '杀手应能看到 diaochan-weiju');
-  // 被杀者视角: 杀时妩媚(daqiao-wumei) vs 被杀时麻木(diaochan-mamu) 二选一
+  for(let i=0;i<40;i++){ const o=fire({seq:10+i,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao',victimGen:'diaochan',killerSeat:1,victimSeat:0}},1,players)[0]; if(o){ killerSeen.add(o.path+'@'+o.seat); if(o.path.indexOf('daqiao')>=0) assert.strictEqual(o.seat,1,'daqiao视频应锚杀手座位1'); if(o.path.indexOf('diaochan')>=0) assert.strictEqual(o.seat,0,'diaochan视频应锚被杀座位0'); } }
+  assert.ok(killerSeen.has('assets/video/daqiao-xiuse.mp4@1'), '杀手应能看到 daqiao-xiuse@1');
+  assert.ok(killerSeen.has('assets/video/diaochan-weiju.mp4@0'), '杀手应能看到 diaochan-weiju@0');
   const victimSeen=new Set();
-  for(let i=0;i<20;i++) victimSeen.add(fire({seq:30+i,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}},0,players)[0]);
-  assert.ok(victimSeen.has('assets/video/daqiao-wumei.mp4'), '被杀者应能看到 daqiao-wumei');
-  assert.ok(victimSeen.has('assets/video/diaochan-mamu.mp4'), '被杀者应能看到 diaochan-mamu');
-  // 其他玩家: 后缀池随机(杀后缀 vs 被杀后缀 二选一)
-  const other=fire({seq:100,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao', victimGen:'diaochan', killerSeat:1, victimSeat:0}},2,players);
-  const killSfx=['assets/video/daqiao-xiuse01.mp4','assets/video/daqiao-xiuse02.mp4','assets/video/daqiao-xiuse03.mp4'];
-  const deathSfx=['assets/video/diaochan-mamu01.mp4','assets/video/diaochan-mamu02.mp4','assets/video/diaochan-mamu03.mp4','assets/video/diaochan-weiju01.mp4'];
+  for(let i=0;i<40;i++){ const o=fire({seq:60+i,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao',victimGen:'diaochan',killerSeat:1,victimSeat:0}},0,players)[0]; if(o){ victimSeen.add(o.path+'@'+o.seat); if(o.path.indexOf('daqiao')>=0) assert.strictEqual(o.seat,1,'daqiao视频应锚杀手座位1'); if(o.path.indexOf('diaochan')>=0) assert.strictEqual(o.seat,0,'diaochan视频应锚被杀座位0'); } }
+  assert.ok(victimSeen.has('assets/video/daqiao-wumei.mp4@1'), '被杀者应能看到 daqiao-wumei@1');
+  assert.ok(victimSeen.has('assets/video/diaochan-mamu.mp4@0'), '被杀者应能看到 diaochan-mamu@0');
+  const other=fire({seq:100,kind:'girlKillDeath',seat:0,result:{killerGen:'daqiao',victimGen:'diaochan',killerSeat:1,victimSeat:0}},2,players);
+  const killSfx=['assets/video/daqiao-xiuse01.mp4','assets/video/daqiao-xiuse02.mp4','assets/video/daqiao-xiuse03.mp4'].map(p=>({path:p,seat:1}));
+  const deathSfx=['assets/video/diaochan-mamu01.mp4','assets/video/diaochan-mamu02.mp4','assets/video/diaochan-mamu03.mp4','assets/video/diaochan-weiju01.mp4'].map(p=>({path:p,seat:0}));
   const pool=killSfx.concat(deathSfx);
-  assert.ok(pool.indexOf(other[0])>=0, '他人应播后缀(杀或被杀),实际 '+S(other));
+  const o2=other[0]; assert.ok(o2 && pool.some(function(p){return p.path===o2.path&&p.seat===o2.seat;}) && o2.selfSeat===2, '他人应播后缀且锚点随女孩,实际 '+S(other));
 });
 
-check('gameOver：三人胜利播开心 / 失败播悲痛(无后缀)', function(){
+check('gameOver：三人胜利播开心 / 失败播悲痛(锚自己座位)', function(){
   const win={fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlWin:{seat:0,gen:'diaochan'}};
-  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:win},0,[{alive:true,role:'fan',general:'diaochan'}])), S(['assets/video/diaochan-kaixin.mp4']), '女孩胜利');
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:win},0,[{alive:true,role:'fan',general:'diaochan'}])), S([{path:'assets/video/diaochan-kaixin.mp4',seat:0,selfSeat:0}]), '女孩胜利锚自己座位');
   const lose={fan:'lose',lord:'win',zhong:'win',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'diaochan'}};
-  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose},0,[{alive:true,role:'fan',general:'diaochan'}])), S(['assets/video/diaochan-beitong.mp4']), '女孩失败');
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose},0,[{alive:true,role:'fan',general:'diaochan'}])), S([{path:'assets/video/diaochan-beitong.mp4',seat:0,selfSeat:0}]), '女孩失败锚自己座位');
 });
 
-check('gameOver：旁观者看后缀表情(替换阵营动画);无后缀池时回退阵营动画', function(){
+check('gameOver：旁观者看后缀表情锚女孩座位;无后缀池时回退阵营动画', function(){
   const win={fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlWin:{seat:0,gen:'daqiao'}};
   const other=fire({seq:1,kind:'gameOver',seat:null,result:win},1,[{alive:true,role:'fan',general:'daqiao'},{alive:true,role:'zhong'}]);
-  assert.ok(['assets/video/daqiao-kaixin01.mp4'].indexOf(other[0])>=0, '旁观者应播后缀开心,实际 '+S(other));
+  assert.ok(S(other)===S([{path:'assets/video/daqiao-kaixin01.mp4',seat:0,selfSeat:1}]), '旁观者应播后缀开心且锚点=女孩座位0,实际 '+S(other));
   // xiaoqiao 悲痛无后缀 → 旁观者回退阵营动画(忠臣赢不播)
   const lose={fan:'lose',lord:'win',zhong:'win',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'xiaoqiao'}};
   assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose},1,[{alive:true,role:'fan',general:'xiaoqiao'},{alive:true,role:'zhong'}])), S([]), '无后缀池回退阵营(忠臣赢不播)');
