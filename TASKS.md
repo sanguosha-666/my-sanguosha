@@ -1,5 +1,14 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-30 — 三姐妹表情动画头像化播放（用户功能请求，非 issue）
+
+- 需求：daqiao/xiaoqiao/diaochan 表情动画桌面播在女孩头像上（他人=放大悬浮、自己=头像框原尺寸），手机=头像 FLIP 放大到自适应全屏再播、播完缩回，平板维持全屏不变。
+- [x] Phase 1/3：brainstorming + 设计定稿（方案 A 锚定内容所属女孩座位；独立 `#girlFxVideo` 层），spec 见 `docs/superpowers/specs/2026-08-30-girl-fx-avatar-playback-design.md`
+- [ ] Phase 2/3：实现（index.html CSS/元素 + game-bg.js `triggerGirlFx` + render.js 返回 `{key,seat}`）
+- [ ] Phase 3/3：测试更新（run_movie_fx_detect_test 锚点断言 + 新层回退测试）+ 全量回归
+- 关键成果：设备口径复用 isPhoneLayout/(hover+fine)；legacy 全屏路径零改动；回退=现有全屏。
+- 下一步：writing-plans 出实现计划。
+
 ## 2026-08-28 — 按名称自动勾选 20B+ 模型
 
 - [x] Phase 1/1：`modelSizeB` 从 id 抓 Nb；拉列表时并入 ≥20B；hydrate 保留 DEFAULT 或 ≥20B。compound 仍靠硬编码。cache-bust ai-bot 429。
