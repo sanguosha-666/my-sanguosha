@@ -471,6 +471,57 @@ function triggerMovieFx(kind){
   bindFxVideo(v); // 绑定 ended/error,播放完/失败即隐藏恢复
 }
 
+// ============ 三姐妹表情动画:头像化播放层(纯判定/几何) ============
+// 触发由 render.js maybePlayMovieFx 在算好"要播的具体视频路径 + 锚点女孩座位"后调用
+// triggerGirlFx({path, seat, selfSeat})。设备三分支(口径复用既有断点,见 isPhoneLayout 注释):
+//   手机  → 头像矩形 FLIP 放大到"按视频真实比例的最大居中盒"(自适应全屏), 播完缩回原位;
+//   桌面  → 锚定女孩座位头像: 自己座位=原尺寸贴合(头像活起来), 他人座位=1.8x 放大悬浮;
+//   平板/回退 → 转调 triggerMovieFx 走既有全屏 #movieFxVideo, 零改动。
+// 座位不可见(找不到/可见面积<50%/<2px)一律回退全屏, 不静默丢动画。
+function girlFxComputeMode(){
+  if(typeof window==='undefined') return 'fullscreen';
+  if(typeof isPhoneLayout==='function' && isPhoneLayout()) return 'phone';
+  if(typeof window.matchMedia==='function' &&
+     window.matchMedia('(hover:hover) and (pointer:fine)').matches) return 'desktop';
+  return 'fullscreen'; // 平板, 或无 matchMedia 的旧环境: 安全回退现状全屏
+}
+function girlFxDecide(anchorSeat, selfSeat){
+  const mode=girlFxComputeMode();
+  if(mode!=='desktop') return mode==='phone' ? 'phone' : 'fullscreen';
+  return anchorSeat===selfSeat ? 'desktop-self' : 'desktop-other';
+}
+// anchor: 头像 getBoundingClientRect(视口坐标); vw/vh: 视口; aspect: videoWidth/videoHeight(兜底 3:4=0.75)
+function girlFxTargetBox(mode, anchor, vw, vh, aspect){
+  if(mode==='fullscreen' || !anchor) return null;
+  const a = (typeof aspect==='number' && aspect>0) ? aspect : 0.75;
+  if(mode==='desktop-self') return {left:anchor.left, top:anchor.top, width:anchor.width, height:anchor.height};
+  if(mode==='desktop-other'){
+    let w=anchor.width*1.8, h=anchor.height*1.8;
+    if(w>vw){ h*=vw/w; w=vw; }
+    if(h>vh){ w*=vh/h; h=vh; }
+    const cx=anchor.left+anchor.width/2, cy=anchor.top+anchor.height/2;
+    return {left:Math.max(0,Math.min(cx-w/2, vw-w)), top:Math.max(0,Math.min(cy-h/2, vh-h)), width:w, height:h};
+  }
+  // phone: 保持视频比例的最大居中盒(横屏下通常高撑满、左右黑边)
+  let h=vh, w=h*a;
+  if(w>vw){ w=vw; h=w/a; }
+  return {left:(vw-w)/2, top:(vh-h)/2, width:w, height:h};
+}
+// 解析锚点头像矩形 + 可见性阈值; 不可见返回 null(调用方回退全屏)
+function girlFxAnchorRect(seat){
+  if(typeof document==='undefined') return null;
+  var art=document.querySelector('.seat[data-seat="'+seat+'"] .seat-art');
+  if(!art || typeof art.getBoundingClientRect!=='function') return null;
+  var r=art.getBoundingClientRect();
+  if(!r || r.width<2 || r.height<2) return null;
+  var vw=(typeof window!=='undefined'&&window.innerWidth)||0;
+  var vh=(typeof window!=='undefined'&&window.innerHeight)||0;
+  var ix=Math.max(0, Math.min(r.right,vw)-Math.max(r.left,0));
+  var iy=Math.max(0, Math.min(r.bottom,vh)-Math.max(r.top,0));
+  if(vw&&vh && ix*iy < r.width*r.height*0.5) return null; // 可见面积<50%
+  return {left:r.left, top:r.top, width:r.width, height:r.height};
+}
+
 function triggerDeathFx(kind){
   if(kind !== 'self') return; // 他人死亡:无特效
   if(typeof document === 'undefined') return;
