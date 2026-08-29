@@ -85,5 +85,24 @@ check('girlFxTargetBox: fullscreen/无锚点 返回 null', ()=>{
   assert.strictEqual(R_phone('girlFxTargetBox("phone", null, 844,390, 0.75)'), null);
 });
 
+check('triggerGirlFx: 平板 → 转调 triggerMovieFx, #girlFxVideo 不动', ()=>{
+  let movieCalls=[], girlShown=false;
+  const run=R_tablet;
+  run(`window.triggerMovieFx=function(k){ global.__m=(global.__m||[]).concat(k); };`);
+  run(`triggerMovieFx=window.triggerMovieFx;`);
+  run(`__girlVideoShown=false;`);
+  run(`document.getElementById=function(id){ return id==='girlFxVideo' ? {style:{},classList:{add(){},remove(){}}, load(){},play(){return{catch(){}}},pause(){},removeAttribute(){}} : null; };`);
+  run(`triggerGirlFx({path:'assets/video/daqiao-xiuse.mp4', seat:0, selfSeat:1});`);
+  assert.ok(run(`(global.__m||[]).indexOf('assets/video/daqiao-xiuse.mp4')>=0`), '应回退到 triggerMovieFx');
+});
+check('triggerGirlFx: 桌面但座位不可见(girlFxAnchorRect 返回 null)→ 回退全屏', ()=>{
+  const run=R_desktop;
+  run(`window.triggerMovieFx=function(k){ global.__m=(global.__m||[]).concat(k); }; triggerMovieFx=window.triggerMovieFx;`);
+  run(`girlFxAnchorRect=function(){ return null; };`);
+  run(`document.getElementById=function(){ return {style:{},classList:{add(){},remove(){}}, load(){},play(){return{catch(){}}},pause(){},removeAttribute(){},addEventListener(){}}; };`);
+  run(`triggerGirlFx({path:'assets/video/xiaoqiao-mamu.mp4', seat:3, selfSeat:0});`);
+  assert.ok(run(`(global.__m||[]).indexOf('assets/video/xiaoqiao-mamu.mp4')>=0`));
+});
+
 console.log('\ngirl_fx_layer: '+passed+' passed, '+failed+' failed');
 process.exit(failed?1:0);

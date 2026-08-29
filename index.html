@@ -2689,6 +2689,13 @@
   .bg-video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none;background:transparent;}
   /* 特效视频：全视口背景层 + contain 留黑边，不 cover 裁切、不 stretch；z-index:1500 盖过座位卡 */
   .fx-video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:1500;pointer-events:none;}
+  /* 三姐妹表情头像化层:默认隐藏;FLIP 靠改 left/top/width/height 触发 transition。
+     cover 裁切贴合头像观感,圆角与 .seat-art 一致(见 death-shatter-fx .seat-art)。 */
+  .girl-fx-video{position:fixed;inset:auto;width:0;height:0;visibility:hidden;
+    object-fit:cover;background:#15120f;border-radius:10px;z-index:1501;pointer-events:none;
+    transition:left .45s ease,top .45s ease,width .45s ease,height .45s ease,box-shadow .3s ease,object-fit .01s;}
+  .girl-fx-video.girl-fx-full{object-fit:contain;background:#000;border-radius:0;} /* 手机自适应全屏:保比例含黑边 */
+  .girl-fx-video.girl-fx-float{box-shadow:0 8px 40px rgba(0,0,0,.6);} /* 桌面他人悬浮抬升 */
   .bg-veil{position:fixed;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg, rgba(26,23,20,.40) 0%, rgba(26,23,20,.62) 100%);}
   .wrap{position:relative;z-index:2;}
   #gameBgCanvas{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;}
@@ -2799,6 +2806,7 @@
     <video id="deathFxVideo" class="fx-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
     <video id="lightningFxVideo" class="fx-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
     <video id="movieFxVideo" class="fx-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
+    <video id="girlFxVideo" class="girl-fx-video" muted playsinline preload="auto" aria-hidden="true" tabindex="-1"></video>
     <!-- #oppTopRow 只在宽屏桌面布局(.desktop-layout)下才会被使用(装zone==='top'的座位卡),
          窄屏下永远是空的、没有任何CSS属性的占位元素(不挂.opp-row这类会带来无条件基础样式
          的class)——render.js只有desktopLayoutActive为真时才会把座位分流进来,窄屏下
@@ -2883,7 +2891,7 @@
 <script src="render-hand.js?v=413"></script>
 <script src="render-controls.js?v=442"></script>
 <script src="render-log.js?v=415"></script>
-<script src="game-bg.js?v=31"></script>
+<script src="game-bg.js?v=32"></script>
 <script src="pwa.js?v=17"></script>
 </body>
 </html>

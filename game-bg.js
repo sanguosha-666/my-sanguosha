@@ -307,7 +307,7 @@ function stopGameBg(){
   if(bgCtx && bgCanvas) bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
   // 回大厅兜底:若全屏特效动画仍在播放/显示,立即停止并隐藏,恢复默认背景
   if(typeof document !== 'undefined'){
-    ['deathFxVideo','lightningFxVideo','movieFxVideo'].forEach(function(id){
+    ['deathFxVideo','lightningFxVideo','movieFxVideo','girlFxVideo'].forEach(function(id){
       var dv = document.getElementById(id);
       if(dv) hideFxVideo(dv);
     });
@@ -520,6 +520,73 @@ function girlFxAnchorRect(seat){
   var iy=Math.max(0, Math.min(r.bottom,vh)-Math.max(r.top,0));
   if(vw&&vh && ix*iy < r.width*r.height*0.5) return null; // 可见面积<50%
   return {left:r.left, top:r.top, width:r.width, height:r.height};
+}
+function girlFxPlace(v, box){
+  v.style.left=box.left+'px'; v.style.top=box.top+'px';
+  v.style.width=box.width+'px'; v.style.height=box.height+'px';
+}
+function triggerGirlFx(opts){
+  if(typeof document==='undefined' || !opts || !opts.path) return;
+  var v=document.getElementById('girlFxVideo');
+  var mode=girlFxDecide(opts.seat, opts.selfSeat);
+  var anchor=(mode==='fullscreen') ? null : girlFxAnchorRect(opts.seat);
+  if(mode==='fullscreen' || !anchor || !v || typeof v.style==='undefined'){
+    triggerMovieFx(opts.path); return; // 平板/座位不可见/缺元素 → 现状全屏
+  }
+  applyFxAudio(v);
+  v.classList.remove('girl-fx-full');
+  v.classList.remove('girl-fx-float');
+  girlFxPlace(v, anchor);              // 起点=头像矩形
+  v.style.visibility='visible';
+  v.src=opts.path;
+  if(typeof v.load==='function') v.load();
+  v._girlAnchor=anchor; v._girlMode=mode;
+  var vw=(typeof window!=='undefined'&&window.innerWidth)||document.documentElement.clientWidth;
+  var vh=(typeof window!=='undefined'&&window.innerHeight)||document.documentElement.clientHeight;
+  // 下一帧再设目标盒, 让起始 rect 先提交, transition 才会播放(FLIP 关键两帧)
+  function goTarget(){
+    var aspect=(v.videoWidth&&v.videoHeight)?(v.videoWidth/v.videoHeight):0.75;
+    var box=girlFxTargetBox(mode, anchor, vw, vh, aspect);
+    if(mode==='phone') v.classList.add('girl-fx-full');
+    if(mode==='desktop-other') v.classList.add('girl-fx-float');
+    girlFxPlace(v, box);
+  }
+  if(typeof requestAnimationFrame==='function') requestAnimationFrame(function(){ requestAnimationFrame(goTarget); });
+  else goTarget();
+  bindGirlFx(v);
+  var p=v.play();
+  if(p&&typeof p.catch==='function') p.catch(function(){ girlFxEnd(v, true); }); // 起播失败静默降级隐藏(同现有 fx 惯例)
+}
+function bindGirlFx(v){
+  if(v.__girlBound) return;
+  v.__girlBound=true;
+  v.addEventListener('ended', function(){ girlFxEnd(v, false); });
+  v.addEventListener('error', function(){ girlFxEnd(v, true); });
+}
+function girlFxEnd(v, silent){
+  if(typeof v.pause==='function') v.pause();
+  v.classList.remove('girl-fx-full');
+  v.classList.remove('girl-fx-float');
+  if(silent){ hideFxVideo(v); return; }
+  var a=v._girlAnchor;
+  if(a) girlFxPlace(v, a); // 缩回头像原位(desktop-self 本就在位, 等价淡出前置)
+  setTimeout(function(){ hideFxVideo(v); }, 480); // 略大于 450ms transition, 等缩回动画走完再释放
+}
+// 播放中尺寸/方向变化: 重算目标盒(desktop-self 贴新头像位; phone/other 重居中)
+function girlFxReflow(){
+  if(typeof document==='undefined') return;
+  var v=document.getElementById('girlFxVideo');
+  if(!v || v.style.visibility!=='visible' || !v._girlMode) return;
+  var anchor=v._girlAnchor;
+  if(!anchor) return;
+  var vw=(typeof window!=='undefined'&&window.innerWidth)||0;
+  var vh=(typeof window!=='undefined'&&window.innerHeight)||0;
+  var aspect=(v.videoWidth&&v.videoHeight)?(v.videoWidth/v.videoHeight):0.75;
+  girlFxPlace(v, girlFxTargetBox(v._girlMode, anchor, vw, vh, aspect));
+}
+if(typeof window!=='undefined'){
+  window.addEventListener('resize', girlFxReflow);
+  window.addEventListener('orientationchange', girlFxReflow);
 }
 
 function triggerDeathFx(kind){
