@@ -3,11 +3,11 @@
 ## 2026-08-30 — 三姐妹表情动画头像化播放（用户功能请求，非 issue）
 
 - 需求：daqiao/xiaoqiao/diaochan 表情动画桌面播在女孩头像上（他人=放大悬浮、自己=头像框原尺寸），手机=头像 FLIP 放大到自适应全屏再播、播完缩回，平板维持全屏不变。
-- [x] Phase 1/3：brainstorming + 设计定稿（方案 A 锚定内容所属女孩座位；独立 `#girlFxVideo` 层），spec 见 `docs/superpowers/specs/2026-08-30-girl-fx-avatar-playback-design.md`
-- [ ] Phase 2/3：实现（index.html CSS/元素 + game-bg.js `triggerGirlFx` + render.js 返回 `{key,seat}`）
-- [ ] Phase 3/3：测试更新（run_movie_fx_detect_test 锚点断言 + 新层回退测试）+ 全量回归
-- 关键成果：设备口径复用 isPhoneLayout/(hover+fine)；legacy 全屏路径零改动；回退=现有全屏。
-- 下一步：writing-plans 出实现计划。
+- [x] Phase 1/3：brainstorming + 设计定稿（方案 A 锚定内容所属女孩座位；独立 `#girlFxVideo` 层），spec 见 `docs/superpowers/specs/2026-08-30-girl-fx-avatar-playback-design.md`；计划见 `docs/superpowers/plans/2026-08-30-girl-fx-avatar-playback.md`
+- [x] Phase 2/3：实现完成（`ffa9704..90a7004` 4 提交）——game-bg.js 纯函数+`triggerGirlFx`（含世代令牌修覆盖竞态）、index.html `#girlFxVideo`/CSS、render.js 三姐妹返回 `{path,seat}` 分派。每任务过 oracle 审查（Task2 一轮修复）。
+- [x] Phase 3/3：测试更新 + 全量回归 `run_all_tests.js` 172/172 绿（首跑 run_bot_observability_test 负载偶发失败，单跑 11/11、复跑全绿）。
+- 待办：真机三设备手工核验（桌面头像悬浮/自尺寸、手机 FLIP 放大缩回、平板全屏不变 + legacy 动画不回归），清单见计划 Task 4。
+- 关键成果：设备口径复用 isPhoneLayout/(hover+fine)；legacy 全屏路径零改动；座位不可见回退现有全屏。
 
 ## 2026-08-28 — 按名称自动勾选 20B+ 模型
 
