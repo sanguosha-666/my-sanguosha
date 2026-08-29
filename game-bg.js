@@ -533,6 +533,10 @@ function triggerGirlFx(opts){
   if(mode==='fullscreen' || !anchor || !v || typeof v.style==='undefined'){
     triggerMovieFx(opts.path); return; // 平板/座位不可见/缺元素 → 现状全屏
   }
+  // 【为什么需要世代令牌】#girlFxVideo 是单例,旧触发的 play() promise 可能在新触发已设新 src/load 后才 AbortError reject,
+  // 或旧触发 ended 后的 480ms 缩回 timer 在新动画开播后才到点;两者都会静默杀掉新动画。世代令牌让过期回调自检失效。
+  v._girlEpoch=(v._girlEpoch||0)+1;
+  var epoch=v._girlEpoch;
   applyFxAudio(v);
   v.classList.remove('girl-fx-full');
   v.classList.remove('girl-fx-float');
@@ -555,7 +559,7 @@ function triggerGirlFx(opts){
   else goTarget();
   bindGirlFx(v);
   var p=v.play();
-  if(p&&typeof p.catch==='function') p.catch(function(){ girlFxEnd(v, true); }); // 起播失败静默降级隐藏(同现有 fx 惯例)
+  if(p&&typeof p.catch==='function') p.catch(function(){ if(v._girlEpoch!==epoch) return; girlFxEnd(v, true); }); // 起播失败静默降级隐藏(同现有 fx 惯例);过期世代不处理
 }
 function bindGirlFx(v){
   if(v.__girlBound) return;
@@ -567,12 +571,19 @@ function girlFxEnd(v, silent){
   if(typeof v.pause==='function') v.pause();
   v.classList.remove('girl-fx-full');
   v.classList.remove('girl-fx-float');
+  // 进入结束流程即清 _girlMode, 防 480ms 缩回窗口内 resize 触发 girlFxReflow 把元素弹回目标盒
+  var curMode=v._girlMode;
+  var curEpoch=v._girlEpoch;
+  v._girlMode=null;
   if(silent){ hideFxVideo(v); return; }
   var a=v._girlAnchor;
   if(a) girlFxPlace(v, a); // 缩回头像原位(desktop-self 本就在位, 等价淡出前置)
-  setTimeout(function(){ hideFxVideo(v); }, 480); // 略大于 450ms transition, 等缩回动画走完再释放
+  setTimeout(function(){
+    if(curEpoch!=null && v._girlEpoch!==curEpoch) return; // 已被新触发覆盖,不再隐藏
+    hideFxVideo(v);
+  }, 480); // 略大于 450ms transition, 等缩回动画走完再释放
 }
-// 播放中尺寸/方向变化: 重算目标盒(desktop-self 贴新头像位; phone/other 重居中)
+// 播放中尺寸/方向变化: 重算目标盒(贴缓存锚点位（放大期间座位视为不动）; phone/other 重居中)
 function girlFxReflow(){
   if(typeof document==='undefined') return;
   var v=document.getElementById('girlFxVideo');

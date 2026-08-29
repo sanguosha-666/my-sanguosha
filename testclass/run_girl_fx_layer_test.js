@@ -86,11 +86,9 @@ check('girlFxTargetBox: fullscreen/无锚点 返回 null', ()=>{
 });
 
 check('triggerGirlFx: 平板 → 转调 triggerMovieFx, #girlFxVideo 不动', ()=>{
-  let movieCalls=[], girlShown=false;
   const run=R_tablet;
   run(`window.triggerMovieFx=function(k){ global.__m=(global.__m||[]).concat(k); };`);
   run(`triggerMovieFx=window.triggerMovieFx;`);
-  run(`__girlVideoShown=false;`);
   run(`document.getElementById=function(id){ return id==='girlFxVideo' ? {style:{},classList:{add(){},remove(){}}, load(){},play(){return{catch(){}}},pause(){},removeAttribute(){}} : null; };`);
   run(`triggerGirlFx({path:'assets/video/daqiao-xiuse.mp4', seat:0, selfSeat:1});`);
   assert.ok(run(`(global.__m||[]).indexOf('assets/video/daqiao-xiuse.mp4')>=0`), '应回退到 triggerMovieFx');
@@ -102,6 +100,67 @@ check('triggerGirlFx: 桌面但座位不可见(girlFxAnchorRect 返回 null)→ 
   run(`document.getElementById=function(){ return {style:{},classList:{add(){},remove(){}}, load(){},play(){return{catch(){}}},pause(){},removeAttribute(){},addEventListener(){}}; };`);
   run(`triggerGirlFx({path:'assets/video/xiaoqiao-mamu.mp4', seat:3, selfSeat:0});`);
   assert.ok(run(`(global.__m||[]).indexOf('assets/video/xiaoqiao-mamu.mp4')>=0`));
+});
+check('girlFxAnchorRect: 正常头像矩形返回原值', ()=>{
+  const run=loadGameBg('desktop');
+  run(`document.querySelector=function(sel){ if(sel==='.seat[data-seat="2"] .seat-art') return { getBoundingClientRect(){ return {left:10,top:20,width:100,height:133,right:110,bottom:153}; } }; return null; };`);
+  run(`window.innerWidth=1400; window.innerHeight=900;`);
+  const got=run(`girlFxAnchorRect(2)`);
+  assert.strictEqual(got.left,10); assert.strictEqual(got.top,20);
+  assert.strictEqual(got.width,100); assert.strictEqual(got.height,133);
+});
+check('girlFxAnchorRect: 宽<2px 返回 null', ()=>{
+  const run=loadGameBg('desktop');
+  run(`document.querySelector=function(){ return { getBoundingClientRect(){ return {left:0,top:0,width:1,height:10,right:1,bottom:10}; } }; };`);
+  assert.strictEqual(run(`girlFxAnchorRect(0)`), null);
+});
+check('girlFxAnchorRect: 视口相交<50% 返回 null', ()=>{
+  const run=loadGameBg('desktop');
+  // 头像 100x100 在 (0,0), 视口 1400x900 下大半被裁: 模拟 right 30 只有 30% 可见
+  run(`document.querySelector=function(){ return { getBoundingClientRect(){ return {left:-70,top:0,width:100,height:100,right:30,bottom:100}; } }; };`);
+  run(`window.innerWidth=1400; window.innerHeight=900;`);
+  assert.strictEqual(run(`girlFxAnchorRect(0)`), null);
+});
+check('girlFxAnchorRect: querySelector 返回 null 时返回 null', ()=>{
+  const run=loadGameBg('desktop');
+  run(`document.querySelector=function(){ return null; };`);
+  assert.strictEqual(run(`girlFxAnchorRect(5)`), null);
+});
+check('triggerGirlFx 世代令牌: 旧触发的缩回 timer 不杀新动画', ()=>{
+  const run=loadGameBg('desktop');
+  // 注入可控视频与可控 anchor, 以及可捕获 timer 的 setTimeout
+  run(`
+    var __fakeVideo={style:{visibility:'hidden'},classList:{add(){},remove(){}},load(){},pause(){},removeAttribute(){},addEventListener(){},_girlEpoch:0,_girlMode:null,_girlAnchor:null,src:''};
+    __fakeVideo.play=function(){ return {catch(fn){ __fakeVideo._catch=fn; }}; };
+    document.getElementById=function(id){ return id==='girlFxVideo'?__fakeVideo:null; };
+    document.querySelector=function(){ return { getBoundingClientRect(){ return {left:50,top:50,width:80,height:106,right:130,bottom:156}; } }; };
+    window.innerWidth=1400; window.innerHeight=900;
+    document.documentElement={clientWidth:1400,clientHeight:900};
+    window.matchMedia=function(q){ return {matches:/hover:\\s*hover/.test(q)&&/pointer:\\s*fine/.test(q)}; };
+    // 捕获 setTimeout 回调
+    var __timers=[];
+    var _origSetTimeout=setTimeout;
+    setTimeout=function(fn,ms){ __timers.push(fn); return 1; };
+    // 绑定 triggerMovieFx 空实现避免回退分支
+    window.triggerMovieFx=function(){};
+    triggerMovieFx=window.triggerMovieFx;
+  `);
+  // 第一次触发 A
+  run(`triggerGirlFx({path:'assets/video/a.mp4', seat:0, selfSeat:0});`);
+  // 立即让 A 进入结束流程 (模拟 ended → girlFxEnd(false) 排 timer)
+  run(`girlFxEnd(__fakeVideo,false);`);
+  assert.strictEqual(run(`__timers.length`), 1, 'A 应排一个缩回 timer');
+  // 第二次触发 B (应递增 epoch, 使 A 的 timer 过期)
+  run(`triggerGirlFx({path:'assets/video/b.mp4', seat:0, selfSeat:1});`);
+  assert.strictEqual(run(`__fakeVideo.src`), 'assets/video/b.mp4', 'B 应覆盖 src');
+  // 执行 A 的过期 timer, 不应隐藏 B
+  run(`var _t=__timers[0]; __timers=[]; _t();`);
+  assert.strictEqual(run(`__fakeVideo.style.visibility`), 'visible', 'B 不应被 A 的过期 timer 隐藏');
+  // B 的结束 timer 仍有效: 触发 B 的结束并执行其 timer 应隐藏
+  run(`girlFxEnd(__fakeVideo,false);`);
+  assert.strictEqual(run(`__timers.length`), 1, 'B 应排新 timer');
+  run(`__timers[0]();`);
+  assert.strictEqual(run(`__fakeVideo.style.visibility`), 'hidden', 'B 的正常结束应隐藏');
 });
 
 console.log('\ngirl_fx_layer: '+passed+' passed, '+failed+' failed');
