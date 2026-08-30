@@ -1,5 +1,12 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-31 — 大厅/对局/1v1 BGM（用户功能请求，未实现）
+
+- [x] Phase 1/3：brainstorming + 设计定稿。spec：`docs/superpowers/specs/2026-08-31-bgm-design.md`
+- [ ] Phase 2/3：用户审 spec + writing-plans
+- [ ] Phase 3/3：实现（等素材 + 计划批准）
+- 关键：单 audio 切曲池；大厅 2 首后停；终局当前曲 ended 或 40s；🔊 兼管 BGM；视频永远 mute。
+
 ## 2026-08-30 — 甄姬接入表情动画（与貂蝉等同逻辑）
 
 - [x] `GIRL_EMO_GENERALS` 加 `zhenji`；`GIRL_VIDEOS.zhenji` 六情绪（含悲痛+妩媚后缀池）；素材 27 段入库。
