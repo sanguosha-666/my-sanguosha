@@ -1,5 +1,10 @@
 # TASKS.md — 三国杀项目进度
 
+## 2026-08-30 — 甄姬接入表情动画（与貂蝉等同逻辑）
+
+- [x] `GIRL_EMO_GENERALS` 加 `zhenji`；`GIRL_VIDEOS.zhenji` 六情绪（含悲痛+妩媚后缀池）；素材 27 段入库。
+- [x] detect 测试：游戏层 girlKill + 前端分派/终局。cache-bust data 454→455、render 467→468。
+
 ## 2026-08-30 — 内奸胜利动画池追加两段（用户素材，非 issue）
 
 - [x] 用户供图 `neijian-win-1.mp4`(1280×720)/`neijian-win-2.mp4`(1504×832)（首轮两文件 md5 相同，已让用户重传第二个），`MOVIE_VIDEOS.neiWin` 随机二选一 → 四选一；cache-bust game-bg ?v=33→34。提交 `ca56d7f`。

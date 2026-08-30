@@ -694,7 +694,7 @@ function maybePlayLightningFx(g){
 //              旁观者:有 girlWin/girlLose 时随机播对应后缀(替换阵营动画,无后缀池则回退
 //              阵营动画)→ 左慈输播 zuoci1 → 反贼输 fanze-lost / 反贼胜 fanzei-win /
 //              主公输 zhuzhong-lost / 忠臣输 han / 内奸胜 neijian-win
-// 三人表情视频表(GIRL_EMO_GENERALS 见 data.js):{武将id: {情绪: {main:无后缀路径, sfx:[后缀路径]}}}
+// 表情视频表(GIRL_EMO_GENERALS 见 data.js):{武将id: {情绪: {main:无后缀路径, sfx:[后缀路径]}}}
 // 命名约定 assets/video/<武将>-<情绪>.mp4 与 <武将>-<情绪>NN.mp4。
 const GIRL_VIDEOS = {
   daqiao: {
@@ -720,6 +720,14 @@ const GIRL_VIDEOS = {
     weiju:   { main:'assets/video/xiaoqiao-weiju.mp4',   sfx:['assets/video/xiaoqiao-weiju01.mp4','assets/video/xiaoqiao-weiju02.mp4'] },
     wumei:   { main:'assets/video/xiaoqiao-wumei.mp4',   sfx:[] },
     xiuse:   { main:'assets/video/xiaoqiao-xiuse.mp4',   sfx:['assets/video/xiaoqiao-xiuse01.mp4','assets/video/xiaoqiao-xiuse02.mp4'] },
+  },
+  zhenji: {
+    kaixin:  { main:'assets/video/zhenji-kaixin.mp4',    sfx:['assets/video/zhenji-kaixin01.mp4','assets/video/zhenji-kaixin02.mp4','assets/video/zhenji-kaixin03.mp4'] },
+    beitong: { main:'assets/video/zhenji-beitong.mp4',   sfx:['assets/video/zhenji-beitong01.mp4','assets/video/zhenji-beitong02.mp4','assets/video/zhenji-beitong03.mp4'] },
+    mamu:    { main:'assets/video/zhenji-mamu.mp4',      sfx:['assets/video/zhenji-mamu01.mp4','assets/video/zhenji-mamu02.mp4','assets/video/zhenji-mamu03.mp4'] },
+    weiju:   { main:'assets/video/zhenji-weiju.mp4',     sfx:['assets/video/zhenji-weiju01.mp4','assets/video/zhenji-weiju02.mp4','assets/video/zhenji-weiju03.mp4'] },
+    wumei:   { main:'assets/video/zhenji-wumei.mp4',     sfx:['assets/video/zhenji-wumei01.mp4','assets/video/zhenji-wumei02.mp4','assets/video/zhenji-wumei03.mp4'] },
+    xiuse:   { main:'assets/video/zhenji-xiuse.mp4',     sfx:['assets/video/zhenji-xiuse01.mp4','assets/video/zhenji-xiuse02.mp4','assets/video/zhenji-xiuse03.mp4','assets/video/zhenji-xiuse04.mp4','assets/video/zhenji-xiuse05.mp4','assets/video/zhenji-xiuse06.mp4'] },
   },
 };
 function girlMainPath(gen, emotion){

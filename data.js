@@ -503,9 +503,9 @@ const GENERALS = {
 const GENERAL_IDS = Object.keys(GENERALS);
 function getGeneral(id){ return GENERALS[id] || null; } // 唯一查询入口
 
-// 三人表情动画武将(大乔/小乔/貂蝉):game.js 写 girlKill/girlDeath/gameOver 事件,
+// 表情动画武将:game.js 写 girlKill/girlDeath/gameOver 事件,
 // render.js 按座位分派各情绪视频(无后缀给主视角,有后缀随机给其他玩家)。
-const GIRL_EMO_GENERALS = ['daqiao','diaochan','xiaoqiao'];
+const GIRL_EMO_GENERALS = ['daqiao','diaochan','xiaoqiao','zhenji'];
 
 // ---------- 主公技分类(CORE-149 / issue #208) ----------
 // 【这里补的是什么】主公技的**能力**本来就已经是结构化的 caps 了(见下表),业务层也一直

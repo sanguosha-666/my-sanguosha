@@ -197,6 +197,15 @@ check('三人互杀 → 单条 girlKillDeath，杀与被杀视频随机', ()=>{
   assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, girlWin:{seat:1, gen:'daqiao'}, zuociLose:false}}));
 });
 
+check('甄姬杀人 → girlKill(与三人同一事件形态)', ()=>{
+  const s = freshGameSandbox();
+  const g = mkDying(s, 0, 1);
+  g.players[1].general = 'zhenji';
+  R(s, 'finishDying')(g, true);
+  assert.strictEqual(S(g.movieFxQueue[0]), S({seq:1, kind:'girlKill', seat:1, result:{gen:'zhenji', victimSeat:0}}));
+  assert.strictEqual(S(g.lastMovieFx), S({seq:2, kind:'gameOver', seat:null, result:{winnerSeat:1, girlWin:{seat:1, gen:'zhenji'}, zuociLose:false}}));
+});
+
 check('三人被杀无杀手(如闪电) → girlDeath killerSeat:null', ()=>{
   const s = freshGameSandbox();
   const g = mkDying(s, 0, 1);
@@ -507,6 +516,22 @@ check('gameOver：旁观者看后缀表情锚女孩座位;无后缀池时回退�
   // xiaoqiao 悲痛无后缀 → 旁观者回退阵营动画(忠臣赢不播)
   const lose={fan:'lose',lord:'win',zhong:'win',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'xiaoqiao'}};
   assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose},1,[{alive:true,role:'fan',general:'xiaoqiao'},{alive:true,role:'zhong'}])), S([]), '无后缀池回退阵营(忠臣赢不播)');
+});
+
+check('girlKill 甄姬：杀手羞涩/被杀妩媚/他人后缀, 锚点=甄姬座位', function(){
+  const players=[{alive:true},{alive:true},{alive:true}];
+  assert.strictEqual(S(fire({seq:1,kind:'girlKill',seat:0,result:{gen:'zhenji',victimSeat:1}},0,players)), S([{path:'assets/video/zhenji-xiuse.mp4',seat:0,selfSeat:0}]), '杀手本人');
+  assert.strictEqual(S(fire({seq:2,kind:'girlKill',seat:0,result:{gen:'zhenji',victimSeat:1}},1,players)), S([{path:'assets/video/zhenji-wumei.mp4',seat:0,selfSeat:1}]), '被杀者');
+  const other=fire({seq:3,kind:'girlKill',seat:0,result:{gen:'zhenji',victimSeat:1}},2,players);
+  const pool=['assets/video/zhenji-xiuse01.mp4','assets/video/zhenji-xiuse02.mp4','assets/video/zhenji-xiuse03.mp4','assets/video/zhenji-xiuse04.mp4','assets/video/zhenji-xiuse05.mp4','assets/video/zhenji-xiuse06.mp4','assets/video/zhenji-wumei01.mp4','assets/video/zhenji-wumei02.mp4','assets/video/zhenji-wumei03.mp4'].map(p=>({path:p,seat:0}));
+  const o=other[0]; assert.ok(o && pool.some(function(p){return p.path===o.path&&p.seat===o.seat;}) && o.selfSeat===2, '他人应播羞涩或妩媚后缀,实际 '+S(other));
+});
+
+check('gameOver 甄姬胜/败锚自己座位', function(){
+  const win={fan:'win',lord:'lose',zhong:'lose',nei:'lose',zuociLose:false,girlWin:{seat:0,gen:'zhenji'}};
+  assert.strictEqual(S(fire({seq:1,kind:'gameOver',seat:null,result:win},0,[{alive:true,role:'fan',general:'zhenji'}])), S([{path:'assets/video/zhenji-kaixin.mp4',seat:0,selfSeat:0}]));
+  const lose={fan:'lose',lord:'win',zhong:'win',nei:'lose',zuociLose:false,girlLose:{seat:0,gen:'zhenji'}};
+  assert.strictEqual(S(fire({seq:2,kind:'gameOver',seat:null,result:lose},0,[{alive:true,role:'fan',general:'zhenji'}])), S([{path:'assets/video/zhenji-beitong.mp4',seat:0,selfSeat:0}]));
 });
 
 check('seq 未变不重复触发', function(){
