@@ -277,8 +277,9 @@ const testCode = String.raw`
     botTimer = null; botScheduledKey = null; botDecisionInFlight = false;
     var g = mkSeatG({}); g.phase='play'; g.turn=0; currentG = g;
     scheduleBotTurn(g);
-    // 等 debounce(650~1150ms) + 看门狗(30ms) 都触发完
-    await new Promise(function(r){ setTimeout(r, 1800); });
+    // 等 debounce(650~1150ms) + 看门狗(30ms) 都触发完。
+    // CI 全量并行时事件循环会被拖慢，1800ms 不够，会误报 inFlight 仍为 true。
+    await new Promise(function(r){ setTimeout(r, 4000); });
     isBotController = savedIsBotController;
     runBotDecision = savedRunBotDecision;
     BOT_DECISION_WATCHDOG_MS = savedWatchdogMs;
@@ -299,7 +300,7 @@ const testCode = String.raw`
     botTimer = null; botScheduledKey = null; botDecisionInFlight = false;
     var g = mkSeatG({}); g.phase='play'; g.turn=0; currentG = g;
     scheduleBotTurn(g);
-    await new Promise(function(r){ setTimeout(r, 1800); });
+    await new Promise(function(r){ setTimeout(r, 4000); });
     isBotController = savedIsBotController;
     runBotDecision = savedRunBotDecision;
     BOT_DECISION_WATCHDOG_MS = savedWatchdogMs;
