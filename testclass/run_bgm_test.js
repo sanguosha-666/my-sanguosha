@@ -67,6 +67,9 @@ function loadEnv(){
   vm.runInContext(fs.readFileSync(path.join(ROOT,'game-bg.js'),'utf8'), sandbox, {filename:'game-bg.js'});
   // 按 brief 改成短数组（TDD RED 阶段 BGM_TRACKS 尚不存在，守卫避免提前抛错）
   try { vm.runInContext("if(typeof BGM_TRACKS!=='undefined'){BGM_TRACKS.lobby=['a.mp3','b.mp3']; BGM_TRACKS.room=['r.mp3']; BGM_TRACKS.game=['g1.mp3','g2.mp3']; BGM_TRACKS.duel=['d.mp3'];}", sandbox); } catch(e) {}
+  // 首页 initLobbyBgm 会在加载时起播；单测要干净起点，清掉自动 lobby
+  try { vm.runInContext("bgmMode=null; bgmLobbyPlays=0; bgmLastSrc=null; bgmHold=false;", sandbox); } catch(e) {}
+  bgmPlayer.src=''; bgmPlayer._plays=0; bgmPlayer.paused=true;
   var get = function(expr){ return vm.runInContext(expr, sandbox); };
   var run = function(expr){ return vm.runInContext(expr, sandbox); };
   return { sandbox: sandbox, bgmPlayer: bgmPlayer, bgVideo: bgVideo, get: get, run: run };
@@ -335,6 +338,25 @@ check('22 chatVoiceEnabled=false 初始加载即静音 (game-bg 加载后)', fun
   if(bgmMuted!==true) throw new Error('初始 bgmMuted 期待 true, 实际 '+bgmMuted);
   // _pauses 应至少一次（setBgmMuted(true) 会 pause）
   if(bgmPlayer._pauses < 1) throw new Error('初始应 pause bgmPlayer, _pauses='+bgmPlayer._pauses);
+});
+
+check('23 首页加载 initLobbyBgm 进入 lobby 档', function(){
+  var e = loadEnv();
+  e.run("if(typeof initLobbyBgm==='function') initLobbyBgm(); else setBgmMode('lobby');");
+  var mode = e.get('bgmMode');
+  if(mode!=='lobby') throw new Error('mode='+mode);
+  var src = e.bgmPlayer.src;
+  if(src!=='a.mp3' && src!=='b.mp3') throw new Error('src='+src);
+});
+
+check('24 unmuteBgVideo 在 autoplay 被拒后补 play', function(){
+  var e = loadEnv();
+  e.run("setBgmMode('lobby')");
+  e.bgmPlayer.paused = true;
+  var plays = e.bgmPlayer._plays;
+  e.run('unmuteBgVideo()');
+  if(e.bgmPlayer.paused) throw new Error('手势解锁后应 play');
+  if(e.bgmPlayer._plays <= plays) throw new Error('应再调 play');
 });
 
 console.log('\nBGM tests: '+passed+'/'+(passed+failed)+' passed');

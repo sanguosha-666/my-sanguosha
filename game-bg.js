@@ -107,6 +107,18 @@ function unmuteBgVideo(){
     document.removeEventListener('touchstart', unmuteBgVideo);
     document.removeEventListener('keydown', unmuteBgVideo);
   }
+  // 首页 BGM 在加载时 play() 会被自动播放策略拒绝；手势解锁后必须再 play。
+  if(typeof bgmMuted!=='undefined' && bgmMuted) return;
+  if(typeof bgmMode==='undefined' || !bgmMode || bgmMode==='off'){
+    if(typeof initLobbyBgm==='function') initLobbyBgm();
+    return;
+  }
+  if(typeof bgmFxPaused!=='undefined' && bgmFxPaused) return;
+  var b=typeof bgmEl==='function'?bgmEl():null;
+  if(b && typeof b.play==='function'){
+    var p=b.play();
+    if(p && typeof p.catch==='function') p.catch(function(){});
+  }
 }
 if(typeof document !== 'undefined' && typeof document.addEventListener === 'function'){
   document.addEventListener('click', unmuteBgVideo);
@@ -748,6 +760,16 @@ function bindFxVideo(v){
   v.addEventListener('error', function(){ hideFxVideo(v); });
 }
 
+function initLobbyBgm(){
+  if(typeof setBgmMode!=='function') return;
+  var game=typeof document!=='undefined' && document.getElementById('game');
+  if(game && game.classList && !game.classList.contains('hidden')) return;
+  setBgmMode('lobby');
+}
+
 // 页面首次加载时初始化一个随机背景视频。
 // script 在 </body> 前加载,此时 #bgVideo 已在 DOM(muted+playsinline 下无手势 autoplay 放行)。
-if(typeof document !== 'undefined') pickRandomBgVideo();
+if(typeof document !== 'undefined'){
+  pickRandomBgVideo();
+  initLobbyBgm();
+}
