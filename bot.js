@@ -469,7 +469,7 @@ function botLuanwuIsKnownAlly(g,seat,otherSeat){
 // 两名非友方被压到危险线。没有击杀时,自己仍可能被杀则留技能。
 function botShouldStartLuanwu(g,seat){
   const me=g.players[seat];
-  if(!me||!me.alive||!hasCap(me,'luanwu')||g.luanwuUsed) return false;
+  if(!me||!me.alive||!hasCap(me,'luanwu')||me.luanwuUsed) return false;
   const others=[];
   for(let i=0;i<g.players.length;i++){
     if(i!==seat && g.players[i] && g.players[i].alive) others.push(i);
@@ -913,7 +913,7 @@ function botTryStartExtraSkills(g, seat){
   if(!me || !me.alive) return false;
   // 贾诩【乱武】:限定技。CORE-161:可发动≠应发动,必须过 botShouldStartLuanwu
   // (自己被瞄/友方致命/无收割则留着;真人按钮仍走 startLuanwu,不受这里影响)。
-  if(hasCap(me,'luanwu') && !g.luanwuUsed){
+  if(hasCap(me,'luanwu') && !me.luanwuUsed){
     if(botShouldStartLuanwu(g,seat)){ botInvoke(seat, startLuanwu); return true; }
   }
   // 太史慈【天义】:拼点赢获得本阶段【杀】次数/距离/目标数加成,拼点输本阶段不能用杀,
@@ -982,7 +982,7 @@ function botTryStartExtraSkills(g, seat){
   // 目标选择本身在后续guhuoTarget阶段(已经通过BOT_SEAT_PICKS.guhuoTarget接线),这里
   // 不需要关心。响应侧的guhuoQuestion(质疑与否)同样早就接线过(BOT_DECISIONS.
   // guhuoQuestion),这次不重复实现。
-  if(hasCap(me,'guhuo') && !g.guhuoUsed){
+  if(hasCap(me,'guhuo') && !me.guhuoUsed){
     const spec=CARD_PLAYS[guhuoActionId('杀')];
     if(spec){
       const hand=me.hand||[];

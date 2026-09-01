@@ -204,8 +204,6 @@ function normalize(g){
 
   // 典韦【强袭】武器选择阶段（从手牌弃置武器时）
 
-  // 辅诩【乱武】:游戏内使用标记（限定技，全局只能使用一次）
-  if(typeof g.luanwuUsed!=='boolean') g.luanwuUsed=false;
 
   // 陈宫【明策】:回合内使用标记
   if(typeof g.mingceUsed!=='boolean') g.mingceUsed=false;
@@ -284,10 +282,23 @@ function normalize(g){
     if(typeof p.chained!=='boolean') p.chained=false;
     if(typeof p.turnedOver!=='boolean') p.turnedOver=false;
     if(typeof p.nirvanaUsed!=='boolean') p.nirvanaUsed=false;
+    // CORE-184:贾诩【乱武】限定技,按拥有者各记一份(原为全局 g.luanwuUsed)
+    if(typeof p.luanwuUsed!=='boolean') p.luanwuUsed=false;
+    // CORE-185:孔融【礼让】每轮限一次+送牌记录,按拥有者各记一份
+    if(!Number.isInteger(p.liRangRound)) p.liRangRound=0;
+    if(!p.liRangRecord || typeof p.liRangRecord!=='object') p.liRangRecord=null;
+    if(p.liRangRecord){
+      if(!Array.isArray(p.liRangRecord.discarded)) p.liRangRecord.discarded=[];
+      if(typeof p.liRangRecord.round!=='number' || typeof p.liRangRecord.to!=='number'){
+        p.liRangRecord=null;
+      }
+    }
     if(typeof p.jujianUsed!=='boolean') p.jujianUsed=false;
     if(typeof p.chanyuan!=='boolean') p.chanyuan=false;
     // CORE-182:缠怨按蛊惑来源分别记录(Firebase 吞空数组,读回来是 undefined,必须补默认值)
     if(!Array.isArray(p.chanyuanSources)) p.chanyuanSources=[];
+    // CORE-183:于吉【蛊惑】每回合限一次,按拥有者各记一份(原为全局 g.guhuoUsed)
+    if(typeof p.guhuoUsed!=='boolean') p.guhuoUsed=false;
     if(typeof p.jiuShaBonus!=='boolean') p.jiuShaBonus=false;
     // 曹彰【将驰】本回合效果
     if(typeof p.jiangchiNoSlash!=='boolean') p.jiangchiNoSlash=false;
@@ -534,8 +545,6 @@ function normalize(g){
   if(typeof g.liJianUsed!=='boolean') g.liJianUsed=false;
   // 周瑜【反间】:出牌阶段限一次
   if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
-  // 于吉【蛊惑】:每回合限一次
-  if(typeof g.guhuoUsed!=='boolean') g.guhuoUsed=false;
   if(typeof g.jiuUsed!=='boolean') g.jiuUsed=false;
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
   // 左慈"自己的hook + 借来的hook都想开pending"的排队(见triggerHook/
@@ -566,15 +575,6 @@ function normalize(g){
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
   // 曹彰【将驰】:本回合额外出杀次数剩余
   if(typeof g.jiangchiExtraShaLeft!=='number') g.jiangchiExtraShaLeft=0;
-  // 孔融【礼让】:每轮限一次 + 当前礼让对象/弃牌阶段记录
-  if(!Number.isInteger(g.liRangRound)) g.liRangRound=0;
-  if(!g.liRangRecord || typeof g.liRangRecord!=='object') g.liRangRecord=null;
-  if(g.liRangRecord){
-    if(!Array.isArray(g.liRangRecord.discarded)) g.liRangRecord.discarded=[];
-    if(typeof g.liRangRecord.round!=='number' || typeof g.liRangRecord.from!=='number' || typeof g.liRangRecord.to!=='number'){
-      g.liRangRecord=null;
-    }
-  }
   // quhuRespond(拼点阶段)和 quhuDamageChoice(拼点赢后选伤害目标)结构不同,不能共用同一份校验——
   // 前者带 selfCard(拼点用的那张牌),后者带 targets(可选的伤害目标座位数组),没有 selfCard。
   // 曾经两者共用一段校验、都要求 selfCard 非空,quhuDamageChoice 从来不带这个字段,
@@ -850,13 +850,24 @@ function drawPhaseCount(g, seat){
   return 2 + generalCapValue(g.players[seat],'extraDrawPhase',0);
 }
 function eligibleLiRangSeat(g, targetSeat){
-  if(g.liRangRound===g.roundNum) return null;
   for(let k=1;k<=g.players.length;k++){
     const s=(targetSeat+k)%g.players.length;
     const p=g.players[s];
-    if(s!==targetSeat && p && p.alive && hasCap(p,'lirang') && (p.hand||[]).length>=2) return s;
+    if(s!==targetSeat && p && p.alive && hasCap(p,'lirang') && p.liRangRound!==g.roundNum && (p.hand||[]).length>=2) return s;
   }
   return null;
+}
+// CORE-185
+function liRangRecordsFor(g, toSeat){
+  const out=[];
+  (g.players||[]).forEach(p=>{
+    const r=p && p.liRangRecord;
+    if(r && r.round===g.roundNum && r.to===toSeat){
+      if(!Array.isArray(r.discarded)) r.discarded=[];
+      out.push(r);
+    }
+  });
+  return out;
 }
 function finishDrawPhase(g, seat, n){
   drawN(g, seat, n);
@@ -1804,14 +1815,14 @@ function respondLiRang(activate, cardIdxs){
       continueEnterDrawPhase(g);
       return g;
     }
-    if(g.liRangRound===g.roundNum) return g;
+    if(me.liRangRound===g.roundNum) return g;
     if(!Array.isArray(cardIdxs) || cardIdxs.length!==2) return g;
     const idxs=[...new Set(cardIdxs)].filter(i=>Number.isInteger(i)).sort((a,b)=>b-a);
     if(idxs.length!==2 || idxs.some(i=>i<0 || i>=(me.hand||[]).length)) return g;
     const moved=removeHandCards(g, mySeat, idxs).reverse();
     target.hand.push(...moved);
-    g.liRangRound=g.roundNum;
-    g.liRangRecord={round:g.roundNum, from, to, discarded:[]};
+    me.liRangRound=g.roundNum;
+    me.liRangRecord={round:g.roundNum, to, discarded:[]};
     g.pending=null;
     g.log=pushLog(g.log, me.name+' 发动【礼让】,交给 '+target.name+' 两张牌');
     markSkillSound(g, '礼让');
@@ -4297,7 +4308,7 @@ function canRescueSeat(g, seat, dyingSeat){
     const hasRedEquip=typeof EQUIP_SLOTS!=='undefined' && EQUIP_SLOTS.some(s=>p.equips&&p.equips[s]&&typeof isRed==='function'&&isRed(p.equips[s]));
     if(hasRedHand || hasRedEquip) return true;
   }
-  if(hasCap(p,'guhuo') && !g.guhuoUsed && (p.hand||[]).length>0) return true;
+  if(hasCap(p,'guhuo') && !p.guhuoUsed && (p.hand||[]).length>0) return true;
   return false;
 }
 function nextDyingAskee(g, dyingSeat, current){
@@ -4433,7 +4444,7 @@ function nextWuxieAskee(g, pending, current){
     const p=g.players[seat];
     if(!p || !p.alive || !Array.isArray(p.hand)) return false;
     if(p.hand.some(c=>c && c.name==='无懈可击')) return true;
-    return p.hand.length>0 && hasCap(p,'guhuo') && !g.guhuoUsed;
+    return p.hand.length>0 && hasCap(p,'guhuo') && !p.guhuoUsed;
   };
   if(pending && pending.askAll && pending.depth===0){
     const n=g.players.length;
@@ -5385,10 +5396,7 @@ function discardCard(cardIdx){
     if(me.hand.length<=handCapLimit(g, mySeat)) return g;
     const card=removeHandCards(g, mySeat, cardIdx)[0]; g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
-    if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
-      g.liRangRecord.discarded = g.liRangRecord.discarded || [];
-      g.liRangRecord.discarded.push(card);
-    }
+    liRangRecordsFor(g, mySeat).forEach(r=>{ r.discarded.push(card); });
     g.log=pushLog(g.log, me.name+' 弃置一张牌');
     // 曹植【落英】
     if(maybeStartLuoying(g, mySeat, [card], 'discard', {phase:'discard'})) return g;
@@ -5419,10 +5427,7 @@ function discardCards(cardIdxList){
     g.discardedThisPhase = (g.discardedThisPhase || 0) + discarded.length;
     // 孔融【礼让】记录:和 discardCard 单张版本同一段逻辑,只是这里批量循环每一张都要记
     // (礼让回收的是"本弃牌阶段弃置的全部牌",不能因为改成批量提交就漏记)。
-    if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
-      g.liRangRecord.discarded = g.liRangRecord.discarded || [];
-      g.liRangRecord.discarded.push(...discarded);
-    }
+    liRangRecordsFor(g, mySeat).forEach(r=>{ r.discarded.push(...discarded); });
     g.log=pushLog(g.log, me.name+' 弃置了'+discarded.length+'张牌');
     // 曹植【落英】
     if(maybeStartLuoying(g, mySeat, discarded, 'discard', {phase:'discard'})) return g;
@@ -5897,7 +5902,7 @@ function startTurn(g, seat){
     return;
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0; g.jijiangUsed=false; g.hujiaUsed=false; g.zhibaUsed=false; g.lordHandCap=0;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0; g.jijiangUsed=false; g.hujiaUsed=false; g.zhibaUsed=false; g.lordHandCap=0;
   
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];
@@ -5908,6 +5913,7 @@ function startTurn(g, seat){
   // 官方的"本回合结束时失效"(曹彰自己的结束阶段仍在他回合内,标志还在,也是对的)。
   // 写法对齐同一批的 shuangxiongColor/jiuShaBonus,不新造模式。
   g.players.forEach(p=>{ if(p){ p.jiangchiNoSlash=false; p.jiangchiNoDistance=false; } });
+  g.players.forEach(p=>{ if(p) p.guhuoUsed=false; });   // CORE-183
   if(currentPlayer) {
     currentPlayer.fenxunUsed = false;
     currentPlayer.fenxunTarget = null;

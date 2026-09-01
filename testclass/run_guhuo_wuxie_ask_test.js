@@ -17,7 +17,7 @@ R('tx=function(fn){return fn(__g);}; mySeat=0;');
 const eq=()=>R('emptyEquips')();
 const card=(id,name='杀')=>({id,name,suit:'♠',rank:7});
 const wuxieCard=id=>({id,name:'无懈可击',suit:'♠',rank:3});
-const mkG=(players,extra={})=>Object.assign({players,deck:[card('d1'),card('d2')],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null,guhuoUsed:false},extra);
+const mkG=(players,extra={})=>Object.assign({players,deck:[card('d1'),card('d2')],discard:[],log:[],phase:'play',turn:0,roundNum:1,gameMode:'ffa',pending:null},extra);
 const mkP=(name,general,hand)=>({name,general,hp:4,maxHp:4,hand,equips:eq(),delays:[],alive:true});
 
 // ---- T1: 于吉(guhuo)无真实无懈、guhuoUsed=false 时应被 nextWuxieAskee 算作候选 ----
@@ -30,13 +30,14 @@ R("startTrick(__g,{trick:'无中生有',from:0,to:0})");
 assert.strictEqual(g.phase,'wuxie','应进入无懈窗口');
 assert.strictEqual(g.pending.type,'wuxie','于吉有蛊惑且未用,不应进入公共等待窗口');
 assert.strictEqual(g.pending.asking,1,'无真实无懈但蛊惑未用的于吉应被问到');
-assert.strictEqual(g.guhuoUsed,false,'只是被问到,不得消耗蛊惑次数');
+assert.strictEqual(!!g.players[1].guhuoUsed,false,'只是被问到,不得消耗蛊惑次数');
 
 // ---- T2: guhuoUsed=true 时不算(本回合已用蛊惑),回退到公共等待窗口 ----
 g=mkG([
   mkP('甲','caocao',[]),
   mkP('于吉','yuji',[card('k1','杀')])
-],{guhuoUsed:true});
+]);
+g.players[1].guhuoUsed=true;   // CORE-183:每回合限一次记在于吉自己身上
 sandbox.__g=g;
 R("startTrick(__g,{trick:'无中生有',from:0,to:0})");
 assert.strictEqual(g.pending.type,'wuxiePublicWait','蛊惑已用的于吉不应再被问到');
@@ -45,7 +46,8 @@ assert.strictEqual(g.pending.type,'wuxiePublicWait','蛊惑已用的于吉不应
 g=mkG([
   mkP('甲','caocao',[]),
   mkP('于吉','yuji',[wuxieCard('w1')])
-],{guhuoUsed:true});
+]);
+g.players[1].guhuoUsed=true;   // CORE-183:同上
 sandbox.__g=g;
 R("startTrick(__g,{trick:'无中生有',from:0,to:0})");
 assert.strictEqual(g.pending.type,'wuxie');
@@ -81,7 +83,7 @@ assert.strictEqual(g.pending.asking,1,'e2e 前置:于吉应被问到');
 R('mySeat=1');
 R("startGuhuoResponse(0,'无懈可击')");
 assert.strictEqual(g.phase,'guhuoQuestion','蛊惑应进入质疑阶段');
-assert.strictEqual(g.guhuoUsed,true,'发动蛊惑应消耗本回合次数');
+assert.strictEqual(g.players[1].guhuoUsed,true,'发动蛊惑应消耗本回合次数');
 assert.strictEqual(g.pending.sourceSeat,1);
 // 甲不质疑
 R('mySeat=0');

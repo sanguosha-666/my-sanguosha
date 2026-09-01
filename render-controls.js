@@ -1111,7 +1111,7 @@ function jijiuChoices(p){
   return out;
 }
 function addGuhuoResponseButtons(container, g, me, role){
-  if(!hasCap(me,'guhuo') || g.guhuoUsed) return 0;
+  if(!hasCap(me,'guhuo') || me.guhuoUsed) return 0;
   const names=guhuoResponseNamesForRole(role);
   if(names.length===0) return 0;
   let count=0;
@@ -2487,7 +2487,7 @@ function renderControls(g){
       const shuangxiongNote = canShuangxiongDuelCard(me, selCard) ? '；也可点目标座位上的“双雄:决斗”按钮' : '';
       const canRecast = selCard.name==='铁索连环' || (hasCap(me,'lianhuan') && selCard.suit==='♣');
       const recastNote = canRecast ? (selCard.name==='铁索连环' ? '；也可重铸【铁索连环】' : '；也可重铸发动【连环】') : '';
-      const guhuoNote = hasCap(me,'guhuo') && !g.guhuoUsed ? '；也可发动【蛊惑】声明为其他牌' : '';
+      const guhuoNote = hasCap(me,'guhuo') && !me.guhuoUsed ? '；也可发动【蛊惑】声明为其他牌' : '';
       setBanner('已选中'+label+rangeNote+',点上方一名对手作为目标'+rendeNote+shuangxiongNote+recastNote+guhuoNote+'(或点牌取消)。');
       if(spec && !spec.target && spec.canPlay(g,me,selCard)){
         const ub=document.createElement('button'); ub.className='primary';
@@ -2496,7 +2496,7 @@ function renderControls(g){
         ub.onclick=()=>{ confirmAndPlay(playConfirmMsg(g, actionId, selCard), ()=>playCard(idx, actionId)); };
         c.appendChild(ub);
       }
-      if(hasCap(me,'guhuo') && !g.guhuoUsed){
+      if(hasCap(me,'guhuo') && !me.guhuoUsed){
         const claimable=guhuoClaimableNames().filter(name=>{
           const action=guhuoActionId(name);
           const s=CARD_PLAYS[action];
@@ -2602,7 +2602,7 @@ function renderControls(g){
       fb.textContent='发动【反间】'; fb.onclick=()=>{ selectedCardIdx=null; fanjianMode=true; render(g); }; c.appendChild(fb);
     }
     // 贾诩【乱武】:限定技,出牌阶段,令所有其他角色依次选择
-    if(noLocalMode && selectedCardIdx===null && hasCap(me,'luanwu') && !g.luanwuUsed && g.players.some((p,i)=>p&&p.alive&&i!==mySeat)){
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'luanwu') && !me.luanwuUsed && g.players.some((p,i)=>p&&p.alive&&i!==mySeat)){
       const lwb=document.createElement('button'); lwb.className='skill-btn'; lwb.style.background='#e74c3c';
       lwb.textContent='乱武'; lwb.onclick=()=>startLuanwu(); c.appendChild(lwb);
     }

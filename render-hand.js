@@ -272,7 +272,7 @@ function renderHand(g){
       const actionId = resolveActionId(g, me, card);
       const spec = CARD_PLAYS[actionId];
       const canShuangxiong = canShuangxiongDuelCard(me, card);
-      const canGuhuoActive = hasCap(me,'guhuo') && !g.guhuoUsed && guhuoClaimableNames().some(name=>{
+      const canGuhuoActive = hasCap(me,'guhuo') && !me.guhuoUsed && guhuoClaimableNames().some(name=>{
         const action=guhuoActionId(name);
         const s=CARD_PLAYS[action];
         if(!s) return false;

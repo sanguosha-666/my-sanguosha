@@ -1,7 +1,7 @@
 /**
  * CORE-161(issue #220):乱武被误判为零风险固定发动。
  *
- * botTryStartExtraSkills 原来只要 hasCap('luanwu') && !g.luanwuUsed && 场上有其他存活
+ * botTryStartExtraSkills 原来只要 hasCap('luanwu') && !g.players[0].luanwuUsed && 场上有其他存活
  * 角色就 botInvoke(startLuanwu)。注释写成「对发动者自己零代价零风险」,但 CORE-94 之后
  * findNearestTargets 包含发动者本人,其他角色可以杀贾诩;身份/组队里友方也会被逼出杀或
  * 掉血。限定技被开局无脑烧掉。
@@ -90,7 +90,8 @@ function mkGame(n, opts){
     players.push({
       name:'p'+i, general: i===0 ? 'jiaxu' : 'caocao',
       hp: 4, maxHp: 4, hand:[], equips: emptyEq(), delays:[],
-      alive:true, dying:false, role:null, roleRevealed:false, isBot: i===0
+      alive:true, dying:false, role:null, roleRevealed:false, isBot: i===0,
+      luanwuUsed:false   // CORE-184:限定技标志改为玩家级(线上由 normalize 补默认值)
     });
   }
   players[0].caps = { luanwu:true };
@@ -101,7 +102,7 @@ function mkGame(n, opts){
     phase:'play', turn:0, started:true, gameMode: opts.gameMode||'ffa',
     players, deck: Array.from({length:20},(_,i)=>({id:800+i,name:'杀',suit:'♠',rank:1})),
     discard:[], pending:null, log:[], exchangeCards:[], shaUsed:false,
-    luanwuUsed:false, aiRebelSuspicion:{}
+    aiRebelSuspicion:{}   // CORE-184:乱武限定技标志已改为玩家级 p.luanwuUsed
   };
 }
 
@@ -118,7 +119,7 @@ check('FFA 全员满血空手:有其他存活角色也不应发动(限定技机�
   const invoked = tryStart(g);
   assert.strictEqual(invoked, false, '开局满血不应浪费乱武');
   assert.strictEqual(g.phase, 'play');
-  assert.strictEqual(g.luanwuUsed, false);
+  assert.strictEqual(g.players[0].luanwuUsed, false);
 });
 
 check('FFA 敌方1血无杀:应发动(可收割)', ()=>{
@@ -127,7 +128,7 @@ check('FFA 敌方1血无杀:应发动(可收割)', ()=>{
   const invoked = tryStart(g);
   assert.strictEqual(invoked, true, '敌方1血无杀应收割');
   assert.strictEqual(g.phase, 'luanwuChoose');
-  assert.strictEqual(g.luanwuUsed, true);
+  assert.strictEqual(g.players[0].luanwuUsed, true);
 });
 
 check('FFA 两名其他角色均≤2血且无杀:应发动(压制)', ()=>{
@@ -148,7 +149,7 @@ check('FFA 贾诩2血且是对方唯一最近目标、对方有杀:应保留(反
   const invoked = tryStart(g);
   assert.strictEqual(invoked, false, '自己会被杀且血薄时不应发动');
   assert.strictEqual(g.phase, 'play');
-  assert.strictEqual(g.luanwuUsed, false);
+  assert.strictEqual(g.players[0].luanwuUsed, false);
 });
 
 check('身份局忠臣贾诩:主公1血无杀应保留(友方致命)', ()=>{
@@ -160,7 +161,7 @@ check('身份局忠臣贾诩:主公1血无杀应保留(友方致命)', ()=>{
   g.players[3].role = 'nei';
   const invoked = tryStart(g);
   assert.strictEqual(invoked, false, '主公命悬一线时忠臣不应乱武');
-  assert.strictEqual(g.luanwuUsed, false);
+  assert.strictEqual(g.players[0].luanwuUsed, false);
 });
 
 check('身份局反贼贾诩:主公1血无杀、己方未暴露应发动', ()=>{
@@ -183,7 +184,7 @@ check('身份局反贼贾诩:已知反贼队友1血无杀应保留', ()=>{
   g.players[3].role = 'zhong';
   const invoked = tryStart(g);
   assert.strictEqual(invoked, false, '已知反贼队友致命时不应乱武');
-  assert.strictEqual(g.luanwuUsed, false);
+  assert.strictEqual(g.players[0].luanwuUsed, false);
 });
 
 check('组队:同队1血无杀应保留', ()=>{
@@ -191,7 +192,7 @@ check('组队:同队1血无杀应保留', ()=>{
   g.players[1].hp = 1; // team 0 队友
   const invoked = tryStart(g);
   assert.strictEqual(invoked, false, '队友命悬一线不应乱武');
-  assert.strictEqual(g.luanwuUsed, false);
+  assert.strictEqual(g.players[0].luanwuUsed, false);
 });
 
 check('组队:异队1血无杀、队友满血应发动', ()=>{
@@ -228,7 +229,7 @@ check('真人 startLuanwu 不受 AI 评估影响:满血场面仍能发动', ()=>
   setSeat(0);
   R('startLuanwu')();
   assert.strictEqual(g.phase, 'luanwuChoose', '真人按钮仍应能发动');
-  assert.strictEqual(g.luanwuUsed, true);
+  assert.strictEqual(g.players[0].luanwuUsed, true);
 });
 
 check('破坏性验证:评估恒 true 时满血场面会(错误地)发动,证明保留断言有鉴别力', ()=>{
