@@ -100,25 +100,25 @@ function unlockFxAudio(){
 function applyFxAudio(v){
   if(v && fxAudioUnlocked) v.muted = false;
 }
-function unmuteBgVideo(){
-  unlockFxAudio();
-  if(typeof document.removeEventListener === 'function'){
-    document.removeEventListener('click', unmuteBgVideo);
-    document.removeEventListener('touchstart', unmuteBgVideo);
-    document.removeEventListener('keydown', unmuteBgVideo);
-  }
-  // 首页 BGM 在加载时 play() 会被自动播放策略拒绝；手势解锁后必须再 play。
+function tryPlayBgm(){
   if(typeof bgmMuted!=='undefined' && bgmMuted) return;
+  if(typeof bgmFxPaused!=='undefined' && bgmFxPaused) return;
   if(typeof bgmMode==='undefined' || !bgmMode || bgmMode==='off'){
     if(typeof initLobbyBgm==='function') initLobbyBgm();
     return;
   }
-  if(typeof bgmFxPaused!=='undefined' && bgmFxPaused) return;
   var b=typeof bgmEl==='function'?bgmEl():null;
   if(b && typeof b.play==='function'){
     var p=b.play();
     if(p && typeof p.catch==='function') p.catch(function(){});
   }
+}
+function unmuteBgVideo(){
+  unlockFxAudio();
+  // 不拆 click/touchstart：大厅输入框 keydown 也会进这里，但 Chrome 不把 keydown
+  // 当音频手势，play() 被拒后若拆掉监听，之后再点页面也永远不会补播。
+  // unlockFxAudio 幂等；已在播时 play() 无副作用。
+  tryPlayBgm();
 }
 if(typeof document !== 'undefined' && typeof document.addEventListener === 'function'){
   document.addEventListener('click', unmuteBgVideo);

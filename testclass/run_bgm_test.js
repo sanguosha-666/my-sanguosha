@@ -359,5 +359,16 @@ check('24 unmuteBgVideo 在 autoplay 被拒后补 play', function(){
   if(e.bgmPlayer._plays <= plays) throw new Error('应再调 play');
 });
 
+check('25 unmuteBgVideo 可反复补 play（keydown 用掉手势后点击还能救）', function(){
+  var e = loadEnv();
+  e.run("setBgmMode('lobby')");
+  e.bgmPlayer.paused = true;
+  e.run('unmuteBgVideo()');
+  e.bgmPlayer.paused = true;
+  var plays = e.bgmPlayer._plays;
+  e.run('unmuteBgVideo()');
+  if(e.bgmPlayer._plays <= plays) throw new Error('第二次仍应 play, plays '+plays+' -> '+e.bgmPlayer._plays);
+});
+
 console.log('\nBGM tests: '+passed+'/'+(passed+failed)+' passed');
 if(failed) process.exit(1);
