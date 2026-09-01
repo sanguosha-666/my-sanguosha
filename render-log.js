@@ -257,6 +257,7 @@ let chatVoiceEnabled = (function(){
   try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); }
   catch(e){ return true; }
 })();
+if(!chatVoiceEnabled && typeof setBgmMuted==='function') setBgmMuted(true);
 const spokenChatIds = new Set(); // 已见消息 id 去重:跨同步累积、跨enterGame累积(重进不重念);
                                  // 关闭语音期间的消息也标记(重开不重放);页面刷新时重建
 function toggleChatVoice(){
@@ -264,6 +265,7 @@ function toggleChatVoice(){
   try{ localStorage.setItem('sgs_chat_voice', chatVoiceEnabled?'1':'0'); }catch(e){}
   const btn=document.getElementById('chatVoiceBtn');
   if(btn) btn.textContent = chatVoiceEnabled ? '🔊' : '🔇';
+  if(typeof setBgmMuted==='function') setBgmMuted(!chatVoiceEnabled);
   return chatVoiceEnabled;
 }
 // detectChatLang:按文本主要字符集判断语言,返回 BCP47 lang 标签。修复"英文/韩文消息

@@ -258,5 +258,39 @@ check('17 单轨缺失连续 error 两次后熔断 off（room 单轨）', functi
   if(e.bgmPlayer._plays !== plays3) throw new Error('熔断后不应再 play '+plays3+'->'+e.bgmPlayer._plays);
 });
 
+check('18 render.js 含 maybeUpdateBgm', function(){
+  var src = fs.readFileSync(path.join(ROOT,'render.js'),'utf8');
+  if(src.indexOf('function maybeUpdateBgm') < 0) throw new Error('未找到 maybeUpdateBgm');
+  if(src.indexOf('maybeUpdateBgm(g)') < 0 && src.indexOf('maybeUpdateBgm(') < 0) throw new Error('render 未调用 maybeUpdateBgm');
+});
+check('19 render-log.js toggleChatVoice 含 setBgmMuted', function(){
+  var src = fs.readFileSync(path.join(ROOT,'render-log.js'),'utf8');
+  var idx = src.indexOf('function toggleChatVoice');
+  if(idx < 0) throw new Error('未找到 toggleChatVoice');
+  var snippet = src.slice(idx, idx+800);
+  if(snippet.indexOf('setBgmMuted') < 0) throw new Error('toggleChatVoice 未含 setBgmMuted');
+  if(src.indexOf("chatVoiceEnabled") < 0 || src.indexOf("setBgmMuted(true") < 0) throw new Error('未找到初始 setBgmMuted(true)');
+});
+check('20 hold 期间 maybeUpdateBgm 不切档', function(){
+  var e = loadEnv();
+  // 注入 maybeUpdateBgm 定义（与 render.js 同款）
+  e.run("function maybeUpdateBgm(g){ if(typeof setBgmMode!=='function') return; if(typeof bgmHold!=='undefined' && bgmHold) return; var gameEl=document.getElementById('game'); var inGame=gameEl && !gameEl.classList.contains('hidden'); if(!inGame){ setBgmMode('lobby'); return; } if(!g || !g.started){ setBgmMode('room'); return; } var n=(typeof aliveCount==='function')?aliveCount(g):(g.players||[]).filter(function(p){return p&&p.alive;}).length; if(n===2) setBgmMode('duel'); else setBgmMode('game'); }");
+  e.run("setBgmMode('game')");
+  if(e.get('bgmMode')!=='game') throw new Error('前置 game 失败 '+e.get('bgmMode'));
+  e.run("beginBgmHold()");
+  // 尝试切 duel（hold 期间应被短路）
+  e.run("maybeUpdateBgm({started:true, players:[{alive:true},{alive:true}]})");
+  if(e.get('bgmMode')!=='game') throw new Error('hold 时不应切档，实际 '+e.get('bgmMode'));
+});
+check('21 hold 期间 ended 应切回 room', function(){
+  var e = loadEnv();
+  e.run("setBgmMode('game')");
+  e.run("beginBgmHold()");
+  if(!e.get('bgmHold')) throw new Error('hold 未生效');
+  e.bgmPlayer.fire('ended');
+  if(e.get('bgmMode')!=='room') throw new Error('ended 后应 room，实际 '+e.get('bgmMode'));
+  if(e.get('bgmHold')) throw new Error('ended 后 hold 应清除');
+});
+
 console.log('\nBGM tests: '+passed+'/'+(passed+failed)+' passed');
 if(failed) process.exit(1);

@@ -34,9 +34,15 @@ function loadBg(){
     lightningFxVideo: mkVideo(),
     movieFxVideo: mkVideo()
   };
+  const bgmPlayer = mkVideo();
+  // bgmPlayer mock for BGM联动
+  bgmPlayer.muted = true;
   const context = {
     document: {
-      getElementById(id){ return videos[id] || null; },
+      getElementById(id){
+        if(id==='bgmPlayer') return bgmPlayer;
+        return videos[id] || null;
+      },
       addEventListener(){},
       removeEventListener(){},
       body: {}
@@ -48,15 +54,16 @@ function loadBg(){
   context.global = context;
   const sandbox = vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(ROOT,'game-bg.js'),'utf8'), sandbox, {filename:'game-bg.js'});
-  return { sandbox, videos };
+  return { sandbox, videos, bgmPlayer };
 }
 
 console.log('\n== 特效视频音轨 ==\n');
 
-check('unmuteBgVideo 应取消大厅+死亡+闪电+过场 muted', ()=>{
-  const { sandbox, videos } = loadBg();
+check('unmuteBgVideo 后 bgVideo 仍 muted，bgmPlayer 已 unmuted；死亡/闪电/过场已 unmuted', ()=>{
+  const { sandbox, videos, bgmPlayer } = loadBg();
   vm.runInContext('unmuteBgVideo()', sandbox);
-  assert.strictEqual(videos.bgVideo.muted, false, 'bgVideo');
+  assert.strictEqual(videos.bgVideo.muted, true, 'bgVideo 应仍 true');
+  if(bgmPlayer) assert.strictEqual(bgmPlayer.muted, false, 'bgmPlayer 应 false');
   assert.strictEqual(videos.deathFxVideo.muted, false, 'deathFxVideo');
   assert.strictEqual(videos.lightningFxVideo.muted, false, 'lightningFxVideo');
   assert.strictEqual(videos.movieFxVideo.muted, false, 'movieFxVideo');

@@ -526,6 +526,7 @@ function triggerLightningFx(hit){
   var list = LIGHTNING_VIDEOS[hit ? 'true' : 'false'];
   var v = document.getElementById('lightningFxVideo');
   if(!v || !list || !list.length) return;
+  if(typeof pauseBgmForFx==='function') pauseBgmForFx();
   applyFxAudio(v);
   v.src = list[Math.floor(Math.random() * list.length)];
   v.style.visibility = 'visible';
@@ -565,6 +566,7 @@ function triggerMovieFx(kind){
   } else {
     src = kind; // 已是具体路径
   }
+  if(typeof pauseBgmForFx==='function') pauseBgmForFx();
   applyFxAudio(v);
   v.src = src;
   v.style.visibility = 'visible';
@@ -630,6 +632,7 @@ function girlFxPlace(v, box){
 }
 function triggerGirlFx(opts){
   if(typeof document==='undefined' || !opts || !opts.path) return;
+  if(typeof pauseBgmForFx==='function') pauseBgmForFx();
   var v=document.getElementById('girlFxVideo');
   var mode=girlFxDecide(opts.seat, opts.selfSeat);
   var anchor=(mode==='fullscreen') ? null : girlFxAnchorRect(opts.seat);
@@ -709,6 +712,7 @@ function triggerDeathFx(kind){
   // 动画走 DOM 视频层而非飘牌 canvas,故不再要求 bgRunning/bgCtx 就绪
   var v = document.getElementById('deathFxVideo');
   if(!v || !DEATH_VIDEOS.length) return;
+  if(typeof pauseBgmForFx==='function') pauseBgmForFx();
   applyFxAudio(v);
   v.src = DEATH_VIDEOS[Math.floor(Math.random() * DEATH_VIDEOS.length)];
   v.style.visibility = 'visible';
@@ -725,6 +729,7 @@ function hideFxVideo(v){
   v.style.visibility = 'hidden';
   v.removeAttribute('src');
   if(typeof v.load === 'function') v.load(); // 释放视频资源
+  if(typeof resumeBgmAfterFx==='function') resumeBgmAfterFx();
 }
 
 function bindFxVideo(v){

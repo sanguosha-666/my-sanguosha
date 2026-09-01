@@ -853,7 +853,9 @@ function maybePlayMovieFx(g){
   while(lastPlayedMovieFxLen < queue.length){
     const evt = queue[lastPlayedMovieFxLen];
     if(evt && Number.isInteger(evt.seq)){
-      dispatchMovie(movieVideoKeyForMe(g, evt));
+      var out = movieVideoKeyForMe(g, evt);
+      dispatchMovie(out);
+      if(evt.kind==='gameOver' && typeof beginBgmHold==='function') beginBgmHold();
     }
     lastPlayedMovieFxLen++;
     // 同步单槽 seq 为队尾，避免兼容分支重复播
@@ -865,7 +867,9 @@ function maybePlayMovieFx(g){
     if(single.seq===lastMovieFxSeq) return;
     const tailSeq = queue.length ? queue[queue.length-1].seq : null;
     if(tailSeq !== single.seq){
-      dispatchMovie(movieVideoKeyForMe(g, single));
+      var out2 = movieVideoKeyForMe(g, single);
+      dispatchMovie(out2);
+      if(single.kind==='gameOver' && typeof beginBgmHold==='function') beginBgmHold();
     }
     lastMovieFxSeq=single.seq;
     // 若单槽 seq 超前于队列长度，同步游标防止下次 while 重播
@@ -879,6 +883,17 @@ function maybePlayMovieFx(g){
 // 上一局的 seq 会带到下一局,导致新局首张牌/伤害/过场被当成"已播过的历史"吞掉,
 // 或残留 .damage-hit 座位高亮。重置成各哨兵的声明初值(turn/pending 用 null,
 // 音效/特效用 undefined——undefined 走「首次进房吞历史」,和 maybePlay* 去重逻辑对齐)。
+function maybeUpdateBgm(g){
+  if(typeof setBgmMode!=='function') return;
+  if(typeof bgmHold!=='undefined' && bgmHold) return; // 终局 hold 期间不切档
+  var gameEl=document.getElementById('game');
+  var inGame=gameEl && !gameEl.classList.contains('hidden');
+  if(!inGame){ setBgmMode('lobby'); return; }
+  if(!g || !g.started){ setBgmMode('room'); return; }
+  var n=(typeof aliveCount==='function')?aliveCount(g):(g.players||[]).filter(function(p){return p&&p.alive;}).length;
+  if(n===2) setBgmMode('duel');
+  else setBgmMode('game');
+}
 function resetRenderSentinels(){
   lastAnnouncedTurnKey = null;
   lastAnnouncedPendingKey = null;
@@ -1647,6 +1662,7 @@ function render(g){
   maybePlaySkillSound(g); // 技能发动语音:同一批检测
   maybePlayLightningFx(g); // 闪电判定特效:同一批检测(劈中/未劈中分别播 flash1/flash0)
   maybePlayMovieFx(g); // 过场动画:同一批检测(武将死亡/胜负结算,按 kind+座位/身份过滤)
+  if(typeof maybeUpdateBgm==='function') maybeUpdateBgm(g);
   // 单点兜底:只要不在「自己的出牌阶段」,就退出丈八选牌模式——覆盖换回合/进弃牌/游戏结束/中断/离开等一切离开出牌阶段的情形。
   if(!(g.started && g.phase==='play' && g.turn===mySeat)) resetZhangba();
   // 同款兜底:只要不在「自己的弃牌阶段」,就清空已勾选待弃置的手牌下标——覆盖克己跳过/确认
