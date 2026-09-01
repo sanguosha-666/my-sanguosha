@@ -91,9 +91,11 @@ function unlockFxAudio(){
   fxAudioUnlocked = true;
   if(typeof document === 'undefined') return;
   FX_VIDEO_IDS.forEach(function(id){
+    if(id==='bgVideo') return;
     var el = document.getElementById(id);
     if(el && 'muted' in el) el.muted = false;
   });
+  var b=bgmEl(); if(b) b.muted=false;
 }
 function applyFxAudio(v){
   if(v && fxAudioUnlocked) v.muted = false;
@@ -110,6 +112,89 @@ if(typeof document !== 'undefined' && typeof document.addEventListener === 'func
   document.addEventListener('click', unmuteBgVideo);
   document.addEventListener('touchstart', unmuteBgVideo);
   document.addEventListener('keydown', unmuteBgVideo);
+}
+
+// ============ BGM 引擎（四档曲池 + skip/mute/fx暂停） ============
+var BGM_TRACKS = {
+  lobby: ['assets/audio/bgm-lobby.mp3','assets/audio/bgm-lobby01.mp3'],
+  room:  ['assets/audio/bgm-room.mp3'],
+  game:  ['assets/audio/bgm-game.mp3'],
+  duel:  ['assets/audio/bgm-duel.mp3']
+};
+var BGM_VOL = 0.35;
+var bgmMode = null, bgmLastSrc = null, bgmLobbyPlays = 0, bgmMuted = false, bgmFxPaused = false, bgmHoldTimer = 0, bgmHold = false;
+
+function bgmEl(){ return (typeof document!=='undefined') ? document.getElementById('bgmPlayer') : null; }
+function bgmPick(mode, avoid){
+  var pool = (BGM_TRACKS[mode]||[]).slice();
+  if(avoid && pool.length>1) pool = pool.filter(function(p){ return p!==avoid; });
+  if(!pool.length) return null;
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+function bgmPlaySrc(src){
+  var v = bgmEl(); if(!v || !src) return;
+  v.src = src; bgmLastSrc = src;
+  if(typeof v.load==='function') v.load();
+  v.volume = BGM_VOL;
+  if(bgmMuted || bgmFxPaused){ if(typeof v.pause==='function') v.pause(); return; }
+  var p = v.play && v.play();
+  if(p && typeof p.catch==='function') p.catch(function(){});
+}
+function bgmOnEnded(){
+  if(bgmHold){ bgmHold=false; if(bgmHoldTimer){ clearTimeout(bgmHoldTimer); bgmHoldTimer=0; } setBgmMode('room'); return; }
+  if(bgmMode==='lobby'){
+    if(bgmLobbyPlays>=2){ setBgmMode('off'); return; }
+  }
+  var next = bgmPick(bgmMode, bgmLastSrc);
+  if(!next){ setBgmMode('off'); return; }
+  if(bgmMode==='lobby') bgmLobbyPlays++;
+  bgmPlaySrc(next);
+}
+function bindBgmEnded(){
+  var v=bgmEl(); if(!v || v.__bgmEnded) return;
+  v.__bgmEnded=true;
+  v.addEventListener('ended', bgmOnEnded);
+  v.addEventListener('error', function(){ bgmOnEnded(); });
+}
+function setBgmMode(mode){
+  if(mode!=='lobby' && mode!=='room' && mode!=='game' && mode!=='duel' && mode!=='off') return;
+  bindBgmEnded();
+  if(mode==='off'){
+    bgmMode='off'; bgmHold=false;
+    var v=bgmEl(); if(v && v.pause) v.pause();
+    return;
+  }
+  if(mode===bgmMode && !bgmHold) return;
+  if(mode==='lobby' && bgmMode!=='lobby') bgmLobbyPlays=0;
+  bgmHold=false; if(bgmHoldTimer){ clearTimeout(bgmHoldTimer); bgmHoldTimer=0; }
+  bgmMode=mode;
+  var src=bgmPick(mode, null);
+  if(!src){ setBgmMode('off'); return; }
+  if(mode==='lobby') bgmLobbyPlays++;
+  bgmPlaySrc(src);
+}
+function skipBgm(){
+  if(bgmMuted || bgmMode==='off' || !bgmMode) return;
+  if(bgmHold){ bgmHold=false; if(bgmHoldTimer){ clearTimeout(bgmHoldTimer); bgmHoldTimer=0; } setBgmMode('room'); return; }
+  bgmOnEnded();
+}
+function setBgmMuted(muted){
+  bgmMuted=!!muted;
+  var v=bgmEl(); if(!v) return;
+  if(bgmMuted){ if(v.pause) v.pause(); }
+  else if(bgmMode && bgmMode!=='off' && !bgmFxPaused){ var p=v.play&&v.play(); if(p&&p.catch) p.catch(function(){}); }
+}
+function pauseBgmForFx(){ bgmFxPaused=true; var v=bgmEl(); if(v&&v.pause) v.pause(); }
+function resumeBgmAfterFx(){
+  bgmFxPaused=false;
+  var v=bgmEl(); if(!v || bgmMuted || !bgmMode || bgmMode==='off') return;
+  var p=v.play&&v.play(); if(p&&p.catch) p.catch(function(){});
+}
+function beginBgmHold(){
+  if(bgmMode==='off' || bgmMuted) return;
+  bgmHold=true;
+  if(bgmHoldTimer) clearTimeout(bgmHoldTimer);
+  bgmHoldTimer=setTimeout(function(){ if(bgmHold){ bgmHold=false; setBgmMode('room'); } }, 40000);
 }
 
 // ============ 游戏内飘牌 Canvas ============
