@@ -367,6 +367,8 @@ function finishGeneralAssign(g){
     // 身份局主公 +1 体力上限
     if(g.gameMode==='identity' && p.role==='zhu') p.maxHp += 1;
     p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.faceup=true; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.chanyuanSources=[]; p.delays=[];
+    // CORE-183/184/185:蛊惑每回合限一次、乱武限定技、礼让每轮限一次+送牌记录,均按拥有者各记一份
+    p.guhuoUsed=false; p.luanwuUsed=false; p.liRangRound=0; p.liRangRecord=null;
     p.equips = emptyEquips();                // 装备区:开局四槽全空
     drawN(g,i,START_HAND);
   });

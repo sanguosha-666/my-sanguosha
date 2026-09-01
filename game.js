@@ -204,8 +204,6 @@ function normalize(g){
 
   // 典韦【强袭】武器选择阶段（从手牌弃置武器时）
 
-  // 辅诩【乱武】:游戏内使用标记（限定技，全局只能使用一次）
-  if(typeof g.luanwuUsed!=='boolean') g.luanwuUsed=false;
 
   // 陈宫【明策】:回合内使用标记
   if(typeof g.mingceUsed!=='boolean') g.mingceUsed=false;
@@ -284,10 +282,27 @@ function normalize(g){
     if(typeof p.chained!=='boolean') p.chained=false;
     if(typeof p.turnedOver!=='boolean') p.turnedOver=false;
     if(typeof p.nirvanaUsed!=='boolean') p.nirvanaUsed=false;
+    // CORE-184:贾诩【乱武】是限定技(每人整局一次),按拥有者各记一份——原为全局
+    // g.luanwuUsed,左慈化身贾诩时一方发动会把另一方的限定技整局消耗掉。
+    // 和同为限定技的 p.nirvanaUsed(涅槃)同款:玩家级、startTurn 不重置。
+    if(typeof p.luanwuUsed!=='boolean') p.luanwuUsed=false;
+    // CORE-185:孔融【礼让】的"每轮限一次"与"送牌记录"都按拥有者各记一份——原为全局
+    // g.liRangRound/g.liRangRecord,左慈化身孔融时一方用掉会把另一方整轮顶掉,送牌记录
+    // 也会被后一次整体覆盖。记录存在【送出方(孔融自己)】身上,只需再记 to/round。
+    if(!Number.isInteger(p.liRangRound)) p.liRangRound=0;
+    if(!p.liRangRecord || typeof p.liRangRecord!=='object') p.liRangRecord=null;
+    if(p.liRangRecord){
+      if(!Array.isArray(p.liRangRecord.discarded)) p.liRangRecord.discarded=[];
+      if(typeof p.liRangRecord.round!=='number' || typeof p.liRangRecord.to!=='number'){
+        p.liRangRecord=null;
+      }
+    }
     if(typeof p.jujianUsed!=='boolean') p.jujianUsed=false;
     if(typeof p.chanyuan!=='boolean') p.chanyuan=false;
     // CORE-182:缠怨按蛊惑来源分别记录(Firebase 吞空数组,读回来是 undefined,必须补默认值)
     if(!Array.isArray(p.chanyuanSources)) p.chanyuanSources=[];
+    // CORE-183:于吉【蛊惑】每回合限一次,按拥有者各记一份(原为全局 g.guhuoUsed)
+    if(typeof p.guhuoUsed!=='boolean') p.guhuoUsed=false;
     if(typeof p.jiuShaBonus!=='boolean') p.jiuShaBonus=false;
     // 曹彰【将驰】本回合效果
     if(typeof p.jiangchiNoSlash!=='boolean') p.jiangchiNoSlash=false;
@@ -534,8 +549,6 @@ function normalize(g){
   if(typeof g.liJianUsed!=='boolean') g.liJianUsed=false;
   // 周瑜【反间】:出牌阶段限一次
   if(typeof g.fanJianUsed!=='boolean') g.fanJianUsed=false;
-  // 于吉【蛊惑】:每回合限一次
-  if(typeof g.guhuoUsed!=='boolean') g.guhuoUsed=false;
   if(typeof g.jiuUsed!=='boolean') g.jiuUsed=false;
   if(!Array.isArray(g.wangxiQueue)) g.wangxiQueue=[];
   // 左慈"自己的hook + 借来的hook都想开pending"的排队(见triggerHook/
@@ -566,15 +579,6 @@ function normalize(g){
   if(typeof g.sanyaoUsed!=='boolean') g.sanyaoUsed=false;
   // 曹彰【将驰】:本回合额外出杀次数剩余
   if(typeof g.jiangchiExtraShaLeft!=='number') g.jiangchiExtraShaLeft=0;
-  // 孔融【礼让】:每轮限一次 + 当前礼让对象/弃牌阶段记录
-  if(!Number.isInteger(g.liRangRound)) g.liRangRound=0;
-  if(!g.liRangRecord || typeof g.liRangRecord!=='object') g.liRangRecord=null;
-  if(g.liRangRecord){
-    if(!Array.isArray(g.liRangRecord.discarded)) g.liRangRecord.discarded=[];
-    if(typeof g.liRangRecord.round!=='number' || typeof g.liRangRecord.from!=='number' || typeof g.liRangRecord.to!=='number'){
-      g.liRangRecord=null;
-    }
-  }
   // quhuRespond(拼点阶段)和 quhuDamageChoice(拼点赢后选伤害目标)结构不同,不能共用同一份校验——
   // 前者带 selfCard(拼点用的那张牌),后者带 targets(可选的伤害目标座位数组),没有 selfCard。
   // 曾经两者共用一段校验、都要求 selfCard 非空,quhuDamageChoice 从来不带这个字段,
@@ -850,13 +854,27 @@ function drawPhaseCount(g, seat){
   return 2 + generalCapValue(g.players[seat],'extraDrawPhase',0);
 }
 function eligibleLiRangSeat(g, targetSeat){
-  if(g.liRangRound===g.roundNum) return null;
   for(let k=1;k<=g.players.length;k++){
     const s=(targetSeat+k)%g.players.length;
     const p=g.players[s];
-    if(s!==targetSeat && p && p.alive && hasCap(p,'lirang') && (p.hand||[]).length>=2) return s;
+    // CORE-185:"本轮已用过礼让"要查该候选人【自己】的记录,不是全局一份——否则场上有
+    // 两个礼让拥有者时(左慈化身孔融),先手那位用掉会让后手那位整轮不被询问。
+    if(s!==targetSeat && p && p.alive && hasCap(p,'lirang') && p.liRangRound!==g.roundNum && (p.hand||[]).length>=2) return s;
   }
   return null;
+}
+// CORE-185:取出"本轮把牌送给了 toSeat"的全部礼让记录(按座位顺序)。场上可能有两个
+// 礼让拥有者(左慈化身孔融),各自的记录独立存在自己身上,这里统一收集,调用方逐条处理。
+function liRangRecordsFor(g, toSeat){
+  const out=[];
+  (g.players||[]).forEach(p=>{
+    const r=p && p.liRangRecord;
+    if(r && r.round===g.roundNum && r.to===toSeat){
+      if(!Array.isArray(r.discarded)) r.discarded=[];
+      out.push(r);
+    }
+  });
+  return out;
 }
 function finishDrawPhase(g, seat, n){
   drawN(g, seat, n);
@@ -1804,14 +1822,14 @@ function respondLiRang(activate, cardIdxs){
       continueEnterDrawPhase(g);
       return g;
     }
-    if(g.liRangRound===g.roundNum) return g;
+    if(me.liRangRound===g.roundNum) return g;   // CORE-185:每轮限一次按拥有者各记一份
     if(!Array.isArray(cardIdxs) || cardIdxs.length!==2) return g;
     const idxs=[...new Set(cardIdxs)].filter(i=>Number.isInteger(i)).sort((a,b)=>b-a);
     if(idxs.length!==2 || idxs.some(i=>i<0 || i>=(me.hand||[]).length)) return g;
     const moved=removeHandCards(g, mySeat, idxs).reverse();
     target.hand.push(...moved);
-    g.liRangRound=g.roundNum;
-    g.liRangRecord={round:g.roundNum, from, to, discarded:[]};
+    me.liRangRound=g.roundNum;
+    me.liRangRecord={round:g.roundNum, to, discarded:[]};   // 记录挂在送出方(孔融自己)身上
     g.pending=null;
     g.log=pushLog(g.log, me.name+' 发动【礼让】,交给 '+target.name+' 两张牌');
     markSkillSound(g, '礼让');
@@ -4297,7 +4315,7 @@ function canRescueSeat(g, seat, dyingSeat){
     const hasRedEquip=typeof EQUIP_SLOTS!=='undefined' && EQUIP_SLOTS.some(s=>p.equips&&p.equips[s]&&typeof isRed==='function'&&isRed(p.equips[s]));
     if(hasRedHand || hasRedEquip) return true;
   }
-  if(hasCap(p,'guhuo') && !g.guhuoUsed && (p.hand||[]).length>0) return true;
+  if(hasCap(p,'guhuo') && !p.guhuoUsed && (p.hand||[]).length>0) return true;
   return false;
 }
 function nextDyingAskee(g, dyingSeat, current){
@@ -4427,13 +4445,14 @@ function nextWuxieAskee(g, pending, current){
   // 值得被问的玩家 = 真实持有【无懈可击】,或拥有【蛊惑】且本回合未使用过
   // (蛊惑可把任意一张手牌当【无懈可击】打出,与 canStartGuhuoResponse 的守卫对齐:
   // hasCap 已覆盖化身/新生借用,skillsLost/缠怨锁技能也随 hasCap 一起失效;
-  // "未使用过"用全局 g.guhuoUsed,本回合已蛊惑过就不再问。手牌非空才可能扣置,
+  // "未使用过"用该玩家自己的 p.guhuoUsed(CORE-183:按拥有者各记一份,不是全局一份),
+  // 本回合已蛊惑过就不再问。手牌非空才可能扣置,
   // 空手问毫无意义,符合 #67"只询问值得问的玩家"结论。能力/手牌数均为公开信息,不泄露)。
   const canWuxie = seat=>{
     const p=g.players[seat];
     if(!p || !p.alive || !Array.isArray(p.hand)) return false;
     if(p.hand.some(c=>c && c.name==='无懈可击')) return true;
-    return p.hand.length>0 && hasCap(p,'guhuo') && !g.guhuoUsed;
+    return p.hand.length>0 && hasCap(p,'guhuo') && !p.guhuoUsed;
   };
   if(pending && pending.askAll && pending.depth===0){
     const n=g.players.length;
@@ -5385,10 +5404,7 @@ function discardCard(cardIdx){
     if(me.hand.length<=handCapLimit(g, mySeat)) return g;
     const card=removeHandCards(g, mySeat, cardIdx)[0]; g.discard.push(card);
     markDiscardReveal(g, mySeat, [card]);
-    if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
-      g.liRangRecord.discarded = g.liRangRecord.discarded || [];
-      g.liRangRecord.discarded.push(card);
-    }
+    liRangRecordsFor(g, mySeat).forEach(r=>{ r.discarded.push(card); });
     g.log=pushLog(g.log, me.name+' 弃置一张牌');
     // 曹植【落英】
     if(maybeStartLuoying(g, mySeat, [card], 'discard', {phase:'discard'})) return g;
@@ -5419,10 +5435,7 @@ function discardCards(cardIdxList){
     g.discardedThisPhase = (g.discardedThisPhase || 0) + discarded.length;
     // 孔融【礼让】记录:和 discardCard 单张版本同一段逻辑,只是这里批量循环每一张都要记
     // (礼让回收的是"本弃牌阶段弃置的全部牌",不能因为改成批量提交就漏记)。
-    if(g.liRangRecord && g.liRangRecord.round===g.roundNum && g.liRangRecord.to===mySeat){
-      g.liRangRecord.discarded = g.liRangRecord.discarded || [];
-      g.liRangRecord.discarded.push(...discarded);
-    }
+    liRangRecordsFor(g, mySeat).forEach(r=>{ r.discarded.push(...discarded); });
     g.log=pushLog(g.log, me.name+' 弃置了'+discarded.length+'张牌');
     // 曹植【落英】
     if(maybeStartLuoying(g, mySeat, discarded, 'discard', {phase:'discard'})) return g;
@@ -5897,7 +5910,7 @@ function startTurn(g, seat){
     return;
   }
   g.players.forEach(p=>{ if(p) p.shuangxiongColor=null; });
-  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.guhuoUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0; g.jijiangUsed=false; g.hujiaUsed=false; g.zhibaUsed=false; g.lordHandCap=0;
+  g.turn=seat; g.shaUsed=false; g.shaPlayedInDuel=false; g.duanliangUsed=false; g.tiaoxinUsed=false; g.zhihengUsed=false; g.renDeCount=0; g.qingNangUsed=false; g.quHuUsed=false; g.liJianUsed=false; g.fanJianUsed=false; g.jiuUsed=false; g.luoyiActive=false; g.sanyaoUsed=false; g.dimengUsed=false; g.huanhuoUsed=false; g.tianyiUsed=false; g.tianyiWin=false; g.tianyiLose=false; g.qiangxiUsed=false; g.mingceUsed=false; g.xuanfengDiscardUsed=false; g.discardedThisPhase=0; g.jiangchiExtraShaLeft=0; g.jijiangUsed=false; g.hujiaUsed=false; g.zhibaUsed=false; g.lordHandCap=0;
   
   // 丁奉【奋迅】:重置当前回合玩家的专属状态
   const currentPlayer = g.players[seat];
@@ -5908,6 +5921,11 @@ function startTurn(g, seat){
   // 官方的"本回合结束时失效"(曹彰自己的结束阶段仍在他回合内,标志还在,也是对的)。
   // 写法对齐同一批的 shuangxiongColor/jiuShaBonus,不新造模式。
   g.players.forEach(p=>{ if(p){ p.jiangchiNoSlash=false; p.jiangchiNoDistance=false; } });
+  // CORE-183:于吉【蛊惑】"每回合限一次"必须按拥有者各记一份——左慈化身于吉时场上可能
+  // 同时有两个蛊惑拥有者,原来的全局 g.guhuoUsed 会让一方用掉、另一方本回合直接失效
+  // (蛊惑可在别人回合作为响应打出,不是"各自回合天然错开")。和上面的 jiangchiNoSlash
+  // 同理:本回合限定的玩家标志放【全员】重置块,不能放 currentPlayer 专属块(规则 27)。
+  g.players.forEach(p=>{ if(p) p.guhuoUsed=false; });
   if(currentPlayer) {
     currentPlayer.fenxunUsed = false;
     currentPlayer.fenxunTarget = null;

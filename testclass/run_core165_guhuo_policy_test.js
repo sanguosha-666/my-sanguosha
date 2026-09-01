@@ -28,7 +28,7 @@ function mkG(mode, roles){
     role:r.role,roleRevealed:!!r.revealed,team:r.team}));
   players[0].hand=[{id:'g1',name:'桃',suit:'♥',rank:6}];
   return {players,gameMode:mode,phase:'play',turn:0,roundNum:1,log:[],pending:null,
-          deck:[],discard:[],guhuoUsed:false};
+          deck:[],discard:[]};
 }
 function triedGuhuo(g){
   R("__invoked=[];");
@@ -70,7 +70,7 @@ g=mkG('ffa',[{},{}]);
 assert.strictEqual(triedGuhuo(g),true,'ffa 模式行为不变');
 
 // 7) 已用过 guhuoUsed 时不发动(既有门槛零回归)
-g=mkG('ffa',[{},{}]); g.guhuoUsed=true;
+g=mkG('ffa',[{},{}]); g.players[0].guhuoUsed=true;   // CORE-183:每回合限一次记在于吉自己身上
 assert.strictEqual(triedGuhuo(g),false,'本回合已用过蛊惑时不得再发动');
 
 console.log('CORE-165 guhuo faction policy: all passed');

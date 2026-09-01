@@ -73,12 +73,14 @@ check('闭月(貂蝉):回合结束时直接摸1张,不再挂起询问', function
 
 // ---- 5. 礼让回收(孔融):回合结束时直接拿回弃置的牌,不再询问 ----
 check('礼让回收(孔融):回合结束时直接拿回本弃牌阶段弃置的牌,不再挂起询问', function(){
-  const kong={name:'孔融',general:'kongrong',hp:3,maxHp:3,hand:[],equips:eq(),delays:[],alive:true};
+  // CORE-185:礼让送牌记录改为挂在送出方(孔融自己)身上,不再是全局单槽 g.liRangRecord
+  const discardedCardRef=card('lr1','杀');
+  const kong={name:'孔融',general:'kongrong',hp:3,maxHp:3,hand:[],equips:eq(),delays:[],alive:true,
+    liRangRound:1, liRangRecord:{round:1,to:1,discarded:[discardedCardRef]}};
   const other={name:'对手',hp:4,maxHp:4,hand:[],equips:eq(),delays:[],alive:true};
-  const discardedCard=card('lr1','杀');
+  const discardedCard=discardedCardRef;
   const g={
-    players:[kong,other],deck:[],discard:[discardedCard],log:[],phase:'discard',turn:1,roundNum:1,gameMode:'ffa',pending:null,
-    liRangRecord:{round:1,from:0,to:1,discarded:[discardedCard]}
+    players:[kong,other],deck:[],discard:[discardedCard],log:[],phase:'discard',turn:1,roundNum:1,gameMode:'ffa',pending:null
   };
   sandbox.__g=g;
   const opened=run('maybeStartLiRangRecover(__g,1)');

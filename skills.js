@@ -313,7 +313,7 @@ function guhuoResponseNamesForRole(role){
 }
 function canStartGuhuoResponse(g, seat, role){
   const me=g.players[seat];
-  if(!me || !me.alive || !hasCap(me,'guhuo') || g.guhuoUsed) return false;
+  if(!me || !me.alive || !hasCap(me,'guhuo') || me.guhuoUsed) return false;   // CORE-183:按拥有者各记一份
   if(role==='闪'){
     if(g.phase==='respond' && g.pending && g.pending.to===seat && !g.pending.noShan) return true;
     return g.phase==='aoeResp' && g.pending && g.pending.to===seat && g.pending.need==='闪';
@@ -553,7 +553,7 @@ function startGuhuo(cardIdx, claimedName){
   tx(g=>{
     if(g.phase!=='play'||g.turn!==mySeat) return g;
     const me=g.players[mySeat];
-    if(!me || !me.alive || !hasCap(me,'guhuo') || g.guhuoUsed) return g;
+    if(!me || !me.alive || !hasCap(me,'guhuo') || me.guhuoUsed) return g;   // CORE-183:按拥有者各记一份
     const actual=me.hand[cardIdx];
     if(!actual || !guhuoClaimableNames().includes(claimedName)) return g;
     const spec=CARD_PLAYS[guhuoActionId(claimedName)];
@@ -562,7 +562,7 @@ function startGuhuo(cardIdx, claimedName){
     if(spec.canPlay && !spec.canPlay(g, me, claimed)) return g;
     if(!guhuoHasLegalTarget(g, mySeat, claimed, spec)) return g;
     removeHandCards(g, mySeat, cardIdx);
-    g.guhuoUsed=true;
+    me.guhuoUsed=true;
     g.pending=setResponseAskedAt({ type:'guhuoQuestion', sourceSeat:mySeat, actualCard:actual, claimedCard:claimed, questioners:[], answered:[] });
     g.log=pushLog(g.log, me.name+' 扣置一张手牌发动【蛊惑】,声明为【'+claimedName+'】');
     markSkillSound(g, '蛊惑');
@@ -587,7 +587,7 @@ function startGuhuoResponse(cardIdx, claimedName){
     if(!actual || !guhuoResponseNamesForRole(role).includes(claimedName)) return g;
     const claimed={ id:actual.id, name:claimedName, suit:actual.suit, rank:actual.rank, originalName:actual.name };
     removeHandCards(g, mySeat, cardIdx);
-    g.guhuoUsed=true;
+    me.guhuoUsed=true;
     const oldPhase=g.phase;
     const oldPending=g.pending;
     g.pending=setResponseAskedAt({
@@ -954,8 +954,10 @@ function maybeStartTianxiang(g, seat, amount, sourceSeat, reason, srcType, sourc
 
 function zhengyiRecipient(g, seat){
   const p=g.players[seat];
-  const r=g.liRangRecord;
-  if(!p || !p.alive || !hasCap(p,'zhengyi') || !r || r.round!==g.roundNum || r.from!==seat) return null;
+  // CORE-185:礼让记录挂在送出方自己身上,直接查这名角色自己的那一份(原来查全局单槽
+  // g.liRangRecord 并比对 r.from===seat,场上有两个孔融时会被对方的记录顶掉)。
+  const r=p && p.liRangRecord;
+  if(!p || !p.alive || !hasCap(p,'zhengyi') || !r || r.round!==g.roundNum) return null;
   const target=g.players[r.to];
   if(!target || !target.alive || r.to===seat) return null;
   return r.to;
@@ -1667,23 +1669,34 @@ function liRangDiscardCardsInPile(g, cards){
 }
 
 function maybeStartLiRangRecover(g, endingSeat){
-  const r=g.liRangRecord;
-  if(!r || r.round!==g.roundNum || r.to!==endingSeat) return false;
-  const kong=g.players[r.from];
-  if(!kong || !kong.alive || !hasCap(kong,'lirang')) return false;
-  const cards=liRangDiscardCardsInPile(g, r.discarded);
-  if(cards.length===0) return false;
-  // 孔融【礼让】回收:白拿回自己之前送出的牌,对孔融自己零代价、纯收益,不再询问,直接生效。
-  const gained=[];
-  cards.forEach(card=>{
-    const idx=(g.discard||[]).findIndex(c=>c===card || (c && card && c.id!==undefined && c.id===card.id));
-    if(idx>=0) gained.push(g.discard.splice(idx,1)[0]);
+  // CORE-185:场上可能有两个礼让拥有者(左慈化身孔融),本轮都把牌送给了同一个人——逐条
+  // 处理各自的记录,而不是只看全局单槽的那一份。每条记录取走的牌会从弃牌堆里 splice 掉,
+  // 后一条再过 liRangDiscardCardsInPile 时自然只剩没被拿走的,不会重复回收同一张牌。
+  const records=[];
+  g.players.forEach((p, seat)=>{
+    const r=p && p.liRangRecord;
+    if(r && r.round===g.roundNum && r.to===endingSeat && p.alive && hasCap(p,'lirang')) records.push({seat, r});
   });
-  if(gained.length){
-    kong.hand.push(...gained);
-    g.log=pushLog(g.log, kong.name+' 发动【礼让】,获得 '+g.players[endingSeat].name+' 本弃牌阶段弃置的'+gained.length+'张牌');
-    markSkillSound(g, '礼让');
-  }
+  if(records.length===0) return false;
+  let any=false;
+  records.forEach(({seat, r})=>{
+    const kong=g.players[seat];
+    const cards=liRangDiscardCardsInPile(g, r.discarded);
+    if(cards.length===0) return;
+    // 孔融【礼让】回收:白拿回自己之前送出的牌,对孔融自己零代价、纯收益,不再询问,直接生效。
+    const gained=[];
+    cards.forEach(card=>{
+      const idx=(g.discard||[]).findIndex(c=>c===card || (c && card && c.id!==undefined && c.id===card.id));
+      if(idx>=0) gained.push(g.discard.splice(idx,1)[0]);
+    });
+    if(gained.length){
+      kong.hand.push(...gained);
+      g.log=pushLog(g.log, kong.name+' 发动【礼让】,获得 '+g.players[endingSeat].name+' 本弃牌阶段弃置的'+gained.length+'张牌');
+      markSkillSound(g, '礼让');
+      any=true;
+    }
+  });
+  if(!any) return false;
   advanceXiaoguo(g, endingSeat, endingSeat);
   return true;
 }
@@ -3250,10 +3263,10 @@ function startLuanwu() {
   tx(g => {
     if (g.phase !== 'play' || g.turn !== mySeat) return g;
     const me = g.players[mySeat];
-    if (!me || !me.alive || !hasCap(me, 'luanwu') || g.luanwuUsed) return g;
+    if (!me || !me.alive || !hasCap(me, 'luanwu') || me.luanwuUsed) return g;   // CORE-184:按拥有者各记一份
     
-    // 标记乱武已使用
-    g.luanwuUsed = true;
+    // 标记乱武已使用(限定技,记在发动者自己身上)
+    me.luanwuUsed = true;
     
     // 准备乱武选择流程
     // 找出所有其他存活角色
