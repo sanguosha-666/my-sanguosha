@@ -469,15 +469,18 @@ function nextGuhuoAsker(g, fromSeat){
   for(let k=1;k<=g.players.length;k++){
     const seat=(fromSeat+k)%g.players.length;
     const p=g.players[seat];
-    if(seat!==d.sourceSeat && p && p.alive && !p.chanyuan && !answered.has(seat)) return seat;
+    // CORE-182:只跳过对"本次蛊惑的发动者"已有缠怨的玩家,不看其它于吉来源给的缠怨
+    if(seat!==d.sourceSeat && p && p.alive && !hasChanyuanFrom(p, d.sourceSeat) && !answered.has(seat)) return seat;
   }
   return null;
 }
 
-function grantChanyuan(g, seat){
+function grantChanyuan(g, seat, sourceSeat){
   const p=g.players[seat];
-  if(!p || !p.alive || p.chanyuan) return;
-  p.chanyuan = true;
+  if(!p || !p.alive || hasChanyuanFrom(p, sourceSeat)) return;
+  if(!Array.isArray(p.chanyuanSources)) p.chanyuanSources=[];
+  p.chanyuanSources.push(sourceSeat);
+  p.chanyuan = true;   // 保留旧语义:至少对一个来源有缠怨(体力≤1 锁技能/座位卡角标)
   markSkillSound(g,'缠怨');
   g.log = pushLog(g.log, p.name+' 因质疑真实【蛊惑】获得【缠怨】');
 }
@@ -536,7 +539,7 @@ function resolveGuhuoAfterQuestion(g){
   const isTrue = actualName===claimedName;
   g.log=pushLog(g.log, (me?me.name:'于吉')+' 翻开【蛊惑】牌:实际为【'+actualName+'】,声明为【'+claimedName+'】');
   if(questioners.length>0 && isTrue){
-    questioners.forEach(seat=>grantChanyuan(g, seat));
+    questioners.forEach(seat=>grantChanyuan(g, seat, d.sourceSeat));
     finishGuhuo(g, true);
   } else if(questioners.length>0 && !isTrue){
     g.log=pushLog(g.log, '【蛊惑】为假,此牌作废');
@@ -615,7 +618,7 @@ function respondGuhuoQuestion(question){
   tx(g=>{
     if(g.phase!=='guhuoQuestion'||!g.pending||g.pending.type!=='guhuoQuestion'||g.pending.asking!==mySeat) return g;
     const me=g.players[mySeat];
-    if(!me || !me.alive || me.chanyuan) return g;
+    if(!me || !me.alive || hasChanyuanFrom(me, g.pending.sourceSeat)) return g;
     g.pending.answered = g.pending.answered || [];
     if(!g.pending.answered.includes(mySeat)) g.pending.answered.push(mySeat);
     if(question){

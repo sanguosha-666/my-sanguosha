@@ -365,7 +365,7 @@ function finishGeneralAssign(g){
     p.maxHp = generalMaxHp(p.general);       // 体力上限按武将,异常回退 MAX_HP
     // 身份局主公 +1 体力上限
     if(g.gameMode==='identity' && p.role==='zhu') p.maxHp += 1;
-    p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.faceup=true; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.delays=[];
+    p.hp = p.maxHp; p.hand=[]; p.alive=true; p.dying=false; p.chained=false; p.faceup=true; p.turnedOver=false; p.nirvanaUsed=false; p.chanyuan=false; p.chanyuanSources=[]; p.delays=[];
     p.equips = emptyEquips();                // 装备区:开局四槽全空
     drawN(g,i,START_HAND);
   });
