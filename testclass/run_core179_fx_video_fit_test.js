@@ -59,6 +59,7 @@ check('.fx-video 全视口 contain 黑边，不 cover、不小窗', function(){
   assert.ok(rule.indexOf('width:100%') >= 0, '.fx-video 应为 width:100%，实际 '+rule);
   assert.ok(rule.indexOf('height:100%') >= 0, '.fx-video 应为 height:100%，实际 '+rule);
   assert.ok(/background:#000|background:#000000|background:black/.test(rule), '.fx-video 背景应为黑，实际 '+rule);
+  assert.ok(rule.indexOf('visibility:hidden') >= 0, '.fx-video 默认必须 hidden，否则进房三条空 video 全屏黑底盖住界面，实际 '+rule);
   assert.ok(rule.indexOf('object-fit:cover') < 0, '.fx-video 不应 cover 裁切');
   assert.ok(rule.indexOf('max-width') < 0, '.fx-video 不应有 max-width 小窗限制');
   assert.ok(rule.indexOf('max-height') < 0, '.fx-video 不应有 max-height 小窗限制');
