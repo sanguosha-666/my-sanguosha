@@ -189,6 +189,7 @@ function bgmOnEnded(isError){
 }
 function bindBgmEnded(){
   var v=bgmEl(); if(!v || v.__bgmEnded) return;
+  if(typeof v.addEventListener!=='function') return;
   v.__bgmEnded=true;
   v.addEventListener('ended', function(){ bgmOnEnded(false); });
   v.addEventListener('error', function(){ bgmOnEnded(true); });
@@ -763,7 +764,7 @@ function bindFxVideo(v){
 function initLobbyBgm(){
   if(typeof setBgmMode!=='function') return;
   var game=typeof document!=='undefined' && document.getElementById('game');
-  if(game && game.classList && !game.classList.contains('hidden')) return;
+  if(game && game.classList && typeof game.classList.contains==='function' && !game.classList.contains('hidden')) return;
   setBgmMode('lobby');
 }
 
