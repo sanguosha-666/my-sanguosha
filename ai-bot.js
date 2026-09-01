@@ -95,7 +95,14 @@ function modelSizeB(id){
   }
   return best;
 }
-function isAutoSelectModel(id){ return modelSizeB(id) >= 20; }
+function isCohereModelId(id){
+  const raw = String(id||'');
+  if(/^cohere:/i.test(raw)) return true;
+  const colon = raw.indexOf(':');
+  const name = colon>=0 ? raw.slice(colon+1) : raw;
+  return /^command-/i.test(name);
+}
+function isAutoSelectModel(id){ return !isCohereModelId(id) && modelSizeB(id) >= 20; }
 function mergeAutoSelectModels(selected, liveIds){
   const out = Array.isArray(selected) ? selected.slice() : [];
   (liveIds||[]).forEach(function(id){

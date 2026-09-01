@@ -197,6 +197,20 @@ async function check(name, fn){
     if(out.filter(function(x){ return x==='groq/compound'; }).length!==1) throw new Error('compound 只留原勾选一份');
   });
 
+  await check('isAutoSelectModel: ≥20B 勾选但忽略 cohere', function(){
+    const auto = vm.runInContext('isAutoSelectModel', sandbox);
+    if(!auto('openai/gpt-oss-20b')) throw new Error('groq 20b 应自动勾');
+    if(!auto('cerebras:gpt-oss-120b')) throw new Error('cerebras 120b 应自动勾');
+    if(auto('cohere:command-a-plus-05-2026')) throw new Error('cohere 前缀不应自动勾');
+    if(auto('command-a-03-2025')) throw new Error('command-* 不应自动勾');
+    if(auto('cohere:some-70b')) throw new Error('cohere 70b 也不应自动勾');
+    const merge = vm.runInContext('mergeAutoSelectModels', sandbox);
+    const out = merge([], ['openai/gpt-oss-20b','cohere:foo-70b','command-r-plus']);
+    if(out.indexOf('openai/gpt-oss-20b')<0) throw new Error('应并上 groq 20b');
+    if(out.indexOf('cohere:foo-70b')>=0) throw new Error('不应并上 cohere');
+    if(out.indexOf('command-r-plus')>=0) throw new Error('不应并上 command-*');
+  });
+
   await check('modelIdAllowedInSavedPool: DEFAULT 或 ≥20B 保留,8b 丢', function(){
     const ok = vm.runInContext('modelIdAllowedInSavedPool', sandbox);
     if(!ok('groq/compound','groq')) throw new Error('硬编码 compound 应留');
