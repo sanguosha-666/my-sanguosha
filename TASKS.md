@@ -1,11 +1,12 @@
 # TASKS.md — 三国杀项目进度
 
-## 2026-08-31 — 大厅/对局/1v1 BGM（用户功能请求，未实现）
+## 2026-08-31 — 大厅/对局/1v1 BGM（用户功能请求）
 
 - [x] Phase 1/3：brainstorming + 设计定稿。spec：`docs/superpowers/specs/2026-08-31-bgm-design.md`
-- [x] Phase 2/3：用户审 spec + writing-plans。计划：`docs/superpowers/plans/2026-08-31-bgm.md`
-- [ ] Phase 3/3：实现（4 task：引擎 / DOM+进房 / render切档+hold+特效+🔊 / 全量回归）
-- 关键：单 audio 切曲池；大厅 2 首后停；终局当前曲 ended 或 40s；🔊 兼管 BGM；视频永远 mute。
+- [x] Phase 2/3：writing-plans。计划：`docs/superpowers/plans/2026-08-31-bgm.md`
+- [x] Phase 3/3：实现 `b075523..a5a17e6`（引擎/DOM+进房/render切档+hold+特效+🔊/熔断+初始静音修复）。全量 `run_all_tests.js` **173/173**。
+- 关键：四档 lobby/room/game/duel；首页 2 首后停；终局 ended 或 40s；聊天 🔊 兼管；⏭ 在关房左边；`#bgVideo` 永远 mute。
+- 素材：工作区有未跟踪 `bgm-game (N).m4a` / `bgm-duel (N).m4a`（文件名带空格，未入库）。需改名为 `bgm-game.mp3` / `bgm-game01.mp3`… 并写入 `BGM_TRACKS` 才进池。
 
 ## 2026-08-30 — 甄姬接入表情动画（与貂蝉等同逻辑）
 
