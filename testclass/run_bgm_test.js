@@ -271,10 +271,23 @@ check('19 render-log.js toggleChatVoice 含 setBgmMuted', function(){
   if(snippet.indexOf('setBgmMuted') < 0) throw new Error('toggleChatVoice 未含 setBgmMuted');
   if(src.indexOf("chatVoiceEnabled") < 0 || src.indexOf("setBgmMuted(true") < 0) throw new Error('未找到初始 setBgmMuted(true)');
 });
-check('20 hold 期间 maybeUpdateBgm 不切档', function(){
+check('20 hold 期间 maybeUpdateBgm 不切档（真实现）', function(){
   var e = loadEnv();
-  // 注入 maybeUpdateBgm 定义（与 render.js 同款）
-  e.run("function maybeUpdateBgm(g){ if(typeof setBgmMode!=='function') return; if(typeof bgmHold!=='undefined' && bgmHold) return; var gameEl=document.getElementById('game'); var inGame=gameEl && !gameEl.classList.contains('hidden'); if(!inGame){ setBgmMode('lobby'); return; } if(!g || !g.started){ setBgmMode('room'); return; } var n=(typeof aliveCount==='function')?aliveCount(g):(g.players||[]).filter(function(p){return p&&p.alive;}).length; if(n===2) setBgmMode('duel'); else setBgmMode('game'); }");
+  // 从 render.js 抽取真实 maybeUpdateBgm 实现（防拷贝漂移）
+  var src = fs.readFileSync(path.join(ROOT,'render.js'),'utf8');
+  var start = src.indexOf('function maybeUpdateBgm');
+  var end = src.indexOf('function resetRenderSentinels');
+  if(start < 0 || end < 0 || end <= start) throw new Error('未找到 maybeUpdateBgm 真实现切片');
+  var fnSrc = src.slice(start, end);
+  e.run(fnSrc);
+  // 注入 inGame DOM 桩：默认 inGame=true（避免切 lobby）
+  e.sandbox.document.getElementById = (function(orig){
+    return function(id){
+      if(id==='game') return { classList:{ contains:function(c){ return c!=='hidden'?false:true; } } };
+      return orig.call(this, id);
+    };
+  })(e.sandbox.document.getElementById);
+  // 需额外绑定 bgmEl 指向的 bgmPlayer 保持不变（复用 orig）
   e.run("setBgmMode('game')");
   if(e.get('bgmMode')!=='game') throw new Error('前置 game 失败 '+e.get('bgmMode'));
   e.run("beginBgmHold()");
@@ -290,6 +303,38 @@ check('21 hold 期间 ended 应切回 room', function(){
   e.bgmPlayer.fire('ended');
   if(e.get('bgmMode')!=='room') throw new Error('ended 后应 room，实际 '+e.get('bgmMode'));
   if(e.get('bgmHold')) throw new Error('ended 后 hold 应清除');
+});
+check('22 chatVoiceEnabled=false 初始加载即静音 (game-bg 加载后)', function(){
+  // 构造 chatVoiceEnabled=false 的沙箱再加载 game-bg.js
+  var bgmPlayer = mkBgmPlayer();
+  var bgVideo = mkVideo();
+  var canvas = { width:300,height:150,clientWidth:800,clientHeight:600,getContext:function(){ return {clearRect:function(){},setTransform:function(){},save:function(){},restore:function(){},translate:function(){},rotate:function(){},beginPath:function(){},moveTo:function(){},lineTo:function(){},closePath:function(){},fill:function(){},stroke:function(){},fillText:function(){}}; }};
+  var otherVideos = { deathFxVideo: mkVideo(), lightningFxVideo: mkVideo(), movieFxVideo: mkVideo(), girlFxVideo: mkVideo() };
+  var ctx = {
+    Math: Math, console: console, Number: Number, String: String, Array: Array, Object: Object, Set: Set,
+    chatVoiceEnabled: false,
+    document: {
+      hidden:false,
+      getElementById:function(id){
+        if(id==='bgmPlayer') return bgmPlayer;
+        if(id==='bgVideo') return bgVideo;
+        if(id==='gameBgCanvas') return canvas;
+        if(id==='bgVeil') return {style:{}};
+        return otherVideos[id]||null;
+      },
+      addEventListener:function(){}, removeEventListener:function(){}, body:{appendChild:function(){}}, createElement:function(){return {style:{},classList:{add:function(){},remove:function(){}},appendChild:function(){},setAttribute:function(){},getAttribute:function(){}};}, querySelector:function(){return null;}, querySelectorAll:function(){return [];}
+    },
+    window:{ devicePixelRatio:1, innerWidth:1400, innerHeight:900, addEventListener:function(){}, removeEventListener:function(){}, matchMedia:function(){return {matches:false};} },
+    setTimeout:setTimeout, clearTimeout:clearTimeout, requestAnimationFrame:function(){return 0;}, cancelAnimationFrame:function(){}
+  };
+  ctx.window.document = ctx.document;
+  ctx.global = ctx;
+  var sb = vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(ROOT,'game-bg.js'),'utf8'), sb, {filename:'game-bg.js'});
+  var bgmMuted = vm.runInContext('bgmMuted', sb);
+  if(bgmMuted!==true) throw new Error('初始 bgmMuted 期待 true, 实际 '+bgmMuted);
+  // _pauses 应至少一次（setBgmMuted(true) 会 pause）
+  if(bgmPlayer._pauses < 1) throw new Error('初始应 pause bgmPlayer, _pauses='+bgmPlayer._pauses);
 });
 
 console.log('\nBGM tests: '+passed+'/'+(passed+failed)+' passed');

@@ -27,7 +27,7 @@
 - 新增 4 条：18 源码含 `maybeUpdateBgm`、19 `toggleChatVoice` 含 `setBgmMuted`、20 hold 期间 `maybeUpdateBgm` 不切档、21 hold 期间 `ended` 切回 `room`
 
 ### index.html
-- `render.js?v=468→469` `render-log.js?v=415→416` `game-bg.js?v=36→37`
+- `render.js?v=468→469` `render-log.js?v=415→416` `game-bg.js?v=36→37→38` (fix 递增)
 
 ## TDD 证据
 
@@ -46,3 +46,28 @@ node check_cache_bust.js → passed (HEAD..working tree 22 scripts)
 
 ## 疑虑
 - `render-log.js` 初始 `setBgmMuted(true)` 在 `game-bg.js` 之后加载时 typeof 守卫会跳过（脚本顺序）；符合 brief 的 guard 写法，实际静音仍可在首次 toggle 或后续 load 时生效。
+
+---
+
+## Fix (review 2026-09-01) — M1 / I1
+
+### M1 初始静音改到 game-bg 加载后
+- `render-log.js:260` 保留为 harmless 额外 guard
+- `game-bg.js` `setBgmMuted` 定义后新增 `if(typeof chatVoiceEnabled!=='undefined' && !chatVoiceEnabled) setBgmMuted(true);` 带 typeof 守卫，沙箱单加载 game-bg 仍安全；`chatVoiceEnabled=false` 时加载即 `bgmMuted=true` 且 pause
+- `index.html` `game-bg.js?v=37→38`
+
+### I1 hold 测试用真 maybeUpdateBgm
+- `run_bgm_test.js` 20 改为从 `render.js` 切片抽取真实 `maybeUpdateBgm` (`indexOf('function maybeUpdateBgm')`→`function resetRenderSentinels`) 并 `runInContext`，注入 `game` 可见桩，漂移即失败
+- 新增 22：`chatVoiceEnabled=false` 沙箱加载 `game-bg.js` 后断言 `bgmMuted===true` 且 `_pauses>=1`
+
+### 验证
+```
+$ node testclass/run_bgm_test.js
+BGM tests: 22/22 passed (18-22 含真实现 + 初始静音)
+$ node testclass/run_fx_video_audio_test.js
+fx video audio tests: 3/3 passed
+$ node testclass/run_chat_tts_test.js
+结果: 22 通过, 0 失败
+$ node check_cache_bust.js
+cache-bust check passed: HEAD..working tree (22 scripts)
+```

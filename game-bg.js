@@ -202,6 +202,7 @@ function setBgmMuted(muted){
   if(bgmMuted){ if(v.pause) v.pause(); }
   else if(bgmMode && bgmMode!=='off' && !bgmFxPaused){ var p=v.play&&v.play(); if(p&&p.catch) p.catch(function(){}); }
 }
+if(typeof chatVoiceEnabled!=='undefined' && !chatVoiceEnabled) setBgmMuted(true);
 function pauseBgmForFx(){ bgmFxPaused=true; var v=bgmEl(); if(v&&v.pause) v.pause(); }
 function resumeBgmAfterFx(){
   bgmFxPaused=false;
