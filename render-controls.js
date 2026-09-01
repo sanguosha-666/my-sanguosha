@@ -2077,7 +2077,7 @@ function renderControls(g){
   if(g.pending && g.pending.type==='guhuoQuestion'){
     const d=g.pending;
     const source=g.players[d.sourceSeat];
-    if(d.asking===mySeat && !(me && me.chanyuan)){
+    if(d.asking===mySeat && !hasChanyuanFrom(me, d.sourceSeat)){   // CORE-182:按蛊惑来源判断
       setBanner((source?escapeHtml(source.name):'于吉')+' 发动【蛊惑】声明为【'+escapeHtml(d.claimedCard&&d.claimedCard.name||'?')+'】,是否质疑?');
       const qb=document.createElement('button'); qb.className='primary';
       qb.textContent='质疑';

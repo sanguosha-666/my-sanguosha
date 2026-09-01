@@ -286,6 +286,8 @@ function normalize(g){
     if(typeof p.nirvanaUsed!=='boolean') p.nirvanaUsed=false;
     if(typeof p.jujianUsed!=='boolean') p.jujianUsed=false;
     if(typeof p.chanyuan!=='boolean') p.chanyuan=false;
+    // CORE-182:缠怨按蛊惑来源分别记录(Firebase 吞空数组,读回来是 undefined,必须补默认值)
+    if(!Array.isArray(p.chanyuanSources)) p.chanyuanSources=[];
     if(typeof p.jiuShaBonus!=='boolean') p.jiuShaBonus=false;
     // 曹彰【将驰】本回合效果
     if(typeof p.jiangchiNoSlash!=='boolean') p.jiangchiNoSlash=false;

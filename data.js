@@ -841,6 +841,13 @@ function validateHuashenPick(pool, generalId, skillName){
 function chanyuanLocksSkills(player){
   return !!(player && player.chanyuan && player.hp<=1);
 }
+// CORE-182:【缠怨】必须按【蛊惑】来源分别记录。p.chanyuan 只表示"至少对一个来源有缠怨"
+// (供 chanyuanLocksSkills 的体力≤1 锁技能与座位卡角标沿用旧语义),而"谁不再被某个
+// 于吉询问"必须查这里——场上可能同时存在两个蛊惑来源(真实于吉 + 左慈化身于吉),
+// 对甲的缠怨不应让乙的蛊惑也跳过该玩家。sourceSeat 即发动这次蛊惑的座位号。
+function hasChanyuanFrom(player, sourceSeat){
+  return !!(player && Array.isArray(player.chanyuanSources) && player.chanyuanSources.includes(sourceSeat));
+}
 // 查询某玩家的武将是否拥有某项被动能力(能力声明在 GENERALS.caps,业务层不写武将名)
 function generalHasCap(player, cap){
   // 蔡文姬【断肠】等:武将技能整体失效后,不再从 GENERALS.caps 读取
