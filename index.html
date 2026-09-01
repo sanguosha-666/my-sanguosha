@@ -2708,6 +2708,7 @@
      故初始静音,用户首次交互后由 game-bg.js 自动恢复声音;
      src 由 pickRandomBgVideo() 随机设置；透明/加载失败时 body 渐变兜底 -->
 <video id="bgVideo" class="bg-video" autoplay muted loop playsinline aria-hidden="true" tabindex="-1"></video>
+<audio id="bgmPlayer" preload="none" aria-hidden="true"></audio>
 <div id="bgVeil" class="bg-veil" aria-hidden="true"></div>
 <!-- CORE-130(issue #170):原来这里有7个 position:fixed 的圆形图标按钮,分两行(top:12/top:64)
      悬浮压在游戏内容上,实测七个按钮全部与对手座位区矩形相交。现已整体挪进 #game 的
@@ -2830,6 +2831,7 @@
         <!-- 全屏按钮:默认 hidden,由 pwa.js 的能力检测决定显不显示(iPhone Safari 不支持
              非视频全屏,那里永远不显示;已从主屏启动时也不显示——地址栏本来就没了)。 -->
         <button id="fullscreenBtn" class="icon-btn hidden" title="全屏游玩" onclick="pwaToggleFullscreen()">⛶</button>
+        <button id="bgmSkipBtn" class="icon-btn" title="下一曲" onclick="skipBgm()">⏭</button>
         <button id="closeRoomBtn" class="icon-btn hidden" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
         <button id="aiPanelBtn" class="icon-btn" title="查看AI决策(理由/武将/模型,含非托管机器人)" onclick="openAiPanelModal()">🧠</button>
         <button id="debugLogBtn" class="icon-btn" title="查看调试日志(排查机器人卡死/报错用)" onclick="showDebugLog()">🐛</button>
@@ -2876,7 +2878,7 @@
      "数据类脚本"一段,不引入任何加载顺序约束。 -->
 <script src="skills/skill-registry.js?v=21"></script>
 <script src="debug-log.js?v=417"></script>
-<script src="room-lifecycle.js?v=428"></script>
+<script src="room-lifecycle.js?v=429"></script>
 <script src="game.js?v=467"></script>
 <script src="sha/sha-resolution.js?v=426"></script>
 <script src="weapons.js?v=418"></script>
@@ -2891,7 +2893,7 @@
 <script src="render-hand.js?v=413"></script>
 <script src="render-controls.js?v=442"></script>
 <script src="render-log.js?v=415"></script>
-<script src="game-bg.js?v=35"></script>
+<script src="game-bg.js?v=36"></script>
 <script src="pwa.js?v=17"></script>
 </body>
 </html>

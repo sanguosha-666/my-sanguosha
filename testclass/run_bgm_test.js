@@ -194,5 +194,69 @@ check('11 unlockFxAudio 后 bgVideo 仍 muted, bgmPlayer 已 unmuted', function(
   if(e.bgmPlayer.muted !== false) throw new Error('unmuteBgVideo 后 bgmPlayer false');
 });
 
+// ---- Task 2 DOM + lifecycle 源码断言（Step1 TDD: 预期 FAIL 直到 HTML/lifecycle 落地） ----
+check('12 index.html 存在 <audio id="bgmPlayer"', function(){
+  var html = fs.readFileSync(path.join(ROOT,'index.html'),'utf8');
+  if(html.indexOf('<audio id="bgmPlayer"') < 0) throw new Error('未找到 <audio id="bgmPlayer"');
+});
+check('13 index.html 存在 id="bgmSkipBtn" 且 onclick="skipBgm()"', function(){
+  var html = fs.readFileSync(path.join(ROOT,'index.html'),'utf8');
+  if(html.indexOf('id="bgmSkipBtn"') < 0) throw new Error('未找到 bgmSkipBtn');
+  if(html.indexOf('onclick="skipBgm()"') < 0) throw new Error('未找到 onclick="skipBgm()"');
+});
+check('14 #bgmSkipBtn 在 fullscreenBtn 与 closeRoomBtn 之间', function(){
+  var html = fs.readFileSync(path.join(ROOT,'index.html'),'utf8');
+  var a = html.indexOf('id="fullscreenBtn"');
+  var b = html.indexOf('id="bgmSkipBtn"');
+  var c = html.indexOf('id="closeRoomBtn"');
+  if(a < 0 || b < 0 || c < 0) throw new Error('缺按钮 '+a+','+b+','+c);
+  if(!(a < b && b < c)) throw new Error('顺序不对 fullscreen='+a+' skip='+b+' close='+c);
+});
+check('15 enterGame 含 setBgmMode(room) 且 backToLobby 含 setBgmMode(lobby)', function(){
+  var rl = fs.readFileSync(path.join(ROOT,'room-lifecycle.js'),'utf8');
+  if(rl.indexOf("setBgmMode('room')") < 0 && rl.indexOf('setBgmMode("room")') < 0) throw new Error('enterGame 未找到 setBgmMode(room)');
+  if(rl.indexOf("setBgmMode('lobby')") < 0 && rl.indexOf('setBgmMode("lobby")') < 0) throw new Error('backToLobby 未找到 setBgmMode(lobby)');
+  // 粗略校验位置：enterGame 在 pauseBgVideo 之后
+  var enterIdx = rl.indexOf('function enterGame');
+  var pauseIdx = rl.indexOf('pauseBgVideo', enterIdx);
+  var roomIdx = rl.indexOf("setBgmMode('room')", enterIdx);
+  if(!(pauseIdx > 0 && roomIdx > pauseIdx)) throw new Error('setBgmMode(room) 不在 pauseBgVideo 之后');
+  var backIdx = rl.indexOf('function backToLobby');
+  var resumeIdx = rl.indexOf('resumeBgVideo', backIdx);
+  var lobbyIdx = rl.indexOf("setBgmMode('lobby')", backIdx);
+  if(!(resumeIdx > 0 && lobbyIdx > resumeIdx)) throw new Error('setBgmMode(lobby) 不在 resumeBgVideo 之后');
+});
+check('16 #bgmPlayer 紧跟 #bgVideo 之后', function(){
+  var html = fs.readFileSync(path.join(ROOT,'index.html'),'utf8');
+  var v = html.indexOf('id="bgVideo"');
+  var a = html.indexOf('id="bgmPlayer"');
+  if(v < 0 || a < 0) throw new Error('缺 bgVideo/bgmPlayer');
+  if(!(v < a)) throw new Error('bgmPlayer 应在 bgVideo 之后');
+  // 确保 audio 在 veil 之前或紧邻视频（简单校验距离 < 500 字符）
+  if(a - v > 500) throw new Error('bgmPlayer 离 bgVideo 过远 '+(a-v));
+});
+
+// ---- Extra: consecutive-error fuse ----
+check('17 单轨缺失连续 error 两次后熔断 off（room 单轨）', function(){
+  var e = loadEnv();
+  // 覆盖为单轨缺失
+  e.run("BGM_TRACKS.room=['missing.mp3'];");
+  e.run("setBgmMode('room')");
+  var plays1 = e.bgmPlayer._plays;
+  if(plays1 < 1) throw new Error('首播未触发 plays='+plays1);
+  // 第一次 error -> 应重播同一首（还有一次机会）
+  e.bgmPlayer.fire('error');
+  var plays2 = e.bgmPlayer._plays;
+  if(plays2 <= plays1) throw new Error('第一次 error 后应重播 plays '+plays1+'->'+plays2);
+  if(e.bgmPlayer.paused) throw new Error('第一次 error 后不应 paused');
+  // 第二次 error -> 熔断 off
+  e.bgmPlayer.fire('error');
+  if(e.bgmPlayer.paused !== true) throw new Error('第二次 error 后应 paused 熔断');
+  var plays3 = e.bgmPlayer._plays;
+  // 不应再有第三次 play
+  e.bgmPlayer.fire('error');
+  if(e.bgmPlayer._plays !== plays3) throw new Error('熔断后不应再 play '+plays3+'->'+e.bgmPlayer._plays);
+});
+
 console.log('\nBGM tests: '+passed+'/'+(passed+failed)+' passed');
 if(failed) process.exit(1);

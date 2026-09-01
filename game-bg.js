@@ -123,6 +123,8 @@ var BGM_TRACKS = {
 };
 var BGM_VOL = 0.35;
 var bgmMode = null, bgmLastSrc = null, bgmLobbyPlays = 0, bgmMuted = false, bgmFxPaused = false, bgmHoldTimer = 0, bgmHold = false;
+var bgmErrStreak=0;
+var _bgmInErrorRetry=false;
 
 function bgmEl(){ return (typeof document!=='undefined') ? document.getElementById('bgmPlayer') : null; }
 function bgmPick(mode, avoid){
@@ -136,11 +138,20 @@ function bgmPlaySrc(src){
   v.src = src; bgmLastSrc = src;
   if(typeof v.load==='function') v.load();
   v.volume = BGM_VOL;
+  // 成功起播清零连续错误计数；error 重试路径通过 _bgmInErrorRetry 避免误清
+  if(!_bgmInErrorRetry) bgmErrStreak=0;
   if(bgmMuted || bgmFxPaused){ if(typeof v.pause==='function') v.pause(); return; }
   var p = v.play && v.play();
   if(p && typeof p.catch==='function') p.catch(function(){});
 }
-function bgmOnEnded(){
+function bgmOnEnded(isError){
+  // error 熔断：单轨缺失会 infinite-retry，连续 2 次 error 直接 off
+  if(isError){
+    bgmErrStreak++;
+    if(bgmErrStreak>=2){ setBgmMode('off'); return; }
+  } else {
+    bgmErrStreak=0;
+  }
   if(bgmHold){ bgmHold=false; if(bgmHoldTimer){ clearTimeout(bgmHoldTimer); bgmHoldTimer=0; } setBgmMode('room'); return; }
   if(bgmMode==='lobby'){
     if(bgmLobbyPlays>=2){ setBgmMode('off'); return; }
@@ -148,13 +159,19 @@ function bgmOnEnded(){
   var next = bgmPick(bgmMode, bgmLastSrc);
   if(!next){ setBgmMode('off'); return; }
   if(bgmMode==='lobby') bgmLobbyPlays++;
-  bgmPlaySrc(next);
+  if(isError){
+    _bgmInErrorRetry=true;
+    bgmPlaySrc(next);
+    _bgmInErrorRetry=false;
+  } else {
+    bgmPlaySrc(next);
+  }
 }
 function bindBgmEnded(){
   var v=bgmEl(); if(!v || v.__bgmEnded) return;
   v.__bgmEnded=true;
-  v.addEventListener('ended', bgmOnEnded);
-  v.addEventListener('error', function(){ bgmOnEnded(); });
+  v.addEventListener('ended', function(){ bgmOnEnded(false); });
+  v.addEventListener('error', function(){ bgmOnEnded(true); });
 }
 function setBgmMode(mode){
   if(mode!=='lobby' && mode!=='room' && mode!=='game' && mode!=='duel' && mode!=='off') return;
@@ -171,12 +188,13 @@ function setBgmMode(mode){
   var src=bgmPick(mode, null);
   if(!src){ setBgmMode('off'); return; }
   if(mode==='lobby') bgmLobbyPlays++;
+  bgmErrStreak=0;
   bgmPlaySrc(src);
 }
 function skipBgm(){
   if(bgmMuted || bgmMode==='off' || !bgmMode) return;
   if(bgmHold){ bgmHold=false; if(bgmHoldTimer){ clearTimeout(bgmHoldTimer); bgmHoldTimer=0; } setBgmMode('room'); return; }
-  bgmOnEnded();
+  bgmOnEnded(false);
 }
 function setBgmMuted(muted){
   bgmMuted=!!muted;

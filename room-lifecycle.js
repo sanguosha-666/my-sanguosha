@@ -87,6 +87,7 @@ function enterGame(){
   // 加载时的初始检测(render.js 底部 `checkLandscapeGate()`)同一套写法。
   if(typeof checkLandscapeGate==='function') checkLandscapeGate();
   if(typeof pauseBgVideo==='function') pauseBgVideo();          // 大厅视频暂停,避免后台耗流量
+  if(typeof setBgmMode==='function') setBgmMode('room');
   if(typeof startGameBg==='function') startGameBg();            // 启动游戏内飘牌 Canvas
   gameRef.on('value', snap => render(snap.val()));
   if(chatQuery) chatQuery.off();
@@ -710,5 +711,6 @@ function backToLobby(){
   if(typeof checkLandscapeGate==='function') checkLandscapeGate();
   if(typeof stopGameBg==='function') stopGameBg();              // 停止并清空飘牌
   if(typeof resumeBgVideo==='function') resumeBgVideo();        // 恢复大厅视频(随机换一个)
+  if(typeof setBgmMode==='function') setBgmMode('lobby');
   document.getElementById('lobbyErr').textContent = '房间已清理,可重新进入。';
 }
