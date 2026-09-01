@@ -23,6 +23,7 @@
 7. 复用聊天 🔊：`toggleChatVoice` 同时管 TTS+BGM。技能/特效音轨不管。大厅看不见该按钮；🔇 持久化后大厅也不播。
 8. `#bgVideo` 永远 mute。音量约 0.35，切曲约 300ms fade。首次手势复用 `unmuteBgVideo`。
 9. 缺文件静默，不抛。素材稍后补；代码硬编码数组（同 `BG_VIDEOS`）。
+10. `#gameToolbar` 里 **🚪关房左边** 加「下一曲」按钮（`#bgmSkipBtn`）。语义同当前档 `ended`：抽下一首（避开正在播的）。大厅 2 首计数：skip 也 +1，第 2 首再 skip → 停。🔇/off 时点了无操作。终局 hold 期间 skip = 立刻切大厅曲池（放弃剩余 40s）。工具行只在 `#game` 可见，大厅看不到此按钮。
 
 ## 架构
 
@@ -31,6 +32,7 @@
 ```
 setBgmMode('lobby'|'game'|'duel'|'off')
 setBgmMuted(boolean)   // 聊天 🔊 调用
+skipBgm()              // 下一曲，语义同 ended
 pauseBgmForFx() / resumeBgmAfterFx()  // hideFxVideo / trigger*Fx 调用
 ```
 
@@ -73,16 +75,26 @@ BGM_TRACKS = {
 
 ## 静音按钮
 
-不新增 DOM。`render-log.js toggleChatVoice()` 翻转后调用 `setBgmMuted(!chatVoiceEnabled)`。按钮文案仍 🔊/🔇。localStorage 键不变。
+不新增静音 DOM。`render-log.js toggleChatVoice()` 翻转后调用 `setBgmMuted(!chatVoiceEnabled)`。按钮文案仍 🔊/🔇。localStorage 键不变。
+
+## 下一曲按钮
+
+`index.html #gameToolbar`：插在 `#fullscreenBtn` 与 `#closeRoomBtn` 之间。
+
+```html
+<button id="bgmSkipBtn" class="icon-btn" title="下一曲" onclick="skipBgm()">⏭</button>
+```
+
+不 `hidden`（关房按钮才按房主显隐）。`skipBgm` 在 `game-bg.js`。
 
 ## 改动面
 
-- `index.html`：`<audio id="bgmPlayer" preload="none">`；cache-bust `game-bg.js` / `render.js` / `render-log.js`
-- `game-bg.js`：曲池、`setBgmMode`、ended 抽下一首、大厅 2 首、终局 40s、fade、特效暂停
+- `index.html`：`<audio id="bgmPlayer" preload="none">` + `#bgmSkipBtn`；cache-bust `game-bg.js` / `render.js` / `render-log.js`
+- `game-bg.js`：曲池、`setBgmMode`、`skipBgm`、ended 抽下一首、大厅 2 首、终局 40s、fade、特效暂停
 - `render.js`：`maybeUpdateBgm(g)`
 - `render-log.js`：`toggleChatVoice` 联动
 - 进房/回大厅现有函数旁各一调
-- `testclass/run_bgm_test.js`：切档、同模式不重载、ended 抽下一首且避开上一首、大厅 2 首后停、终局 ended/40s、特效暂停、🔊 联动、缺文件静默
+- `testclass/run_bgm_test.js`：切档、同模式不重载、ended 抽下一首且避开上一首、大厅 2 首后停、终局 ended/40s、特效暂停、🔊 联动、⏭ skip、缺文件静默
 - `run_fx_video_audio_test.js`：`unmuteBgVideo` 也 unmute `#bgmPlayer`（若存在）
 
 ## 不做
