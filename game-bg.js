@@ -115,11 +115,19 @@ if(typeof document !== 'undefined' && typeof document.addEventListener === 'func
 }
 
 // ============ BGM 引擎（四档曲池 + skip/mute/fx暂停） ============
+function bgmList(stem, count){
+  var out=['assets/audio/'+stem+'.mp3'];
+  for(var i=1;i<count;i++){
+    var n=i<10?('0'+i):(''+i);
+    out.push('assets/audio/'+stem+n+'.mp3');
+  }
+  return out;
+}
 var BGM_TRACKS = {
-  lobby: ['assets/audio/bgm-lobby.mp3','assets/audio/bgm-lobby01.mp3'],
-  room:  ['assets/audio/bgm-room.mp3'],
-  game:  ['assets/audio/bgm-game.mp3'],
-  duel:  ['assets/audio/bgm-duel.mp3']
+  lobby: bgmList('bgm-lobby', 2),
+  room:  bgmList('bgm-room', 10),
+  game:  bgmList('bgm-game', 49),
+  duel:  bgmList('bgm-duel', 13)
 };
 var BGM_VOL = 0.35;
 var bgmMode = null, bgmLastSrc = null, bgmLobbyPlays = 0, bgmMuted = false, bgmFxPaused = false, bgmHoldTimer = 0, bgmHold = false;
