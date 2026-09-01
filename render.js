@@ -640,7 +640,7 @@ function playDamageHitSound(g,targetSeat){
     const file=gender==='female'?'damage_female.wav':'damage_male.ogg';
     const voice=new Audio('assets/audio/'+file);
     const sword=new Audio('assets/audio/damage_sword.mp3');
-    voice.volume=.82; sword.volume=.58;
+    voice.volume=.86; sword.volume=.58;
     voice.play().catch(err=>console.warn('受击音效播放失败:',file,err && err.name,err));
     sword.play().catch(err=>console.warn('剑击音效播放失败:',err && err.name,err));
     // 游戏反馈只播放一次短促受击声；即使以后替换成较长源文件，也不会连续呻吟。

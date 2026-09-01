@@ -141,7 +141,7 @@ var BGM_TRACKS = {
   game:  bgmList('bgm-game', 49),
   duel:  bgmList('bgm-duel', 13)
 };
-var BGM_VOL = 0.35;
+var BGM_VOL = 0.79;
 var bgmMode = null, bgmLastSrc = null, bgmLobbyPlays = 0, bgmMuted = false, bgmFxPaused = false, bgmHoldTimer = 0, bgmHold = false;
 var bgmErrStreak=0;
 var _bgmInErrorRetry=false;
