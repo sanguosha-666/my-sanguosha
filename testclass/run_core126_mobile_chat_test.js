@@ -205,7 +205,11 @@ check('💬 入口按钮存在,且只在"非桌面布局 + 已进房间"时显�
   // 保留一条已经不成立的旧命题——CLAUDE.md 规则20:设计变更后必须回头检查旧断言语义。
   if(!/id="gameToolbar"/.test(html))
     throw new Error('未找到 #gameToolbar——CORE-130 之后 #chatBtn 应在这个容器内');
-  const toolbarBlock = html.slice(html.indexOf('id="gameToolbar"'), html.indexOf('id="gameToolbar"') + 1200);
+  // 原来这里取的是固定 1200 字的切片,工具栏里每加一个按钮就往后挤,迟早把 #chatBtn 挤出
+  // 窗口、变成一条与真实结构无关的假红(CORE-194 加静音键后容器已 1394 字,正好踩到)。
+  // 改成切到容器真正的结束标签,断言的命题不变,但不再依赖"内容有多长"这个无关变量。
+  const tbStart = html.indexOf('id="gameToolbar"');
+  const toolbarBlock = html.slice(tbStart, html.indexOf('</div>', tbStart));
   if(!/id="chatBtn"/.test(toolbarBlock))
     throw new Error('#chatBtn 应位于 #gameToolbar 内(这样大厅阶段随 #game.hidden 自动隐藏)');
   if(!/#game\.desktop-layout #chatBtn\{display:none;\}/.test(html))

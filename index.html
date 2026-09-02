@@ -2831,6 +2831,10 @@
         <!-- 全屏按钮:默认 hidden,由 pwa.js 的能力检测决定显不显示(iPhone Safari 不支持
              非视频全屏,那里永远不显示;已从主屏启动时也不显示——地址栏本来就没了)。 -->
         <button id="fullscreenBtn" class="icon-btn hidden" title="全屏游玩" onclick="pwaToggleFullscreen()">⛶</button>
+        <!-- CORE-194(issue #256):背景音乐静音开关。和「下一曲」并列成一组 BGM 控件;
+             图标/title 由 game-bg.js 的 syncBgmMuteBtn 按当前状态刷新,这里写的是
+             未静音时的默认值(真实初值在脚本加载后立即被同步一次)。 -->
+        <button id="bgmMuteBtn" class="icon-btn" title="背景音乐:播放中(点击静音)" aria-pressed="false" onclick="toggleBgmMute()">🔊</button>
         <button id="bgmSkipBtn" class="icon-btn" title="下一曲" onclick="skipBgm()">⏭</button>
         <button id="closeRoomBtn" class="icon-btn hidden" title="关闭房间:删除本房间数据,所有人回到大厅">🚪</button>
         <button id="aiPanelBtn" class="icon-btn" title="查看AI决策(理由/武将/模型,含非托管机器人)" onclick="openAiPanelModal()">🧠</button>
@@ -2892,8 +2896,8 @@
 <script src="render-discard.js?v=413"></script>
 <script src="render-hand.js?v=414"></script>
 <script src="render-controls.js?v=445"></script>
-<script src="render-log.js?v=416"></script>
-<script src="game-bg.js?v=43"></script>
+<script src="render-log.js?v=417"></script>
+<script src="game-bg.js?v=44"></script>
 <script src="pwa.js?v=17"></script>
 </body>
 </html>

@@ -25,7 +25,23 @@ function mkBgmPlayer(){
 function mkVideo(){
   return { muted: true, src: '', style:{visibility:'hidden'}, play:function(){ return {catch:function(){}}; }, pause:function(){}, load:function(){}, addEventListener:function(){}, removeAttribute:function(){} };
 }
-function loadEnv(){
+// CORE-194:BGM 静音改成有自己的 localStorage 键(sgs_bgm_muted)+顶栏按钮(#bgmMuteBtn),
+// 所以沙箱要能注入这两样。opts.store 为初始 localStorage 内容,opts.withBtn 决定是否提供按钮。
+function mkStore(init){
+  var data = Object.assign({}, init||{});
+  return {
+    data: data,
+    getItem: function(k){ return Object.prototype.hasOwnProperty.call(data,k) ? data[k] : null; },
+    setItem: function(k,v){ data[k] = String(v); },
+    removeItem: function(k){ delete data[k]; }
+  };
+}
+function mkMuteBtn(){
+  return { id:'bgmMuteBtn', textContent:'', title:'', _attrs:{},
+    setAttribute:function(k,v){ this._attrs[k]=v; }, getAttribute:function(k){ return this._attrs[k]; } };
+}
+function loadEnv(opts){
+  opts = opts || {};
   var bgmPlayer = mkBgmPlayer();
   var bgVideo = mkVideo();
   // 让 bgmPlayer 的 fire 能触发 bgm 引擎绑定的 ended/error
@@ -33,7 +49,10 @@ function loadEnv(){
   var canvas = { width:300,height:150,clientWidth:800,clientHeight:600,getContext:function(){ return {clearRect:function(){},setTransform:function(){},save:function(){},restore:function(){},translate:function(){},rotate:function(){},beginPath:function(){},moveTo:function(){},lineTo:function(){},closePath:function(){},fill:function(){},stroke:function(){},fillText:function(){}}; }};
   var otherVideos = { deathFxVideo: mkVideo(), lightningFxVideo: mkVideo(), movieFxVideo: mkVideo(), girlFxVideo: mkVideo() };
   var listeners = { doc: {}, win: {} };
+  var muteBtn = (opts.withBtn===false) ? null : mkMuteBtn();
+  var store = mkStore(opts.store);
   var context = {
+    localStorage: store,
     Math: Math, console: console, Number: Number, String: String, Array: Array, Object: Object, Set: Set,
     document: {
       hidden: false,
@@ -42,6 +61,7 @@ function loadEnv(){
         if(id==='bgVideo') return bgVideo;
         if(id==='gameBgCanvas') return canvas;
         if(id==='bgVeil') return { style:{} };
+        if(id==='bgmMuteBtn') return muteBtn;
         return otherVideos[id] || null;
       },
       addEventListener: function(ev,fn){ (listeners.doc[ev]=listeners.doc[ev]||[]).push(fn); },
@@ -72,7 +92,8 @@ function loadEnv(){
   bgmPlayer.src=''; bgmPlayer._plays=0; bgmPlayer.paused=true;
   var get = function(expr){ return vm.runInContext(expr, sandbox); };
   var run = function(expr){ return vm.runInContext(expr, sandbox); };
-  return { sandbox: sandbox, bgmPlayer: bgmPlayer, bgVideo: bgVideo, get: get, run: run };
+  return { sandbox: sandbox, bgmPlayer: bgmPlayer, bgVideo: bgVideo, get: get, run: run,
+           store: store, muteBtn: muteBtn };
 }
 
 console.log('\n== BGM 引擎 ==\n');
@@ -266,13 +287,17 @@ check('18 render.js 含 maybeUpdateBgm', function(){
   if(src.indexOf('function maybeUpdateBgm') < 0) throw new Error('未找到 maybeUpdateBgm');
   if(src.indexOf('maybeUpdateBgm(g)') < 0 && src.indexOf('maybeUpdateBgm(') < 0) throw new Error('render 未调用 maybeUpdateBgm');
 });
-check('19 render-log.js toggleChatVoice 含 setBgmMuted', function(){
+// 【19 号用例已按 CORE-194(issue #256)改写】原断言是"toggleChatVoice 必须含 setBgmMuted"
+// ——它钉住的正是被拆掉的那处耦合(聊天语音开关顺带静音背景音乐),命题已经反过来了,
+// 不能留着继续绿。现在只保留"聊天语音开关本身还在、状态仍持久化"这部分仍然成立的语义;
+// "不得再调用 setBgmMuted" 这条反向断言在下面的 22j。
+check('19 render-log.js toggleChatVoice 仍在且仍持久化聊天语音开关(与BGM无关的那部分)', function(){
   var src = fs.readFileSync(path.join(ROOT,'render-log.js'),'utf8');
   var idx = src.indexOf('function toggleChatVoice');
   if(idx < 0) throw new Error('未找到 toggleChatVoice');
   var snippet = src.slice(idx, idx+800);
-  if(snippet.indexOf('setBgmMuted') < 0) throw new Error('toggleChatVoice 未含 setBgmMuted');
-  if(src.indexOf("chatVoiceEnabled") < 0 || src.indexOf("setBgmMuted(true") < 0) throw new Error('未找到初始 setBgmMuted(true)');
+  if(snippet.indexOf('chatVoiceEnabled') < 0) throw new Error('未切换 chatVoiceEnabled');
+  if(snippet.indexOf("sgs_chat_voice") < 0) throw new Error('未持久化聊天语音开关');
 });
 check('20 hold 期间 maybeUpdateBgm 不切档（真实现）', function(){
   var e = loadEnv();
@@ -307,37 +332,84 @@ check('21 hold 期间 ended 应切回 room', function(){
   if(e.get('bgmMode')!=='room') throw new Error('ended 后应 room，实际 '+e.get('bgmMode'));
   if(e.get('bgmHold')) throw new Error('ended 后 hold 应清除');
 });
-check('22 chatVoiceEnabled=false 初始加载即静音 (game-bg 加载后)', function(){
-  // 构造 chatVoiceEnabled=false 的沙箱再加载 game-bg.js
-  var bgmPlayer = mkBgmPlayer();
-  var bgVideo = mkVideo();
-  var canvas = { width:300,height:150,clientWidth:800,clientHeight:600,getContext:function(){ return {clearRect:function(){},setTransform:function(){},save:function(){},restore:function(){},translate:function(){},rotate:function(){},beginPath:function(){},moveTo:function(){},lineTo:function(){},closePath:function(){},fill:function(){},stroke:function(){},fillText:function(){}}; }};
-  var otherVideos = { deathFxVideo: mkVideo(), lightningFxVideo: mkVideo(), movieFxVideo: mkVideo(), girlFxVideo: mkVideo() };
-  var ctx = {
-    Math: Math, console: console, Number: Number, String: String, Array: Array, Object: Object, Set: Set,
-    chatVoiceEnabled: false,
-    document: {
-      hidden:false,
-      getElementById:function(id){
-        if(id==='bgmPlayer') return bgmPlayer;
-        if(id==='bgVideo') return bgVideo;
-        if(id==='gameBgCanvas') return canvas;
-        if(id==='bgVeil') return {style:{}};
-        return otherVideos[id]||null;
-      },
-      addEventListener:function(){}, removeEventListener:function(){}, body:{appendChild:function(){}}, createElement:function(){return {style:{},classList:{add:function(){},remove:function(){}},appendChild:function(){},setAttribute:function(){},getAttribute:function(){}};}, querySelector:function(){return null;}, querySelectorAll:function(){return [];}
-    },
-    window:{ devicePixelRatio:1, innerWidth:1400, innerHeight:900, addEventListener:function(){}, removeEventListener:function(){}, matchMedia:function(){return {matches:false};} },
-    setTimeout:setTimeout, clearTimeout:clearTimeout, requestAnimationFrame:function(){return 0;}, cancelAnimationFrame:function(){}
-  };
-  ctx.window.document = ctx.document;
-  ctx.global = ctx;
-  var sb = vm.createContext(ctx);
-  vm.runInContext(fs.readFileSync(path.join(ROOT,'game-bg.js'),'utf8'), sb, {filename:'game-bg.js'});
-  var bgmMuted = vm.runInContext('bgmMuted', sb);
-  if(bgmMuted!==true) throw new Error('初始 bgmMuted 期待 true, 实际 '+bgmMuted);
-  // _pauses 应至少一次（setBgmMuted(true) 会 pause）
-  if(bgmPlayer._pauses < 1) throw new Error('初始应 pause bgmPlayer, _pauses='+bgmPlayer._pauses);
+// ============ CORE-194(issue #256):BGM 静音与聊天语音解耦 + 顶栏静音按钮 ============
+// 【为什么原来的 22 号用例被整体改写】它断言的是"chatVoiceEnabled=false 时 game-bg.js 加载
+// 即静音"——那正是 CORE-194 要拆掉的耦合(背景音乐和聊天语音播报两条互不相关的通道共用一个
+// 开关)。断言的命题本身已经不成立,不能让它继续绿着,所以按新设计整体重写:静音状态改由
+// 自己的 localStorage 键 sgs_bgm_muted 决定,只在该键从未设置过时一次性继承老用户的
+// sgs_chat_voice(迁移),此后完全独立。
+check('22a 默认(无任何存储)不静音', function(){
+  var e = loadEnv();
+  if(e.get('bgmMuted')!==false) throw new Error('默认应不静音,实际 '+e.get('bgmMuted'));
+});
+check('22b sgs_bgm_muted="1" 时初始即静音', function(){
+  var e = loadEnv({ store:{ sgs_bgm_muted:'1' } });
+  if(e.get('bgmMuted')!==true) throw new Error('应静音,实际 '+e.get('bgmMuted'));
+});
+check('22c sgs_bgm_muted="0" 时不静音(显式设置优先)', function(){
+  var e = loadEnv({ store:{ sgs_bgm_muted:'0' } });
+  if(e.get('bgmMuted')!==false) throw new Error('应不静音,实际 '+e.get('bgmMuted'));
+});
+check('22d 老用户迁移:只有 sgs_chat_voice="0"(BGM 键未设置过)时继承为静音', function(){
+  var e = loadEnv({ store:{ sgs_chat_voice:'0' } });
+  if(e.get('bgmMuted')!==true) throw new Error('老用户应继承静音,实际 '+e.get('bgmMuted'));
+});
+check('22e 一旦显式设置过 BGM 键,就不再看聊天语音(两者独立)', function(){
+  var e = loadEnv({ store:{ sgs_chat_voice:'0', sgs_bgm_muted:'0' } });
+  if(e.get('bgmMuted')!==false) throw new Error('显式的 BGM 偏好应优先于聊天语音,实际 '+e.get('bgmMuted'));
+});
+check('22f toggleBgmMute 切换状态、暂停/恢复播放、并写入 localStorage', function(){
+  var e = loadEnv();
+  e.run("setBgmMode('game')");
+  var pausesBefore = e.bgmPlayer._pauses;
+  if(e.run('toggleBgmMute()')!==true) throw new Error('第一次点击应变为静音');
+  if(e.get('bgmMuted')!==true) throw new Error('bgmMuted 应为 true');
+  if(e.bgmPlayer._pauses <= pausesBefore) throw new Error('静音应 pause(不是仅仅音量为0)');
+  if(e.store.getItem('sgs_bgm_muted')!=='1') throw new Error('应写入 localStorage,实际 '+e.store.getItem('sgs_bgm_muted'));
+  var playsBefore = e.bgmPlayer._plays;
+  if(e.run('toggleBgmMute()')!==false) throw new Error('第二次点击应恢复');
+  if(e.bgmPlayer._plays <= playsBefore) throw new Error('取消静音应恢复播放');
+  if(e.store.getItem('sgs_bgm_muted')!=='0') throw new Error('应写入 0,实际 '+e.store.getItem('sgs_bgm_muted'));
+});
+check('22g 按钮图标/title/aria-pressed 随状态同步', function(){
+  var e = loadEnv();
+  if(e.muteBtn.textContent!=='🔊') throw new Error('初始应为 🔊,实际 '+e.muteBtn.textContent);
+  e.run('toggleBgmMute()');
+  if(e.muteBtn.textContent!=='🔇') throw new Error('静音后应为 🔇,实际 '+e.muteBtn.textContent);
+  if(e.muteBtn.getAttribute('aria-pressed')!=='true') throw new Error('aria-pressed 应为 true');
+  if(e.muteBtn.title.indexOf('背景音乐')<0) throw new Error('title 应点明是背景音乐,实际 '+e.muteBtn.title);
+  e.run('toggleBgmMute()');
+  if(e.muteBtn.textContent!=='🔊') throw new Error('恢复后应为 🔊');
+  if(e.muteBtn.getAttribute('aria-pressed')!=='false') throw new Error('aria-pressed 应为 false');
+});
+check('22h 静音状态跨切档保持(lobby/room/game/duel 切换不会把音乐放出来)', function(){
+  var e = loadEnv({ store:{ sgs_bgm_muted:'1' } });
+  ['lobby','room','game','duel'].forEach(function(m){
+    e.run("setBgmMode('"+m+"')");
+    if(e.get('bgmMuted')!==true) throw new Error(m+' 档后静音状态丢失');
+    if(e.bgmPlayer.paused!==true) throw new Error(m+' 档后不应在播放');
+  });
+});
+check('22i 没有按钮元素时不报错(脚本先于 DOM 加载 / 大厅页面)', function(){
+  var e = loadEnv({ withBtn:false });
+  e.run('toggleBgmMute()');   // 不应抛异常
+  if(e.get('bgmMuted')!==true) throw new Error('无按钮时状态仍应切换');
+});
+check('22j 聊天语音开关不再影响背景音乐(解耦)', function(){
+  var src = fs.readFileSync(path.join(ROOT,'render-log.js'),'utf8');
+  var body = src.slice(src.indexOf('function toggleChatVoice()'));
+  body = body.slice(0, body.indexOf('\n}'));
+  // 剔除注释行再检查:改动处留了说明注释,里面会提到 setBgmMuted
+  var code = body.split('\n').map(function(l){ return l.replace(/\/\/.*$/,''); }).join('\n');
+  if(/setBgmMuted/.test(code)) throw new Error('toggleChatVoice 不应再调用 setBgmMuted');
+});
+check('22k index.html 里静音按钮已接线到 toggleBgmMute', function(){
+  var html = fs.readFileSync(path.join(ROOT,'index.html'),'utf8');
+  if(html.indexOf('id="bgmMuteBtn"')<0) throw new Error('顶栏缺少 #bgmMuteBtn');
+  var seg = html.slice(html.indexOf('id="bgmMuteBtn"'));
+  seg = seg.slice(0, seg.indexOf('</button>'));
+  if(seg.indexOf('toggleBgmMute()')<0) throw new Error('按钮未接线到 toggleBgmMute');
+  if(seg.indexOf('icon-btn')<0) throw new Error('应沿用既有 .icon-btn 样式(触屏点击区)');
 });
 
 check('23 首页加载 initLobbyBgm 进入 lobby 档', function(){
