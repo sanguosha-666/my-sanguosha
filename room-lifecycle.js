@@ -507,6 +507,30 @@ function abandonHuashenChangePickEnd(){
   });
 }
 
+// abandonHuashenPick(CORE-189):开局 huashenPick 的超时兜底里,万一 pool 里没有任何
+// 一个武将在 HUASHEN_SKILL_TABLE 里有可用技能条目时的退路。
+// 【为什么不能像 abandonHuashenChangePick* 那样"置空 pending 就走"】那两个是回合中途的
+// 可选流程,放弃=不更改化身,收尾到 continueBiyueCheck 即可;而开局这个 pending 由
+// checkHuashenBeforeAssign 按"有pool但huashenGeneral===null"重新找出来,只置空 pending
+// 不做别的,下一次调用会**原地找回同一个座位再开一次**,变成死循环。
+// 所以这里清空 pool 让 checkHuashenBeforeAssign 重新发一份 —— 它的补池逻辑从
+// GENERAL_IDS(排除左慈自己)里取,而除左慈外的每个武将在化身表里都至少有一条可用条目,
+// 重新发出来的池子必然可用,循环必然终止。
+// 【实际可达性】相信不可达(当前 65 个非左慈武将全部在表里且条目非空),纯防御,
+// 不是为某个已知场景写的。
+function abandonHuashenPick(){
+  tx(g=>{
+    if(g.phase!=='huashenPick' || !g.pending || g.pending.type!=='huashenPick' || g.pending.seat!==mySeat) return g;
+    const me = g.players[mySeat];
+    if(!me) return g;
+    g.log = pushLog(g.log, me.name+'：【化身】候选武将均无可用技能,重新抽取候选');
+    me.huashenPool = [];
+    g.pending = null;
+    checkHuashenBeforeAssign(g);
+    return g;
+  });
+}
+
 // respondPickGeneral: 三选一模式下,玩家从自己的候选(p.generalChoices)里选一个。
 // finishLordGeneralPick: 主公选将结算的共用主体(respondPickLordGeneral/debugPickLordGeneral
 // 校验各自的合法性之后都调用它)——选完后全场立刻可见主公武将(p.general 已写入;渲染层对

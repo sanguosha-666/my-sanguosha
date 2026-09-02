@@ -4113,11 +4113,9 @@ function buildBotGuhuoSystemPrompt(g, seat){
   +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},其中 1 表示质疑、'
   +'0 表示不质疑,不要输出任何解释文字、代码块标记或多余字段。', g, seat);
 }
-function buildBotGuhuoUserPrompt(state){
-  return '当前局面:\n'+JSON.stringify(state)
-    +'\n\n只返回 {"choice": 数字} 这一个JSON对象,1表示质疑、0表示不质疑。';
-}
-
+// CORE-192:对应的 buildBot*UserPrompt() 已删除 —— 这三个决策点收进 BOT_DECISIONS 之后,
+// user prompt 统一由总线的 buildBotDefaultUserPrompt 生成(见 callAiChooseIndex 调用处),
+// 各自的 buildSystemPrompt 仍在注册表里正常使用,只有 user prompt 这一半被通用实现取代。
 // 【本决策点的注册入口】BOT_DECISIONS.guhuoQuestion(见文件前面"响应类三兄弟"段):
 // 候选=[不质疑,质疑](顺序与 prompt 的 choice 语义对齐:1=质疑在index1),localFallback
 // 是旧硬编码分支的固定30%随机,execute 提交 respondGuhuoQuestion(question);AI视角经
@@ -4187,11 +4185,9 @@ function buildBotGanglieSystemPrompt(g, seat){
   +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},其中 1 表示弃牌、'
   +'0 表示受到伤害,不要输出任何解释文字、代码块标记或多余字段。', g, seat);
 }
-function buildBotGanglieUserPrompt(state){
-  return '当前局面:\n'+JSON.stringify(state)
-    +'\n\n只返回 {"choice": 数字} 这一个JSON对象,1表示弃牌、0表示受伤。';
-}
-
+// CORE-192:对应的 buildBot*UserPrompt() 已删除 —— 这三个决策点收进 BOT_DECISIONS 之后,
+// user prompt 统一由总线的 buildBotDefaultUserPrompt 生成(见 callAiChooseIndex 调用处),
+// 各自的 buildSystemPrompt 仍在注册表里正常使用,只有 user prompt 这一半被通用实现取代。
 // 【本决策点的注册入口】BOT_DECISIONS.ganglieChoice(见文件前面"响应类三兄弟"段):
 // 候选=[受伤, 弃置2张(手牌>=2时)](顺序与 prompt 的 choice 语义对齐:1=弃牌在index1),
 // localFallback 与旧硬编码分支逐字一致,execute 提交 respondGanglieChoice(action,picks)。
@@ -4348,12 +4344,9 @@ function buildBotGuicaiSystemPrompt(){
   +'请只输出一个严格的JSON对象,格式固定为 {"choice": 数字},不要输出任何解释文字、'
   +'代码块标记或多余字段。';
 }
-function buildBotGuicaiUserPrompt(state, candidates){
-  return '当前局面:\n'+JSON.stringify(state)
-    +'\n\n合法候选动作列表(index从0开始,0是"不发动"):\n'+JSON.stringify(candidates)
-    +'\n\n只返回 {"choice": 数字} 这一个JSON对象。';
-}
-
+// CORE-192:对应的 buildBot*UserPrompt() 已删除 —— 这三个决策点收进 BOT_DECISIONS 之后,
+// user prompt 统一由总线的 buildBotDefaultUserPrompt 生成(见 callAiChooseIndex 调用处),
+// 各自的 buildSystemPrompt 仍在注册表里正常使用,只有 user prompt 这一半被通用实现取代。
 // 【本决策点的注册入口】BOT_DECISIONS.guicaiHandPick(见文件前面"响应类三兄弟"段):
 // buildCandidates 复用 buildBotGuicaiCandidates 的形状并补 replace 标志;无密钥回退
 // {replace:false} 与改动前 respondGuicai(false) 这个硬编码默认完全一致,是回归基线。

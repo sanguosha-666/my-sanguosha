@@ -1391,3 +1391,25 @@ registerStageTimeoutAction("yaowu_choose", function(g){ return function(){ const
 registerStageTimeoutAction("shensuSha", function(g){ return function(){ cancelShensuSha(); }; });
 registerStageTimeoutAction("shaOffsetChoice", function(g){ return function(){ respondShaOffsetChoice(null); }; });
 registerStageTimeoutAction(["fenxunDiscard","fenxunTarget"], function(g){ return function(){ cancelFenxun(); }; });
+// CORE-188(issue #250):雌雄双股剑的选择由【被杀方】响应,不是回合玩家,pending 上也没有
+// resume/resumePhase —— canDefaultAbandonPending 的三条出路一条都不满足,此前完全没有
+// 超时兜底,真人在这一步掉线会把整条杀的结算永久悬在这里。
+// 保守动作取 'draw'(令使用者摸一张牌):两个选项里它不动响应者自己的手牌,对超时的那个人
+// 损失最小;而且 respondCixiongChoice 两条分支收尾都调 continueAfterCixiong,杀的后续
+// 结算照常走完,不会像"直接清空 pending"那样把结算链拦腰截断。
+registerStageTimeoutAction("cixiongChoice", function(g){ return function(){ respondCixiongChoice('draw'); }; });
+// CORE-189(issue #251):左慈开局声明化身。这个 pending 在 finishGeneralAssign 之前,
+// g.turn 还没被 startTurn 设过,同样落不进 canDefaultAbandonPending 的任何一条——
+// 持有左慈的真人掉线会导致**整局开不了场**,局内其他人连可操作入口都没有。
+// 【化身】没有"不发动"这个选项(左慈必须声明一个),所以保守动作不能是放弃,只能替他选:
+// 取 pool 里第一个有可用技能条目的武将 + 该武将的第一条技能,确定性、不用随机,便于复现。
+// 写法与相邻的 huashenChangePickStart/End 逐字同款,不新造模式。
+// 选出来的组合仍会过 respondHuashenPick 里的 validateHuashenPick(含 CORE-191 的
+// 主公技/限定技/觉醒技过滤),不会因为走了超时路径就绕过校验。
+registerStageTimeoutAction("huashenPick", function(g){ return function(){
+    const me = g.players[g.pending.seat];
+    const generalId = me && (me.huashenPool||[]).find(function(id){ return (HUASHEN_SKILL_TABLE[id]||[]).length; });
+    if(!generalId){ abandonHuashenPick(); return; }
+    const entry = (HUASHEN_SKILL_TABLE[generalId]||[])[0];
+    respondHuashenPick(generalId, entry && entry.name);
+  }; });
