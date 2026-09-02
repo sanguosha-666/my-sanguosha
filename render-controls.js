@@ -171,7 +171,10 @@ let tiaoxinMode = false;
 let tiaoxinTarget = null;
 function resetTiaoxin(){ tiaoxinMode=false; tiaoxinTarget=null; }
 // 贾诩【乱武】:乱武选择阶段
-function resetLuanwu(){} // 乱武不需要额外的客户端状态,使用pending存储
+// CORE-192:刻意保留的空壳。乱武不需要任何客户端选牌/选目标状态(全程走 pending),
+// 但 reset* 系列在 render() 的清理块里是按名字成批调用的,留一个 no-op 比在调用处
+// 开特例更省事;删它要连带确认所有批量调用点。
+function resetLuanwu(){}
 let lirangPicks = [];
 function resetLirang(){ lirangPicks=[]; }
 // guanshifuOptions: 攻击者自己当前可弃的项(手牌逐张 + 非空装备槽逐件,武器槽排除——那就是

@@ -539,10 +539,47 @@ function generalHasLordSkill(idOrGeneral){
   return LORD_SKILL_CAPS.some(cap => !!gen.caps[cap]);
 }
 
+// ---------- 限定技 / 觉醒技分类(CORE-191 / issue #253) ----------
+// 【为什么要有这两张表】官方【化身】规则:左慈**不能**获得主公技、限定技、觉醒技。
+// 主公技早就有 LORD_SKILL_CAPS 这层分类元数据(见上),限定技/觉醒技一直没有——
+// HUASHEN_SKILL_TABLE 表头注释当年明确写着"本表当前不含任何技能类型分类元数据……
+// 本次暂不实现这个过滤,记在这里以防以后被误以为'什么都能借、这是故意的最终设计'"。
+// 结果就是庞统【涅槃】、贾诩【乱武】(限定技)和姜维【志继】(觉醒技)三条被收进了化身表,
+// 而孙策【魂姿】(同为觉醒技)没被收进去——不是因为有规则挡住,纯粹是碰巧漏登记。
+// 这两张表就是把那个缺口关掉,和 LORD_SKILL_CAPS 完全同一套写法。
+//
+// 【为什么不在 GENERALS 上加 skillType 字段】和 LORD_SKILL_CAPS 同一个理由:那等于把
+// 同一个事实记两处(caps 里有 niepan、另一处又写 skillType:'限定技'),迟早漂移——
+// CORE-117(issue #125)那次 GENERALS.simayi.skill 漏掉"鬼才"就是同类问题。
+// 单一事实源仍然是 caps,这里只加名单 + 派生查询。
+//
+// 【名单是逐条核对 desc 得到的,不是凭印象列的】用脚本扫了全部 66 个武将的 desc,
+// 命中"限定技"/"觉醒技"字样的只有这 4 条,逐条确认过对应的 cap key:
+//   niepan  庞统【涅槃】  限定技(desc:"涅槃:限定技,当你处于濒死状态时…")
+//   luanwu  贾诩【乱武】  限定技(desc:"乱武:限定技,出牌阶段…")
+//   zhiji   姜维【志继】  觉醒技(desc:"志继:觉醒技,准备阶段,若你没有手牌…")
+//   hunzi   孙策【魂姿】  觉醒技(desc:"魂姿:觉醒技,准备阶段,若你的体力值为1…")
+//
+// 【这两张表只管"能不能被化身借用"】不改变技能本身的任何行为——涅槃/乱武/志继/魂姿
+// 对本尊武将照常生效,限次逻辑也不变(p.nirvanaUsed / p.luanwuUsed / p.zhijiAwakened /
+// p.hunziAwakened 各自照旧)。
+const LIMIT_SKILL_CAPS  = ['niepan','luanwu'];   // 限定技:一局一次
+const AWAKEN_SKILL_CAPS = ['zhiji','hunzi'];     // 觉醒技:满足条件后永久觉醒
+// huashenForbiddenCap: 这个 cap 是否属于"左慈不能借用"的三类之一(主公技/限定技/觉醒技)。
+// HUASHEN_SKILL_TABLE 的构造和 validateHuashenPick 的校验都查它,业务层只问这一个问题。
+function huashenForbiddenCap(cap){
+  return LORD_SKILL_CAPS.includes(cap) || LIMIT_SKILL_CAPS.includes(cap) || AWAKEN_SKILL_CAPS.includes(cap);
+}
+// huashenEntryForbidden: 化身表里的一个技能条目是否不可借用(其 caps 数组里含任一禁用 cap)。
+// 纯 hook 型条目(只有 hook 字段、没有 caps)不可能是这三类,恒返回 false。
+function huashenEntryForbidden(entry){
+  return !!(entry && Array.isArray(entry.caps) && entry.caps.some(huashenForbiddenCap));
+}
+
 // ---------- 左慈【化身】技能拆分表 ----------
 // HUASHEN_SKILL_TABLE:把 GENERALS 里每个武将"整个打包"的 caps/hooks,按单个技能名的粒度
 // 拆开,供左慈【化身】(选择借用其他武将的单个技能)使用。覆盖 GENERALS 里当前已实现的全部
-// 64 个武将(左慈自己除外),每条 caps/hooks key 均已用脚本逐一核对确认真实存在于对应武将的
+// 65 个武将(左慈自己除外;CORE-193 更正了这个数字,原写 64),每条 caps/hooks key 均已用脚本逐一核对确认真实存在于对应武将的
 // GENERALS 条目里(无编造/无遗漏)。
 //
 // 【架构约定,后续实现化身逻辑时必须遵守】任何时候只应动态查询"左慈当前借用的那个具体武将id"
@@ -562,35 +599,26 @@ function generalHasLordSkill(idOrGeneral){
 // 手牌上限-1)和"同疾"两个技能名。妄尊依赖身份局主公时机,不适合作为化身候选,
 // 因此这里只收"同疾"一条。
 //
-// 【马谡"散谣"未纳入】masu 条目本该有"散谣"(caps:['sanyao'])+"制蛮"(caps:['zhimeng'])
-// 两条,这次审查 generalHasCap->hasCap 时核实发现:sanyao 这个 cap 从未被任何
-// hasCap/generalHasCap 查询过(发动函数 startSanyao 只检查 g.sanyaoUsed/g.phase,不检查
-// 是不是马谡),且 startSanyao 本身在全项目里没有任何调用点——散谣对马谡本体来说都是
-// 完全无法触发的死代码,不是"借了没生效"这么简单,是"压根没有能借的东西"。这里只保留
-// "制蛮"一条,等马谡本体的散谣补上真正的触发入口(见 CLAUDE.md「已知的待优化点」)后
-// 再考虑加回。
+// 【马谡"散谣"已纳入(CORE-190)】这里原先只收"制蛮"一条,理由是"散谣对马谡本体来说
+// 都是完全无法触发的死代码"。**那个理由现在已经不成立**:散谣改成了原子函数
+// sanyao(costKey,targetSeat)(skills.js,内含 hasCap(me,'sanyao') 守卫),
+// render-controls.js 有真实的技能按钮入口、sanyaoOptions(me) 提供可弃项清单,
+// hasCap(me,'sanyao') 也确有查询点。原注释末尾本来就写着"等马谡本体的散谣补上真正的
+// 触发入口之后再考虑加回这一条"——那个前提已经满足,所以这次把它加回来了。
+// 散谣是普通的"出牌阶段限一次",不属于主公技/限定技/觉醒技任何一类,不受化身禁用规则影响。
 //
-// 【限定技/主公技/觉醒技/获得技能——本表暂不做类型过滤】官方"化身"规则通常要求排除
-// 限定技(一局限一次的技能,如庞统涅槃niepan)、主公技(刘备激将/曹操护驾/孙权救援/
-// 孙策制霸/袁绍血裔/张角黄天)、觉醒技(如姜维志继zhiji)、以及"觉醒/特殊条件下才动态获得
-// 的技能"(志继本身
-// 【2026-08 更正】这段原本写的是"主公技这几个因为项目无身份局系统压根没被写进
-// GENERALS.caps,天然不会出现在本表"——**这句已经过时**:身份局早就实现了,六个主公技
-// 也都有各自的 caps(见 LORD_SKILL_CAPS)。它们确实仍然不在本表里,但原因不是"没写进
-// caps",而是本表在逐个武将拆分技能时**没有收录这几条**(可以核对 sunquan/sunce/liubei/
-// caocao/yuanshao/zhangjiao 六项,里面只有非主公技)。结论没变、理由要改对,
-// 否则以后有人照着这句去 caps 里找、会发现根本不是那么回事。
-// (志继本身
-// 触发后会让姜维player.caps.guanxing=true,这是运行时追加的能力,和本表这种静态查表
-// 结构是两回事)。
-// 本表当前**不含任何技能类型分类元数据**,姜维志继/庞统涅槃这类技能和普通caps技能
-// 一视同仁被收录,均可被化身/新生声明借用——比如借到志继,hasCap(左慈,'zhiji')会
-// 因huashenHasCap生效,game.js里志继的觉醒判定(检查手牌是否为空等条件)是通用hasCap
-// 入口,借用后左慈理论上真的能触发这套觉醒流程,而不是被静默挡住。
-// 若以后要把这几类技能排除在化身候选之外,需要在respondHuashenPick/respondXinshengPick
-// (或对应的新版本函数名,后续改动可能会重命名)的候选校验逻辑里,依据某种技能类型标记
-// 过滤掉这些entry——本次暂不实现这个过滤,记在这里以防以后被误以为"什么都能借、这是
-// 故意的最终设计"。
+// 【主公技/限定技/觉醒技一律不收录】官方"化身"规则:左慈不能获得主公技、限定技、觉醒技。
+// CORE-191(issue #253)之前本表**没有任何技能类型分类元数据**,结果是:主公技那六条
+// (激将/护驾/救援/制霸/血裔/黄天)碰巧一条都没被收录、是对的;但庞统【涅槃】、贾诩
+// 【乱武】(限定技)和姜维【志继】(觉醒技)三条被收进来了,而孙策【魂姿】(同为觉醒技)
+// 没被收进来——**没有规则在保证这件事,魂姿的缺席纯属碰巧**。
+// 现在三类都有了分类名单(LORD_SKILL_CAPS / LIMIT_SKILL_CAPS / AWAKEN_SKILL_CAPS,
+// 见上),统一经 huashenForbiddenCap / huashenEntryForbidden 查询;那三条违规条目已移除。
+// **加新武将时不需要记得"别把限定技写进来"**:只要 cap 名登记进了对应名单,
+// validateHuashenPick 与化身/新生的候选枚举都会自动把它挡掉(双保险,见下)。
+// 袁术【妄尊】依旧不在本表也不在主公技名单里,理由见 LORD_SKILL_CAPS 的注释
+// (它是"作用于主公的普通武将技",不是"只有主公能发动的技能")——它没被收录是本表
+// 逐个拆分技能时的既有选择,不受这次分类改动影响。
 const HUASHEN_SKILL_TABLE = {
   zhangfei: [
     { name:'咆哮', caps:['unlimitedSha'] }
@@ -642,17 +670,14 @@ const HUASHEN_SKILL_TABLE = {
     { name:'红颜', caps:['hongyan'] }
   ],
   pangtong: [
-    { name:'连环', caps:['lianhuan'] },
-    { name:'涅槃', caps:['niepan'] }
+    { name:'连环', caps:['lianhuan'] }
+    // 【涅槃】是限定技,左慈不可借用(CORE-191),已移出本表;见 LIMIT_SKILL_CAPS
   ],
-  // 马谡【散谣】这次刻意不纳入可借用范围——核实发现 sanyao 这个 cap 从未被任何
-  // hasCap/generalHasCap 查询过(散谣的发动函数 startSanyao 只检查 g.sanyaoUsed/
-  // g.phase,不检查是不是马谡),且 startSanyao 本身在全项目里没有任何调用点(没有对应
-  // 的UI按钮/respond函数触发它)——散谣对马谡本体来说都是完全无法触发的死代码,不是
-  // "借了没生效"这么简单,是"压根没有能借的东西"。借一个连本体都触发不了的技能没有
-  // 意义,等马谡本体的散谣补上真正的触发入口之后再考虑加回这一条(该问题已单独记入
-  // CLAUDE.md「已知的待优化点」,不在这次改动范围内解决)。
+  // CORE-190:散谣当年因"是完全无法触发的死代码"被排除,该理由已失效(散谣现在有原子
+  // 函数 sanyao()、UI 入口和 hasCap 查询点),按原注释"补上触发入口后再考虑加回"的约定
+  // 加回。详见上方 masu 段落的说明。
   masu: [
+    { name:'散谣', caps:['sanyao'] },
     { name:'制蛮', caps:['zhimeng'] }
   ],
   machao: [
@@ -736,8 +761,10 @@ const HUASHEN_SKILL_TABLE = {
     { name:'空城', caps:['kongcheng'] }
   ],
   jiangwei: [
-    { name:'挑衅', caps:['tiaoxin'] },
-    { name:'志继', caps:['zhiji'], note:'觉醒技,hooks为空对象{},当前无额外触发逻辑' }
+    { name:'挑衅', caps:['tiaoxin'] }
+    // 【志继】是觉醒技,左慈不可借用(CORE-191),已移出本表;见 AWAKEN_SKILL_CAPS。
+    // (原条目带 note:'觉醒技,hooks为空对象{},当前无额外触发逻辑'——当时是把"觉醒技"
+    //  当成一条备注写下来的,而不是当成排除依据,正是这次要改的那个缺口。)
   ],
   zhoutai: [
     { name:'不屈', caps:['buqu'], note:'hooks为空对象{},当前无额外触发逻辑' }
@@ -768,7 +795,7 @@ const HUASHEN_SKILL_TABLE = {
   ],
   jiaxu: [
     { name:'完杀', caps:['wansha'] },
-    { name:'乱武', caps:['luanwu'] },
+    // 【乱武】是限定技,左慈不可借用(CORE-191),已移出本表;见 LIMIT_SKILL_CAPS
     { name:'帷幕', caps:['weimu'] }
   ],
   yuanshao: [
@@ -834,7 +861,15 @@ const HUASHEN_SKILL_TABLE = {
 function validateHuashenPick(pool, generalId, skillName){
   if(!Array.isArray(pool) || !pool.includes(generalId)) return false;
   const entries = HUASHEN_SKILL_TABLE[generalId];
-  if(!entries || !entries.some(e=>e.name===skillName)) return false;
+  if(!entries) return false;
+  const entry = entries.find(e=>e.name===skillName);
+  if(!entry) return false;
+  // CORE-191:主公技/限定技/觉醒技一律不可借用。那三条违规条目已从 HUASHEN_SKILL_TABLE
+  // 移除,所以正常路径根本枚举不到它们;这里是第二道防线——万一以后有人往表里加回一条
+  // 这三类的技能(或新武将的某个 cap 被登记进了禁用名单但表项忘了删),服务端校验会直接
+  // 拒绝,不依赖"有没有人记得别往表里加"。三个声明入口(开局 respondHuashenPick /
+  // 回合开始、结束的更改化身)共用这一个校验,一处收口。
+  if(huashenEntryForbidden(entry)) return false;
   return true;
 }
 

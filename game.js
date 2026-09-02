@@ -2927,7 +2927,11 @@ function consumePendingHookQueue(g, resume){
   if(!g.pendingHookQueue) return false;
   // 兼容旧的单槽形状(可能来自改动前写进 Firebase 的房间状态)
   if(!Array.isArray(g.pendingHookQueue)) g.pendingHookQueue = [g.pendingHookQueue];
-  while(g.pendingHookQueue.length){
+  // CORE-186:循环体内取到最后一项时会把队列置成 null,而两条 continue 分支(座位已阵亡 /
+  // 借用武将已无该 hook)会跳回来重新求值 while 条件——所以条件里必须先确认它还是数组,
+  // 否则读 null.length 直接抛异常、整个 tx 中断。兄弟函数 startNextWangxi 是同款
+  // while+continue 结构但不在循环内置 null,所以没这个问题。
+  while(Array.isArray(g.pendingHookQueue) && g.pendingHookQueue.length){
     const item = g.pendingHookQueue.shift();
     if(g.pendingHookQueue.length===0) g.pendingHookQueue = null;
     const p = g.players[item.seat];
@@ -3709,7 +3713,15 @@ function respondWangxi(activate){
 // delayJudge 分支/respondXiaoguoChoice),seat 是被打断的那个人(dealDamage 的 seat 参数,
 // 也就是 resume.type==='sha'/'duel'/'aoe' 时这里需要的那个座位号)。
 function resumeAfterInterrupt(g, resume, seat){
-  if(resume && resume.type==='afterDamageEffects'){
+  // CORE-187:函数开头这一处有 `resume &&` 守卫,但从 startNextWangxi 往下的整条分支链
+  // 都直接读 resume.type,没有任何空值防护——刚烈的恢复点包装 {type:'ganglie',resume,seat}
+  // 里内层 resume 为空时(空值会被 tx 出口的 stripUndefined 整个剔掉键),ganglie 分支
+  // 递归传进来的就是 undefined,读 .type 直接抛异常、tx 中断。
+  // 归一成空对象而不是提前 return:末尾的 else("'sha' 及其它")本来就是设计好的兜底分支,
+  // 它会正确处理"回合玩家已阵亡则推进回合,否则回到 play",正是"没有特定恢复点"时该做的事。
+  // 提前 return 反而会把崩溃换成卡死(局面停在原地、谁都推不动)。
+  if(!resume || typeof resume!=='object') resume = {};
+  if(resume.type==='afterDamageEffects'){
     if(consumePendingHookQueue(g,resume)) return;
     const q=g.afterDamageEffects;
     const originalResume=q&&q.originalResume ? q.originalResume : {type:'sha'};
@@ -5546,53 +5558,10 @@ function pickXuanfengTarget(seat) {
 }
 
 // 选择弃置的牌数
-function chooseXuanfengDiscardCount(count) {
-  tx(g => {
-    const pending = g.pending;
-    if (!pending || pending.type !== 'xuanfengPick' || pending.from !== mySeat) return g;
-    
-    if (pending.stage !== 'chooseCount') return g;
-    
-    const me = g.players[mySeat];
-    const targetSeat = pending.targets[pending.currentTargetIndex];
-    const target = g.players[targetSeat];
-    
-    const available = (target.hand || []).length +
-      EQUIP_SLOTS.filter(slot => target.equips && target.equips[slot]).length +
-      (target.delays || []).length;
-
-    // 检查数量是否合法。0表示放弃刚选的这个目标，不能留下一个0张的幽灵目标。
-    if (!Number.isInteger(count) || count < 0 || count > pending.maxRemaining || count > available) {
-      g.log = pushLog(g.log, `${me.name} 选择的弃牌数无效`);
-      return g;
-    }
-
-    if (count === 0) {
-      pending.targets.splice(pending.currentTargetIndex, 1);
-      pending.discardedCounts.splice(pending.currentTargetIndex, 1);
-      pending.currentTargetIndex = null;
-      pending.stage = 'selecting';
-      return g;
-    }
-    
-    // 更新弃牌数量
-    pending.discardedCounts[pending.currentTargetIndex] = count;
-    pending.maxRemaining -= count;
-    
-    // 如果还有剩余可弃置牌数且还有其他目标可以选择
-    if (pending.maxRemaining > 0) {
-      // 回到目标选择阶段
-      pending.stage = 'selecting';
-      g.log = pushLog(g.log, `${me.name} 还可以弃置${pending.maxRemaining}张牌,请继续选择目标`);
-    } else {
-      // 开始执行旋风
-      executeXuanfeng(g);
-    }
-    
-    return g;
-  });
-}
-
+// CORE-192:chooseXuanfengDiscardCount() 已删除。它的守卫要求 pending.stage==='chooseCount',
+// 而旋风的 xuanfengPick 只会把 stage 设成 'selecting'/'chooseCard',全项目没有任何地方写过
+// 'chooseCount' —— 这个守卫永远不成立,函数体不可达;弃牌数量现在由 pending.maxRemaining
+// 逐张递减决定(见下方 respondXuanfengPick 一族),不再有"先选数量"这一步。
 // 手牌不可见，只能随机弃；装备区与判定区是明牌，可以指定。
 function pickXuanfengCard(kind, value) {
   tx(g => {

@@ -82,33 +82,41 @@ check('CORE-183 startTurn 对全员重置(不是只重置回合玩家)',()=>{
 });
 
 // ============ CORE-184:贾诩【乱武】限定技(每人整局一次) ============
+// 【重要:本段的场景在 CORE-191(issue #253)之后已不可达,断言随之改写】
+// CORE-184 当初修的是"左慈化身贾诩和真贾诩共用全局 g.luanwuUsed,一方发动会把另一方的
+// 限定技整局消耗掉"。CORE-191 按官方【化身】规则把限定技/觉醒技/主公技整体排除出可借用
+// 范围,乱武已从 HUASHEN_SKILL_TABLE 移除——**左慈再也借不到乱武,"两个乱武拥有者同时
+// 在场"这个前提不复存在**,原来那三条"两个拥有者互不影响"的断言现在连场景都构造不出来。
+// 改动本身依然正确且保留:限定技状态记在玩家身上(p.luanwuUsed)本来就比全局一份更准确,
+// 也和同为限定技的庞统涅槃 p.nirvanaUsed 口径一致;只是它现在守的是一个不再可达的场景。
+// 所以这里不再假装测"两个拥有者",改为钉住仍然成立、且真正在生效的那部分语义:
+// 限定技状态是玩家级的、startTurn 不重置、跨局重置。
+// (删掉整段也是一种选择,但那样 p.luanwuUsed 的玩家级语义就完全没有断言覆盖了。)
 function luanwuG(){
   return {players:[
     mkP('甲','caocao',[card('a1','杀')]),
     mkP('贾诩真','jiaxu',[card('j1','杀')]),
-    mkP('左慈','zuoci',[card('z1','杀')],huashen('jiaxu','乱武'))
+    mkP('乙','liubei',[card('b1','杀')])
   ],deck:[card('d1'),card('d2')],discard:[],log:[],
   phase:'play',turn:1,roundNum:1,gameMode:'ffa',pending:null};
 }
-g=luanwuG(); use(g);
-check('CORE-184 前提:真实贾诩与左慈化身贾诩都拥有【乱武】',()=>{
-  assert.ok(R('hasCap')(g.players[1],'luanwu'));
-  assert.ok(R('hasCap')(g.players[2],'luanwu'));
+check('CORE-191 前提:乱武是限定技,左慈已不可借用(CORE-184 的两拥有者场景因此不可达)',()=>{
+  const zuoci=mkP('左慈','zuoci',[],huashen('jiaxu','乱武'));
+  g=luanwuG(); g.players[2]=zuoci; use(g);
+  assert.ok(R('hasCap')(g.players[1],'luanwu'),'真贾诩当然仍有乱武');
+  assert.strictEqual(R('hasCap')(g.players[2],'luanwu'),false,'左慈不得再通过化身获得乱武');
+  assert.strictEqual(R('validateHuashenPick')(['jiaxu'],'jiaxu','乱武'),false,'声明本身就该被拒绝');
 });
 
-check('CORE-184 一方发动限定技后,另一方本局仍能发动(核心)',()=>{
+check('CORE-184 限定技消耗记在发动者自己身上(玩家级,不是全局一份)',()=>{
   g=luanwuG(); use(g);
   setSeat(1); R('startLuanwu()');
-  assert.strictEqual(g.players[1].luanwuUsed,true,'消耗应记在发动者自己身上');
-  assert.strictEqual(g.players[2].luanwuUsed,false,'不得消耗另一个拥有者的限定技');
-  // 推进到左慈自己的回合
-  g.phase='play'; g.turn=2; g.pending=null; use(g);
-  setSeat(2); R('startLuanwu()');
-  assert.strictEqual(g.phase,'luanwuChoose','左慈应能正常发动自己的乱武');
-  assert.strictEqual(g.pending.sourceSeat,2);
+  assert.strictEqual(g.players[1].luanwuUsed,true,'消耗应记在发动者身上');
+  assert.strictEqual(g.players[2].luanwuUsed,false,'不得记到别人头上');
+  assert.strictEqual(g.phase,'luanwuChoose','本人发动应正常开启选择阶段');
 });
 
-check('CORE-184 各自整局仍只能发动一次,且 startTurn 不重置(限定技语义不变)',()=>{
+check('CORE-184 整局只能发动一次,且 startTurn 不重置(限定技语义不变)',()=>{
   g=luanwuG(); use(g);
   setSeat(1); R('startLuanwu()');
   R('startTurn(__g, 1)');
