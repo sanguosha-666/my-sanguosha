@@ -257,7 +257,9 @@ let chatVoiceEnabled = (function(){
   try{ return !(typeof localStorage!=='undefined' && localStorage.getItem('sgs_chat_voice')==='0'); }
   catch(e){ return true; }
 })();
-if(!chatVoiceEnabled && typeof setBgmMuted==='function') setBgmMuted(true);
+// CORE-194:这里原来有一句 `if(!chatVoiceEnabled) setBgmMuted(true)` —— 背景音乐的静音
+// 状态被聊天语音开关顺带决定。两者是互不相关的音频通道,现在各自独立:BGM 的初始静音
+// 状态由 game-bg.js 从 sgs_bgm_muted 读取(含对老用户 sgs_chat_voice 的一次性继承)。
 const spokenChatIds = new Set(); // 已见消息 id 去重:跨同步累积、跨enterGame累积(重进不重念);
                                  // 关闭语音期间的消息也标记(重开不重放);页面刷新时重建
 function toggleChatVoice(){
@@ -265,7 +267,8 @@ function toggleChatVoice(){
   try{ localStorage.setItem('sgs_chat_voice', chatVoiceEnabled?'1':'0'); }catch(e){}
   const btn=document.getElementById('chatVoiceBtn');
   if(btn) btn.textContent = chatVoiceEnabled ? '🔊' : '🔇';
-  if(typeof setBgmMuted==='function') setBgmMuted(!chatVoiceEnabled);
+  // CORE-194:不再顺带静音背景音乐——背景音乐有自己的按钮(顶栏 #bgmMuteBtn / toggleBgmMute)。
+  // 这个开关现在只管聊天语音播报这一件事,两者可任意组合。
   return chatVoiceEnabled;
 }
 // detectChatLang:按文本主要字符集判断语言,返回 BCP47 lang 标签。修复"英文/韩文消息

@@ -142,7 +142,23 @@ var BGM_TRACKS = {
   duel:  bgmList('bgm-duel', 13)
 };
 var BGM_VOL = 0.79;
-var bgmMode = null, bgmLastSrc = null, bgmLobbyPlays = 0, bgmMuted = false, bgmFxPaused = false, bgmHoldTimer = 0, bgmHold = false;
+// CORE-194:BGM 静音有了自己的持久化状态(原来是从 chatVoiceEnabled 派生出来的,
+// 关掉聊天语音才能关掉背景音乐,两条互不相关的音频通道共用一个开关)。
+// 键名沿用 sgs_chat_voice 的命名与读写惯例(try/catch 静默降级,读不到就按默认值走)。
+var BGM_MUTE_KEY = 'sgs_bgm_muted';
+var bgmMuted = (function(){
+  try{
+    if(typeof localStorage==='undefined') return false;
+    var v = localStorage.getItem(BGM_MUTE_KEY);
+    // 【老用户迁移】v===null 表示这个偏好从未被单独设置过。此前想关背景音乐只能去关
+    // 聊天语音,所以那批用户的 sgs_chat_voice==='0' 里其实混着"我想关掉背景音乐"这个诉求
+    // ——这时继承它,避免升级后背景音乐突然响起来。一旦用户点过新的静音按钮(写入了
+    // 本键),就完全以本键为准,不再看聊天语音。
+    if(v===null) return localStorage.getItem('sgs_chat_voice')==='0';
+    return v==='1';
+  }catch(e){ return false; }
+})();
+var bgmMode = null, bgmLastSrc = null, bgmLobbyPlays = 0, bgmFxPaused = false, bgmHoldTimer = 0, bgmHold = false;
 var bgmErrStreak=0;
 var _bgmInErrorRetry=false;
 
@@ -219,11 +235,37 @@ function skipBgm(){
 }
 function setBgmMuted(muted){
   bgmMuted=!!muted;
+  syncBgmMuteBtn();
   var v=bgmEl(); if(!v) return;
+  // 静音走 pause 而不是 v.muted=true:静音期间不再解码,和 CORE-141/144 的耗电治理口径一致。
   if(bgmMuted){ if(v.pause) v.pause(); }
   else if(bgmMode && bgmMode!=='off' && !bgmFxPaused){ var p=v.play&&v.play(); if(p&&p.catch) p.catch(function(){}); }
 }
-if(typeof chatVoiceEnabled!=='undefined' && !chatVoiceEnabled) setBgmMuted(true);
+// CORE-194:顶栏静音按钮的唯一切换入口(和 skipBgm 并列,都由 index.html 的 onclick 直接调)。
+// 写 localStorage 让偏好跨刷新留存;写失败(隐私模式等)只影响持久化,不影响本次会话的静音效果。
+function toggleBgmMute(){
+  setBgmMuted(!bgmMuted);
+  try{ if(typeof localStorage!=='undefined') localStorage.setItem(BGM_MUTE_KEY, bgmMuted?'1':'0'); }catch(e){}
+  return bgmMuted;
+}
+// syncBgmMuteBtn:把按钮图标/title 同步成当前状态。setBgmMuted 里调一次即可覆盖所有改动
+// 路径(按钮点击/未来任何代码调用),不需要在每个调用点各自记得刷新 UI。
+function syncBgmMuteBtn(){
+  if(typeof document==='undefined') return;
+  var b=document.getElementById('bgmMuteBtn'); if(!b) return;
+  b.textContent = bgmMuted ? '🔇' : '🔊';
+  b.title = bgmMuted ? '背景音乐:已静音(点击恢复)' : '背景音乐:播放中(点击静音)';
+  // aria-pressed 是锦上添花:元素没有 setAttribute 时(部分测试的精简 DOM 桩)跳过即可,
+  // 图标与 title 已经设好。防御写法与本文件既有的 v.play&&v.play() / 
+  // typeof v.pause==='function' 同款,不新造模式。
+  if(typeof b.setAttribute==='function') b.setAttribute('aria-pressed', bgmMuted ? 'true' : 'false');
+}
+// 页面加载时把按钮初始图标刷成持久化读回来的状态(此时 DOM 可能还没解析到工具栏,
+// syncBgmMuteBtn 查不到元素会安全返回;真正兜底的是下面的 DOMContentLoaded)。
+syncBgmMuteBtn();
+if(typeof document!=='undefined' && document.addEventListener){
+  document.addEventListener('DOMContentLoaded', syncBgmMuteBtn);
+}
 function pauseBgmForFx(){ bgmFxPaused=true; var v=bgmEl(); if(v&&v.pause) v.pause(); }
 function resumeBgmAfterFx(){
   bgmFxPaused=false;
