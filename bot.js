@@ -3031,7 +3031,10 @@ function isGuoseCard(c){ return !!(c && c.suit==='♦'); }
 // 本身滤掉不重复注册。去掉整条判断会把②也丢了。改成显式判断 card.name!=='杀'(这张牌
 // 本身不是杀,才谈得上"转化"),精确只保留②这一个意图,不影响①的修复效果。
 function isWushengShaCard(g, me, c){
-  if(!c || c.name==='杀') return false;
+  // 排除条件必须是"整张杀系"(杀/火杀/雷杀),不是只排字面'杀':红色火杀也满足下面三条,
+  // 只排'杀'会让它被常规枚举和武圣转化双收录(和当年只排闪漏掉赵云红色闪同类——
+  // 都是"本身就是目标牌却再被转化候选注册一条")。
+  if(!c || isShaName(c.name)) return false;
   const red = c.suit==='♥'||c.suit==='♦';
   return red && hasCap(me, 'wusheng') && canUseAs(me, c, '杀') && CARD_PLAYS['杀'].canPlay(g, me, c);
 }

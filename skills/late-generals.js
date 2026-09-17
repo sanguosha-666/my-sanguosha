@@ -317,6 +317,7 @@ function respondLieRen(cardIndex) {
           g.pending = null;
           g.phase = 'play';
           const pendingBefore = g.pending; // = null
+          maybeBaiyinRecover(g, mySeat, cardToGain);
           triggerHook(g, mySeat, 'onLoseEquip', {count:1});
           if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return g; } // 旋风等钩子挂起了,保留不覆盖
           finishSingleShaTarget(g);

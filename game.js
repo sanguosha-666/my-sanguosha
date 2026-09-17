@@ -2508,6 +2508,7 @@ function pickMingceCard(cardIdx, isEquip){
       g.pending = null;
       g.phase = 'play';
       const pendingBefore = g.pending;
+      maybeBaiyinRecover(g, mySeat, card);
       triggerHook(g, mySeat, 'onLoseEquip', {count:1});
       if(g.pending !== pendingBefore && g.pending){
         // 钩子挂起了询问(如旋风):明策这次就到此为止,交出的牌按弃置处理避免凭空消失
@@ -2807,6 +2808,7 @@ function respondLiuli(choice, newTargetSeat){
     markSkillSound(g, '流离');
     if(choice.kind==='equip'){
       const pendingBefore=g.pending;
+      maybeBaiyinRecover(g, to, discarded);
       triggerHook(g,to,'onLoseEquip',{count:1});
       if(g.pending!==pendingBefore && g.pending){
         g.pending.resume={type:'liuliAfterDiscard',from,newTargetSeat,usedAs,shaColor,sourceCard,jiuBonus,shaInfo:g.pending.shaInfo};
@@ -4224,6 +4226,7 @@ function applyIdentityKillReward(g, victimSeat, killerSeat){
         punishedCards.push(card);
         g.discard.push(card);
         killer.equips[s] = null;
+        maybeBaiyinRecover(g, killerSeat, card);
         lost++;
       }
     });
@@ -5632,6 +5635,7 @@ function executeXuanfeng(g) {
         if(EQUIP_SLOTS.includes(slot) && target.equips && target.equips[slot]){
           card=target.equips[slot];
           target.equips[slot]=null;
+          maybeBaiyinRecover(g, targetSeat, card);
           triggerHook(g, targetSeat, 'onLoseEquip', {count:1});
         }
       } else if(selection.kind==='delay'){
@@ -5696,6 +5700,7 @@ function executeXuanfeng(g) {
         if (equips[slot] === card) {
           equips[slot] = null;
           cardsToDiscard.push(card);
+          maybeBaiyinRecover(g, targetSeat, card);
           triggerHook(g, targetSeat, 'onLoseEquip', { count: 1 });
           equipFound = true;
           break;
@@ -6441,6 +6446,7 @@ function beigeDiscard(cardIndex, isEquip, equipType) {
       if (source.equips && source.equips[equipType] !== null) {
         discardedCard = source.equips[equipType];
         source.equips[equipType] = null;
+        maybeBaiyinRecover(g, mySeat, discardedCard);
       }
     } else {
       // 弃置手牌
@@ -6557,8 +6563,10 @@ function processBeigeJudgeResult(g, judgeCard, sourceSeat, damagedSeat, damageSo
           for (const eqType of equipSlots) {
             if (cardsToDiscard.length >= 2) break;
             if (sourcePlayer.equips[eqType] !== null) {
-              cardsToDiscard.push(sourcePlayer.equips[eqType]);
+              const lostEquip = sourcePlayer.equips[eqType];
+              cardsToDiscard.push(lostEquip);
               sourcePlayer.equips[eqType] = null;
+              maybeBaiyinRecover(g, damageSource, lostEquip);
             }
           }
         }
@@ -7072,6 +7080,7 @@ function pickHuanhuoGotCard(kind, value) {
       gotCard=target.equips[slot];
       target.equips[slot]=null;
       lostEquip=true;
+      maybeBaiyinRecover(g, firstTargetSeat, gotCard);
     } else if(Number.isInteger(kind)){
       const hand=target.hand||[];
       if(!hand.length) return g;
@@ -7326,6 +7335,7 @@ function chooseRenxinEquip(slot) {
     g.discard = g.discard || [];
     g.discard.push(equipCard);
     markDiscardReveal(g, seat, [equipCard]);
+    maybeBaiyinRecover(g, seat, equipCard);
     triggerHook(g, seat, 'onLoseEquip', {count:1});
     
     // 翻面(真实字段 faceup)
