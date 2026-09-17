@@ -910,6 +910,7 @@ function doQiaobianMove(g, move){
     src.equips[slot]=null;
     dst.equips[slot]=card;
     g.log=pushLog(g.log, '【巧变】把 '+src.name+' 的装备【'+card.name+'】移到了 '+dst.name);
+    maybeBaiyinRecover(g, move.srcSeat, card);
     triggerHook(g, move.srcSeat, 'onLoseEquip', {count:1});
   } else if(move.kind==='delay'){
     const idx=move.idx;
@@ -1810,6 +1811,7 @@ function respondXiaoguoChoice(choice){
     // 记下骁果续接信息；旧实现触发后无条件 g.pending=null，导致只留下“可以发动旋风”的日志。
     g.pending=null;
     const pendingBefore=g.pending;
+    maybeBaiyinRecover(g, endingSeat, card);
     triggerHook(g, endingSeat, 'onLoseEquip', {count:1});
     drawN(g, from, 1);
     if(g.pending!==pendingBefore && g.pending){
@@ -1869,7 +1871,9 @@ function respondTiaoxin(targetSeat){
     if(g.tiaoxinUsed) return g; // 本回合已使用过
     const target = g.players[targetSeat];
     if(!target || !target.alive || targetSeat===mySeat) return g;
-    if((target.hand||[]).length===0) return g;
+    // 官方【挑衅】无持牌前置：目标选不出杀就走被弃牌，选项2可弃到装备区。
+    // 只看手牌会把"0手牌+有装备"的合法目标误挡在技能之外；可弃的牌=手牌+装备。
+    if(tiaoxinDiscardOptions(target).length===0) return g;
     
     g.tiaoxinUsed=true;
     markSkillSound(g, '挑衅');
@@ -1986,6 +1990,15 @@ function pickTiaoxinDiscard(kind, value){
       g.discard.push(card);
       markDiscardReveal(g, to, [card]);
       g.log=pushLog(g.log, asker.name+' 弃置了 '+target.name+' 的装备【'+card.name+'】');
+      // 【失去装备钩子的正确接法,见 CLAUDE.md「凌统旋风」条】先把 phase/pending 归位
+      // 休止相(让旋风捕获到正确的 previousPhase 而不是死相 'tiaoxinDiscard'),再按序
+      // 触发白银狮子回血与 onLoseEquip;钩子挂起新 pending 就保留不覆盖、直接收尾。
+      g.pending=null; g.phase='play';
+      maybeBaiyinRecover(g, to, card);
+      const pendingBefore=g.pending;
+      triggerHook(g, to, 'onLoseEquip', {count:1});
+      if(g.pending!==pendingBefore && g.pending) return g;
+      return g;
     } else {
       return g;
     }
@@ -2187,6 +2200,7 @@ function sanyao(costKey, targetSeat) {
       // 一个武将),这个分支目前不可达,是按强制约定补上的正确性代码,不是修一个能被打的漏洞。
       g.phase = 'play';
       const pendingBefore = g.pending;
+      maybeBaiyinRecover(g, mySeat, discardedCard);
       triggerHook(g, mySeat, 'onLoseEquip', { count: 1 });
       if(g.pending !== pendingBefore && g.pending) {
         g.pending.resume = { type: 'sanyaoDamage', casterSeat: mySeat, target: targetSeat };
@@ -2293,6 +2307,7 @@ function zhimengAutoResolve(g, from, to, option) {
     if(target.equips && target.equips[option.type]) {
       gainedCard = target.equips[option.type];
       target.equips[option.type] = null;
+      maybeBaiyinRecover(g, to, gainedCard);
       triggerHook(g, to, 'onLoseEquip', {count:1});
     }
   } else if(option.type === 'delay') {
@@ -2652,6 +2667,7 @@ function discardShensuEquip(g, seat, equipInfo) {
     g.discard.push(card);
     markDiscardReveal(g, seat, [card]);
     g.log = pushLog(g.log, player.name + ' 弃置了装备牌【' + card.name + '】');
+    maybeBaiyinRecover(g, seat, card);
   }
 }
 
@@ -2918,6 +2934,7 @@ function pickQiaomengEquip(slot) {
     g.pending = null;
     g.phase = 'play';
     const pendingBefore = g.pending; // = null
+    maybeBaiyinRecover(g, pending.targetSeat, card);
     triggerHook(g, pending.targetSeat, 'onLoseEquip', {count:1});
     if(g.pending !== pendingBefore && g.pending){ g.pending.resume = {type:'sha'}; return g; } // 旋风等钩子挂起了,保留不覆盖
     finishSingleShaTarget(g); // 方天画戟排队中还有下一个则继续,否则回到出牌阶段
