@@ -3289,7 +3289,7 @@ BOT_SEAT_PICKS.tiaoxin = {
     const out = [];
     g.players.forEach(function(p, i){
       if(!p || !p.alive || i===seat) return;
-      if((p.hand||[]).length===0) return;
+      if(tiaoxinDiscardOptions(p).length===0) return;
       out.push({ seat: i, label: '挑衅→'+botAiName(g,i) });
     });
     return out;

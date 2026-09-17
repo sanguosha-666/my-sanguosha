@@ -1907,8 +1907,8 @@ function render(g){
         d.innerHTML += '<span class="tag" style="display:inline-block;margin:6px 14px 0;background:#3a2f28">够不着</span>';
       }
     }
-    // 姜维【挑衅】:出牌阶段,选择一个其他角色作为目标
-    if(tiaoxinMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive && (p.hand||[]).length>0 && !tiaoxinTarget){
+    // 姜维【挑衅】:出牌阶段,选择一个其他角色作为目标(可弃判定手牌+装备,同入口与 respondTiaoxin)
+    if(tiaoxinMode && g.phase==='play' && g.turn===mySeat && i!==mySeat && p.alive && tiaoxinDiscardOptions(p).length>0 && !tiaoxinTarget){
       d.style.cursor='pointer';
       d.style.outline='2px dashed var(--cinnabar-bright)';
       d.onclick=()=>{ confirmAndPlay('对 '+g.players[i].name+' 发动【挑衅】？', ()=>respondTiaoxin(i)); };

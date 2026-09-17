@@ -2579,8 +2579,9 @@ function renderControls(g){
       const qb=document.createElement('button'); qb.className='ghost';
       qb.textContent='发动【奇袭】'; qb.onclick=()=>{ selectedCardIdx=null; qixiMode=true; qixiCardIdx=null; render(g); }; c.appendChild(qb);
     }
-    // 姜维【挑衅】:出牌阶段限一次,选择一个其他角色
-    if(noLocalMode && selectedCardIdx===null && hasCap(me,'tiaoxin') && !g.tiaoxinUsed && g.players.some((p,i)=>p&&p.alive&&i!==mySeat&&(p.hand||[]).length>0)){
+    // 姜维【挑衅】:出牌阶段限一次,选择一个其他角色。可弃判定用手牌+装备(同 respondTiaoxin 前置),
+    // 只看手牌会让"空城但有装备"的合法目标从入口就被藏起来。
+    if(noLocalMode && selectedCardIdx===null && hasCap(me,'tiaoxin') && !g.tiaoxinUsed && g.players.some((p,i)=>p&&p.alive&&i!==mySeat&&tiaoxinDiscardOptions(p).length>0)){
       const tb=document.createElement('button'); tb.className='ghost';
       tb.textContent='发动【挑衅】'; tb.onclick=()=>{ selectedCardIdx=null; tiaoxinMode=true; render(g); }; c.appendChild(tb);
     }
